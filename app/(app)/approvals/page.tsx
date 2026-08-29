@@ -39,8 +39,12 @@ export default async function ApprovalsPage() {
   const campaignIds = [
     ...new Set(
       (approvals ?? [])
-        .filter((a) => a.resource_type === "prompter_master_campaigns")
-        .map((a) => a.resource_id),
+        .map((a) => {
+          if (a.resource_type === "prompter_master_campaigns") return a.resource_id;
+          const context = a.context as { master_campaign_id?: string };
+          return context.master_campaign_id ?? null;
+        })
+        .filter((id): id is string => !!id),
     ),
   ];
   const { data: campaigns } = campaignIds.length
@@ -75,7 +79,18 @@ export default async function ApprovalsPage() {
         ) : (
           <div className="flex flex-col gap-3">
             {pending.map((a) => {
-              const context = a.context as { daily_budget?: number | null; total_budget?: number | null };
+              const context = a.context as {
+                daily_budget?: number | null;
+                total_budget?: number | null;
+                master_campaign_id?: string;
+                channel?: string;
+                action_type?: string;
+                suggested_daily_budget?: number | null;
+                rationale?: string;
+                risk_level?: "LOW" | "MEDIUM" | "HIGH";
+              };
+              const isAutopilotAction = a.approval_type === "AUTOPILOT_ACTION";
+
               return (
                 <Card key={a.id}>
                   <CardContent className="flex flex-col gap-3 p-5 sm:flex-row sm:items-start sm:justify-between">
@@ -85,10 +100,30 @@ export default async function ApprovalsPage() {
                         <span className="text-sm font-medium text-foreground">
                           {APPROVAL_TYPE_LABEL[a.approval_type] ?? a.approval_type}
                         </span>
+                        {isAutopilotAction && context.risk_level ? (
+                          <Badge
+                            variant={
+                              context.risk_level === "HIGH"
+                                ? "danger"
+                                : context.risk_level === "MEDIUM"
+                                  ? "warning"
+                                  : "neutral"
+                            }
+                          >
+                            Risiko {context.risk_level}
+                          </Badge>
+                        ) : null}
                       </div>
                       {a.resource_type === "prompter_master_campaigns" ? (
                         <Link href={`/campaigns/${a.resource_id}`} className="text-sm text-brand hover:underline">
                           {campaignNameById.get(a.resource_id) ?? "Campaign"}
+                        </Link>
+                      ) : isAutopilotAction && context.master_campaign_id ? (
+                        <Link
+                          href={`/campaigns/${context.master_campaign_id}`}
+                          className="text-sm text-brand hover:underline"
+                        >
+                          {campaignNameById.get(context.master_campaign_id) ?? "Campaign"} — {context.channel}
                         </Link>
                       ) : null}
                       <p className="mt-1 text-xs text-muted-foreground">
@@ -100,6 +135,19 @@ export default async function ApprovalsPage() {
                           Budget total: {formatCurrency(context.total_budget)}
                           {context.daily_budget ? ` · Harian: ${formatCurrency(context.daily_budget)}` : ""}
                         </p>
+                      ) : null}
+                      {isAutopilotAction ? (
+                        <div className="mt-1 flex flex-col gap-1">
+                          <p className="text-xs text-foreground">
+                            <strong>{context.action_type?.replaceAll("_", " ")}</strong>
+                            {context.suggested_daily_budget !== null && context.suggested_daily_budget !== undefined
+                              ? ` — usulan budget harian ${formatCurrency(context.suggested_daily_budget)}`
+                              : ""}
+                          </p>
+                          {context.rationale ? (
+                            <p className="text-xs text-muted-foreground">{context.rationale}</p>
+                          ) : null}
+                        </div>
                       ) : null}
                     </div>
                     {session.role === "owner" ? (

@@ -49,16 +49,20 @@ Submitting a campaign for approval and deciding it are deliberately different pr
 
 Connecting or disconnecting an ad platform account is owner-only (product spec §62 — STAFF must not connect ad accounts without authorization): checked explicitly in the shared `lib/connectors/oauth-authorize.ts`/`oauth-callback.ts` handlers every platform's authorize/callback route wraps, and in `features/connections/actions.ts#disconnectAction()`, and independently backed by RLS on `prompter_connected_accounts`.
 
-## Automation safety
+## Automation safety (Phase 7)
 
-`prompter_automation_settings` defaults to `automation_mode = 'manual'` and `emergency_stop_active = false` for every new tenant. The eventual Autopilot feature must never be able to bypass:
+`prompter_automation_settings` defaults to `automation_mode = 'manual'` and `emergency_stop_active = false` for every new tenant. Autopilot is implemented as a **policy-gated routing decision, never an autonomous execution one** — this app has no background scheduler, so nothing ever runs unattended. Every boundary below is enforced by running code, checked at the point it actually matters rather than assumed from an earlier state:
 
-- the tenant's budget policy,
-- platform (Meta/TikTok/X) permission scopes,
-- tenant authorization, or
-- an active emergency stop.
+- **Budget Guard.** `submitRecommendationCore()` (`features/campaigns/optimization-actions.ts`) — used by both a manual "submit" click and autopilot's auto-routing path — calls `checkBudgetGuard()` **before** the `prompter_approvals` row is even created for a budget-changing recommendation. A recommendation that would exceed the tenant's configured limit is rejected outright; no human approval can ever push a budget past it.
+- **User authorization / RBAC.** Generating a recommendation and deciding a `CAMPAIGN_LAUNCH` approval both require `owner`/`marketing`; deciding any approval (including `AUTOPILOT_ACTION`) is **owner-only**, enforced by both `features/approvals/actions.ts#decideApprovalAction()` and the `prompter_approvals` UPDATE RLS policy. Automation mode changes, Emergency Stop toggles, and autopilot policy toggles (`features/settings/actions.ts`) are owner-only at the app layer.
+- **Approval policies.** Auto-routing (`maybeAutoSubmitRecommendations()`) only fires when `automation_mode = 'autopilot'` **and** the specific `prompter_autopilot_policies` row for that action type is `enabled` — every other combination requires the human "submit" click Phases 1-6 already had. Either way, the recommendation still lands as a *pending* approval; nothing skips the Approval Center itself.
+- **Platform capabilities / connector configuration.** `executeAutopilotAction()` (`features/approvals/actions.ts`) re-resolves the connector, calls `connector.isConfigured()`, and requires a `CONNECTED` row in `prompter_connected_accounts` at execution time — not trusting whatever state existed when the recommendation was generated. A paid external action never executes against an unconfigured connector.
+- **Emergency Stop.** Checked twice in the lifecycle: it implicitly gates auto-routing (no auto-submission happens once active), and `executeAutopilotAction()` re-reads `prompter_automation_settings.emergency_stop_active` **fresh** immediately before calling the connector — an Emergency Stop activated after a recommendation was submitted, but before it was approved, still blocks execution (logged as `autopilot_action.blocked_emergency_stop`, with the approval's `reason` updated to say so).
+- **Tenant isolation.** `prompter_analytics_insights`, `prompter_optimization_recommendations`, and `prompter_autopilot_policies` all carry RLS scoped through `fn_current_tenant_id()`, the same as every other Promoter table — an autopilot policy or recommendation from one tenant is never visible to, nor executable by, another.
 
-These are product requirements, not yet enforced by running code — Autopilot execution logic doesn't exist yet (Phase 7).
+**No fake implementation.** `executeAutopilotAction()` only ever calls the real `connector.pauseCampaign()`/`connector.updateBudget()` — a failure is caught and stored as a note on the approval (`autopilot_action.execution_failed`) rather than being reported as success; nothing claims "Campaign optimized" or "Budget updated" without the connector call actually succeeding.
+
+**Full audit trail.** Every step of an autopilot action's lifecycle is recorded: the recommendation and its rationale (`prompter_optimization_recommendations`), the underlying AI job (`prompter_ai_jobs`), the requested action/risk level/approval status (`prompter_approvals` + `context`), and the execution outcome (`prompter_audit_logs`: `autopilot_policy.auto_submitted`, `optimization.recommendation_submitted`, `autopilot_action.blocked_emergency_stop`, `autopilot_action.executed`, `autopilot_action.execution_failed`, plus `automation_mode.updated`/`emergency_stop.toggled`/`autopilot_policy.updated` for settings changes) — every new Phase 7 audit row has `actor_user_id` populated.
 
 ## Known pre-existing findings (not introduced by this app)
 

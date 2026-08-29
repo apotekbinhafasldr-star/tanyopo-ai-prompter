@@ -308,19 +308,21 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
                 <EmptyState
                   icon={Package}
                   title="Belum ada data untuk dianalisis"
-                  description="Estimasi profit muncul setelah produk ini punya campaign dan konversi Purchase tercatat."
+                  description="Estimasi kontribusi marketing muncul setelah produk ini punya campaign dan konversi Purchase tercatat."
                 />
               ) : (
                 <Card>
                   <CardHeader>
-                    <CardTitle>Estimasi Profit Marketing (perkiraan)</CardTitle>
+                    <CardTitle>Estimasi Kontribusi Marketing</CardTitle>
                   </CardHeader>
                   <CardContent className="flex flex-col gap-4 pt-4">
                     <p className="text-xs text-muted-foreground">
                       Pendapatan − HPP − biaya iklan, dihitung dari konversi Purchase produk ini. Ini
-                      perkiraan, bukan laporan keuangan resmi — asumsi 1 unit terjual per konversi Purchase,
-                      dan biaya iklan hanya mencakup data yang sudah tercatat di Analytics (belum otomatis
-                      terisi sampai integrasi insights platform diaktifkan).
+                      perkiraan, bukan laporan keuangan resmi, dan <strong>bukan laba bersih</strong> —
+                      biaya operasional lain (gaji, sewa, dll.) tidak termasuk di sini. Asumsi 1 unit
+                      terjual per konversi Purchase, dan biaya iklan hanya mencakup data yang sudah
+                      tercatat di Analytics (sinkronkan insight dari halaman detail campaign untuk
+                      campaign yang sudah Aktif).
                     </p>
                     <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <div>
@@ -347,7 +349,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
                       </div>
                     </dl>
                     <div className="rounded-[var(--radius-md)] bg-surface-muted p-4">
-                      <p className="text-xs text-muted-foreground">Estimasi Profit Bersih</p>
+                      <p className="text-xs text-muted-foreground">Estimasi Kontribusi Marketing (bukan laba bersih)</p>
                       {profitEstimate.netProfit !== null ? (
                         <p
                           className={
@@ -360,7 +362,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
                         </p>
                       ) : (
                         <p className="text-sm text-muted-foreground">
-                          Isi HPP produk (di halaman Edit) untuk menghitung estimasi profit bersih.
+                          Isi HPP produk (di halaman Edit) untuk menghitung estimasi kontribusi marketing.
                         </p>
                       )}
                     </div>

@@ -46,7 +46,9 @@ export type AiJobType =
   | "MARKETING_BLUEPRINT"
   | "CAMPAIGN_PROPOSAL"
   | "CONTENT_GENERATION"
-  | "SEO_RECOMMENDATIONS";
+  | "SEO_RECOMMENDATIONS"
+  | "ANALYTICS_INSIGHT"
+  | "OPTIMIZATION_RECOMMENDATION";
 export type AiJobStatus = "QUEUED" | "PROCESSING" | "COMPLETED" | "FAILED";
 export type CampaignStatus =
   | "DRAFT"
@@ -82,6 +84,11 @@ export type WebhookEventStatus = "RECEIVED" | "PROCESSED" | "FAILED" | "IGNORED"
 export type GrowthPlatform = "FACEBOOK" | "INSTAGRAM" | "TIKTOK" | "X";
 export type FollowerSnapshotSource = "manual";
 export type SeoProjectStatus = "ACTIVE" | "PAUSED";
+
+/** A single suggested action inside an optimization recommendation — never executed on its own, only ever proposed. */
+export type OptimizationActionType = "INCREASE_BUDGET" | "DECREASE_BUDGET" | "PAUSE_CHANNEL" | "NO_ACTION";
+export type RiskLevel = "LOW" | "MEDIUM" | "HIGH";
+export type AutopilotPolicyType = "AUTO_PAUSE_UNDERPERFORMING" | "AUTO_PROPOSE_BUDGET_REALLOCATION";
 
 /** Connector/OAuth provider — distinct from `Channel`, which names a content/campaign destination. */
 export type ConnectorPlatform = "META" | "TIKTOK" | "X";
@@ -944,6 +951,88 @@ export interface Database {
           Omit<
             Database["public"]["Tables"]["prompter_seo_recommendations"]["Insert"],
             "tenant_id" | "project_id"
+          >
+        >;
+        Relationships: [];
+      };
+      prompter_analytics_insights: {
+        Row: {
+          tenant_id: string;
+          summary: string | null;
+          trends: Json;
+          top_channel: string | null;
+          underperforming_channels: Json;
+          risks: Json;
+          ai_job_id: string | null;
+          model: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          tenant_id: string;
+          summary?: string | null;
+          trends?: Json;
+          top_channel?: string | null;
+          underperforming_channels?: Json;
+          risks?: Json;
+          ai_job_id?: string | null;
+          model?: string | null;
+        };
+        Update: Partial<
+          Omit<Database["public"]["Tables"]["prompter_analytics_insights"]["Insert"], "tenant_id">
+        >;
+        Relationships: [];
+      };
+      prompter_optimization_recommendations: {
+        Row: {
+          id: string;
+          tenant_id: string;
+          master_campaign_id: string;
+          summary: string | null;
+          recommendations: Json;
+          ai_job_id: string | null;
+          model: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          tenant_id: string;
+          master_campaign_id: string;
+          summary?: string | null;
+          recommendations?: Json;
+          ai_job_id?: string | null;
+          model?: string | null;
+        };
+        Update: Partial<
+          Omit<
+            Database["public"]["Tables"]["prompter_optimization_recommendations"]["Insert"],
+            "tenant_id" | "master_campaign_id"
+          >
+        >;
+        Relationships: [];
+      };
+      prompter_autopilot_policies: {
+        Row: {
+          id: string;
+          tenant_id: string;
+          policy_type: AutopilotPolicyType;
+          enabled: boolean;
+          threshold_config: Json;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          tenant_id: string;
+          policy_type: AutopilotPolicyType;
+          enabled?: boolean;
+          threshold_config?: Json;
+        };
+        Update: Partial<
+          Omit<
+            Database["public"]["Tables"]["prompter_autopilot_policies"]["Insert"],
+            "tenant_id" | "policy_type"
           >
         >;
         Relationships: [];

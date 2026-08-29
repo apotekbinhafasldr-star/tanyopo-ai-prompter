@@ -163,6 +163,20 @@ Two existing tables also changed:
 - `prompter_content_items` gained `scheduled_at timestamptz` (nullable) — the content calendar (`/content`, "Kalender" tab) groups items by this date. Setting it on a `DRAFT` item moves it to `SCHEDULED`; clearing it on a `SCHEDULED` item reverts it to `DRAFT` — see `features/content/actions.ts#scheduleContentAction()`.
 - `prompter_ai_jobs.job_type`'s CHECK constraint gained `'SEO_RECOMMENDATIONS'`.
 
+## Phase 7 schema
+
+Migration: `supabase/migrations/20260829240000_prompter_phase7_schema.sql`. Same additive-only rule as Phase 0-6. Write access on every new table follows the Phase 1 pattern (owner/marketing write, any tenant member read), except where noted.
+
+| Table | Purpose | Write access |
+|---|---|---|
+| `prompter_analytics_insights` | One row per tenant (PK `tenant_id`, upserted on regenerate — same pattern as `prompter_marketing_blueprints`). Analytics Agent output: `summary`, `trends`, `top_channel`, `underperforming_channels`, `risks`, plus `ai_job_id`/`model`. Generation refuses (no AI call, no row written) when the tenant has zero `prompter_marketing_metrics` and zero `prompter_conversions` rows. | owner/marketing |
+| `prompter_optimization_recommendations` | One row per master campaign (`unique(master_campaign_id)`, upserted on regenerate). Optimization Agent output: `summary` plus a `recommendations` array (channel, `action_type`, `suggested_daily_budget`, `rationale`, `risk_level`), each reasoned from that channel's real spend/conversions/estimated marketing contribution, plus `ai_job_id`/`model`. Generation refuses when the campaign has no channel data. | owner/marketing |
+| `prompter_autopilot_policies` | One row per tenant per `policy_type` (`AUTO_PAUSE_UNDERPERFORMING`/`AUTO_PROPOSE_BUDGET_REALLOCATION`). `enabled` gates whether a matching Optimization Agent recommendation is auto-routed to the Approval Center when `prompter_automation_settings.automation_mode = 'autopilot'` — it never gates execution itself, which always requires an Owner's Approve decision. | **Owner only** — same governance level as `prompter_budget_policies` |
+
+One existing table also changed: `prompter_ai_jobs.job_type`'s CHECK constraint gained `'ANALYTICS_INSIGHT'` and `'OPTIMIZATION_RECOMMENDATION'`.
+
+`prompter_approvals.approval_type = 'AUTOPILOT_ACTION'` rows (reserved since the Phase 2 migration, unused until now) are the first to actually be created in Phase 7 — `context` (JSONB) carries `source` (`'optimization_agent'` or `'autopilot_policy'`), `master_campaign_id`, `channel`, `action_type`, `suggested_daily_budget`, `rationale`, and `risk_level`, giving `/approvals` and `features/approvals/actions.ts#executeAutopilotAction()` everything needed to both display and execute the decision without a second lookup.
+
 ## TypeScript types
 
 `types/database.ts` is **hand-authored**, not the full `supabase gen types typescript` output. The shared project's full schema is ~80 UMKMpro-specific tables (POS, inventory, HR, workshop, F&B, ...) that this app never queries; importing all of it would make every Promoter file's types depend on a schema this codebase doesn't own. Instead, `types/database.ts` declares only the tables Promoter actually touches: the `prompter_*` tables plus a read-oriented slice of `tenants`/`user_profiles`.

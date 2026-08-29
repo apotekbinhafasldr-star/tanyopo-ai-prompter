@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { BarChart3, TrendingUp } from "lucide-react";
+import { BarChart3, TrendingUp, Sparkles } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Badge } from "@/components/ui/badge";
@@ -7,6 +7,7 @@ import { requireSessionContext } from "@/services/session";
 import { createClient } from "@/lib/supabase/server";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
 import { ConversionForm } from "@/features/analytics/conversion-form";
+import { GenerateInsightButton } from "@/features/analytics/generate-insight-button";
 
 export const metadata: Metadata = { title: "Analytics — Tanyopo AI Promoter" };
 
@@ -23,7 +24,7 @@ export default async function AnalyticsPage() {
   const session = await requireSessionContext();
   const supabase = await createClient();
 
-  const [{ data: metrics }, { data: conversions }, { data: campaigns }] = await Promise.all([
+  const [{ data: metrics }, { data: conversions }, { data: campaigns }, { data: insight }] = await Promise.all([
     supabase
       .from("prompter_marketing_metrics")
       .select("id")
@@ -40,11 +41,20 @@ export default async function AnalyticsPage() {
       .select("id, name")
       .eq("tenant_id", session.tenantId)
       .order("created_at", { ascending: false }),
+    supabase
+      .from("prompter_analytics_insights")
+      .select("*")
+      .eq("tenant_id", session.tenantId)
+      .maybeSingle(),
   ]);
 
   const campaignNameById = new Map((campaigns ?? []).map((c) => [c.id, c.name]));
   const totalConversionValue = (conversions ?? []).reduce((sum, c) => sum + (c.value ?? 0), 0);
   const hasRealMetrics = (metrics ?? []).length > 0;
+  const hasAnyData = hasRealMetrics || (conversions ?? []).length > 0;
+  const trends = (insight?.trends as { metric: string; observation: string; direction: string }[] | undefined) ?? [];
+  const risks = (insight?.risks as string[] | undefined) ?? [];
+  const underperforming = (insight?.underperforming_channels as string[] | undefined) ?? [];
 
   return (
     <div className="flex flex-1 flex-col gap-6 p-8">
@@ -68,8 +78,76 @@ export default async function AnalyticsPage() {
             <EmptyState
               icon={BarChart3}
               title="Belum ada data iklan"
-              description="Spend, impressions, klik, dan ROAS akan muncul di sini setelah channel terhubung dan campaign berjalan nyata."
+              description="Sinkronkan insight di halaman detail campaign (untuk campaign yang sudah Aktif) untuk mengisi data ini dari platform sungguhan."
             />
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center gap-2 space-y-0">
+          <Sparkles className="size-4 text-brand" aria-hidden />
+          <CardTitle>Tanyopo Intelligence</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4 pt-4">
+          {!hasAnyData ? (
+            <EmptyState
+              icon={Sparkles}
+              title="Belum ada data untuk dianalisis"
+              description="Insight AI aktif setelah ada data metrik iklan (sinkronkan dari campaign Aktif) atau konversi tercatat."
+            />
+          ) : (
+            <>
+              {(session.role === "owner" || session.role === "marketing") ? (
+                <GenerateInsightButton hasExisting={!!insight?.summary} />
+              ) : null}
+
+              {!insight?.summary ? (
+                <p className="text-sm text-muted-foreground">Belum ada insight dibuat.</p>
+              ) : (
+                <div className="flex flex-col gap-4">
+                  <p className="text-sm text-foreground">{insight.summary}</p>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    {insight.top_channel ? <Badge variant="success">Terbaik: {insight.top_channel}</Badge> : null}
+                    {underperforming.map((c) => (
+                      <Badge key={c} variant="warning">
+                        Perlu perhatian: {c}
+                      </Badge>
+                    ))}
+                  </div>
+
+                  {trends.length > 0 ? (
+                    <div className="flex flex-col gap-2">
+                      <p className="text-xs font-medium text-muted-foreground">Tren</p>
+                      {trends.map((t, i) => (
+                        <div key={i} className="flex items-start gap-2 text-sm">
+                          <Badge variant={t.direction === "UP" ? "success" : t.direction === "DOWN" ? "danger" : "neutral"}>
+                            {t.direction}
+                          </Badge>
+                          <p className="text-foreground">
+                            <strong>{t.metric}:</strong> {t.observation}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+
+                  {risks.length > 0 ? (
+                    <div className="flex flex-col gap-1">
+                      <p className="text-xs font-medium text-warning">Catatan/Risiko</p>
+                      <ul className="list-inside list-disc text-sm text-foreground">
+                        {risks.map((r, i) => (
+                          <li key={i}>{r}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+
+                  <p className="text-xs text-muted-foreground">Diperbarui {formatDate(insight.updated_at)}</p>
+                </div>
+              )}
+            </>
           )}
         </CardContent>
       </Card>

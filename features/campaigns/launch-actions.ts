@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireSessionContext } from "@/services/session";
 import { getConnector } from "@/lib/connectors/get-connector";
+import { CHANNEL_TO_CONNECTOR } from "@/lib/connectors/channel-map";
 import { decryptToken } from "@/lib/crypto/token-cipher";
 import type { CampaignProposal } from "@/schemas/ai/campaign-proposal";
 import type { ConnectorPlatform } from "@/types/database";
@@ -12,13 +13,6 @@ import type { ConnectorPlatform } from "@/types/database";
 export interface LaunchActionState {
   error: string | null;
 }
-
-const CHANNEL_TO_CONNECTOR: Partial<Record<string, ConnectorPlatform>> = {
-  FACEBOOK: "META",
-  INSTAGRAM: "META",
-  TIKTOK: "TIKTOK",
-  X: "X",
-};
 
 /**
  * Each ad platform has its own objective vocabulary (Meta's `OUTCOME_*`,
