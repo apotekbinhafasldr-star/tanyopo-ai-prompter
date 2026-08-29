@@ -32,6 +32,7 @@ export const publicEnv = {
 /** Server-only. Never import this module from a Client Component. */
 export const serverEnv = {
   supabaseSecretKey: readOptional("SUPABASE_SECRET_KEY"),
+  tokenEncryptionKey: readOptional("TOKEN_ENCRYPTION_KEY"),
   aiProviderApiKey: readOptional("AI_PROVIDER_API_KEY"),
   aiProviderName: process.env.AI_PROVIDER_NAME ?? "not_configured",
   meta: {

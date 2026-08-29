@@ -12,7 +12,10 @@ import { RegenerateProposalButton } from "@/features/campaigns/regenerate-button
 import { CampaignCopyEditor } from "@/features/campaigns/copy-editor";
 import { SubmitForApprovalButton } from "@/features/campaigns/submit-button";
 import { updateCampaignCopyAction, deleteCampaignAction, cancelSubmissionAction } from "@/features/campaigns/actions";
+import { LaunchChannelButton } from "@/features/campaigns/launch-button";
 import type { CampaignProposal } from "@/schemas/ai/campaign-proposal";
+
+const LAUNCHABLE_CHANNELS = new Set(["FACEBOOK", "INSTAGRAM"]);
 
 export const metadata: Metadata = { title: "Detail Campaign — Tanyopo AI Promoter" };
 
@@ -53,7 +56,7 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
       : Promise.resolve({ data: null }),
     supabase
       .from("prompter_channel_campaigns")
-      .select("id, channel, status, budget_percentage, external_campaign_id")
+      .select("id, channel, status, budget_percentage, external_campaign_id, error")
       .eq("master_campaign_id", id)
       .order("channel"),
   ]);
@@ -154,17 +157,25 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
           <CardContent className="pt-4">
             <div className="flex flex-col divide-y divide-border">
               {channelCampaigns.map((cc) => (
-                <div key={cc.id} className="flex items-center justify-between gap-3 py-3">
-                  <span className="text-sm font-medium text-foreground">{channelLabel(cc.channel)}</span>
-                  <span className="text-sm text-muted-foreground">
-                    {cc.budget_percentage !== null ? `${cc.budget_percentage}%` : "—"}
-                  </span>
-                  <Badge variant={campaignStatusVariant(cc.status)}>
-                    {campaignStatusLabel(cc.status)}
-                  </Badge>
-                  <span className="text-xs text-muted-foreground">
-                    {cc.external_campaign_id ?? "Belum terhubung ke platform"}
-                  </span>
+                <div key={cc.id} className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className="text-sm font-medium text-foreground">{channelLabel(cc.channel)}</span>
+                    <span className="text-sm text-muted-foreground">
+                      {cc.budget_percentage !== null ? `${cc.budget_percentage}%` : "—"}
+                    </span>
+                    <Badge variant={campaignStatusVariant(cc.status)}>
+                      {campaignStatusLabel(cc.status)}
+                    </Badge>
+                    <span className="text-xs text-muted-foreground">
+                      {cc.external_campaign_id ?? "Belum terhubung ke platform"}
+                    </span>
+                  </div>
+                  {cc.error ? <p className="max-w-md text-xs text-danger">{cc.error}</p> : null}
+                  {campaign.status === "SCHEDULED" &&
+                  LAUNCHABLE_CHANNELS.has(cc.channel) &&
+                  cc.status !== "ACTIVE" ? (
+                    <LaunchChannelButton channelCampaignId={cc.id} retry={cc.status === "FAILED"} />
+                  ) : null}
                 </div>
               ))}
             </div>

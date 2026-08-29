@@ -33,6 +33,8 @@ app/                    Route segments (App Router)
   onboarding/             Post-signup wizard, standalone layout (no sidebar)
   (app)/                  Authenticated app shell (sidebar) — dashboard and
                           every feature area
+  api/connections/meta/   OAuth route handlers (authorize, callback) —
+                          the only routes outside the App Router page tree
 components/
   ui/                    Design-system primitives (Button, Card, Input, ...)
   layout/                Sidebar and other shell chrome
@@ -40,13 +42,17 @@ components/
 features/                Feature-scoped UI + server actions, grouped by
                           domain (auth, onboarding, dashboard, marketing,
                           products, promote, campaigns, content, approvals,
-                          analytics, settings, ...)
+                          analytics, settings, connections, ...)
 lib/
   supabase/              client.ts (browser), server.ts (SSR), admin.ts
                           (service-role, server-only)
   ai/                    provider.ts (vendor-neutral interface),
                           anthropic-provider.ts, get-provider.ts,
                           prompts.ts (shared prompt builders)
+  connectors/            types.ts (PlatformConnector interface),
+                          meta-connector.ts, get-connector.ts
+  crypto/                token-cipher.ts (AES-256-GCM for OAuth tokens)
+  budget-guard.ts         Pure Budget Guard check — see services/budget-guard.ts
   env.ts                 Typed env access; missing optional vars resolve to
                           undefined rather than throwing
   utils/, constants/      Small shared helpers (cn(), nav config, ...)
@@ -74,4 +80,4 @@ docs/                     This documentation set
 
 ## What's real vs. what's still a stub
 
-As of Phase 2, **Products, Promote, Campaigns, Content, Approvals, and Analytics** are real — they read and write actual tenant data, enforce the campaign approval/Budget Guard flow, and (when `AI_PROVIDER_API_KEY` is configured) call a real AI provider. **Growth, SEO, AI Marketing, Connections, Billing** are still routed and reachable from the sidebar but render `components/shared/coming-soon.tsx` stating which phase builds them — see [ROADMAP.md](ROADMAP.md). No stub page pretends to have working data or a working button behind it, no Phase 1/2 feature fakes a result when its AI provider isn't configured (see [AI_SYSTEM.md](AI_SYSTEM.md)), and no campaign in this app reaches `ACTIVE` status without a real platform connector confirming it (Phase 3+).
+As of Phase 3, **Products, Promote, Campaigns, Content, Approvals, Analytics, and Connections** are real — they read and write actual tenant data, enforce the campaign approval/Budget Guard flow, (when `AI_PROVIDER_API_KEY` is configured) call a real AI provider, and (when `META_APP_ID`/`META_APP_SECRET`/`META_REDIRECT_URI` are configured) run a real Meta OAuth flow and can launch a campaign to a connected Meta ad account. **Growth, SEO, AI Marketing, Billing** are still routed and reachable from the sidebar but render `components/shared/coming-soon.tsx` stating which phase builds them — see [ROADMAP.md](ROADMAP.md). No stub page pretends to have working data or a working button behind it, no feature fakes a result when its AI provider or ad-platform credentials aren't configured (see [AI_SYSTEM.md](AI_SYSTEM.md), [INTEGRATIONS.md](INTEGRATIONS.md)), and `prompter_channel_campaigns.status` only ever reaches `ACTIVE` after Meta's own API confirms the campaign exists.

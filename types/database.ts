@@ -72,6 +72,18 @@ export type ConversionEventType =
   | "SUBSCRIPTION";
 export type AttributionModel = "LAST_CLICK" | "FIRST_CLICK" | "MANUAL" | "UMKMPRO_VERIFIED";
 
+/** Connector/OAuth provider — distinct from `Channel`, which names a content/campaign destination. */
+export type ConnectorPlatform = "META" | "TIKTOK" | "X";
+export type ConnectorCapability =
+  | "CONNECT_ACCOUNT"
+  | "READ_ANALYTICS"
+  | "PUBLISH_CONTENT"
+  | "CREATE_CAMPAIGN"
+  | "CREATE_AD"
+  | "UPDATE_BUDGET"
+  | "PAUSE_CAMPAIGN";
+export type StoredConnectionStatus = "CONNECTED" | "EXPIRED" | "ACTION_REQUIRED" | "DISCONNECTED";
+
 /** Mirrors the existing UMKMpro `user_profiles.role` CHECK constraint. */
 export type TenantRole =
   | "owner"
@@ -478,6 +490,7 @@ export interface Database {
           status: CampaignStatus;
           budget_percentage: number | null;
           external_campaign_id: string | null;
+          error: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -489,6 +502,7 @@ export interface Database {
           status?: CampaignStatus;
           budget_percentage?: number | null;
           external_campaign_id?: string | null;
+          error?: string | null;
         };
         Update: Partial<
           Omit<
@@ -641,6 +655,81 @@ export interface Database {
           Omit<
             Database["public"]["Tables"]["prompter_attributions"]["Insert"],
             "tenant_id" | "conversion_id"
+          >
+        >;
+        Relationships: [];
+      };
+      prompter_platform_capabilities: {
+        Row: {
+          platform: ConnectorPlatform;
+          capability: ConnectorCapability;
+          enabled: boolean;
+          requires_oauth: boolean;
+          requires_approval: boolean;
+          api_version: string | null;
+          notes: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: never; // seeded by migration only — no INSERT policy exists
+        Update: never; // no UPDATE policy exists — capability changes are migrations
+        Relationships: [];
+      };
+      prompter_connected_accounts: {
+        Row: {
+          id: string;
+          tenant_id: string;
+          platform: ConnectorPlatform;
+          external_account_id: string;
+          external_account_name: string | null;
+          status: StoredConnectionStatus;
+          scopes: string[];
+          expires_at: string | null;
+          refreshable: boolean;
+          last_refreshed_at: string | null;
+          connected_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          tenant_id: string;
+          platform: ConnectorPlatform;
+          external_account_id: string;
+          external_account_name?: string | null;
+          status?: StoredConnectionStatus;
+          scopes?: string[];
+          expires_at?: string | null;
+          refreshable?: boolean;
+          last_refreshed_at?: string | null;
+          connected_by?: string | null;
+        };
+        Update: Partial<
+          Omit<Database["public"]["Tables"]["prompter_connected_accounts"]["Insert"], "tenant_id">
+        >;
+        Relationships: [];
+      };
+      prompter_oauth_credentials: {
+        Row: {
+          id: string;
+          tenant_id: string;
+          connected_account_id: string;
+          encrypted_access_token: string;
+          encrypted_refresh_token: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          tenant_id: string;
+          connected_account_id: string;
+          encrypted_access_token: string;
+          encrypted_refresh_token?: string | null;
+        };
+        Update: Partial<
+          Omit<
+            Database["public"]["Tables"]["prompter_oauth_credentials"]["Insert"],
+            "tenant_id" | "connected_account_id"
           >
         >;
         Relationships: [];

@@ -110,7 +110,23 @@ DRAFT --submit (passes Budget Guard)--> AWAITING_APPROVAL --Owner approves--> SC
   |___________Owner rejects, or submitter cancels___________|
 ```
 
-`ACTIVE`, `PAUSED`, `COMPLETED`, `FAILED` exist in the CHECK constraint (both `prompter_master_campaigns.status` and `prompter_channel_campaigns.status`) for forward compatibility, but **no code path in this repository sets them** — those transitions require a real platform connector (Phase 3+) to confirm the campaign is actually live, per the product spec's status-transparency rule (never claim "berhasil tayang" without external confirmation).
+As of Phase 2, `ACTIVE`, `PAUSED`, `COMPLETED`, `FAILED` exist in the CHECK constraint (both `prompter_master_campaigns.status` and `prompter_channel_campaigns.status`) for forward compatibility, but no code path sets them yet — those transitions require a real platform connector to confirm the campaign is actually live, per the product spec's status-transparency rule (never claim "berhasil tayang" without external confirmation). Phase 3 adds exactly one such path — see below.
+
+## Phase 3 schema
+
+Migrations: `supabase/migrations/20260829160000_prompter_phase3_schema.sql` and a small follow-up (`20260829160100_prompter_channel_campaigns_add_error.sql`, adds `prompter_channel_campaigns.error`). Same additive-only rule as Phase 0-2.
+
+| Table | Purpose | Write access |
+|---|---|---|
+| `prompter_platform_capabilities` | Global connector capability registry (`platform` × `capability` → `enabled`/`requires_oauth`/`requires_approval`/`api_version`), not tenant-scoped. Seeded by the migration itself. | **None** — no INSERT/UPDATE/DELETE policy exists at all; a capability change is a new migration, never a runtime write. |
+| `prompter_connected_accounts` | OAuth connection metadata per tenant per platform (`unique(tenant_id, platform)`) — external account id/name, `status`, `scopes`, `expires_at`. **Never the token.** A missing row means `NOT_CONNECTED`; a row is only ever written after a real OAuth callback succeeds. | Owner only |
+| `prompter_oauth_credentials` | Encrypted tokens (`lib/crypto/token-cipher.ts`, AES-256-GCM). RLS enabled with **zero policies** — see [SECURITY.md](SECURITY.md) "OAuth token storage." Only the service-role client can touch this table. | Service-role only (no app-level policy) |
+
+`platform` here (`META`/`TIKTOK`/`X`) names an OAuth connector/provider, deliberately distinct from the `Channel` enum used on campaigns/content (`FACEBOOK`/`INSTAGRAM`/`TIKTOK`/`X`/`SEO`) — a single Meta connection covers both the Facebook and Instagram channels, matching the Connection Center's one "Facebook & Instagram" card.
+
+### The one path to `ACTIVE`
+
+`features/campaigns/launch-actions.ts#launchChannelCampaignAction()` is the only code in this repository that sets `prompter_channel_campaigns.status = 'ACTIVE'` — and only after Meta's Graph API has confirmed the campaign, ad set, creative, and ad were all actually created. A failure at any step is stored in the new `error` column and the row's status becomes `FAILED` instead; nothing is left in an ambiguous or fabricated state.
 
 ## TypeScript types
 

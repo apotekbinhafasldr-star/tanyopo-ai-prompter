@@ -30,7 +30,7 @@ Development proceeds phase by phase. A phase is not started until the previous o
 - Campaign copy editing covers headline/primary text/CTA only, not the full proposal
 - `budget_allocation` percentages are AI-generated and not validated to sum to exactly 100
 
-## Phase 2 — Marketing Operations ✅ (this delivery)
+## Phase 2 — Marketing Operations ✅
 
 - `prompter_channel_campaigns` (per-platform rows under a master campaign, materialized from `channels` + the AI proposal's `budget_allocation`), `prompter_budget_policies`, `prompter_approvals`, `prompter_marketing_metrics`, `prompter_conversions`, `prompter_attributions` + RLS
 - Budget Guard (`services/budget-guard.ts`): a campaign whose `daily_budget`/`total_budget` exceeds the tenant's `daily_limit`/`campaign_limit` is **rejected outright** on submission — it never reaches the Approval Center as a request that would just get rejected there
@@ -47,12 +47,23 @@ Development proceeds phase by phase. A phase is not started until the previous o
 - Conversions are manual-entry only — no ad-platform conversion API or UMKMpro conversion bridge (Phase 4)
 - Budget Guard checks `daily_limit`/`campaign_limit` only; `monthly_limit`, `require_approval_above`, and `autopilot_limit` are stored but not yet enforced
 
-## Phase 3 — Meta Foundation
+## Phase 3 — Meta Foundation ✅ (this delivery)
 
-- Connection Center UI
-- OAuth architecture, encrypted token storage
-- `MetaConnector` adapter, `platform_capabilities` registry
-- Real `NOT_CONFIGURED`/`CONNECTED`/`EXPIRED` states, no simulated success
+- `prompter_platform_capabilities` (global, seeded, read-only from the app), `prompter_connected_accounts` (metadata, owner-only), `prompter_oauth_credentials` (encrypted tokens, RLS enabled with zero app-level policies — service-role only) + a small follow-up migration adding `prompter_channel_campaigns.error`
+- Token encryption (`lib/crypto/token-cipher.ts`, AES-256-GCM, `TOKEN_ENCRYPTION_KEY`)
+- `PlatformConnector` interface (`lib/connectors/types.ts`) + `MetaConnector` (`lib/connectors/meta-connector.ts`) implementing `connect`/`disconnect`/`getAccounts`/`createCampaign`/`createAdSet`/`createCreative`/`createAd`/`getInsights`/`pauseCampaign`/`updateBudget` against the real Meta Marketing API v21.0 — every write leaves the object `PAUSED`. `getConnector()` returns `null` for TikTok/X (no implementation yet, Phase 6)
+- Meta OAuth flow (`/api/connections/meta/authorize` + `/callback`): CSRF state cookie, code → short-lived → long-lived token exchange, scope verification, ad account fetch, encrypted storage via the service-role client
+- Connection Center (`/connections`): honest per-platform status (`CONNECTED`/`NOT_CONNECTED`/`EXPIRED`/`NOT_CONFIGURED`/`NOT_AVAILABLE`) for Facebook & Instagram (Meta), TikTok, X, Website, UMKMpro AI — Connect/Disconnect owner-gated at both the route and RLS layers
+- Campaign launch capstone (`features/campaigns/launch-actions.ts`): the one code path that sets `prompter_channel_campaigns.status = 'ACTIVE'`, and only once Meta's own API confirms the campaign/ad set/creative/ad were created; a failure is stored on the row's `error` column, never silently dropped
+- Audit log now also records `connection.connected`, `connection.disconnected`, `campaign.launched`, `campaign.launch_failed`
+
+**Known Phase 3 simplifications / honesty notes:**
+- **Unverified against a live ad account.** This environment has neither Meta credentials nor network access to `graph.facebook.com` — the connector's request/response shapes follow the documented Marketing API v21.0 contracts but haven't been exercised end-to-end. Treat it as a first implementation to verify, not battle-tested code.
+- `createCreative` requires a Facebook Page ID and there's no Page-picker UI yet, so the launch flow reaches that step and stops there with a clear stored error — full ad creation isn't reachable today even with real credentials, until Page selection is built.
+- Location targeting on launch defaults to Indonesia (`["ID"]`) — no country picker/geocoding from the campaign's free-text `target_country` field yet.
+- Budget is passed to Meta assuming no currency minor-unit multiplier (true for IDR) — a cents-based ad account currency would need adjusting.
+- One ad account per tenant per platform is auto-selected (the first one returned) — no "switch ad account" UI.
+- `getInsights`, `pauseCampaign`, `updateBudget` are implemented on the connector but have no UI wired to them yet.
 
 ## Phase 4 — UMKMpro Integration
 
