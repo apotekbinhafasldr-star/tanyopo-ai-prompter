@@ -12,7 +12,7 @@ Two products, one ecosystem. Promoter's source code is fully separate from UMKMp
 
 1. **One Supabase project.** Not two — see [DATABASE.md](DATABASE.md) for why and how tenancy still stays cleanly separated.
 2. **One tenant identity.** `auth.users`, `public.tenants`, `public.user_profiles` are owned by UMKMpro AI's schema. Promoter reads them for auth/tenancy and never writes to them directly.
-3. **An eventual API bridge.** UMKMpro AI's "🚀 PROMOSIKAN DENGAN AI" button will call into Promoter's `/api/v1/integrations/umkmpro/*` namespace (Phase 4). Promoter does not require UMKMpro AI to function — a user can sign up and use Promoter standalone.
+3. **An API bridge.** UMKMpro AI's "🚀 PROMOSIKAN DENGAN AI" button calls into Promoter's `/api/v1/integrations/umkmpro/*` namespace (Phase 4 — see [INTEGRATIONS.md](INTEGRATIONS.md)). Promoter does not require UMKMpro AI to function — a user can sign up and use Promoter standalone.
 
 ## Tech stack
 
@@ -33,8 +33,10 @@ app/                    Route segments (App Router)
   onboarding/             Post-signup wizard, standalone layout (no sidebar)
   (app)/                  Authenticated app shell (sidebar) — dashboard and
                           every feature area
-  api/connections/meta/   OAuth route handlers (authorize, callback) —
-                          the only routes outside the App Router page tree
+  api/connections/meta/   OAuth route handlers (authorize, callback)
+  api/v1/integrations/    Signed service routes for UMKMpro AI (products,
+    umkmpro/               promotions, conversions, webhooks) — no
+                          Supabase session, HMAC-signed instead
 components/
   ui/                    Design-system primitives (Button, Card, Input, ...)
   layout/                Sidebar and other shell chrome
@@ -52,13 +54,18 @@ lib/
   connectors/            types.ts (PlatformConnector interface),
                           meta-connector.ts, get-connector.ts
   crypto/                token-cipher.ts (AES-256-GCM for OAuth tokens)
+  umkmpro/                signature.ts (pure HMAC sign/verify), auth.ts
+                          (server-only env wrapper), route-helpers.ts
   budget-guard.ts         Pure Budget Guard check — see services/budget-guard.ts
+  profit-estimate.ts      Pure revenue − COGS − ad spend calculation
+  rate-limit.ts            Pure in-memory fixed-window limiter
+  api/response.ts          Shared { data, error, meta } envelope helpers
   env.ts                 Typed env access; missing optional vars resolve to
                           undefined rather than throwing
   utils/, constants/      Small shared helpers (cn(), nav config, ...)
 services/                Server-only data-access functions shared across
                           routes (session.ts, ai-jobs.ts, budget-guard.ts,
-                          channel-campaigns.ts)
+                          channel-campaigns.ts, umkmpro.ts)
 schemas/                 Zod schemas, one file per domain
 types/                   Hand-scoped Supabase Database type (see DATABASE.md
                           for why this isn't the full generated schema)
@@ -80,4 +87,4 @@ docs/                     This documentation set
 
 ## What's real vs. what's still a stub
 
-As of Phase 3, **Products, Promote, Campaigns, Content, Approvals, Analytics, and Connections** are real — they read and write actual tenant data, enforce the campaign approval/Budget Guard flow, (when `AI_PROVIDER_API_KEY` is configured) call a real AI provider, and (when `META_APP_ID`/`META_APP_SECRET`/`META_REDIRECT_URI` are configured) run a real Meta OAuth flow and can launch a campaign to a connected Meta ad account. **Growth, SEO, AI Marketing, Billing** are still routed and reachable from the sidebar but render `components/shared/coming-soon.tsx` stating which phase builds them — see [ROADMAP.md](ROADMAP.md). No stub page pretends to have working data or a working button behind it, no feature fakes a result when its AI provider or ad-platform credentials aren't configured (see [AI_SYSTEM.md](AI_SYSTEM.md), [INTEGRATIONS.md](INTEGRATIONS.md)), and `prompter_channel_campaigns.status` only ever reaches `ACTIVE` after Meta's own API confirms the campaign exists.
+As of Phase 4, **Products, Promote, Campaigns, Content, Approvals, Analytics, Connections, and the UMKMpro AI integration** are real — they read and write actual tenant data, enforce the campaign approval/Budget Guard flow, (when `AI_PROVIDER_API_KEY` is configured) call a real AI provider, (when `META_APP_ID`/`META_APP_SECRET`/`META_REDIRECT_URI` are configured) run a real Meta OAuth flow and can launch a campaign to a connected Meta ad account, and (when `UMKMPRO_SERVICE_TOKEN`/`SUPABASE_SECRET_KEY` are configured) accept genuinely signature-verified product syncs, promotion handoffs, conversions, and webhooks from UMKMpro AI. **Growth, SEO, AI Marketing, Billing** are still routed and reachable from the sidebar but render `components/shared/coming-soon.tsx` stating which phase builds them — see [ROADMAP.md](ROADMAP.md). No stub page pretends to have working data or a working button behind it, no feature fakes a result when its AI provider, ad-platform, or UMKMpro credentials aren't configured (see [AI_SYSTEM.md](AI_SYSTEM.md), [INTEGRATIONS.md](INTEGRATIONS.md)), and `prompter_channel_campaigns.status` only ever reaches `ACTIVE` after Meta's own API confirms the campaign exists.

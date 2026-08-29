@@ -71,6 +71,8 @@ export type ConversionEventType =
   | "PURCHASE"
   | "SUBSCRIPTION";
 export type AttributionModel = "LAST_CLICK" | "FIRST_CLICK" | "MANUAL" | "UMKMPRO_VERIFIED";
+export type HandoffStatus = "PENDING" | "CONSUMED" | "EXPIRED";
+export type WebhookEventStatus = "RECEIVED" | "PROCESSED" | "FAILED" | "IGNORED";
 
 /** Connector/OAuth provider — distinct from `Channel`, which names a content/campaign destination. */
 export type ConnectorPlatform = "META" | "TIKTOK" | "X";
@@ -264,6 +266,8 @@ export interface Database {
           hpp?: number | null;
           website_url?: string | null;
           status?: ProductStatus;
+          source_system?: "promoter" | "umkmpro";
+          source_product_id?: string | null;
         };
         Update: Partial<
           Omit<Database["public"]["Tables"]["prompter_products"]["Insert"], "tenant_id">
@@ -602,6 +606,7 @@ export interface Database {
           currency: string;
           occurred_at: string;
           metadata: Json;
+          external_event_id: string | null;
           created_at: string;
         };
         Insert: {
@@ -617,6 +622,7 @@ export interface Database {
           currency?: string;
           occurred_at?: string;
           metadata?: Json;
+          external_event_id?: string | null;
         };
         Update: Partial<
           Omit<Database["public"]["Tables"]["prompter_conversions"]["Insert"], "tenant_id">
@@ -732,6 +738,103 @@ export interface Database {
             "tenant_id" | "connected_account_id"
           >
         >;
+        Relationships: [];
+      };
+      prompter_product_snapshots: {
+        Row: {
+          id: string;
+          tenant_id: string;
+          source_system: string;
+          source_product_id: string;
+          linked_product_id: string | null;
+          name: string;
+          description: string | null;
+          price: number | null;
+          currency: string;
+          stock: number | null;
+          hpp: number | null;
+          category: string | null;
+          images: Json;
+          snapshot_at: string;
+          source_updated_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          tenant_id: string;
+          source_system?: string;
+          source_product_id: string;
+          linked_product_id?: string | null;
+          name: string;
+          description?: string | null;
+          price?: number | null;
+          currency?: string;
+          stock?: number | null;
+          hpp?: number | null;
+          category?: string | null;
+          images?: Json;
+          snapshot_at?: string;
+          source_updated_at?: string | null;
+        };
+        Update: never; // append-only — see migration comment on this table
+        Relationships: [];
+      };
+      prompter_promotion_handoffs: {
+        Row: {
+          id: string;
+          tenant_id: string;
+          snapshot_id: string | null;
+          product_id: string | null;
+          source_system: string;
+          external_user_reference: string | null;
+          status: HandoffStatus;
+          idempotency_key: string | null;
+          expires_at: string;
+          consumed_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          tenant_id: string;
+          snapshot_id?: string | null;
+          product_id?: string | null;
+          source_system?: string;
+          external_user_reference?: string | null;
+          status?: HandoffStatus;
+          idempotency_key?: string | null;
+          expires_at?: string;
+        };
+        Update: {
+          status?: HandoffStatus;
+          consumed_at?: string | null;
+        };
+        Relationships: [];
+      };
+      prompter_webhook_events: {
+        Row: {
+          id: string;
+          tenant_id: string | null;
+          source_system: string;
+          external_event_id: string;
+          event_type: string;
+          payload: Json;
+          status: WebhookEventStatus;
+          error: string | null;
+          received_at: string;
+          processed_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          tenant_id?: string | null;
+          source_system?: string;
+          external_event_id: string;
+          event_type: string;
+          payload?: Json;
+          status?: WebhookEventStatus;
+          error?: string | null;
+          processed_at?: string | null;
+        };
+        Update: never; // written only by the service-role client
         Relationships: [];
       };
     };

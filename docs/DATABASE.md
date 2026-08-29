@@ -128,6 +128,25 @@ Migrations: `supabase/migrations/20260829160000_prompter_phase3_schema.sql` and 
 
 `features/campaigns/launch-actions.ts#launchChannelCampaignAction()` is the only code in this repository that sets `prompter_channel_campaigns.status = 'ACTIVE'` — and only after Meta's Graph API has confirmed the campaign, ad set, creative, and ad were all actually created. A failure at any step is stored in the new `error` column and the row's status becomes `FAILED` instead; nothing is left in an ambiguous or fabricated state.
 
+## Phase 4 schema
+
+Migration: `supabase/migrations/20260829180000_prompter_phase4_schema.sql`. Same additive-only rule as Phase 0-3.
+
+| Table | Purpose | Write access |
+|---|---|---|
+| `prompter_product_snapshots` | Append-only historical snapshot of a product as UMKMpro AI reported it at sync time (product spec §48). A campaign built from a snapshot stays historically accurate even after the source product's price/stock later changes in UMKMpro — `linked_product_id` points at the live, mutable `prompter_products` mirror the rest of the app queries; the snapshot itself is never mutated. | Service-role only (no app-level INSERT/UPDATE/DELETE policy) |
+| `prompter_promotion_handoffs` | One-time "🚀 PROMOSIKAN DENGAN AI" handoff (product spec §47). UMKMpro AI creates one via the signed API, then redirects its user to `/promote?handoff=<id>`; Promoter's own tenant-scoped RLS SELECT is what "validates this belongs to the visiting user's tenant" means — a handoff for a different tenant simply never comes back from the query a logged-in user's browser makes. `status` moves `PENDING` → `CONSUMED` when `/promote` resolves it, or `EXPIRED` after `expires_at` (30 minutes). `unique(tenant_id, source_system, idempotency_key)` makes a retried UMKMpro request safe. | Insert: service-role only. Update (marking consumed): any tenant member |
+| `prompter_webhook_events` | Idempotent receipt log for the generic webhook endpoint (product spec §56-57). `unique(source_system, external_event_id)` makes redelivery a safe no-op — a duplicate insert is caught and the existing row's id is returned instead of erroring. This table is the audit trail for webhook deliveries; it does not drive any further automated processing today. | Service-role only |
+
+Two existing tables also gained a Phase 4 column/constraint:
+
+- `prompter_products` — `unique(tenant_id, source_system, source_product_id)`. Every `'promoter'`-sourced row keeps `source_product_id = null`, and Postgres treats multiple `NULL`s in a unique constraint as mutually non-conflicting, so this constraint only actually constrains `'umkmpro'`-sourced rows — exactly what makes `upsertProductFromUmkmpro()` (`services/umkmpro.ts`) a safe upsert rather than a duplicate-row risk on every re-sync.
+- `prompter_conversions` — new `external_event_id` column plus `unique(tenant_id, source, external_event_id)`, same NULL-distinctness trick: Phase 2's manual entries (`external_event_id IS NULL`) never collide with each other or with UMKMpro-sourced rows.
+
+### UMKMpro AI integration surface
+
+`/api/v1/integrations/umkmpro/{products,promotions,conversions,webhooks}` — signed service-to-service routes, no Supabase user session involved. See [INTEGRATIONS.md](INTEGRATIONS.md) and [SECURITY.md](SECURITY.md) for the authentication design; `services/umkmpro.ts` is the data-access layer every route calls into.
+
 ## TypeScript types
 
 `types/database.ts` is **hand-authored**, not the full `supabase gen types typescript` output. The shared project's full schema is ~80 UMKMpro-specific tables (POS, inventory, HR, workshop, F&B, ...) that this app never queries; importing all of it would make every Promoter file's types depend on a schema this codebase doesn't own. Instead, `types/database.ts` declares only the tables Promoter actually touches: the `prompter_*` tables plus a read-oriented slice of `tenants`/`user_profiles`.

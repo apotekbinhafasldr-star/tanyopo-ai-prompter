@@ -26,9 +26,22 @@ Two layers of protection, not just one:
 
 Both the OAuth callback (`app/api/connections/meta/callback/route.ts`) and the campaign-launch flow (`features/campaigns/launch-actions.ts`) that needs to read a token back go through the admin client for exactly this reason.
 
+## Signed service authentication (Phase 4)
+
+`/api/v1/integrations/umkmpro/*` has no Supabase session to authenticate against — it's UMKMpro AI's server calling Promoter's server, not a user in a browser. Authentication is HMAC-SHA256 over `${timestamp}.${rawBody}`, keyed by the shared `UMKMPRO_SERVICE_TOKEN`:
+
+- `lib/umkmpro/signature.ts` — pure, dependency-free (only `node:crypto`) signature computation and verification, directly unit tested (`tests/unit/lib/umkmpro-signature.test.ts`). Verification is constant-time (`timingSafeEqual`) and rejects a request whose `x-umkmpro-timestamp` header is more than 5 minutes old or in the future, so a captured request can't be replayed indefinitely.
+- `lib/umkmpro/auth.ts` — the `server-only` wrapper that reads `UMKMPRO_SERVICE_TOKEN` from the environment and pulls the two headers (`x-umkmpro-timestamp`, `x-umkmpro-signature`) off the real request.
+- Every route reads the **raw** request body text and signs/verifies that exact byte string before any `JSON.parse` — parsing then re-stringifying first would let a semantically-identical-but-differently-formatted body slip past a signature computed over the original bytes.
+- A request that fails verification gets a `401 UNAUTHORIZED` naming the specific reason (`MISSING_HEADERS`/`STALE_TIMESTAMP`/`INVALID_SIGNATURE`); `UMKMPRO_SERVICE_TOKEN` unset gets `503 NOT_CONFIGURED` instead — the route never falls back to accepting an unsigned request.
+
+## Rate limiting (Phase 4)
+
+`lib/rate-limit.ts` — a best-effort, in-memory fixed-window limiter (60 requests/minute per route, per `/api/v1/integrations/umkmpro/*` route name). Honestly scoped, not oversold: state is process-local, so it resets on every deploy/restart and isn't shared across multiple server instances — a real gap for a multi-instance production deployment, and one this app doesn't have the infrastructure (a shared cache like Redis) to close yet. It's still a genuine backstop against a runaway retry loop from a single instance, which is the failure mode it exists to catch today.
+
 ## Audit logging
 
-`prompter_audit_logs` is append-only (see [DATABASE.md](DATABASE.md) — no `UPDATE`/`DELETE` RLS policy exists on the table at all). Every critical action defined in the product spec (account connection, campaign launch, budget change, approval, automation change, role change, billing action) must write a row here once those features exist. As of Phase 3: `onboarding.completed`, `campaign.submitted_for_approval`, `campaign.approved`, `campaign.launch_rejected`, `budget_policy.updated`, `connection.connected`, `connection.disconnected`, `campaign.launched`, and `campaign.launch_failed` are wired; automation-mode, role, and billing changes will follow as those features land.
+`prompter_audit_logs` is append-only (see [DATABASE.md](DATABASE.md) — no `UPDATE`/`DELETE` RLS policy exists on the table at all). Every critical action defined in the product spec (account connection, campaign launch, budget change, approval, automation change, role change, billing action) must write a row here once those features exist. As of Phase 4: `onboarding.completed`, `campaign.submitted_for_approval`, `campaign.approved`, `campaign.launch_rejected`, `budget_policy.updated`, `connection.connected`, `connection.disconnected`, `campaign.launched`, `campaign.launch_failed`, `umkmpro.product_synced`, `umkmpro.promotion_handoff_created`, and `umkmpro.conversion_recorded` are wired (`actor_user_id` is `null` for the UMKMpro-originated ones — there is no Promoter user in that request, only a signed service call); automation-mode, role, and billing changes will follow as those features land. The webhook receipt log (`prompter_webhook_events`) intentionally does **not** also write an audit log row — it already is the durable, idempotent record of what UMKMpro AI delivered.
 
 ## Separation of duties (Budget Guard / Approval Center)
 

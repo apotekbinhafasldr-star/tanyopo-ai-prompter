@@ -65,11 +65,23 @@ Development proceeds phase by phase. A phase is not started until the previous o
 - One ad account per tenant per platform is auto-selected (the first one returned) — no "switch ad account" UI.
 - `getInsights`, `pauseCampaign`, `updateBudget` are implemented on the connector but have no UI wired to them yet.
 
-## Phase 4 — UMKMpro Integration
+## Phase 4 — UMKMpro Integration ✅ (this delivery)
 
-- Product handoff → `product_snapshots`
-- `/api/v1/integrations/umkmpro/*` (products, promotions, conversions, webhooks)
-- Signed service authentication
+- `prompter_product_snapshots` (append-only), `prompter_promotion_handoffs`, `prompter_webhook_events` + RLS; `prompter_products` gains `unique(tenant_id, source_system, source_product_id)` for safe upsert; `prompter_conversions` gains `external_event_id` + `unique(tenant_id, source, external_event_id)` for idempotent externally-pushed events
+- Signed service authentication (`lib/umkmpro/signature.ts` + `lib/umkmpro/auth.ts`): HMAC-SHA256 over `${timestamp}.${rawBody}`, keyed by `UMKMPRO_SERVICE_TOKEN`, constant-time comparison, 5-minute freshness window
+- Best-effort in-memory rate limiting (`lib/rate-limit.ts`) and the shared `{ data, error, meta }` API response envelope (`lib/api/response.ts`), product spec §71-72
+- `/api/v1/integrations/umkmpro/{products,promotions,conversions,webhooks}` (`services/umkmpro.ts` is the data-access layer): product sync + append-only snapshot, one-time promotion handoff (idempotent on a caller-supplied key), conversion recording (idempotent upsert), generic idempotent webhook receipt log
+- `/promote?handoff=<id>` resolves a handoff via the normal session-scoped client (RLS is the tenant-isolation check, not extra application code), marks it `CONSUMED`, and preselects the product in the Promote Wizard
+- Fixed two pre-existing bugs required for the handoff flow to survive an unauthenticated visit: `proxy.ts` now preserves the full query string (not just the path) in the post-login `next` redirect, and `loginAction` now honors a validated `next` param instead of always redirecting to `/dashboard`
+- Profit-aware marketing estimate (product spec §49) on the product detail Analytics tab: revenue (from `PURCHASE` conversions) − COGS (product `hpp` × units) − ad spend, clearly labeled as an estimate, `null` (not `Rp 0`) when `hpp` isn't set
+- Audit log now also records `umkmpro.product_synced`, `umkmpro.promotion_handoff_created`, `umkmpro.conversion_recorded`
+
+**Known Phase 4 simplifications / honesty notes:**
+- **The signed-authentication layer was verified against a real running local server in this environment; the database write path was not.** `SUPABASE_SECRET_KEY` isn't obtainable through the Supabase MCP server used in this session (by design — it only exposes publishable keys), so `/api/v1/integrations/umkmpro/*` could be exercised end-to-end for its auth/rate-limit layer (missing signature, wrong secret, stale timestamp all correctly rejected with `401`; a correctly-signed request correctly fails closed with `503 NOT_CONFIGURED` rather than crashing or faking success) but not for an actual database write. Treat `services/umkmpro.ts`'s upsert/idempotency logic as implemented and unit-testable in isolation, not as verified against a live Postgres instance — the next person with the real service-role key should re-run the same signed-request flow and confirm the resulting rows.
+- The webhook endpoint is a pure, idempotent receipt log — it does not dispatch to any further processing based on `eventType`. A concrete need (e.g. "act on `product.deleted`") should get its own explicit handling, not a generic dispatcher built ahead of a real use case.
+- A first-time UMKMpro user who hasn't completed Promoter's own `/onboarding` yet loses the in-flight handoff during that detour (see [INTEGRATIONS.md](INTEGRATIONS.md) "Consuming a handoff") — the link will most likely have expired (30 minutes) by the time onboarding finishes.
+- The profit estimate assumes one unit sold per `PURCHASE` conversion — there's no line-item/quantity field on a conversion yet, so a multi-unit order recorded as a single conversion undercounts units sold (and so understates COGS).
+- Rate limiting is process-local (see [SECURITY.md](SECURITY.md)) — real but not multi-instance-safe.
 
 ## Phase 5 — Growth + SEO
 

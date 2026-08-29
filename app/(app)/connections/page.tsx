@@ -148,7 +148,7 @@ export default async function ConnectionsPage({
           title="UMKMpro AI"
           subtitle="Product handoff"
           status="NOT_AVAILABLE"
-          note="Direncanakan Phase 4 (integrasi produk)."
+          note="Bukan koneksi per-tenant — produk disinkronkan otomatis lewat API bertanda tangan saat UMKMpro AI mengirim data, tidak ada tombol Hubungkan di sini."
         />
       </div>
     </div>

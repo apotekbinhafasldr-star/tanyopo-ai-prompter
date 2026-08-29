@@ -9,6 +9,19 @@ export interface AuthActionState {
   info?: string | null;
 }
 
+/**
+ * Only ever redirects to a same-origin app path. A `next` value coming
+ * from a query string is untrusted input — without this check a login
+ * link could be crafted to bounce a user off to an attacker's site
+ * (`//evil.com`, `https://evil.com`) after they authenticate.
+ */
+function safeNextPath(next: FormDataEntryValue | null): string {
+  if (typeof next !== "string" || !next.startsWith("/") || next.startsWith("//")) {
+    return "/dashboard";
+  }
+  return next;
+}
+
 export async function loginAction(
   _prevState: AuthActionState,
   formData: FormData,
@@ -34,7 +47,7 @@ export async function loginAction(
     };
   }
 
-  redirect("/dashboard");
+  redirect(safeNextPath(formData.get("next")));
 }
 
 export async function registerAction(
