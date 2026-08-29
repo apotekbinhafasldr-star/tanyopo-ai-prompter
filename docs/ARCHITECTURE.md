@@ -33,7 +33,8 @@ app/                    Route segments (App Router)
   onboarding/             Post-signup wizard, standalone layout (no sidebar)
   (app)/                  Authenticated app shell (sidebar) — dashboard and
                           every feature area
-  api/connections/meta/   OAuth route handlers (authorize, callback)
+  api/connections/{meta,  OAuth route handlers (authorize, callback) —
+    tiktok,x}/             thin wrappers around lib/connectors/oauth-*.ts
   api/v1/integrations/    Signed service routes for UMKMpro AI (products,
     umkmpro/               promotions, conversions, webhooks) — no
                           Supabase session, HMAC-signed instead
@@ -52,7 +53,10 @@ lib/
                           anthropic-provider.ts, get-provider.ts,
                           prompts.ts (shared prompt builders)
   connectors/            types.ts (PlatformConnector interface),
-                          meta-connector.ts, get-connector.ts
+                          meta-connector.ts, tiktok-connector.ts,
+                          x-connector.ts, get-connector.ts,
+                          oauth-authorize.ts, oauth-callback.ts (shared
+                          OAuth route handlers all three platforms use)
   crypto/                token-cipher.ts (AES-256-GCM for OAuth tokens)
   umkmpro/                signature.ts (pure HMAC sign/verify), auth.ts
                           (server-only env wrapper), route-helpers.ts
@@ -88,4 +92,4 @@ docs/                     This documentation set
 
 ## What's real vs. what's still a stub
 
-As of Phase 5, **Products, Promote, Campaigns, Content (including the content calendar), Approvals, Analytics, Connections, the UMKMpro AI integration, Growth, and SEO** are real — they read and write actual tenant data, enforce the campaign approval/Budget Guard flow, (when `AI_PROVIDER_API_KEY` is configured) call a real AI provider for blueprint/campaign/content/SEO generation, (when `META_APP_ID`/`META_APP_SECRET`/`META_REDIRECT_URI` are configured) run a real Meta OAuth flow and can launch a campaign to a connected Meta ad account, and (when `UMKMPRO_SERVICE_TOKEN`/`SUPABASE_SECRET_KEY` are configured) accept genuinely signature-verified product syncs, promotion handoffs, conversions, and webhooks from UMKMpro AI. Growth's follower tracking is honestly manual-entry-only (no platform exposes an organic-follower API this app can read), and SEO's AI recommendations are explicitly labeled as reasoning from a URL, not a real site crawl — see [ROADMAP.md](ROADMAP.md) Phase 5 for both caveats in full. **AI Marketing, Billing** are still routed and reachable from the sidebar but render `components/shared/coming-soon.tsx` stating which phase builds them. No stub page pretends to have working data or a working button behind it, no feature fakes a result when its AI provider, ad-platform, or UMKMpro credentials aren't configured (see [AI_SYSTEM.md](AI_SYSTEM.md), [INTEGRATIONS.md](INTEGRATIONS.md)), and `prompter_channel_campaigns.status` only ever reaches `ACTIVE` after Meta's own API confirms the campaign exists.
+As of Phase 6, **Products, Promote, Campaigns, Content (including the content calendar), Approvals, Analytics, Connections, the UMKMpro AI integration, Growth, and SEO** are real — they read and write actual tenant data, enforce the campaign approval/Budget Guard flow, (when `AI_PROVIDER_API_KEY` is configured) call a real AI provider for blueprint/campaign/content/SEO generation, (when each platform's app credentials are configured) run a real OAuth flow for Meta, TikTok, or X and can launch a campaign to a connected ad account, and (when `UMKMPRO_SERVICE_TOKEN`/`SUPABASE_SECRET_KEY` are configured) accept genuinely signature-verified product syncs, promotion handoffs, conversions, and webhooks from UMKMpro AI. Growth's follower tracking is honestly manual-entry-only (no platform exposes an organic-follower API this app can read), SEO's AI recommendations are explicitly labeled as reasoning from a URL rather than a real site crawl, and TikTok/X campaign launches honestly stop at ad-set targeting pending a verified location-catalog mapping — see [ROADMAP.md](ROADMAP.md) Phases 5-6 and [INTEGRATIONS.md](INTEGRATIONS.md) for the full caveats. **AI Marketing, Billing** are still routed and reachable from the sidebar but render `components/shared/coming-soon.tsx` stating which phase builds them. No stub page pretends to have working data or a working button behind it, no feature fakes a result when its AI provider, ad-platform, or UMKMpro credentials aren't configured (see [AI_SYSTEM.md](AI_SYSTEM.md), [INTEGRATIONS.md](INTEGRATIONS.md)), and `prompter_channel_campaigns.status` only ever reaches `ACTIVE` after the target platform's own API confirms the campaign exists.

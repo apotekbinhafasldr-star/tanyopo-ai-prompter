@@ -239,7 +239,8 @@ export class MetaConnector implements PlatformConnector {
     });
   }
 
-  async getInsights(accessToken: string, externalCampaignId: string): Promise<ConnectorInsights> {
+  /** `adAccountId` is unused — Meta's Graph API objects are globally addressable by id alone. */
+  async getInsights(accessToken: string, _adAccountId: string, externalCampaignId: string): Promise<ConnectorInsights> {
     this.requireConfig();
     const result = await graphFetch<{
       data: { spend?: string; impressions?: string; reach?: string; clicks?: string }[];
@@ -259,7 +260,7 @@ export class MetaConnector implements PlatformConnector {
     };
   }
 
-  async pauseCampaign(accessToken: string, externalCampaignId: string): Promise<void> {
+  async pauseCampaign(accessToken: string, _adAccountId: string, externalCampaignId: string): Promise<void> {
     this.requireConfig();
     await graphFetch(`/${externalCampaignId}`, {
       method: "POST",
@@ -271,6 +272,7 @@ export class MetaConnector implements PlatformConnector {
   /** Assumes Campaign Budget Optimization is enabled — sets budget at the campaign level. */
   async updateBudget(
     accessToken: string,
+    _adAccountId: string,
     externalCampaignId: string,
     dailyBudgetMinorUnits: number,
   ): Promise<void> {

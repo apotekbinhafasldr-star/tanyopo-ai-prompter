@@ -16,29 +16,70 @@ export interface LaunchActionState {
 const CHANNEL_TO_CONNECTOR: Partial<Record<string, ConnectorPlatform>> = {
   FACEBOOK: "META",
   INSTAGRAM: "META",
+  TIKTOK: "TIKTOK",
+  X: "X",
 };
 
-const OBJECTIVE_MAP: Record<string, string> = {
-  INCREASE_SALES: "OUTCOME_SALES",
-  GET_LEADS: "OUTCOME_LEADS",
-  INCREASE_FOLLOWERS: "OUTCOME_ENGAGEMENT",
-  BRAND_AWARENESS: "OUTCOME_AWARENESS",
-  WEBSITE_TRAFFIC: "OUTCOME_TRAFFIC",
-  PROMOTE_APP: "OUTCOME_APP_PROMOTION",
+/**
+ * Each ad platform has its own objective vocabulary (Meta's `OUTCOME_*`,
+ * TikTok's `objective_type`, X's `objective`) — mapping Promoter's
+ * `PrimaryGoal` per connector platform rather than assuming one
+ * platform's names apply everywhere.
+ */
+const OBJECTIVE_MAP: Record<ConnectorPlatform, Record<string, string>> = {
+  META: {
+    INCREASE_SALES: "OUTCOME_SALES",
+    GET_LEADS: "OUTCOME_LEADS",
+    INCREASE_FOLLOWERS: "OUTCOME_ENGAGEMENT",
+    BRAND_AWARENESS: "OUTCOME_AWARENESS",
+    WEBSITE_TRAFFIC: "OUTCOME_TRAFFIC",
+    PROMOTE_APP: "OUTCOME_APP_PROMOTION",
+  },
+  TIKTOK: {
+    INCREASE_SALES: "CONVERSIONS",
+    GET_LEADS: "LEAD_GENERATION",
+    INCREASE_FOLLOWERS: "ENGAGEMENT",
+    BRAND_AWARENESS: "REACH",
+    WEBSITE_TRAFFIC: "TRAFFIC",
+    PROMOTE_APP: "APP_PROMOTION",
+  },
+  X: {
+    INCREASE_SALES: "WEBSITE_CONVERSIONS",
+    GET_LEADS: "LEAD_GENERATION",
+    INCREASE_FOLLOWERS: "FOLLOWERS",
+    BRAND_AWARENESS: "AWARENESS",
+    WEBSITE_TRAFFIC: "WEBSITE_CLICKS",
+    PROMOTE_APP: "APP_INSTALLS",
+  },
+};
+
+const DEFAULT_OBJECTIVE: Record<ConnectorPlatform, string> = {
+  META: "OUTCOME_AWARENESS",
+  TIKTOK: "REACH",
+  X: "AWARENESS",
 };
 
 /**
  * Launches one channel of an approved (SCHEDULED) campaign to its connected
- * ad platform. This is the one code path in this app allowed to set a
- * channel_campaigns.status to ACTIVE — only after the platform's own API
- * has confirmed each object was created (product spec §90, never claim
- * "berhasil tayang" without external confirmation). Every object Meta
- * creates is left PAUSED (see lib/connectors/meta-connector.ts) — this
- * action stages the campaign, it does not start spending money.
+ * ad platform (Meta, TikTok, or X — Phase 6). This is the one code path in
+ * this app allowed to set a channel_campaigns.status to ACTIVE — only
+ * after the platform's own API has confirmed each object was created
+ * (product spec §90, never claim "berhasil tayang" without external
+ * confirmation). Every object every connector creates is left
+ * paused/disabled (see lib/connectors/*-connector.ts) — this action stages
+ * the campaign, it does not start spending money. Entirely platform-
+ * agnostic here: which connector runs is resolved once via
+ * `getConnector(connectorPlatform)`, everything platform-specific lives
+ * behind the `PlatformConnector` interface.
  *
- * Known gap: createCreative requires a connected Facebook Page, which
- * there's no picker UI for yet — this will reach that step and fail there
- * with a clear, stored error rather than a silent or fabricated success.
+ * Known gaps, one real missing prerequisite per platform — each connector
+ * throws `ConnectorConfigError` at its own stopping point rather than
+ * faking success past it, and this action stores that as the channel
+ * campaign's `error` exactly like any other failure:
+ * - **Meta**: `createCreative` requires a connected Facebook Page, no picker UI yet.
+ * - **TikTok/X**: `createAdSet` requires each platform's own numeric location id
+ *   (not an ISO country code) — no verified mapping exists yet, so this stops
+ *   one step earlier than Meta rather than risk targeting the wrong location.
  */
 export async function launchChannelCampaignAction(channelCampaignId: string): Promise<LaunchActionState> {
   const session = await requireSessionContext();
@@ -130,7 +171,8 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
   try {
     const campaign = await connector.createCampaign(accessToken, adAccountId, {
       name: masterCampaign.name,
-      objective: OBJECTIVE_MAP[masterCampaign.objective] ?? "OUTCOME_AWARENESS",
+      objective:
+        OBJECTIVE_MAP[connectorPlatform][masterCampaign.objective] ?? DEFAULT_OBJECTIVE[connectorPlatform],
       dailyBudgetMinorUnits,
     });
     externalCampaignId = campaign.id;

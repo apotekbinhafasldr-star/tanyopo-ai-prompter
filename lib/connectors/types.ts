@@ -95,7 +95,19 @@ export interface PlatformConnector {
   createCreative(accessToken: string, adAccountId: string, input: CreativeInput): Promise<{ id: string }>;
   createAd(accessToken: string, adAccountId: string, input: AdInput): Promise<{ id: string }>;
 
-  getInsights(accessToken: string, externalCampaignId: string): Promise<ConnectorInsights>;
-  pauseCampaign(accessToken: string, externalCampaignId: string): Promise<void>;
-  updateBudget(accessToken: string, externalCampaignId: string, dailyBudgetMinorUnits: number): Promise<void>;
+  /**
+   * `adAccountId` is required here (not just on the create* methods)
+   * because not every platform's objects are globally addressable by id
+   * alone — Meta's Graph API is, but TikTok's and X's ad-management APIs
+   * scope nearly every endpoint under the advertiser/account id. Meta's
+   * implementation simply ignores the parameter.
+   */
+  getInsights(accessToken: string, adAccountId: string, externalCampaignId: string): Promise<ConnectorInsights>;
+  pauseCampaign(accessToken: string, adAccountId: string, externalCampaignId: string): Promise<void>;
+  updateBudget(
+    accessToken: string,
+    adAccountId: string,
+    externalCampaignId: string,
+    dailyBudgetMinorUnits: number,
+  ): Promise<void>;
 }

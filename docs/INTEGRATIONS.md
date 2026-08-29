@@ -18,40 +18,47 @@ interface PlatformConnector {
   exchangeCodeForToken(code): Promise<ConnectorTokenResult>;
   disconnect(accessToken, externalAccountId): Promise<void>;
   getAccounts(accessToken): Promise<ConnectorAccount[]>;
-  createCampaign(...): Promise<{ id }>;
-  createAdSet(...): Promise<{ id }>;
-  createCreative(...): Promise<{ id }>;
-  createAd(...): Promise<{ id }>;
-  getInsights(accessToken, externalCampaignId): Promise<ConnectorInsights>;
-  pauseCampaign(accessToken, externalCampaignId): Promise<void>;
-  updateBudget(accessToken, externalCampaignId, dailyBudgetMinorUnits): Promise<void>;
+  createCampaign(accessToken, adAccountId, ...): Promise<{ id }>;
+  createAdSet(accessToken, adAccountId, ...): Promise<{ id }>;
+  createCreative(accessToken, adAccountId, ...): Promise<{ id }>;
+  createAd(accessToken, adAccountId, ...): Promise<{ id }>;
+  getInsights(accessToken, adAccountId, externalCampaignId): Promise<ConnectorInsights>;
+  pauseCampaign(accessToken, adAccountId, externalCampaignId): Promise<void>;
+  updateBudget(accessToken, adAccountId, externalCampaignId, dailyBudgetMinorUnits): Promise<void>;
 }
 ```
 
-`lib/connectors/get-connector.ts#getConnector(platform)` returns the implementation or `null` — `null` means **no connector code exists for that platform yet** (TikTok/X, Phase 6), which the UI must render as `NOT_AVAILABLE`, distinct from a connector that exists but lacks credentials (`connector.isConfigured() === false` → `NOT_CONFIGURED`).
+`adAccountId` is threaded through every method (not just the create* ones, as of Phase 6) because not every platform's objects are globally addressable by id alone the way Meta's Graph API objects are — TikTok's and X's ad-management APIs scope nearly every endpoint under the advertiser/account id. Meta's implementation simply ignores the parameter where it doesn't need it.
 
-**Implemented:** `lib/connectors/meta-connector.ts` (Facebook & Instagram, via the Meta Marketing API). A method called without `META_APP_ID`/`META_APP_SECRET`/`META_REDIRECT_URI` configured throws `ConnectorConfigError` — it never attempts the call, never falls back to a mock success, never simulates campaign data. Every object the connector creates (campaign, ad set, ad) is left in Meta's `PAUSED` state — nothing this app does can start real ad spend on its own.
+`lib/connectors/get-connector.ts#getConnector(platform)` returns the implementation or `null` — as of Phase 6, every `ConnectorPlatform` has a real implementation, so `null` is now a forward-compatible fallback rather than an active TikTok/X state. A connector that exists but lacks credentials still renders `NOT_CONFIGURED` (`connector.isConfigured() === false`), distinct from `NOT_AVAILABLE` (no connector code at all).
 
-**Not yet implemented:** `TikTokConnector`, `XConnector` (Phase 6) — `getConnector()` returns `null` for both today.
+**Implemented:** `lib/connectors/meta-connector.ts` (Facebook & Instagram, Marketing API v21.0), `lib/connectors/tiktok-connector.ts` (TikTok for Business Marketing API v1.3), `lib/connectors/x-connector.ts` (X Ads API v12). A method called on an unconfigured connector throws `ConnectorConfigError` — it never attempts the call, never falls back to a mock success, never simulates campaign data. Every object every connector creates is left paused/disabled (`PAUSED` on Meta, `operation_status: "DISABLE"` on TikTok, `entity_status: "PAUSED"` on X) — nothing this app does can start real ad spend on its own.
 
-**Honesty about verification:** this environment has neither Meta credentials nor network access to `graph.facebook.com`, so the Meta connector's Graph API request/response shapes follow the documented Marketing API v21.0 contracts as closely as possible but have **not been exercised against a live ad account**. Treat it as a first implementation to verify once real credentials exist, not as battle-tested code. One known incomplete step: `createCreative` requires a Facebook Page ID (Meta ads run "as" a Page) and there's no Page-picker UI yet, so it throws a clear `ConnectorConfigError` until that's built — the campaign-launch flow below reaches that step and stops there today, honestly, rather than faking a completed ad.
+**Honesty about verification:** this environment has neither credentials nor network access for any of the three platforms' APIs, so all three connectors' request/response shapes follow their documented API contracts as closely as possible but have **not been exercised against a live ad account**. Treat each as a first implementation to verify once real credentials exist, not as battle-tested code.
+
+**Known incomplete steps — one real missing prerequisite per platform, disclosed rather than worked around:**
+- **Meta**: `createCreative` requires a Facebook Page ID (Meta ads run "as" a Page) and there's no Page-picker UI yet — throws `ConnectorConfigError` there.
+- **TikTok**: `createAdSet` throws immediately — TikTok's targeting API takes numeric `location_id`s from TikTok's own location catalog, not ISO country codes, and this app has no verified mapping. Guessing a number would risk silently targeting the wrong location with real budget, which is worse than stopping. `createCreative` would also stop (TikTok ad creatives need an already-uploaded video/image asset and there's no upload UI), but the flow never reaches it since `createAdSet` runs first.
+- **X**: `createCampaign` auto-selects the ad account's first funding instrument (same "no picker, use the first one" simplification already used for ad-account selection) — real code, not a gap. `createAdSet` then throws for the same reason as TikTok's (X also uses its own numeric location catalog, not ISO codes). `createCreative` would also stop (X Promoted Tweets require an existing tweet id and this app has no tweet-composition flow). X's connector additionally has **no PKCE** on its OAuth2 flow — X's docs state `code_challenge` is required for every client type, and this connector doesn't send one yet, so the authorization request will likely be rejected by X until that's added.
 
 ## Platform capability registry
 
-`prompter_platform_capabilities` (product spec §31) — global reference data, seeded by migration, read-only from the app. Records per platform × capability whether it's `enabled` (this codebase has an implementation), `requires_oauth`, `requires_approval` (the platform's own app-review requirement, not Promoter's Approval Center), and `api_version`. Meta's ads capabilities (`CONNECT_ACCOUNT`, `READ_ANALYTICS`, `CREATE_CAMPAIGN`, `CREATE_AD`, `UPDATE_BUDGET`, `PAUSE_CAMPAIGN`) are enabled; `PUBLISH_CONTENT` (organic posting, as opposed to ads) is not — Phase 3 only covers the Marketing API. Every TikTok/X row is disabled.
+`prompter_platform_capabilities` (product spec §31) — global reference data, seeded by migration, read-only from the app. Records per platform × capability whether it's `enabled` (this codebase has an implementation — not "verified against a live account" or "no remaining gaps," see Meta's own `CREATE_AD` row which was already `enabled=true` despite its Page-picker gap), `requires_oauth`, `requires_approval` (the platform's own app-review requirement, not Promoter's Approval Center), and `api_version`. As of Phase 6, every platform's `CONNECT_ACCOUNT`/`READ_ANALYTICS`/`CREATE_CAMPAIGN`/`CREATE_AD`/`UPDATE_BUDGET`/`PAUSE_CAMPAIGN` capability is enabled, each with a `notes` value naming its specific remaining gap where one exists (see above). `PUBLISH_CONTENT` (organic posting, as opposed to ads) stays disabled for all three — every phase so far only covers each platform's ads/marketing API.
 
 ## OAuth token handling
 
-- **Authorize:** `GET /api/connections/meta/authorize` — owner-only (checked in the route, and independently enforced by RLS on `prompter_connected_accounts`), generates a random `state`, stores `state:tenantId` in a short-lived httpOnly cookie, redirects to Meta's OAuth dialog.
-- **Callback:** `GET /api/connections/meta/callback` — validates `state` against the cookie, exchanges the code for a short-lived token, exchanges that for a long-lived token (~60 days), reads granted scopes via `/debug_token`, fetches the user's ad accounts, and writes through the **service-role client only** (`lib/supabase/admin.ts`):
+- **Authorize:** `GET /api/connections/{meta,tiktok,x}/authorize` — owner-only (checked in the shared handler, and independently enforced by RLS on `prompter_connected_accounts`), generates a random `state`, stores `state:tenantId` in a short-lived httpOnly cookie (a distinct cookie name per platform — `lib/connectors/{meta,tiktok,x}-oauth-state.ts`), redirects to that platform's OAuth dialog. All three routes are two-line wrappers around the shared `lib/connectors/oauth-authorize.ts#handleConnectorOauthAuthorize()`.
+- **Callback:** `GET /api/connections/{meta,tiktok,x}/callback` — validates `state` against the cookie, exchanges the code for a token, fetches the tenant's ad accounts, and writes through the **service-role client only** (`lib/supabase/admin.ts`):
   - `prompter_connected_accounts` — metadata only (external account id/name, status, scopes, `expires_at`).
   - `prompter_oauth_credentials` — the token, encrypted via `lib/crypto/token-cipher.ts` (AES-256-GCM, key from `TOKEN_ENCRYPTION_KEY`) before it's written. This table has RLS enabled with **zero policies** for `anon`/`authenticated` — only the service-role key can ever read or write it, so a token can't reach the browser through any ordinary query path, not just by app-layer discipline.
-- **Disconnect:** `features/connections/actions.ts#disconnectAction()` — owner-only, attempts remote token revocation on a best-effort basis (Meta's `DELETE /me/permissions`), then always deletes the local rows regardless of whether that remote call succeeded, so this app never keeps showing `CONNECTED` for a connection the user asked to remove.
+  
+  All three routes wrap the shared `lib/connectors/oauth-callback.ts#handleConnectorOauthCallback()` — extracted in Phase 6 once three platforms needed the identical flow; nothing platform-specific lives in the callback route itself, only behind each connector's own `PlatformConnector` implementation.
+- **Disconnect:** `features/connections/actions.ts#disconnectAction()` — owner-only, attempts remote token revocation on a best-effort basis (Meta's `DELETE /me/permissions`, TikTok's `/oauth2/revoke/`, X's `/2/oauth2/revoke`), then always deletes the local rows regardless of whether that remote call succeeded, so this app never keeps showing `CONNECTED` for a connection the user asked to remove.
 - Metadata (`expires_at`, `refreshable`, `scopes`, `status`, `last_refreshed_at`) is what the Connection Center displays — never the token itself, in any form.
 
-## Campaign launch (Meta)
+## Campaign launch
 
-`features/campaigns/launch-actions.ts#launchChannelCampaignAction()` — the one code path in this app allowed to set a `prompter_channel_campaigns.status` to `ACTIVE`, and only after Meta's own API has confirmed each object (campaign → ad set → creative → ad) was actually created. Preconditions, all checked before any API call: the master campaign is `SCHEDULED` (i.e., already through Budget Guard + Approval Center), the channel is `FACEBOOK`/`INSTAGRAM`, and the tenant has a `CONNECTED` Meta account. A failure at any step — including the expected `createCreative` config error today — is stored on the channel campaign's `error` column and surfaces in the UI, never silently swallowed or reported as success.
+`features/campaigns/launch-actions.ts#launchChannelCampaignAction()` — the one code path in this app allowed to set a `prompter_channel_campaigns.status` to `ACTIVE`, and only after the target platform's own API has confirmed each object (campaign → ad set → creative → ad) was actually created. Entirely platform-agnostic: which connector runs is resolved once via `getConnector(connectorPlatform)` from the campaign's channel (`FACEBOOK`/`INSTAGRAM` → `META`, `TIKTOK` → `TIKTOK`, `X` → `X`), and a per-platform `OBJECTIVE_MAP` translates Promoter's `PrimaryGoal` into each platform's own objective vocabulary (Meta's `OUTCOME_*`, TikTok's `objective_type` values, X's `objective` values) rather than assuming one platform's names apply everywhere. Preconditions, all checked before any API call: the master campaign is `SCHEDULED` (i.e., already through Budget Guard + Approval Center) and the tenant has a `CONNECTED` account for that platform. A failure at any step — including each connector's own documented incomplete step above — is stored on the channel campaign's `error` column and surfaces in the UI, never silently swallowed or reported as success.
 
 ## UMKMpro AI integration (Phase 4)
 
@@ -70,6 +77,6 @@ Every route follows the same shape (`lib/umkmpro/route-helpers.ts#authorizeUmkmp
 
 Two pre-existing gaps had to be fixed for this to work for a visitor not already logged into Promoter: `proxy.ts` was dropping the query string in its post-login `next` redirect param (fixed — now preserves `pathname + search`), and `loginAction` always redirected to `/dashboard` regardless of `next` (fixed — now redirects to a validated same-origin `next` path, defaulting to `/dashboard`). **Known remaining gap:** a first-time UMKMpro user who hasn't completed Promoter's own `/onboarding` yet will be routed there first, and the `next=/promote?handoff=...` param doesn't currently survive that hop — the handoff will have expired (30 minutes) by the time onboarding is done in the realistic case, showing the expired-link message rather than silently failing.
 
-## Current state (Phase 4)
+## Current state (Phase 6)
 
-Meta connector and OAuth flow are implemented and structurally complete but unverified against a live ad account (see above). TikTok and X connectors don't exist yet (`getConnector()` returns `null`) — `/connections` renders them as `NOT_AVAILABLE`. UMKMpro AI integration is implemented and its signed-authentication layer was verified against a real running local server (see [ROADMAP.md](ROADMAP.md) Phase 4 for what was and wasn't exercisable in this environment).
+Meta, TikTok, and X connectors and OAuth flows are all implemented and structurally complete but unverified against a live ad account on any of the three (see above) — `/connections` renders real Connect/Disconnect flows for all three, gated by each connector's own `isConfigured()`. UMKMpro AI integration is implemented and its signed-authentication layer was verified against a real running local server (see [ROADMAP.md](ROADMAP.md) Phase 4 for what was and wasn't exercisable in this environment).

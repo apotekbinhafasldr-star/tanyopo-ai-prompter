@@ -17,14 +17,14 @@ Supabase Auth, email + password (magic link and Google OAuth are straightforward
 - `lib/env.ts` centralizes env access: `publicEnv` for values safe in client bundles, `serverEnv` (only importable from server code) for everything else. Optional integration credentials resolve to `undefined` instead of throwing, so the app runs with zero third-party integrations configured — see [INTEGRATIONS.md](INTEGRATIONS.md).
 - Social platform passwords (Facebook/Instagram/TikTok/X) are never requested or stored. Platform connections happen through each platform's own OAuth flow; only the resulting token metadata (`expires_at`, `scopes`, `status`) is ever displayed — the token itself is encrypted server-side (see below).
 
-## OAuth token storage (Phase 3)
+## OAuth token storage (Phase 3, extended to TikTok/X in Phase 6)
 
-Two layers of protection, not just one:
+Two layers of protection, not just one, and identical for all three ad-platform connectors:
 
 1. **Encryption at rest.** `lib/crypto/token-cipher.ts` encrypts every token with AES-256-GCM before it's written to the database, keyed by `TOKEN_ENCRYPTION_KEY` (32 raw bytes, base64). A compromised database dump contains only ciphertext, never a usable token.
 2. **RLS lockout.** `prompter_oauth_credentials` has Row Level Security enabled with **zero policies** for `anon`/`authenticated` — every ordinary Supabase client query is denied by default, regardless of the caller's role or tenant. Only the service-role key (`lib/supabase/admin.ts`, itself server-only and never shipped to the browser) can read or write that table. This means a token can't leak through a future bug in an RLS policy on that table, because there is no policy to get wrong.
 
-Both the OAuth callback (`app/api/connections/meta/callback/route.ts`) and the campaign-launch flow (`features/campaigns/launch-actions.ts`) that needs to read a token back go through the admin client for exactly this reason.
+The shared OAuth callback handler (`lib/connectors/oauth-callback.ts#handleConnectorOauthCallback()`, used by all three platforms' callback routes) and the campaign-launch flow (`features/campaigns/launch-actions.ts`) that needs to read a token back both go through the admin client for exactly this reason.
 
 ## Signed service authentication (Phase 4)
 
@@ -47,7 +47,7 @@ Both the OAuth callback (`app/api/connections/meta/callback/route.ts`) and the c
 
 Submitting a campaign for approval and deciding it are deliberately different privilege levels, enforced at the RLS layer rather than only in the UI: `prompter_approvals` INSERT is open to `owner`/`marketing`, but its UPDATE policy (the approve/reject decision) is restricted to `owner` only — see the Phase 2 migration. `features/approvals/actions.ts#decideApprovalAction()` also checks the caller's role before writing, so a non-owner gets a clear error rather than a silently-ignored write. Budget Guard's hard-block check (`services/budget-guard.ts`) runs before an approval request is even created, so a campaign that exceeds the tenant's configured limit never reaches the queue.
 
-Connecting or disconnecting an ad platform account is owner-only (product spec §62 — STAFF must not connect ad accounts without authorization): checked explicitly in `app/api/connections/meta/authorize/route.ts`, the callback route, and `features/connections/actions.ts#disconnectAction()`, and independently backed by RLS on `prompter_connected_accounts`.
+Connecting or disconnecting an ad platform account is owner-only (product spec §62 — STAFF must not connect ad accounts without authorization): checked explicitly in the shared `lib/connectors/oauth-authorize.ts`/`oauth-callback.ts` handlers every platform's authorize/callback route wraps, and in `features/connections/actions.ts#disconnectAction()`, and independently backed by RLS on `prompter_connected_accounts`.
 
 ## Automation safety
 
