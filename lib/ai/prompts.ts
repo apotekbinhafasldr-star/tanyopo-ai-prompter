@@ -93,6 +93,24 @@ export function buildCampaignProposalPrompt(
     .join("\n\n");
 }
 
+export interface SeoRecommendationsInputs {
+  websiteUrl: string;
+  targetKeywords: string[];
+}
+
+export function buildSeoRecommendationsPrompt(inputs: SeoRecommendationsInputs): string {
+  return [
+    `Buat rekomendasi SEO untuk website berikut: ${inputs.websiteUrl}`,
+    inputs.targetKeywords.length > 0
+      ? `Kata kunci target yang sudah dipilih pengguna: ${inputs.targetKeywords.join(", ")}`
+      : "Pengguna belum menentukan kata kunci target — usulkan kata kunci yang relevan berdasarkan URL dan konteks bisnis.",
+    "Anda tidak memiliki akses untuk benar-benar mengunjungi atau meng-crawl website ini — dasarkan rekomendasi pada URL, nama domain, dan konteks bisnis yang diberikan, bukan seolah-olah Anda sudah memeriksa isi halaman sebenarnya.",
+    "Hasilkan ringkasan peluang SEO, daftar kata kunci target (dengan intent dan alasan), rekomendasi on-page (isu, rekomendasi, prioritas HIGH/MEDIUM/LOW), dan content plan (judul artikel, kata kunci target, jenis konten, angle singkat).",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
 export interface ContentGenerationInputs {
   platform: string;
   contentType: string;

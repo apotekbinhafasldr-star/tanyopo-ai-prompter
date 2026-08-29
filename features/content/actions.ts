@@ -99,3 +99,53 @@ export async function generateContentAction(
   revalidatePath(`/products/${product.id}`);
   return { error: null };
 }
+
+/**
+ * Sets or clears a content item's calendar date (Phase 5 content calendar).
+ * A DRAFT item moving to a scheduled date becomes SCHEDULED; clearing the
+ * date on a SCHEDULED item reverts it to DRAFT rather than leaving a
+ * "scheduled with no date" state. APPROVED/PUBLISHED/FAILED items keep
+ * their status as-is — scheduling is metadata about *when*, not a
+ * re-approval.
+ */
+export async function scheduleContentAction(
+  contentItemId: string,
+  _prevState: ContentActionState,
+  formData: FormData,
+): Promise<ContentActionState> {
+  const scheduledAtRaw = formData.get("scheduledAt");
+  const scheduledAt = typeof scheduledAtRaw === "string" && scheduledAtRaw.trim() ? scheduledAtRaw : null;
+
+  const session = await requireSessionContext();
+  const supabase = await createClient();
+
+  const { data: item, error: itemError } = await supabase
+    .from("prompter_content_items")
+    .select("id, status")
+    .eq("id", contentItemId)
+    .eq("tenant_id", session.tenantId)
+    .single();
+
+  if (itemError || !item) {
+    return { error: "Konten tidak ditemukan." };
+  }
+
+  let nextStatus = item.status;
+  if (scheduledAt && item.status === "DRAFT") {
+    nextStatus = "SCHEDULED";
+  } else if (!scheduledAt && item.status === "SCHEDULED") {
+    nextStatus = "DRAFT";
+  }
+
+  const { error } = await supabase
+    .from("prompter_content_items")
+    .update({ scheduled_at: scheduledAt, status: nextStatus })
+    .eq("id", contentItemId);
+
+  if (error) {
+    return { error: "Gagal menyimpan jadwal konten." };
+  }
+
+  revalidatePath("/content");
+  return { error: null };
+}

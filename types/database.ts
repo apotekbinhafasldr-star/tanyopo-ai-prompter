@@ -42,7 +42,11 @@ export type AutomationMode = "manual" | "ai_assist" | "autopilot";
 
 export type ProductStatus = "ACTIVE" | "DRAFT" | "ARCHIVED";
 export type MediaType = "IMAGE" | "VIDEO";
-export type AiJobType = "MARKETING_BLUEPRINT" | "CAMPAIGN_PROPOSAL" | "CONTENT_GENERATION";
+export type AiJobType =
+  | "MARKETING_BLUEPRINT"
+  | "CAMPAIGN_PROPOSAL"
+  | "CONTENT_GENERATION"
+  | "SEO_RECOMMENDATIONS";
 export type AiJobStatus = "QUEUED" | "PROCESSING" | "COMPLETED" | "FAILED";
 export type CampaignStatus =
   | "DRAFT"
@@ -73,6 +77,11 @@ export type ConversionEventType =
 export type AttributionModel = "LAST_CLICK" | "FIRST_CLICK" | "MANUAL" | "UMKMPRO_VERIFIED";
 export type HandoffStatus = "PENDING" | "CONSUMED" | "EXPIRED";
 export type WebhookEventStatus = "RECEIVED" | "PROCESSED" | "FAILED" | "IGNORED";
+
+/** Social platforms Growth tracks follower goals/history for — Channel minus SEO. */
+export type GrowthPlatform = "FACEBOOK" | "INSTAGRAM" | "TIKTOK" | "X";
+export type FollowerSnapshotSource = "manual";
+export type SeoProjectStatus = "ACTIVE" | "PAUSED";
 
 /** Connector/OAuth provider — distinct from `Channel`, which names a content/campaign destination. */
 export type ConnectorPlatform = "META" | "TIKTOK" | "X";
@@ -438,6 +447,7 @@ export interface Database {
           body: Json;
           status: ContentStatus;
           ai_job_id: string | null;
+          scheduled_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -453,6 +463,7 @@ export interface Database {
           body?: Json;
           status?: ContentStatus;
           ai_job_id?: string | null;
+          scheduled_at?: string | null;
         };
         Update: Partial<
           Omit<Database["public"]["Tables"]["prompter_content_items"]["Insert"], "tenant_id">
@@ -835,6 +846,106 @@ export interface Database {
           processed_at?: string | null;
         };
         Update: never; // written only by the service-role client
+        Relationships: [];
+      };
+      prompter_growth_goals: {
+        Row: {
+          id: string;
+          tenant_id: string;
+          platform: GrowthPlatform;
+          target_followers: number;
+          target_date: string | null;
+          notes: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          tenant_id: string;
+          platform: GrowthPlatform;
+          target_followers: number;
+          target_date?: string | null;
+          notes?: string | null;
+        };
+        Update: Partial<
+          Omit<Database["public"]["Tables"]["prompter_growth_goals"]["Insert"], "tenant_id" | "platform">
+        >;
+        Relationships: [];
+      };
+      prompter_follower_snapshots: {
+        Row: {
+          id: string;
+          tenant_id: string;
+          platform: GrowthPlatform;
+          follower_count: number;
+          recorded_at: string;
+          source: FollowerSnapshotSource;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          tenant_id: string;
+          platform: GrowthPlatform;
+          follower_count: number;
+          recorded_at?: string;
+          source?: FollowerSnapshotSource;
+        };
+        Update: never; // corrections go through upsert (onConflict tenant_id,platform,recorded_at), not edit-in-place
+        Relationships: [];
+      };
+      prompter_seo_projects: {
+        Row: {
+          id: string;
+          tenant_id: string;
+          website_url: string;
+          target_keywords: Json;
+          status: SeoProjectStatus;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          tenant_id: string;
+          website_url: string;
+          target_keywords?: Json;
+          status?: SeoProjectStatus;
+        };
+        Update: Partial<
+          Omit<Database["public"]["Tables"]["prompter_seo_projects"]["Insert"], "tenant_id">
+        >;
+        Relationships: [];
+      };
+      prompter_seo_recommendations: {
+        Row: {
+          id: string;
+          tenant_id: string;
+          project_id: string;
+          summary: string | null;
+          target_keywords: Json;
+          on_page_recommendations: Json;
+          content_plan: Json;
+          ai_job_id: string | null;
+          model: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          tenant_id: string;
+          project_id: string;
+          summary?: string | null;
+          target_keywords?: Json;
+          on_page_recommendations?: Json;
+          content_plan?: Json;
+          ai_job_id?: string | null;
+          model?: string | null;
+        };
+        Update: Partial<
+          Omit<
+            Database["public"]["Tables"]["prompter_seo_recommendations"]["Insert"],
+            "tenant_id" | "project_id"
+          >
+        >;
         Relationships: [];
       };
     };

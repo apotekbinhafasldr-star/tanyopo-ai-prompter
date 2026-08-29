@@ -147,6 +147,22 @@ Two existing tables also gained a Phase 4 column/constraint:
 
 `/api/v1/integrations/umkmpro/{products,promotions,conversions,webhooks}` — signed service-to-service routes, no Supabase user session involved. See [INTEGRATIONS.md](INTEGRATIONS.md) and [SECURITY.md](SECURITY.md) for the authentication design; `services/umkmpro.ts` is the data-access layer every route calls into.
 
+## Phase 5 schema
+
+Migration: `supabase/migrations/20260829200000_prompter_phase5_schema.sql`. Same additive-only rule as Phase 0-4. Write access on every new table follows the Phase 1 pattern (owner/marketing write, any tenant member read).
+
+| Table | Purpose |
+|---|---|
+| `prompter_growth_goals` | One row per tenant per social platform (`unique(tenant_id, platform)`), upserted on edit — a follower target the business sets for itself. No automation ever writes to this table; it exists only to give a real, organic growth effort something to track against. |
+| `prompter_follower_snapshots` | Manually-logged follower count history (`unique(tenant_id, platform, recorded_at)` — logging again for today's date corrects rather than duplicates). `source` is a CHECK-constrained `'manual'` today; kept as text rather than a boolean specifically so a future real follower-count API integration doesn't need a schema migration to add a new source value — it needs the actual API code first, which doesn't exist for any platform yet (Meta's Marketing API used elsewhere in this app is ads-only, not an organic-follower reader). |
+| `prompter_seo_projects` | One row per website a tenant wants SEO help for. `target_keywords` is the user's own starting list, kept separate from the AI's own suggestions below so a regenerated recommendation never overwrites what the user typed. |
+| `prompter_seo_recommendations` | One row per project (`unique(project_id)`, upserted on regenerate — same pattern as `prompter_marketing_blueprints`). AI-generated: summary, refined target keywords, on-page fixes, content plan. The AI has no way to actually crawl the target site — see [AI_SYSTEM.md](AI_SYSTEM.md) and [INTEGRATIONS.md](INTEGRATIONS.md) for how that limitation is surfaced honestly rather than presented as a real audit. |
+
+Two existing tables also changed:
+
+- `prompter_content_items` gained `scheduled_at timestamptz` (nullable) — the content calendar (`/content`, "Kalender" tab) groups items by this date. Setting it on a `DRAFT` item moves it to `SCHEDULED`; clearing it on a `SCHEDULED` item reverts it to `DRAFT` — see `features/content/actions.ts#scheduleContentAction()`.
+- `prompter_ai_jobs.job_type`'s CHECK constraint gained `'SEO_RECOMMENDATIONS'`.
+
 ## TypeScript types
 
 `types/database.ts` is **hand-authored**, not the full `supabase gen types typescript` output. The shared project's full schema is ~80 UMKMpro-specific tables (POS, inventory, HR, workshop, F&B, ...) that this app never queries; importing all of it would make every Promoter file's types depend on a schema this codebase doesn't own. Instead, `types/database.ts` declares only the tables Promoter actually touches: the `prompter_*` tables plus a read-oriented slice of `tenants`/`user_profiles`.

@@ -83,11 +83,19 @@ Development proceeds phase by phase. A phase is not started until the previous o
 - The profit estimate assumes one unit sold per `PURCHASE` conversion — there's no line-item/quantity field on a conversion yet, so a multi-unit order recorded as a single conversion undercounts units sold (and so understates COGS).
 - Rate limiting is process-local (see [SECURITY.md](SECURITY.md)) — real but not multi-instance-safe.
 
-## Phase 5 — Growth + SEO
+## Phase 5 — Growth + SEO ✅ (this delivery)
 
-- Growth goals, follower analytics architecture (no bots, no fake engagement)
-- SEO projects, on-page recommendations, content plan
-- Content calendar
+- `prompter_growth_goals`, `prompter_follower_snapshots` + RLS — a per-platform follower target and manually-logged follower count history. No bot, no purchased followers, no fake engagement anywhere in this app — `/growth` (`lib/growth-progress.ts` for the pure progress-bar math) shows an honest "belum ada data" when no snapshot has been logged yet, never a fabricated 0%.
+- `prompter_seo_projects`, `prompter_seo_recommendations` + RLS — a project per website, AI-generated on-page recommendations, refined keyword suggestions, and a content plan (`schemas/ai/seo-recommendations.ts`, `services` follow the same `runAiJob()`/`prompter_ai_jobs` bookkeeping as every other AI feature). `/seo` (list + create) and `/seo/[id]` (detail + generate). **Honesty note surfaced directly in the UI:** the AI cannot actually crawl or audit the target website — recommendations are reasoned from the URL, the user's own target keywords, and brand context, not a real page inspection.
+- Content calendar: `prompter_content_items.scheduled_at` (nullable timestamptz) + a "Kalender" tab on `/content` grouping items by date, alongside the existing "Perpustakaan" list. Scheduling a `DRAFT` item moves it to `SCHEDULED`; clearing the date reverts it to `DRAFT`.
+- `prompter_ai_jobs.job_type` gains `SEO_RECOMMENDATIONS` — a fourth deterministic structured-output generation type (`SEOAgent`, per the product spec's agent list), following the same architecture as the other three (Marketing Blueprint, Campaign Proposal, Content Generation).
+
+**Known Phase 5 simplifications / honesty notes:**
+- Follower counts are entirely manual entry — no platform in this codebase has an organic-follower-count read API wired up (Meta's Marketing API, used for ads elsewhere in this app, doesn't expose that). `prompter_follower_snapshots.source` is schema-ready (`'manual'` today) for a future real integration, but no such integration exists yet.
+- SEO recommendations are AI reasoning from a URL and user-provided context, explicitly not a real crawl/audit — no site-fetching code exists in this app. The UI and prompt both say so rather than implying the AI actually visited the page.
+- The content calendar is a grouped chronological list, not a month-grid calendar widget — consistent with this app's no-external-component-library approach (no charting/calendar library is a dependency). A date-only granularity (no time-of-day) is enough for "what's planned when," which is what the feature is for.
+- No feature (Growth or SEO) is wired to anything outside this app — Growth doesn't read a Meta/TikTok/X follower count via API, and SEO doesn't submit anything to Search Console or a real crawler. Both are honestly scoped to what a tenant records/asks for themselves.
+- **Not exercised in an authenticated browser session.** This environment has no test-user credentials for the shared production Supabase project, and creating one there wasn't done unilaterally (it's real, shared data — see [DATABASE.md](DATABASE.md) on why this app doesn't own that project). Verification for Phase 5 is lint/typecheck/unit tests/production build only — the same bar as Phases 0-3. Someone with real credentials should click through `/growth` and `/seo` once before calling this battle-tested.
 
 ## Phase 6 — TikTok + X
 
