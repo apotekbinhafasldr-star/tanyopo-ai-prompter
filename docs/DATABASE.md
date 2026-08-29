@@ -65,9 +65,33 @@ Append-only. `tenant_id`, `actor_user_id`, `action`, `resource_type`, `resource_
 
 RLS: tenant members can `SELECT` and `INSERT` (as themselves — `actor_user_id` must be `auth.uid()` or `null`). **No `UPDATE`/`DELETE` policy exists on purpose** — rows are immutable once written.
 
+## Phase 1 schema
+
+Migration: `supabase/migrations/20260829120000_prompter_phase1_schema.sql`. Same additive-only rule as Phase 0. Write access (`INSERT`/`UPDATE`/`DELETE`) on every table below is restricted to `owner`/`marketing` roles (these actions create real AI cost or are marketing-facing changes); `SELECT` is open to any tenant member.
+
+| Table | Purpose |
+|---|---|
+| `prompter_products` | Product/service/app/subscription catalog. `source_system`/`source_product_id` are reserved for the Phase 4 UMKMpro handoff — every Phase 1 row has `source_system = 'promoter'`. |
+| `prompter_product_media` | Uploaded product images/videos; `storage_path` points into the `product-media` bucket. |
+| `prompter_ai_jobs` | One row per AI generation call — `job_type`, `status` (`QUEUED`/`PROCESSING`/`COMPLETED`/`FAILED`), `model`, token counts, `estimated_cost`, `error`. Written by `services/ai-jobs.ts#runAiJob()`, never left stuck `QUEUED`. |
+| `prompter_marketing_blueprints` | One row per product (`unique(product_id)`) — regenerating overwrites via upsert rather than versioning. |
+| `prompter_master_campaigns` | Campaign draft from the Promote Wizard. Phase 1 only ever writes `status = 'DRAFT'`; `channels` records the user's *intent*, not a live platform connection. `ai_proposal` is the validated `CampaignProposalSchema` output stored as JSONB. |
+| `prompter_content_items` | AI-generated content (`CAPTION`/`AD_COPY`/`BLOG`/`VIDEO_SCRIPT`). Phase 1 only ever writes `status = 'DRAFT'` — scheduling/publishing states exist in the CHECK constraint for forward-compatibility but aren't reachable yet. |
+
+### Storage buckets
+
+Also created in the Phase 1 migration, all public-read (so they can be embedded in ad previews and social posts) with object paths namespaced `{tenant_id}/...` and a `storage.objects` RLS policy restricting writes to the caller's own tenant folder:
+
+| Bucket | Limit | Status |
+|---|---|---|
+| `product-media` | 100 MB, image/video | In use (product media upload) |
+| `creative-assets` | 100 MB, image/video | Reserved — Phase 2/3 |
+| `brand-assets` | 5 MB, image/svg | Reserved — logo upload, not yet built |
+| `generated-content` | 100 MB, image/video | Reserved — AI-generated creative, not yet built |
+
 ## TypeScript types
 
-`types/database.ts` is **hand-authored**, not the full `supabase gen types typescript` output. The shared project's full schema is ~80 UMKMpro-specific tables (POS, inventory, HR, workshop, F&B, ...) that this app never queries; importing all of it would make every Promoter file's types depend on a schema this codebase doesn't own. Instead, `types/database.ts` declares only the tables Promoter actually touches: the three `prompter_*` tables plus a read-oriented slice of `tenants`/`user_profiles`.
+`types/database.ts` is **hand-authored**, not the full `supabase gen types typescript` output. The shared project's full schema is ~80 UMKMpro-specific tables (POS, inventory, HR, workshop, F&B, ...) that this app never queries; importing all of it would make every Promoter file's types depend on a schema this codebase doesn't own. Instead, `types/database.ts` declares only the tables Promoter actually touches: the `prompter_*` tables plus a read-oriented slice of `tenants`/`user_profiles`.
 
 **When adding a table or column Promoter depends on, update `types/database.ts` by hand alongside the migration.** If a future feature needs a genuinely broad read across UMKMpro's schema, that's a signal to reconsider the approach, not to switch wholesale to the generated file.
 

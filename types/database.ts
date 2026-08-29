@@ -40,6 +40,23 @@ export type PrimaryGoal =
 
 export type AutomationMode = "manual" | "ai_assist" | "autopilot";
 
+export type ProductStatus = "ACTIVE" | "DRAFT" | "ARCHIVED";
+export type MediaType = "IMAGE" | "VIDEO";
+export type AiJobType = "MARKETING_BLUEPRINT" | "CAMPAIGN_PROPOSAL" | "CONTENT_GENERATION";
+export type AiJobStatus = "QUEUED" | "PROCESSING" | "COMPLETED" | "FAILED";
+export type CampaignStatus =
+  | "DRAFT"
+  | "AWAITING_APPROVAL"
+  | "SCHEDULED"
+  | "ACTIVE"
+  | "PAUSED"
+  | "COMPLETED"
+  | "FAILED";
+export type Channel = "FACEBOOK" | "INSTAGRAM" | "TIKTOK" | "X" | "SEO";
+export type ContentPlatform = "FACEBOOK" | "INSTAGRAM" | "TIKTOK" | "X" | "WEBSITE";
+export type ContentType = "CAPTION" | "AD_COPY" | "BLOG" | "VIDEO_SCRIPT";
+export type ContentStatus = "DRAFT" | "APPROVED" | "SCHEDULED" | "PUBLISHED" | "FAILED";
+
 /** Mirrors the existing UMKMpro `user_profiles.role` CHECK constraint. */
 export type TenantRole =
   | "owner"
@@ -186,6 +203,229 @@ export interface Database {
           context?: Json;
         };
         Update: never; // audit logs are append-only, see migration comment
+        Relationships: [];
+      };
+      prompter_products: {
+        Row: {
+          id: string;
+          tenant_id: string;
+          name: string;
+          description: string | null;
+          product_type: BusinessCategory;
+          category: string | null;
+          price: number | null;
+          currency: string;
+          stock: number | null;
+          hpp: number | null;
+          website_url: string | null;
+          status: ProductStatus;
+          source_system: "promoter" | "umkmpro";
+          source_product_id: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          tenant_id: string;
+          name: string;
+          description?: string | null;
+          product_type: BusinessCategory;
+          category?: string | null;
+          price?: number | null;
+          currency?: string;
+          stock?: number | null;
+          hpp?: number | null;
+          website_url?: string | null;
+          status?: ProductStatus;
+        };
+        Update: Partial<
+          Omit<Database["public"]["Tables"]["prompter_products"]["Insert"], "tenant_id">
+        >;
+        Relationships: [];
+      };
+      prompter_product_media: {
+        Row: {
+          id: string;
+          tenant_id: string;
+          product_id: string;
+          storage_path: string;
+          media_type: MediaType;
+          position: number;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          tenant_id: string;
+          product_id: string;
+          storage_path: string;
+          media_type: MediaType;
+          position?: number;
+        };
+        Update: never; // media rows are replaced by delete+insert, not edited in place
+        Relationships: [];
+      };
+      prompter_ai_jobs: {
+        Row: {
+          id: string;
+          tenant_id: string;
+          job_type: AiJobType;
+          status: AiJobStatus;
+          model: string | null;
+          input_reference: Json;
+          output_reference: Json | null;
+          tokens_input: number | null;
+          tokens_output: number | null;
+          estimated_cost: number | null;
+          error: string | null;
+          created_at: string;
+          completed_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          tenant_id: string;
+          job_type: AiJobType;
+          status?: AiJobStatus;
+          model?: string | null;
+          input_reference?: Json;
+          output_reference?: Json | null;
+          tokens_input?: number | null;
+          tokens_output?: number | null;
+          estimated_cost?: number | null;
+          error?: string | null;
+          completed_at?: string | null;
+        };
+        Update: Partial<
+          Omit<Database["public"]["Tables"]["prompter_ai_jobs"]["Insert"], "tenant_id" | "job_type">
+        >;
+        Relationships: [];
+      };
+      prompter_marketing_blueprints: {
+        Row: {
+          id: string;
+          tenant_id: string;
+          product_id: string;
+          summary: string | null;
+          usp: string | null;
+          benefits: Json;
+          pain_points: Json;
+          target_personas: Json;
+          positioning: string | null;
+          marketing_angles: Json;
+          recommended_channels: Json;
+          content_ideas: Json;
+          risks: Json;
+          disclaimers: string | null;
+          ai_job_id: string | null;
+          model: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          tenant_id: string;
+          product_id: string;
+          summary?: string | null;
+          usp?: string | null;
+          benefits?: Json;
+          pain_points?: Json;
+          target_personas?: Json;
+          positioning?: string | null;
+          marketing_angles?: Json;
+          recommended_channels?: Json;
+          content_ideas?: Json;
+          risks?: Json;
+          disclaimers?: string | null;
+          ai_job_id?: string | null;
+          model?: string | null;
+        };
+        Update: Partial<
+          Omit<
+            Database["public"]["Tables"]["prompter_marketing_blueprints"]["Insert"],
+            "tenant_id" | "product_id"
+          >
+        >;
+        Relationships: [];
+      };
+      prompter_master_campaigns: {
+        Row: {
+          id: string;
+          tenant_id: string;
+          product_id: string | null;
+          name: string;
+          objective: PrimaryGoal;
+          channels: Channel[];
+          status: CampaignStatus;
+          target_country: string | null;
+          target_region: string | null;
+          target_city: string | null;
+          audience_notes: string | null;
+          daily_budget: number | null;
+          total_budget: number | null;
+          currency: string;
+          duration_days: number | null;
+          start_date: string | null;
+          ai_proposal: Json | null;
+          ai_job_id: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          tenant_id: string;
+          product_id?: string | null;
+          name: string;
+          objective: PrimaryGoal;
+          channels?: Channel[];
+          status?: CampaignStatus;
+          target_country?: string | null;
+          target_region?: string | null;
+          target_city?: string | null;
+          audience_notes?: string | null;
+          daily_budget?: number | null;
+          total_budget?: number | null;
+          currency?: string;
+          duration_days?: number | null;
+          start_date?: string | null;
+          ai_proposal?: Json | null;
+          ai_job_id?: string | null;
+        };
+        Update: Partial<
+          Omit<Database["public"]["Tables"]["prompter_master_campaigns"]["Insert"], "tenant_id">
+        >;
+        Relationships: [];
+      };
+      prompter_content_items: {
+        Row: {
+          id: string;
+          tenant_id: string;
+          product_id: string | null;
+          platform: ContentPlatform;
+          content_type: ContentType;
+          goal: PrimaryGoal | null;
+          tone: string | null;
+          language: "id" | "en";
+          body: Json;
+          status: ContentStatus;
+          ai_job_id: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          tenant_id: string;
+          product_id?: string | null;
+          platform: ContentPlatform;
+          content_type: ContentType;
+          goal?: PrimaryGoal | null;
+          tone?: string | null;
+          language?: "id" | "en";
+          body?: Json;
+          status?: ContentStatus;
+          ai_job_id?: string | null;
+        };
+        Update: Partial<
+          Omit<Database["public"]["Tables"]["prompter_content_items"]["Insert"], "tenant_id">
+        >;
         Relationships: [];
       };
     };

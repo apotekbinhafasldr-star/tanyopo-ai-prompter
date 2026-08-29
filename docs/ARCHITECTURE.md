@@ -21,6 +21,7 @@ Two products, one ecosystem. Promoter's source code is fully separate from UMKMp
 - **UI:** React 19, Tailwind CSS v4 (CSS-first `@theme` tokens, no `tailwind.config.js`), a small local `components/ui/` primitive set (no external component library) built with `class-variance-authority` + `tailwind-merge`
 - **Icons:** `lucide-react`
 - **Backend:** Supabase (Postgres, Auth, Storage, Edge Functions), reached via `@supabase/ssr` and `@supabase/supabase-js`
+- **AI:** Anthropic (`@anthropic-ai/sdk`) behind a vendor-neutral `AIProvider` interface — see [AI_SYSTEM.md](AI_SYSTEM.md)
 - **Validation:** Zod, schemas live in `schemas/`
 
 ## Folder structure
@@ -37,15 +38,19 @@ components/
   layout/                Sidebar and other shell chrome
   shared/                Cross-feature building blocks (e.g. ComingSoon)
 features/                Feature-scoped UI + server actions, grouped by
-                          domain (auth, onboarding, dashboard, marketing, ...)
+                          domain (auth, onboarding, dashboard, marketing,
+                          products, promote, campaigns, content, ...)
 lib/
   supabase/              client.ts (browser), server.ts (SSR), admin.ts
                           (service-role, server-only)
+  ai/                    provider.ts (vendor-neutral interface),
+                          anthropic-provider.ts, get-provider.ts,
+                          prompts.ts (shared prompt builders)
   env.ts                 Typed env access; missing optional vars resolve to
                           undefined rather than throwing
   utils/, constants/      Small shared helpers (cn(), nav config, ...)
 services/                Server-only data-access functions shared across
-                          routes (e.g. services/session.ts)
+                          routes (e.g. services/session.ts, services/ai-jobs.ts)
 schemas/                 Zod schemas, one file per domain
 types/                   Hand-scoped Supabase Database type (see DATABASE.md
                           for why this isn't the full generated schema)
@@ -65,6 +70,6 @@ docs/                     This documentation set
 2. `app/(app)/layout.tsx` calls `services/session.ts#requireSessionContext()`, a server-only helper that loads the user's `tenant_id`, role, and business name, and redirects to `/onboarding` if the Promoter brand profile isn't complete yet.
 3. Every page under `app/(app)/` is a Server Component that either renders real, tenant-scoped data or an explicit empty/"coming soon" state — never a fabricated number or a fake "connected" status.
 
-## What Phase 0 deliberately does not include
+## What's real vs. what's still a stub
 
-Feature pages (Promote, Products, Campaigns, Content, Growth, SEO, Analytics, AI Marketing, Connections, Approvals, Billing) are routed and reachable from the sidebar, but render `components/shared/coming-soon.tsx` stating which phase builds them. This is intentional — see [ROADMAP.md](ROADMAP.md). No stub page pretends to have working data or a working button behind it.
+As of Phase 1, **Products, Promote, Campaigns, and Content** are real — they read and write actual tenant data and (when `AI_PROVIDER_API_KEY` is configured) call a real AI provider. **Growth, SEO, Analytics, AI Marketing, Connections, Approvals, Billing** are still routed and reachable from the sidebar but render `components/shared/coming-soon.tsx` stating which phase builds them — see [ROADMAP.md](ROADMAP.md). No stub page pretends to have working data or a working button behind it, and no Phase 1 feature fakes a result when its AI provider isn't configured (see [AI_SYSTEM.md](AI_SYSTEM.md)).

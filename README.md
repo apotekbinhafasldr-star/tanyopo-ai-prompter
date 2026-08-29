@@ -6,7 +6,7 @@ Tanyopo AI Promoter is a separate application from **UMKMpro AI** (`MANAGE YOUR 
 
 ## Status
 
-**Phase 0 — Foundation.** Auth, multi-tenant data access, onboarding, the application shell, and the design system are in place. Feature areas (Promote, Products, Campaigns, Content, Growth, SEO, Analytics, AI Marketing, Connections, Approvals, Billing) are routed but render an honest "not built yet" state — see [docs/ROADMAP.md](docs/ROADMAP.md) for what ships in each phase. Nothing in this app fakes a working integration, a connected account, or a metric that isn't real.
+**Phase 1 — Core Promoter.** Auth, multi-tenant data access, onboarding, the application shell, and the design system (Phase 0) are in place, plus real Products, AI Marketing Blueprint generation, the Promote Wizard, Campaign drafts, and Content Studio (Phase 1) — all backed by a real Anthropic-powered AI provider that shows a plain "not configured" state instead of fabricating output when no API key is set. The remaining feature areas (Growth, SEO, Analytics, AI Marketing chat, Connections, Approvals, Billing) are routed but still render an honest "not built yet" state — see [docs/ROADMAP.md](docs/ROADMAP.md) for what ships in each phase. Nothing in this app fakes a working integration, a connected account, or a metric that isn't real.
 
 ## Requirements
 

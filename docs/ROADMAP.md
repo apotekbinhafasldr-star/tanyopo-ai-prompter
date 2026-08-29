@@ -2,7 +2,7 @@
 
 Development proceeds phase by phase. A phase is not started until the previous one is verified stable (lint/typecheck/test/build passing, migrations applied cleanly). This file is the source of truth for "what phase are we in."
 
-## Phase 0 — Foundation ✅ (this delivery)
+## Phase 0 — Foundation ✅
 
 - Repository structure, Next.js 16 + TypeScript + Tailwind v4
 - Supabase client/server/admin architecture
@@ -13,19 +13,29 @@ Development proceeds phase by phase. A phase is not started until the previous o
 - Landing page
 - Docs, `.env.example`, CI (lint/typecheck/test/build)
 
-## Phase 1 — Core Promoter
+## Phase 1 — Core Promoter ✅ (this delivery)
 
-- Products, product media upload (Supabase Storage)
-- Marketing Blueprint generation (AI provider abstraction + structured schemas)
-- Promote Wizard (product → goal → channel → target → budget → AI proposal → preview → draft)
-- Content generation (Content Studio, first pass)
+- `prompter_products`, `prompter_product_media`, `prompter_marketing_blueprints`, `prompter_ai_jobs`, `prompter_master_campaigns`, `prompter_content_items` + RLS; Storage buckets `product-media` (in use), `creative-assets`/`brand-assets`/`generated-content` (reserved for later phases)
+- AI provider abstraction (`lib/ai/provider.ts`) with an Anthropic implementation (`lib/ai/anthropic-provider.ts`, Claude Opus 5 via `client.messages.parse` + Zod structured output) — resolves to `NOT_CONFIGURED` when `AI_PROVIDER_API_KEY` is unset, never fabricates output
+- Every AI generation call is wrapped in a `prompter_ai_jobs` row (`services/ai-jobs.ts`) — QUEUED→PROCESSING→COMPLETED/FAILED, token counts, cost observability foundation
+- Products: list, create, edit, media upload to `product-media`
+- Marketing Blueprint generation on the product detail page (`MarketingBlueprintSchema`)
+- Promote Wizard (`/promote`): pick product → goal → channels → target → budget → AI campaign proposal (`CampaignProposalSchema`) → saved as a `DRAFT` `prompter_master_campaigns` row
+- Campaigns: real list + detail (regenerate proposal, edit headline/primary text/CTA, delete draft) — status stays `DRAFT` in Phase 1, no live publishing (that's Phase 2/3)
+- Content Studio (`/content`): AI content generator (`ContentGenerationSchema`) + a content library list
+
+**Known Phase 1 simplifications** (kept deliberately small in scope, not hidden):
+- Promote Wizard requires an existing product — no inline "create product" sub-step (use `/products/new` first)
+- Products list has no grid/list view toggle (grid only)
+- Campaign copy editing covers headline/primary text/CTA only, not the full proposal
+- `budget_allocation` percentages are AI-generated and not validated to sum to exactly 100
 
 ## Phase 2 — Marketing Operations
 
-- Campaign management (master + channel campaigns)
+- `channel_campaigns` (per-platform execution rows under a Phase 1 master campaign) and the `DRAFT → AWAITING_APPROVAL → SCHEDULED → ACTIVE/...` status transitions
 - Approval Center, Budget Guard
 - Analytics schema, conversions, attribution
-- Audit log wired into every critical action
+- Audit log wired into every critical action (Phase 1 only logs onboarding completion)
 
 ## Phase 3 — Meta Foundation
 

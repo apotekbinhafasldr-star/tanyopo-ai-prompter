@@ -15,7 +15,6 @@ import {
   Search,
   ShieldCheck,
   Bot,
-  Globe,
   Lock,
   KeyRound,
   ScrollText,
