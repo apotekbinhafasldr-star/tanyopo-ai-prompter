@@ -6,7 +6,6 @@ import { createClient } from "@/lib/supabase/server";
 import { requireSessionContext } from "@/services/session";
 import { seoProjectSchema } from "@/schemas/seo";
 import { SeoRecommendationsSchema } from "@/schemas/ai/seo-recommendations";
-import { getAIProvider } from "@/lib/ai/get-provider";
 import { buildSystemPreamble, buildSeoRecommendationsPrompt } from "@/lib/ai/prompts";
 import { runAiJob } from "@/services/ai-jobs";
 
@@ -65,11 +64,6 @@ export async function generateSeoRecommendationsAction(projectId: string): Promi
 
   const supabase = await createClient();
 
-  const provider = getAIProvider();
-  if (!provider) {
-    return { error: "AI belum dikonfigurasi. Tambahkan AI_PROVIDER_API_KEY untuk mengaktifkan fitur ini." };
-  }
-
   const { data: project, error: projectError } = await supabase
     .from("prompter_seo_projects")
     .select("*")
@@ -89,8 +83,8 @@ export async function generateSeoRecommendationsAction(projectId: string): Promi
 
   const result = await runAiJob({
     supabase,
-    provider,
     tenantId: session.tenantId,
+    actorUserId: session.userId,
     jobType: "SEO_RECOMMENDATIONS",
     schema: SeoRecommendationsSchema,
     system: buildSystemPreamble(brandProfile),
@@ -114,7 +108,7 @@ export async function generateSeoRecommendationsAction(projectId: string): Promi
       on_page_recommendations: result.data.on_page_recommendations,
       content_plan: result.data.content_plan,
       ai_job_id: result.jobId,
-      model: "claude-opus-5",
+      model: result.model,
     },
     { onConflict: "project_id" },
   );

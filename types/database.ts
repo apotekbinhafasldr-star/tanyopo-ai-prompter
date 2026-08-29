@@ -50,6 +50,15 @@ export type AiJobType =
   | "ANALYTICS_INSIGHT"
   | "OPTIMIZATION_RECOMMENDATION";
 export type AiJobStatus = "QUEUED" | "PROCESSING" | "COMPLETED" | "FAILED";
+export type AiErrorCategory =
+  | "AUTH"
+  | "RATE_LIMIT"
+  | "CONNECTION"
+  | "API"
+  | "REFUSAL"
+  | "INVALID_OUTPUT"
+  | "CONFIG"
+  | "UNKNOWN";
 export type CampaignStatus =
   | "DRAFT"
   | "AWAITING_APPROVAL"
@@ -315,9 +324,13 @@ export interface Database {
         Row: {
           id: string;
           tenant_id: string;
+          actor_user_id: string | null;
           job_type: AiJobType;
           status: AiJobStatus;
+          provider: string | null;
           model: string | null;
+          fallback_provider: string | null;
+          error_category: AiErrorCategory | null;
           input_reference: Json;
           output_reference: Json | null;
           tokens_input: number | null;
@@ -330,9 +343,13 @@ export interface Database {
         Insert: {
           id?: string;
           tenant_id: string;
+          actor_user_id?: string | null;
           job_type: AiJobType;
           status?: AiJobStatus;
+          provider?: string | null;
           model?: string | null;
+          fallback_provider?: string | null;
+          error_category?: AiErrorCategory | null;
           input_reference?: Json;
           output_reference?: Json | null;
           tokens_input?: number | null;

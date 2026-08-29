@@ -8,7 +8,8 @@
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Yes | App fails to start. |
 | `SUPABASE_SECRET_KEY` | No | `lib/supabase/admin.ts#createAdminClient()` returns `null`; any server-only/service-role code path must treat that as `NOT_CONFIGURED` — this includes every `/api/v1/integrations/umkmpro/*` route (Phase 4), which returns `503 NOT_CONFIGURED` rather than attempting a write with no client. |
 | `NEXT_PUBLIC_APP_URL` | No | Defaults to `http://localhost:3000`. |
-| `AI_PROVIDER_NAME`, `AI_PROVIDER_API_KEY` | No | AI generation features (Phase 1+) render as not configured. |
+| `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` | No (at least one recommended) | AI generation features render as not configured with neither set. Either alone is enough — the AI Router (`lib/ai/router.ts`) picks the one that's present with zero other config. |
+| `AI_DEFAULT_PROVIDER`, `AI_FALLBACK_PROVIDER`, `AI_OPENAI_DEFAULT_MODEL`, `AI_{FAST,STANDARD,STRATEGY,CRITICAL}_{PROVIDER,MODEL}` | No | Optional AI Router tuning — see [AI_SYSTEM.md](AI_SYSTEM.md) "AI Router". Only relevant once both provider keys are set, or to pick a specific model per task class. |
 | `META_APP_ID`/`META_APP_SECRET`/`META_REDIRECT_URI` | No | Meta connector (Phase 3) stays `NOT_CONFIGURED`. |
 | `TIKTOK_APP_ID`/`TIKTOK_APP_SECRET`/`TIKTOK_REDIRECT_URI` | No | TikTok connector (Phase 6) stays `NOT_CONFIGURED`. |
 | `X_CLIENT_ID`/`X_CLIENT_SECRET`/`X_REDIRECT_URI` | No | X connector (Phase 6) stays `NOT_CONFIGURED`. |

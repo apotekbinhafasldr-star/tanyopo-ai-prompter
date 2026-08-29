@@ -3,7 +3,6 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { requireSessionContext } from "@/services/session";
-import { getAIProvider } from "@/lib/ai/get-provider";
 import { buildSystemPreamble, buildOptimizationRecommendationPrompt } from "@/lib/ai/prompts";
 import { runAiJob } from "@/services/ai-jobs";
 import { OptimizationRecommendationSchema, type OptimizationRecommendation } from "@/schemas/ai/optimization-recommendation";
@@ -46,11 +45,6 @@ export async function generateOptimizationRecommendationsAction(
   }
 
   const supabase = await createClient();
-
-  const provider = getAIProvider();
-  if (!provider) {
-    return { error: "AI belum dikonfigurasi. Tambahkan AI_PROVIDER_API_KEY untuk mengaktifkan fitur ini." };
-  }
 
   const { data: campaign, error: campaignError } = await supabase
     .from("prompter_master_campaigns")
@@ -146,8 +140,8 @@ export async function generateOptimizationRecommendationsAction(
 
   const result = await runAiJob({
     supabase,
-    provider,
     tenantId: session.tenantId,
+    actorUserId: session.userId,
     jobType: "OPTIMIZATION_RECOMMENDATION",
     schema: OptimizationRecommendationSchema,
     system: buildSystemPreamble(brandProfile),
@@ -166,7 +160,7 @@ export async function generateOptimizationRecommendationsAction(
       summary: result.data.summary,
       recommendations: result.data.recommendations as Json,
       ai_job_id: result.jobId,
-      model: "claude-opus-5",
+      model: result.model,
     },
     { onConflict: "master_campaign_id" },
   );

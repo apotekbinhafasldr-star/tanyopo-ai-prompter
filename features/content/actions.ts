@@ -5,7 +5,6 @@ import { createClient } from "@/lib/supabase/server";
 import { requireSessionContext } from "@/services/session";
 import { contentGeneratorSchema } from "@/schemas/content";
 import { ContentGenerationSchema } from "@/schemas/ai/content-generation";
-import { getAIProvider } from "@/lib/ai/get-provider";
 import { buildSystemPreamble, buildContentPrompt } from "@/lib/ai/prompts";
 import { runAiJob } from "@/services/ai-jobs";
 import type { ContentPlatform, ContentType, PrimaryGoal } from "@/types/database";
@@ -34,11 +33,6 @@ export async function generateContentAction(
   const session = await requireSessionContext();
   const supabase = await createClient();
 
-  const provider = getAIProvider();
-  if (!provider) {
-    return { error: "AI belum dikonfigurasi. Tambahkan AI_PROVIDER_API_KEY untuk mengaktifkan fitur ini." };
-  }
-
   const { data: product, error: productError } = await supabase
     .from("prompter_products")
     .select("*")
@@ -66,8 +60,8 @@ export async function generateContentAction(
 
   const result = await runAiJob({
     supabase,
-    provider,
     tenantId: session.tenantId,
+    actorUserId: session.userId,
     jobType: "CONTENT_GENERATION",
     schema: ContentGenerationSchema,
     system: buildSystemPreamble(brandProfile),

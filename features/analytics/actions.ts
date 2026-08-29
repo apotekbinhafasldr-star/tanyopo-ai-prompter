@@ -5,7 +5,6 @@ import { createClient } from "@/lib/supabase/server";
 import { requireSessionContext } from "@/services/session";
 import { manualConversionSchema } from "@/schemas/conversion";
 import { AnalyticsInsightSchema } from "@/schemas/ai/analytics-insight";
-import { getAIProvider } from "@/lib/ai/get-provider";
 import { buildSystemPreamble, buildAnalyticsInsightPrompt } from "@/lib/ai/prompts";
 import { runAiJob } from "@/services/ai-jobs";
 import type { ConversionEventType, Json } from "@/types/database";
@@ -69,11 +68,6 @@ export async function generateAnalyticsInsightAction(): Promise<AnalyticsActionS
 
   const supabase = await createClient();
 
-  const provider = getAIProvider();
-  if (!provider) {
-    return { error: "AI belum dikonfigurasi. Tambahkan AI_PROVIDER_API_KEY untuk mengaktifkan fitur ini." };
-  }
-
   const [{ data: metrics }, { data: conversions }] = await Promise.all([
     supabase
       .from("prompter_marketing_metrics")
@@ -118,8 +112,8 @@ export async function generateAnalyticsInsightAction(): Promise<AnalyticsActionS
 
   const result = await runAiJob({
     supabase,
-    provider,
     tenantId: session.tenantId,
+    actorUserId: session.userId,
     jobType: "ANALYTICS_INSIGHT",
     schema: AnalyticsInsightSchema,
     system: buildSystemPreamble(brandProfile),
@@ -140,7 +134,7 @@ export async function generateAnalyticsInsightAction(): Promise<AnalyticsActionS
       underperforming_channels: result.data.underperforming_channels as Json,
       risks: result.data.risks as Json,
       ai_job_id: result.jobId,
-      model: "claude-opus-5",
+      model: result.model,
     },
     { onConflict: "tenant_id" },
   );

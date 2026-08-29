@@ -5,7 +5,6 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { requireSessionContext } from "@/services/session";
 import { CampaignProposalSchema } from "@/schemas/ai/campaign-proposal";
-import { getAIProvider } from "@/lib/ai/get-provider";
 import { buildSystemPreamble, buildCampaignProposalPrompt } from "@/lib/ai/prompts";
 import { runAiJob } from "@/services/ai-jobs";
 import { syncChannelCampaigns, setChannelCampaignsStatus } from "@/services/channel-campaigns";
@@ -19,11 +18,6 @@ export interface CampaignActionState {
 export async function regenerateCampaignProposalAction(campaignId: string): Promise<CampaignActionState> {
   const session = await requireSessionContext();
   const supabase = await createClient();
-
-  const provider = getAIProvider();
-  if (!provider) {
-    return { error: "AI belum dikonfigurasi. Tambahkan AI_PROVIDER_API_KEY untuk mengaktifkan fitur ini." };
-  }
 
   const { data: campaign, error: campaignError } = await supabase
     .from("prompter_master_campaigns")
@@ -70,8 +64,8 @@ export async function regenerateCampaignProposalAction(campaignId: string): Prom
 
   const result = await runAiJob({
     supabase,
-    provider,
     tenantId: session.tenantId,
+    actorUserId: session.userId,
     jobType: "CAMPAIGN_PROPOSAL",
     schema: CampaignProposalSchema,
     system: buildSystemPreamble(brandProfile),

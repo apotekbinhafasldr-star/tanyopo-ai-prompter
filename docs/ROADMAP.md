@@ -136,6 +136,15 @@ Development proceeds phase by phase. A phase is not started until the previous o
 - `estimated_cost` on `prompter_ai_jobs` is still not populated for the two new job types (`ANALYTICS_INSIGHT`, `OPTIMIZATION_RECOMMENDATION`) — same pre-existing gap noted in [AI_SYSTEM.md](AI_SYSTEM.md) since Phase 1.
 - Cross-channel comparison is presented as per-channel rows within a single Analytics Insight / Optimization Recommendation, not a dedicated side-by-side comparison widget — the data itself is real and channel-honest, but there's no new chart/table component built specifically for "compare channel A vs B" beyond what the AI's own summary/rationale text says.
 
+## Architecture correction — shared Supabase confirmation + multi-provider AI (post-Phase 7)
+
+Not a phase — a hardening pass over already-complete Phase 0-7 work, requested explicitly as a correction rather than new functionality. Two parts:
+
+1. **Shared Supabase architecture, confirmed not rebuilt.** Verified (read-only discovery against the live shared project, see [DATABASE.md](DATABASE.md) "Data access boundary") that Promoter already used the single shared Supabase project since Phase 0, already reused `tenants`/`user_profiles` as its tenant/membership model with no duplicate `organizations` schema, and never queries any of UMKMpro's ~79 operational tables directly — every access to UMKMpro data goes through the signed `/api/v1/integrations/umkmpro/*` API into Promoter's own `prompter_*` mirror/snapshot tables. No schema or application change was needed here; this was already the architecture.
+2. **Multi-provider AI Router.** `lib/ai/router.ts` replaces the single-provider `getAIProvider()` (retired) — every feature now declares a task class (`FAST`/`STANDARD`/`STRATEGY`/`CRITICAL`, `lib/ai/task-classes.ts`) instead of getting a hard-coded Anthropic instance. Added `lib/ai/openai-provider.ts` (OpenAI Responses API) alongside the existing `lib/ai/anthropic-provider.ts`; routing is config-driven (`lib/ai/routing-config.ts#resolveRoute()`, pure, unit tested) with one optional live fallback on a real provider failure. `prompter_ai_jobs` gained `provider`/`actor_user_id`/`fallback_provider`/`error_category` columns for real AI usage accounting — see [AI_SYSTEM.md](AI_SYSTEM.md) "AI Router" and [DATABASE.md](DATABASE.md) "Architecture correction — AI Router usage-accounting columns". `CRITICAL`-class routing (the Optimization Agent) never gains authority to bypass Budget Guard, RBAC, or the Approval Center — task class governs which AI provider answers a request, nothing about what happens with the answer.
+
+**Honesty note:** neither `OPENAI_API_KEY` nor `ANTHROPIC_API_KEY` is configured in this repository's own working environments — live generation against a real provider has not been exercised as part of this correction. See [SECURITY.md](SECURITY.md) and the session's live-verification report for exactly what remains `NOT_VERIFIED` versus what passed lint/typecheck/unit-tests/build.
+
 ## What "done" means for a phase
 
 - `npm run lint`, `npm run typecheck`, `npm run test`, `npm run build` all pass

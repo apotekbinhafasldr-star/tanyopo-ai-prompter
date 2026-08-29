@@ -28,6 +28,20 @@ RLS on every `prompter_*` table uses UMKMpro AI's existing helper functions rath
 
 A user who registers directly through Promoter (`/register`) still gets a `tenants` + `user_profiles` row via the same shared trigger — `jenis_usaha` is set to `"lainnya"` since it isn't a UMKMpro business type. Real marketing context (business category, what they sell, primary goal, tone of voice, etc.) is collected in `/onboarding` and stored in `prompter_brand_profiles`, which is entirely Promoter's own table.
 
+### Data access boundary — UMKMpro's operational domain
+
+The shared project's `public` schema has ~79 non-`prompter_` tables today (POS, inventory, HR, workshop, F&B, tax, payroll, ...) — all owned and evolved by UMKMpro AI. Promoter's access to that domain is deliberately narrow:
+
+| UMKMpro domain | Example tables | Shared or private | Promoter's access |
+|---|---|---|---|
+| Identity | `auth.users` | Shared | Session only, via Supabase Auth — never read as a table |
+| Tenant / membership | `tenants`, `user_profiles` | Shared | Read-only reference (`tenant_id` FK, `fn_current_tenant_id()`/`fn_current_role()`) — Promoter never writes to either |
+| Product / inventory | `products` (UMKMpro's own, 36 columns), `product_batches`, `warehouses`, `warehouse_stock`, `inventory_movements`, `purchase_orders`, `stock_opname_*` | Private | **None.** Promoter never queries these directly. A product reaches Promoter only through the signed `/api/v1/integrations/umkmpro/products` API, landing in Promoter's own `prompter_products` (mirror) and `prompter_product_snapshots` (append-only history) — see below |
+| Sales / orders | `transactions`, `transaction_items`, `online_orders`, `pesanan_meja`, `receivables` | Private | **None.** Conversion/revenue signal comes only through the explicit, signed `/api/v1/integrations/umkmpro/conversions` API into Promoter's own `prompter_conversions` — never a join or direct read |
+| HR / operations | `employees`, `attendance`, `payroll_notes`, `kontrak_karyawan`, `leave_requests`, ... | Private | **None.** Not marketing-relevant; no Promoter code references these tables at all |
+
+Verified for this correction: a repository-wide search for any `.from("<umkmpro-table>")` call outside the `prompter_` prefix, across `app/`, `features/`, `services/`, `lib/`, found none — every Promoter data access is either a `prompter_*` table, the shared `tenants`/`user_profiles` reference read, or the signed UMKMpro integration API. There is no `organizations`/`organization_members` table in this schema at all — `tenants` **is** the organization entity and `user_profiles` **is** the membership record (role + tenant_id), so "shared tenant model" here means literally the same two tables, not a lookalike duplicate.
+
 ## Phase 0 schema
 
 Migration: `supabase/migrations/20260829080000_prompter_foundation_schema.sql` (+ a follow-up linter fix in `20260829080100_prompter_fix_function_search_path.sql`).
@@ -176,6 +190,12 @@ Migration: `supabase/migrations/20260829240000_prompter_phase7_schema.sql`. Same
 One existing table also changed: `prompter_ai_jobs.job_type`'s CHECK constraint gained `'ANALYTICS_INSIGHT'` and `'OPTIMIZATION_RECOMMENDATION'`.
 
 `prompter_approvals.approval_type = 'AUTOPILOT_ACTION'` rows (reserved since the Phase 2 migration, unused until now) are the first to actually be created in Phase 7 — `context` (JSONB) carries `source` (`'optimization_agent'` or `'autopilot_policy'`), `master_campaign_id`, `channel`, `action_type`, `suggested_daily_budget`, `rationale`, and `risk_level`, giving `/approvals` and `features/approvals/actions.ts#executeAutopilotAction()` everything needed to both display and execute the decision without a second lookup.
+
+## Architecture correction — AI Router usage-accounting columns
+
+Migration: `supabase/migrations/20260829250000_prompter_ai_router_usage_columns.sql`. Not a new phase — a hardening pass that added the multi-provider AI Router (`lib/ai/router.ts`, see [AI_SYSTEM.md](AI_SYSTEM.md)). Same additive-only rule as every phase before it.
+
+`prompter_ai_jobs` gained four nullable columns: `provider` (which AI provider — `"openai"`/`"anthropic"` — actually produced the result, set by the router, never guessed by feature code), `actor_user_id` (the user who triggered the generation, `references user_profiles(id) on delete set null`), `fallback_provider` (set only when the router's primary provider failed live and a configured fallback served the request instead — names the primary that failed), and `error_category` (a CHECK-constrained coarse failure category — `AUTH`/`RATE_LIMIT`/`CONNECTION`/`API`/`REFUSAL`/`INVALID_OUTPUT`/`CONFIG`/`UNKNOWN` — so AI usage accounting can query without parsing vendor-specific error text). No RLS change was needed — the existing Phase 1 policy (`for all`, owner/marketing, tenant-scoped) already covers these new columns at the row level.
 
 ## TypeScript types
 

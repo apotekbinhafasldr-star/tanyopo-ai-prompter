@@ -5,7 +5,6 @@ import { createClient } from "@/lib/supabase/server";
 import { requireSessionContext } from "@/services/session";
 import { promoteWizardSchema } from "@/schemas/campaign";
 import { CampaignProposalSchema } from "@/schemas/ai/campaign-proposal";
-import { getAIProvider } from "@/lib/ai/get-provider";
 import { buildSystemPreamble, buildCampaignProposalPrompt } from "@/lib/ai/prompts";
 import { runAiJob } from "@/services/ai-jobs";
 import { syncChannelCampaigns } from "@/services/channel-campaigns";
@@ -40,11 +39,6 @@ export async function generateCampaignDraftAction(
   const session = await requireSessionContext();
   const supabase = await createClient();
 
-  const provider = getAIProvider();
-  if (!provider) {
-    return { error: "AI belum dikonfigurasi. Tambahkan AI_PROVIDER_API_KEY untuk mengaktifkan fitur ini." };
-  }
-
   const { data: product, error: productError } = await supabase
     .from("prompter_products")
     .select("*")
@@ -76,8 +70,8 @@ export async function generateCampaignDraftAction(
 
   const result = await runAiJob({
     supabase,
-    provider,
     tenantId: session.tenantId,
+    actorUserId: session.userId,
     jobType: "CAMPAIGN_PROPOSAL",
     schema: CampaignProposalSchema,
     system: buildSystemPreamble(brandProfile),
