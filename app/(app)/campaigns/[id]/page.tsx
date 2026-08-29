@@ -7,13 +7,29 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { requireSessionContext } from "@/services/session";
 import { createClient } from "@/lib/supabase/server";
-import { formatCurrency, formatDate, channelLabel, campaignStatusLabel, goalLabel } from "@/lib/utils/format";
+import { formatCurrency, formatDate, channelLabel, campaignStatusLabel, campaignStatusVariant, goalLabel } from "@/lib/utils/format";
 import { RegenerateProposalButton } from "@/features/campaigns/regenerate-button";
 import { CampaignCopyEditor } from "@/features/campaigns/copy-editor";
-import { updateCampaignCopyAction, deleteCampaignAction } from "@/features/campaigns/actions";
+import { SubmitForApprovalButton } from "@/features/campaigns/submit-button";
+import { updateCampaignCopyAction, deleteCampaignAction, cancelSubmissionAction } from "@/features/campaigns/actions";
 import type { CampaignProposal } from "@/schemas/ai/campaign-proposal";
 
 export const metadata: Metadata = { title: "Detail Campaign — Tanyopo AI Promoter" };
+
+const STATUS_BANNER: Record<string, { tone: "info" | "warning" | "success"; text: string }> = {
+  DRAFT: {
+    tone: "info",
+    text: "Campaign ini masih berupa draft internal. Ajukan untuk persetujuan saat Anda siap.",
+  },
+  AWAITING_APPROVAL: {
+    tone: "warning",
+    text: "Menunggu persetujuan Owner di Approval Center sebelum dijadwalkan.",
+  },
+  SCHEDULED: {
+    tone: "success",
+    text: "Sudah disetujui dan terjadwal. Peluncuran nyata ke channel akan aktif setelah Connection Center tersedia (Phase 3).",
+  },
+};
 
 export default async function CampaignDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -31,12 +47,28 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
     notFound();
   }
 
-  const { data: product } = campaign.product_id
-    ? await supabase.from("prompter_products").select("id, name").eq("id", campaign.product_id).single()
-    : { data: null };
+  const [{ data: product }, { data: channelCampaigns }] = await Promise.all([
+    campaign.product_id
+      ? supabase.from("prompter_products").select("id, name").eq("id", campaign.product_id).single()
+      : Promise.resolve({ data: null }),
+    supabase
+      .from("prompter_channel_campaigns")
+      .select("id, channel, status, budget_percentage, external_campaign_id")
+      .eq("master_campaign_id", id)
+      .order("channel"),
+  ]);
 
   const proposal = campaign.ai_proposal as CampaignProposal | null;
   const boundCopyAction = updateCampaignCopyAction.bind(null, id);
+  const isDraft = campaign.status === "DRAFT";
+  const isAwaitingApproval = campaign.status === "AWAITING_APPROVAL";
+  const banner = STATUS_BANNER[campaign.status];
+  const bannerClass =
+    banner?.tone === "warning"
+      ? "bg-warning-muted text-warning"
+      : banner?.tone === "success"
+        ? "bg-success-muted text-success"
+        : "bg-info-muted text-info";
 
   return (
     <div className="flex flex-1 flex-col gap-6 p-8">
@@ -44,7 +76,7 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-xl font-semibold tracking-tight text-foreground">{campaign.name}</h1>
-            <Badge variant={campaign.status === "DRAFT" ? "neutral" : "brand"}>
+            <Badge variant={campaignStatusVariant(campaign.status)}>
               {campaignStatusLabel(campaign.status)}
             </Badge>
           </div>
@@ -54,19 +86,27 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
             </Link>
           ) : null}
         </div>
-        <form action={deleteCampaignAction}>
-          <input type="hidden" name="campaignId" value={id} />
-          <Button type="submit" variant="ghost" size="sm" disabled={campaign.status !== "DRAFT"}>
-            <Trash2 />
-            Hapus Draft
-          </Button>
-        </form>
+        <div className="flex items-center gap-2">
+          {isDraft ? <SubmitForApprovalButton campaignId={id} /> : null}
+          {isAwaitingApproval && session.role === "owner" ? (
+            <form action={cancelSubmissionAction}>
+              <input type="hidden" name="campaignId" value={id} />
+              <Button type="submit" variant="ghost" size="sm">
+                Batalkan Pengajuan
+              </Button>
+            </form>
+          ) : null}
+          <form action={deleteCampaignAction}>
+            <input type="hidden" name="campaignId" value={id} />
+            <Button type="submit" variant="ghost" size="sm" disabled={!isDraft}>
+              <Trash2 />
+              Hapus Draft
+            </Button>
+          </form>
+        </div>
       </div>
 
-      <div className="rounded-[var(--radius-md)] bg-info-muted p-4 text-sm text-info">
-        Campaign ini masih berupa <strong>draft internal</strong>. Persetujuan dan peluncuran ke channel nyata
-        akan tersedia setelah Approval Center dan Connection Center aktif.
-      </div>
+      {banner ? <div className={`rounded-[var(--radius-md)] p-4 text-sm ${bannerClass}`}>{banner.text}</div> : null}
 
       <Card>
         <CardHeader>
@@ -106,6 +146,32 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
         </CardContent>
       </Card>
 
+      {channelCampaigns && channelCampaigns.length > 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Breakdown per Channel</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-4">
+            <div className="flex flex-col divide-y divide-border">
+              {channelCampaigns.map((cc) => (
+                <div key={cc.id} className="flex items-center justify-between gap-3 py-3">
+                  <span className="text-sm font-medium text-foreground">{channelLabel(cc.channel)}</span>
+                  <span className="text-sm text-muted-foreground">
+                    {cc.budget_percentage !== null ? `${cc.budget_percentage}%` : "—"}
+                  </span>
+                  <Badge variant={campaignStatusVariant(cc.status)}>
+                    {campaignStatusLabel(cc.status)}
+                  </Badge>
+                  <span className="text-xs text-muted-foreground">
+                    {cc.external_campaign_id ?? "Belum terhubung ke platform"}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
       {!proposal ? (
         <Card>
           <CardContent className="p-6 text-sm text-muted-foreground">
@@ -117,7 +183,7 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0">
               <CardTitle>Strategi AI</CardTitle>
-              <RegenerateProposalButton campaignId={id} />
+              {isDraft ? <RegenerateProposalButton campaignId={id} /> : null}
             </CardHeader>
             <CardContent className="flex flex-col gap-4 pt-4">
               <div>
@@ -144,12 +210,26 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
               <CardTitle>Konten Iklan</CardTitle>
             </CardHeader>
             <CardContent className="pt-4">
-              <CampaignCopyEditor
-                action={boundCopyAction}
-                headline={proposal.headline}
-                primaryText={proposal.primary_text}
-                cta={proposal.cta}
-              />
+              {isDraft ? (
+                <CampaignCopyEditor
+                  action={boundCopyAction}
+                  headline={proposal.headline}
+                  primaryText={proposal.primary_text}
+                  cta={proposal.cta}
+                />
+              ) : (
+                <div className="flex flex-col gap-3 text-sm">
+                  <p>
+                    <strong>Headline:</strong> {proposal.headline}
+                  </p>
+                  <p>
+                    <strong>Teks Utama:</strong> {proposal.primary_text}
+                  </p>
+                  <p>
+                    <strong>CTA:</strong> {proposal.cta}
+                  </p>
+                </div>
+              )}
             </CardContent>
           </Card>
 

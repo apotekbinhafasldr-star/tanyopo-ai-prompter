@@ -1,8 +1,11 @@
 import type { Metadata } from "next";
-import { User, Building2 } from "lucide-react";
+import { User, Building2, ShieldCheck } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { requireSessionContext } from "@/services/session";
+import { createClient } from "@/lib/supabase/server";
+import { getOrCreateBudgetPolicy } from "@/services/budget-guard";
+import { BudgetPolicyForm } from "@/features/settings/budget-policy-form";
 
 export const metadata: Metadata = { title: "Settings — Tanyopo AI Promoter" };
 
@@ -17,6 +20,8 @@ const ROLE_LABEL: Record<string, string> = {
 
 export default async function SettingsPage() {
   const session = await requireSessionContext({ allowIncompleteOnboarding: true });
+  const supabase = await createClient();
+  const budgetPolicy = await getOrCreateBudgetPolicy(supabase, session.tenantId);
 
   return (
     <div className="flex flex-1 flex-col gap-6 p-8">
@@ -67,6 +72,19 @@ export default async function SettingsPage() {
             Pengaturan brand, tim, otomasi, dan API akan tersedia pada fase pengembangan
             berikutnya.
           </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center gap-2 space-y-0">
+          <ShieldCheck className="size-4 text-muted-foreground" aria-hidden />
+          <CardTitle>Budget Guard</CardTitle>
+          <CardDescription className="sr-only">
+            Batas budget yang diperiksa sebelum campaign diajukan
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="pt-4">
+          <BudgetPolicyForm policy={budgetPolicy} readOnly={session.role !== "owner"} />
         </CardContent>
       </Card>
     </div>

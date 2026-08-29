@@ -85,9 +85,32 @@ Also created in the Phase 1 migration, all public-read (so they can be embedded 
 | Bucket | Limit | Status |
 |---|---|---|
 | `product-media` | 100 MB, image/video | In use (product media upload) |
-| `creative-assets` | 100 MB, image/video | Reserved — Phase 2/3 |
+| `creative-assets` | 100 MB, image/video | Reserved — Phase 3+ |
 | `brand-assets` | 5 MB, image/svg | Reserved — logo upload, not yet built |
 | `generated-content` | 100 MB, image/video | Reserved — AI-generated creative, not yet built |
+
+## Phase 2 schema
+
+Migration: `supabase/migrations/20260829140000_prompter_phase2_schema.sql`. Same additive-only rule as Phase 0/1.
+
+| Table | Purpose | Write access |
+|---|---|---|
+| `prompter_budget_policies` | One row per tenant (lazily created via `services/budget-guard.ts#getOrCreateBudgetPolicy()`). Hard limits (`daily_limit`, `campaign_limit`) checked before a campaign can be submitted. | **Owner only** — financial governance, stricter than the owner/marketing pattern used elsewhere |
+| `prompter_channel_campaigns` | Per-channel row under a master campaign (`unique(master_campaign_id, channel)`), materialized from the campaign's `channels` + the AI proposal's `budget_allocation`. `status` mirrors the parent master campaign. `external_campaign_id` stays `null` until a Phase 3+ connector actually creates the ad — nothing in this app writes a fake one. | owner/marketing |
+| `prompter_approvals` | Approval Center queue. Phase 2 only creates `CAMPAIGN_LAUNCH` rows (`resource_type = 'prompter_master_campaigns'`); the other types in the CHECK constraint (`BUDGET_CHANGE`, `CAMPAIGN_SCALE`, `CONTENT_PUBLISH`, `AUTOPILOT_ACTION`) are forward-compatible reservations. | Insert: owner/marketing (`requested_by` must be the caller). **Decide (update): owner only** — enforced by RLS, not just the UI, giving a real separation of duties between who submits and who approves. |
+| `prompter_marketing_metrics` | Normalized daily metrics per channel campaign (spend, impressions, reach, clicks, conversions, revenue, ...). Empty until a Phase 3+ connector syncs real platform data — `/analytics` reads this table and shows an honest empty state, never a fabricated number. | owner/marketing |
+| `prompter_conversions` | Conversion events. Phase 2 supports manual entry only (`source` defaults to `'manual'`) via the Analytics page's "Catat Konversi" form — there's no ad-platform conversion API or UMKMpro bridge yet (Phase 4). | owner/marketing |
+| `prompter_attributions` | Attribution schema (`LAST_CLICK`/`FIRST_CLICK`/`MANUAL`/`UMKMPRO_VERIFIED` models). Modeled now so a future attribution engine doesn't need a schema migration on launch day — **no code path writes to this table yet**. | owner/marketing |
+
+### Campaign status machine (Phase 2)
+
+```
+DRAFT --submit (passes Budget Guard)--> AWAITING_APPROVAL --Owner approves--> SCHEDULED
+  ^                                           |
+  |___________Owner rejects, or submitter cancels___________|
+```
+
+`ACTIVE`, `PAUSED`, `COMPLETED`, `FAILED` exist in the CHECK constraint (both `prompter_master_campaigns.status` and `prompter_channel_campaigns.status`) for forward compatibility, but **no code path in this repository sets them** — those transitions require a real platform connector (Phase 3+) to confirm the campaign is actually live, per the product spec's status-transparency rule (never claim "berhasil tayang" without external confirmation).
 
 ## TypeScript types
 

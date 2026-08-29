@@ -16,8 +16,9 @@ describe("contentGeneratorSchema", () => {
   });
 
   it("defaults language to id when omitted", () => {
-    const { language: _language, ...rest } = valid;
-    const result = contentGeneratorSchema.safeParse(rest);
+    const withoutLanguage: Partial<typeof valid> = { ...valid };
+    delete withoutLanguage.language;
+    const result = contentGeneratorSchema.safeParse(withoutLanguage);
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data.language).toBe("id");

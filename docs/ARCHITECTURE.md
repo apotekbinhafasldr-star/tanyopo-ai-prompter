@@ -39,7 +39,8 @@ components/
   shared/                Cross-feature building blocks (e.g. ComingSoon)
 features/                Feature-scoped UI + server actions, grouped by
                           domain (auth, onboarding, dashboard, marketing,
-                          products, promote, campaigns, content, ...)
+                          products, promote, campaigns, content, approvals,
+                          analytics, settings, ...)
 lib/
   supabase/              client.ts (browser), server.ts (SSR), admin.ts
                           (service-role, server-only)
@@ -50,7 +51,8 @@ lib/
                           undefined rather than throwing
   utils/, constants/      Small shared helpers (cn(), nav config, ...)
 services/                Server-only data-access functions shared across
-                          routes (e.g. services/session.ts, services/ai-jobs.ts)
+                          routes (session.ts, ai-jobs.ts, budget-guard.ts,
+                          channel-campaigns.ts)
 schemas/                 Zod schemas, one file per domain
 types/                   Hand-scoped Supabase Database type (see DATABASE.md
                           for why this isn't the full generated schema)
@@ -72,4 +74,4 @@ docs/                     This documentation set
 
 ## What's real vs. what's still a stub
 
-As of Phase 1, **Products, Promote, Campaigns, and Content** are real — they read and write actual tenant data and (when `AI_PROVIDER_API_KEY` is configured) call a real AI provider. **Growth, SEO, Analytics, AI Marketing, Connections, Approvals, Billing** are still routed and reachable from the sidebar but render `components/shared/coming-soon.tsx` stating which phase builds them — see [ROADMAP.md](ROADMAP.md). No stub page pretends to have working data or a working button behind it, and no Phase 1 feature fakes a result when its AI provider isn't configured (see [AI_SYSTEM.md](AI_SYSTEM.md)).
+As of Phase 2, **Products, Promote, Campaigns, Content, Approvals, and Analytics** are real — they read and write actual tenant data, enforce the campaign approval/Budget Guard flow, and (when `AI_PROVIDER_API_KEY` is configured) call a real AI provider. **Growth, SEO, AI Marketing, Connections, Billing** are still routed and reachable from the sidebar but render `components/shared/coming-soon.tsx` stating which phase builds them — see [ROADMAP.md](ROADMAP.md). No stub page pretends to have working data or a working button behind it, no Phase 1/2 feature fakes a result when its AI provider isn't configured (see [AI_SYSTEM.md](AI_SYSTEM.md)), and no campaign in this app reaches `ACTIVE` status without a real platform connector confirming it (Phase 3+).

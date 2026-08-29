@@ -13,7 +13,7 @@ Development proceeds phase by phase. A phase is not started until the previous o
 - Landing page
 - Docs, `.env.example`, CI (lint/typecheck/test/build)
 
-## Phase 1 — Core Promoter ✅ (this delivery)
+## Phase 1 — Core Promoter ✅
 
 - `prompter_products`, `prompter_product_media`, `prompter_marketing_blueprints`, `prompter_ai_jobs`, `prompter_master_campaigns`, `prompter_content_items` + RLS; Storage buckets `product-media` (in use), `creative-assets`/`brand-assets`/`generated-content` (reserved for later phases)
 - AI provider abstraction (`lib/ai/provider.ts`) with an Anthropic implementation (`lib/ai/anthropic-provider.ts`, Claude Opus 5 via `client.messages.parse` + Zod structured output) — resolves to `NOT_CONFIGURED` when `AI_PROVIDER_API_KEY` is unset, never fabricates output
@@ -30,12 +30,22 @@ Development proceeds phase by phase. A phase is not started until the previous o
 - Campaign copy editing covers headline/primary text/CTA only, not the full proposal
 - `budget_allocation` percentages are AI-generated and not validated to sum to exactly 100
 
-## Phase 2 — Marketing Operations
+## Phase 2 — Marketing Operations ✅ (this delivery)
 
-- `channel_campaigns` (per-platform execution rows under a Phase 1 master campaign) and the `DRAFT → AWAITING_APPROVAL → SCHEDULED → ACTIVE/...` status transitions
-- Approval Center, Budget Guard
-- Analytics schema, conversions, attribution
-- Audit log wired into every critical action (Phase 1 only logs onboarding completion)
+- `prompter_channel_campaigns` (per-platform rows under a master campaign, materialized from `channels` + the AI proposal's `budget_allocation`), `prompter_budget_policies`, `prompter_approvals`, `prompter_marketing_metrics`, `prompter_conversions`, `prompter_attributions` + RLS
+- Budget Guard (`services/budget-guard.ts`): a campaign whose `daily_budget`/`total_budget` exceeds the tenant's `daily_limit`/`campaign_limit` is **rejected outright** on submission — it never reaches the Approval Center as a request that would just get rejected there
+- Campaign status machine: `DRAFT` → (submit, passes Budget Guard) → `AWAITING_APPROVAL` → (Owner decides) → `SCHEDULED` or back to `DRAFT`. **No code path in this app ever sets `ACTIVE`** — that only happens once a real connector (Phase 3+) confirms the campaign is live on the platform
+- Approval Center (`/approvals`): pending queue + history, Owner-only Approve/Reject (RLS-enforced, not just UI-gated), campaign owner/submitter can cancel a pending submission back to `DRAFT`
+- Budget Guard settings card in `/settings` (Owner-only edit; other roles see it read-only)
+- Campaign detail: per-channel breakdown table, submit-for-approval action, editing/regenerating locked to `DRAFT` status only
+- Analytics (`/analytics`): honest empty state for `prompter_marketing_metrics` (nothing writes to it until a Phase 3+ connector exists) + manual conversion logging against `prompter_conversions` (a business owner recording a sale they know came from a campaign)
+- Audit log (`prompter_audit_logs`) now records `campaign.submitted_for_approval`, `campaign.approved`, `campaign.launch_rejected`, `budget_policy.updated` — alongside Phase 0's `onboarding.completed`
+
+**Known Phase 2 simplifications:**
+- `prompter_attributions` is schema-only — nothing writes to it yet (no attribution model is computed until real conversion data exists)
+- Approval Center only handles `CAMPAIGN_LAUNCH`; the other approval types in the schema (`BUDGET_CHANGE`, `CAMPAIGN_SCALE`, `CONTENT_PUBLISH`, `AUTOPILOT_ACTION`) have no feature behind them yet
+- Conversions are manual-entry only — no ad-platform conversion API or UMKMpro conversion bridge (Phase 4)
+- Budget Guard checks `daily_limit`/`campaign_limit` only; `monthly_limit`, `require_approval_above`, and `autopilot_limit` are stored but not yet enforced
 
 ## Phase 3 — Meta Foundation
 

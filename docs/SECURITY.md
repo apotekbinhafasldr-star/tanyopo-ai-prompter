@@ -19,7 +19,11 @@ Supabase Auth, email + password (magic link and Google OAuth are straightforward
 
 ## Audit logging
 
-`prompter_audit_logs` is append-only (see [DATABASE.md](DATABASE.md) — no `UPDATE`/`DELETE` RLS policy exists on the table at all). Every critical action defined in the product spec (account connection, campaign launch, budget change, approval, automation change, role change, billing action) must write a row here once those features exist. The onboarding completion flow (`features/onboarding/actions.ts`) already does this as the first example.
+`prompter_audit_logs` is append-only (see [DATABASE.md](DATABASE.md) — no `UPDATE`/`DELETE` RLS policy exists on the table at all). Every critical action defined in the product spec (account connection, campaign launch, budget change, approval, automation change, role change, billing action) must write a row here once those features exist. As of Phase 2, `onboarding.completed`, `campaign.submitted_for_approval`, `campaign.approved`, `campaign.launch_rejected`, and `budget_policy.updated` are wired; account connection, automation-mode, role, and billing changes will follow as those features (Phase 3+) land.
+
+## Separation of duties (Budget Guard / Approval Center)
+
+Submitting a campaign for approval and deciding it are deliberately different privilege levels, enforced at the RLS layer rather than only in the UI: `prompter_approvals` INSERT is open to `owner`/`marketing`, but its UPDATE policy (the approve/reject decision) is restricted to `owner` only — see the Phase 2 migration. `features/approvals/actions.ts#decideApprovalAction()` also checks the caller's role before writing, so a non-owner gets a clear error rather than a silently-ignored write. Budget Guard's hard-block check (`services/budget-guard.ts`) runs before an approval request is even created, so a campaign that exceeds the tenant's configured limit never reaches the queue.
 
 ## Automation safety
 

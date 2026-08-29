@@ -63,3 +63,20 @@ const CAMPAIGN_STATUS_LABEL: Record<string, string> = {
 export function campaignStatusLabel(status: string) {
   return CAMPAIGN_STATUS_LABEL[status] ?? status;
 }
+
+const CAMPAIGN_STATUS_VARIANT: Record<
+  string,
+  "neutral" | "warning" | "brand" | "success" | "danger"
+> = {
+  DRAFT: "neutral",
+  AWAITING_APPROVAL: "warning",
+  SCHEDULED: "brand",
+  ACTIVE: "success",
+  PAUSED: "warning",
+  COMPLETED: "success",
+  FAILED: "danger",
+};
+
+export function campaignStatusVariant(status: string) {
+  return CAMPAIGN_STATUS_VARIANT[status] ?? "neutral";
+}

@@ -56,6 +56,21 @@ export type Channel = "FACEBOOK" | "INSTAGRAM" | "TIKTOK" | "X" | "SEO";
 export type ContentPlatform = "FACEBOOK" | "INSTAGRAM" | "TIKTOK" | "X" | "WEBSITE";
 export type ContentType = "CAPTION" | "AD_COPY" | "BLOG" | "VIDEO_SCRIPT";
 export type ContentStatus = "DRAFT" | "APPROVED" | "SCHEDULED" | "PUBLISHED" | "FAILED";
+export type ApprovalType =
+  | "CAMPAIGN_LAUNCH"
+  | "BUDGET_CHANGE"
+  | "CAMPAIGN_SCALE"
+  | "CONTENT_PUBLISH"
+  | "AUTOPILOT_ACTION";
+export type ApprovalStatus = "PENDING" | "APPROVED" | "REJECTED" | "EXPIRED";
+export type ConversionEventType =
+  | "LEAD"
+  | "SIGNUP"
+  | "ADD_TO_CART"
+  | "CHECKOUT"
+  | "PURCHASE"
+  | "SUBSCRIPTION";
+export type AttributionModel = "LAST_CLICK" | "FIRST_CLICK" | "MANUAL" | "UMKMPRO_VERIFIED";
 
 /** Mirrors the existing UMKMpro `user_profiles.role` CHECK constraint. */
 export type TenantRole =
@@ -425,6 +440,208 @@ export interface Database {
         };
         Update: Partial<
           Omit<Database["public"]["Tables"]["prompter_content_items"]["Insert"], "tenant_id">
+        >;
+        Relationships: [];
+      };
+      prompter_budget_policies: {
+        Row: {
+          tenant_id: string;
+          daily_limit: number | null;
+          monthly_limit: number | null;
+          campaign_limit: number | null;
+          currency: string;
+          require_approval_above: number | null;
+          autopilot_limit: number | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          tenant_id: string;
+          daily_limit?: number | null;
+          monthly_limit?: number | null;
+          campaign_limit?: number | null;
+          currency?: string;
+          require_approval_above?: number | null;
+          autopilot_limit?: number | null;
+        };
+        Update: Partial<
+          Omit<Database["public"]["Tables"]["prompter_budget_policies"]["Insert"], "tenant_id">
+        >;
+        Relationships: [];
+      };
+      prompter_channel_campaigns: {
+        Row: {
+          id: string;
+          tenant_id: string;
+          master_campaign_id: string;
+          channel: Channel;
+          status: CampaignStatus;
+          budget_percentage: number | null;
+          external_campaign_id: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          tenant_id: string;
+          master_campaign_id: string;
+          channel: Channel;
+          status?: CampaignStatus;
+          budget_percentage?: number | null;
+          external_campaign_id?: string | null;
+        };
+        Update: Partial<
+          Omit<
+            Database["public"]["Tables"]["prompter_channel_campaigns"]["Insert"],
+            "tenant_id" | "master_campaign_id"
+          >
+        >;
+        Relationships: [];
+      };
+      prompter_approvals: {
+        Row: {
+          id: string;
+          tenant_id: string;
+          approval_type: ApprovalType;
+          status: ApprovalStatus;
+          resource_type: string;
+          resource_id: string;
+          requested_by: string | null;
+          decided_by: string | null;
+          decided_at: string | null;
+          reason: string | null;
+          context: Json;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          tenant_id: string;
+          approval_type: ApprovalType;
+          status?: ApprovalStatus;
+          resource_type: string;
+          resource_id: string;
+          requested_by?: string | null;
+          context?: Json;
+        };
+        Update: {
+          status?: ApprovalStatus;
+          decided_by?: string | null;
+          decided_at?: string | null;
+          reason?: string | null;
+        };
+        Relationships: [];
+      };
+      prompter_marketing_metrics: {
+        Row: {
+          id: string;
+          tenant_id: string;
+          master_campaign_id: string | null;
+          channel_campaign_id: string | null;
+          platform: Channel;
+          date: string;
+          spend: number;
+          impressions: number;
+          reach: number;
+          clicks: number;
+          engagements: number;
+          leads: number;
+          conversions: number;
+          revenue: number;
+          followers_acquired: number;
+          raw_data: Json;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          tenant_id: string;
+          master_campaign_id?: string | null;
+          channel_campaign_id?: string | null;
+          platform: Channel;
+          date: string;
+          spend?: number;
+          impressions?: number;
+          reach?: number;
+          clicks?: number;
+          engagements?: number;
+          leads?: number;
+          conversions?: number;
+          revenue?: number;
+          followers_acquired?: number;
+          raw_data?: Json;
+        };
+        Update: Partial<
+          Omit<Database["public"]["Tables"]["prompter_marketing_metrics"]["Insert"], "tenant_id">
+        >;
+        Relationships: [];
+      };
+      prompter_conversions: {
+        Row: {
+          id: string;
+          tenant_id: string;
+          master_campaign_id: string | null;
+          channel_campaign_id: string | null;
+          customer_reference: string | null;
+          order_reference: string | null;
+          source: string;
+          event_type: ConversionEventType;
+          value: number | null;
+          currency: string;
+          occurred_at: string;
+          metadata: Json;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          tenant_id: string;
+          master_campaign_id?: string | null;
+          channel_campaign_id?: string | null;
+          customer_reference?: string | null;
+          order_reference?: string | null;
+          source?: string;
+          event_type: ConversionEventType;
+          value?: number | null;
+          currency?: string;
+          occurred_at?: string;
+          metadata?: Json;
+        };
+        Update: Partial<
+          Omit<Database["public"]["Tables"]["prompter_conversions"]["Insert"], "tenant_id">
+        >;
+        Relationships: [];
+      };
+      prompter_attributions: {
+        Row: {
+          id: string;
+          tenant_id: string;
+          conversion_id: string;
+          master_campaign_id: string | null;
+          channel_campaign_id: string | null;
+          touchpoint_type: string | null;
+          attribution_model: AttributionModel;
+          weight: number;
+          attributed_value: number | null;
+          confidence: number | null;
+          metadata: Json;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          tenant_id: string;
+          conversion_id: string;
+          master_campaign_id?: string | null;
+          channel_campaign_id?: string | null;
+          touchpoint_type?: string | null;
+          attribution_model?: AttributionModel;
+          weight?: number;
+          attributed_value?: number | null;
+          confidence?: number | null;
+          metadata?: Json;
+        };
+        Update: Partial<
+          Omit<
+            Database["public"]["Tables"]["prompter_attributions"]["Insert"],
+            "tenant_id" | "conversion_id"
+          >
         >;
         Relationships: [];
       };
