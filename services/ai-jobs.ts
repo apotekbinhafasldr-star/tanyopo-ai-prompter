@@ -17,7 +17,7 @@ interface RunAiJobParams<T> {
 }
 
 export type RunAiJobResult<T> =
-  | { ok: true; data: T; jobId: string }
+  | { ok: true; data: T; jobId: string; model: string }
   | { ok: false; error: string; jobId: string | null };
 
 /**
@@ -59,7 +59,7 @@ export async function runAiJob<T>(params: RunAiJobParams<T>): Promise<RunAiJobRe
       })
       .eq("id", job.id);
 
-    return { ok: true, data: result.data, jobId: job.id };
+    return { ok: true, data: result.data, jobId: job.id, model: result.model };
   } catch (err) {
     const message = err instanceof Error ? err.message : "AI gagal memproses permintaan.";
 

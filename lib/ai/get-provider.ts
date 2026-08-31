@@ -2,6 +2,7 @@ import "server-only";
 
 import { serverEnv } from "@/lib/env";
 import { AnthropicProvider } from "@/lib/ai/anthropic-provider";
+import { OpenAIProvider } from "@/lib/ai/openai-provider";
 import type { AIProvider } from "@/lib/ai/provider";
 
 /**
@@ -11,19 +12,24 @@ import type { AIProvider } from "@/lib/ai/provider";
  * the "never fake" rule in the product spec (§98).
  */
 export function getAIProvider(): AIProvider | null {
-  if (!serverEnv.aiProviderApiKey) {
-    return null;
-  }
-
-  // "anthropic" is the default provider when a key is set but the vendor
-  // name is left blank — the switch stays here so a second provider can be
-  // added later without changing any call site.
+  // AI_PROVIDER_NAME picks the vendor explicitly. Left blank, it falls back
+  // to whichever vendor-specific key is present — AI_PROVIDER_API_KEY selects
+  // Anthropic (checked first for backward compatibility), OPENAI_API_KEY
+  // selects OpenAI.
   const providerName =
-    serverEnv.aiProviderName === "not_configured" ? "anthropic" : serverEnv.aiProviderName;
+    serverEnv.aiProviderName !== "not_configured"
+      ? serverEnv.aiProviderName
+      : serverEnv.aiProviderApiKey
+        ? "anthropic"
+        : serverEnv.openaiApiKey
+          ? "openai"
+          : "not_configured";
 
   switch (providerName) {
     case "anthropic":
-      return new AnthropicProvider(serverEnv.aiProviderApiKey);
+      return serverEnv.aiProviderApiKey ? new AnthropicProvider(serverEnv.aiProviderApiKey) : null;
+    case "openai":
+      return serverEnv.openaiApiKey ? new OpenAIProvider(serverEnv.openaiApiKey) : null;
     default:
       return null;
   }

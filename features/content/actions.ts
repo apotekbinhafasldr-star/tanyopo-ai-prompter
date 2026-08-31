@@ -36,7 +36,7 @@ export async function generateContentAction(
 
   const provider = getAIProvider();
   if (!provider) {
-    return { error: "AI belum dikonfigurasi. Tambahkan AI_PROVIDER_API_KEY untuk mengaktifkan fitur ini." };
+    return { error: "AI belum dikonfigurasi. Tambahkan AI_PROVIDER_API_KEY atau OPENAI_API_KEY untuk mengaktifkan fitur ini." };
   }
 
   const { data: product, error: productError } = await supabase

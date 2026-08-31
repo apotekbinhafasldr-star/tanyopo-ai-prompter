@@ -186,7 +186,7 @@ export async function generateMarketingBlueprintAction(productId: string): Promi
 
   const provider = getAIProvider();
   if (!provider) {
-    return { error: "AI belum dikonfigurasi. Tambahkan AI_PROVIDER_API_KEY untuk mengaktifkan fitur ini." };
+    return { error: "AI belum dikonfigurasi. Tambahkan AI_PROVIDER_API_KEY atau OPENAI_API_KEY untuk mengaktifkan fitur ini." };
   }
 
   const { data: product, error: productError } = await supabase
@@ -237,7 +237,7 @@ export async function generateMarketingBlueprintAction(productId: string): Promi
       risks: result.data.risks,
       disclaimers: result.data.disclaimers,
       ai_job_id: result.jobId,
-      model: "claude-opus-5",
+      model: result.model,
     },
     { onConflict: "product_id" },
   );
