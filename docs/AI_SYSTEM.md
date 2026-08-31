@@ -11,9 +11,11 @@ interface AIProvider {
 }
 ```
 
-`lib/ai/get-provider.ts#getAIProvider()` returns the configured implementation or `null`. `serverEnv.aiProviderApiKey` (see `lib/env.ts`) gates this — with no key set, every AI-powered action returns `null` and the caller must show that as a plain "AI belum dikonfigurasi" state, never fabricated output. `serverEnv.aiProviderName` selects the implementation and defaults to `"anthropic"` when a key is present but the name is left blank.
+`lib/ai/get-provider.ts#getAIProvider()` returns the configured implementation or `null`. With no vendor key set, every AI-powered action returns `null` and the caller must show that as a plain "AI belum dikonfigurasi" state, never fabricated output. `serverEnv.aiProviderName` selects the implementation explicitly; left blank, it falls back to whichever vendor key is present (`AI_PROVIDER_API_KEY` → Anthropic, checked first for backward compatibility; `OPENAI_API_KEY` → OpenAI).
 
-**Implemented:** `lib/ai/anthropic-provider.ts` — Claude Opus 5 (`claude-opus-5`) via the official `@anthropic-ai/sdk`, using `client.messages.parse()` with `zodOutputFormat()` for structured output. Errors are classified most-specific-first (`AuthenticationError` → `RateLimitError` → `APIConnectionError` → `APIError`) into human-readable messages before reaching the UI; a `stop_reason: "refusal"` is surfaced as a clear "AI menolak membuat konten ini" rather than an opaque failure.
+**Implemented:**
+- `lib/ai/anthropic-provider.ts` — Claude Opus 5 (`claude-opus-5`) via the official `@anthropic-ai/sdk`, using `client.messages.parse()` with `zodOutputFormat()` for structured output. Errors are classified most-specific-first (`AuthenticationError` → `RateLimitError` → `APIConnectionError` → `APIError`) into human-readable messages before reaching the UI; a `stop_reason: "refusal"` is surfaced as a clear "AI menolak membuat konten ini" rather than an opaque failure.
+- `lib/ai/openai-provider.ts` — GPT-5.1 (`gpt-5.1`) via the official `openai` SDK, using `client.chat.completions.parse()` with `zodResponseFormat()` for structured output. Same most-specific-first error classification and refusal handling as the Anthropic provider.
 
 Swapping or adding a provider means adding a new `lib/ai/*-provider.ts` file and a case in `get-provider.ts` — no feature code changes.
 
@@ -59,4 +61,4 @@ Any AI insight or metric shown without real underlying data must be visibly labe
 
 ## Current state (Phase 1)
 
-Anthropic is the only implemented provider. Marketing Blueprint generation, Promote Wizard campaign proposals, and Content Studio generation are live end-to-end when `AI_PROVIDER_API_KEY` is configured. Image generation/analysis, the remaining eight agent roles, and cost estimation are not yet built.
+Anthropic and OpenAI are both implemented. Marketing Blueprint generation, Promote Wizard campaign proposals, and Content Studio generation are live end-to-end when either `AI_PROVIDER_API_KEY` or `OPENAI_API_KEY` is configured. Image generation/analysis, the remaining eight agent roles, and cost estimation are not yet built.

@@ -34,6 +34,7 @@ export const serverEnv = {
   supabaseSecretKey: readOptional("SUPABASE_SECRET_KEY"),
   aiProviderApiKey: readOptional("AI_PROVIDER_API_KEY"),
   aiProviderName: process.env.AI_PROVIDER_NAME ?? "not_configured",
+  openaiApiKey: readOptional("OPENAI_API_KEY"),
   meta: {
     appId: readOptional("META_APP_ID"),
     appSecret: readOptional("META_APP_SECRET"),
