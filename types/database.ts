@@ -88,6 +88,7 @@ export type ConversionEventType =
 export type AttributionModel = "LAST_CLICK" | "FIRST_CLICK" | "MANUAL" | "UMKMPRO_VERIFIED";
 export type SubscriptionPlan = "FREE" | "PRO" | "BUSINESS" | "GROWTH" | "AGENCY" | "UMKMPRO_BUNDLE";
 export type SubscriptionStatus = "ACTIVE" | "TRIALING" | "PAST_DUE" | "CANCELED";
+export type InvoiceStatus = "DRAFT" | "OPEN" | "PAID" | "VOID" | "UNCOLLECTIBLE";
 export type HandoffStatus = "PENDING" | "CONSUMED" | "EXPIRED";
 export type WebhookEventStatus = "RECEIVED" | "PROCESSED" | "FAILED" | "IGNORED";
 
@@ -546,6 +547,40 @@ export interface Database {
         Update: Partial<
           Omit<Database["public"]["Tables"]["prompter_subscriptions"]["Insert"], "tenant_id">
         >;
+        Relationships: [];
+      };
+      prompter_invoices: {
+        Row: {
+          id: string;
+          tenant_id: string;
+          provider: string | null;
+          external_invoice_id: string | null;
+          status: InvoiceStatus;
+          amount: number | null;
+          currency: string;
+          description: string | null;
+          period_start: string | null;
+          period_end: string | null;
+          issued_at: string | null;
+          paid_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          tenant_id: string;
+          provider?: string | null;
+          external_invoice_id?: string | null;
+          status?: InvoiceStatus;
+          amount?: number | null;
+          currency?: string;
+          description?: string | null;
+          period_start?: string | null;
+          period_end?: string | null;
+          issued_at?: string | null;
+          paid_at?: string | null;
+        };
+        Update: Partial<Omit<Database["public"]["Tables"]["prompter_invoices"]["Insert"], "tenant_id">>;
         Relationships: [];
       };
       prompter_channel_campaigns: {

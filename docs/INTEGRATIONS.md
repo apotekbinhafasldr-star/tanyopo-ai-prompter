@@ -79,6 +79,25 @@ Every route follows the same shape (`lib/umkmpro/route-helpers.ts#authorizeUmkmp
 
 Two pre-existing gaps had to be fixed for this to work for a visitor not already logged into Promoter: `proxy.ts` was dropping the query string in its post-login `next` redirect param (fixed — now preserves `pathname + search`), and `loginAction` always redirected to `/dashboard` regardless of `next` (fixed — now redirects to a validated same-origin `next` path, defaulting to `/dashboard`). **Known remaining gap:** a first-time UMKMpro user who hasn't completed Promoter's own `/onboarding` yet will be routed there first, and the `next=/promote?handoff=...` param doesn't currently survive that hop — the handoff will have expired (30 minutes) by the time onboarding is done in the realistic case, showing the expired-link message rather than silently failing.
 
+## Payment provider architecture (Final Blocker Resolution pass)
+
+Same discipline as the ad-platform connectors: one vendor-neutral interface (`lib/billing/payment-provider.ts#PaymentProvider`), resolved through a single choke point (`lib/billing/get-payment-provider.ts#getPaymentProvider()`) so nothing else in the app ever picks a processor itself.
+
+```ts
+interface PaymentProvider {
+  readonly name: string;
+  isConfigured(): boolean;
+  createCheckoutSession(input): Promise<CheckoutSessionResult>;
+  getSubscriptionStatus(externalSubscriptionId): Promise<RemoteSubscriptionStatus>;
+  cancelSubscription(externalSubscriptionId): Promise<void>;
+  verifyWebhookSignature(rawBody, signatureHeader): boolean;
+}
+```
+
+Today `getPaymentProvider()` always returns `NullPaymentProvider` — every method throws `PaymentProviderConfigError` (or, for `verifyWebhookSignature`, returns `false`) rather than simulating a checkout, a subscription status, or a passing signature check. No real adapter (Stripe/Midtrans/Xendit/...) exists yet; one plugs in behind this same interface once a processor is chosen, driven by `PAYMENT_PROVIDER_NAME`/`PAYMENT_PROVIDER_API_KEY`/`PAYMENT_PROVIDER_WEBHOOK_SECRET` (all blank today — see `.env.example`).
+
+Supporting schema (`prompter_subscriptions`, `prompter_invoices`) and the `/billing` page already exist and read/write real data — see [ROADMAP.md](ROADMAP.md) "Billing foundation" and "Payment provider abstraction". Absence of a configured processor does not block any other part of the app: `/billing` renders an honest "not configured" state, and plan changes still work as a pure governance/usage-gating change (no proration, no charge) until a real processor exists to actually bill one.
+
 ## Current state (Phase 7)
 
 Meta, TikTok, and X connectors and OAuth flows are all implemented and structurally complete but unverified against a live ad account on any of the three (see above) — `/connections` renders real Connect/Disconnect flows for all three, gated by each connector's own `isConfigured()`. UMKMpro AI integration is implemented and its signed-authentication layer was verified against a real running local server (see [ROADMAP.md](ROADMAP.md) Phase 4 for what was and wasn't exercisable in this environment). As of Phase 7, `getInsights`, `pauseCampaign`, and `updateBudget` are wired to real UI-triggered actions (metrics sync, and Owner-approved autopilot execution) for the first time — see [ROADMAP.md](ROADMAP.md) Phase 7 and [SECURITY.md](SECURITY.md) "Automation safety" for the approval/Budget Guard/Emergency Stop boundaries around when `pauseCampaign`/`updateBudget` are actually allowed to run.

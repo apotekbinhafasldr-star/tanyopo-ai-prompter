@@ -72,6 +72,24 @@ export const serverEnv = {
   umkmpro: {
     serviceToken: readOptional("UMKMPRO_SERVICE_TOKEN"),
   },
+  // No specific processor is wired in yet (lib/billing/get-payment-provider.ts
+  // always returns NullPaymentProvider today) — these are generic,
+  // provider-neutral names a future adapter reads, not any one vendor's
+  // own env var convention. All three unset (the only state today) means
+  // billing_provider/success_fee_rate_bps stay NOT_CONFIGURED.
+  payment: {
+    providerName: readOptional("PAYMENT_PROVIDER_NAME"),
+    apiKey: readOptional("PAYMENT_PROVIDER_API_KEY"),
+    webhookSecret: readOptional("PAYMENT_PROVIDER_WEBHOOK_SECRET"),
+  },
+  jobs: {
+    // Bearer secret app/api/internal/jobs/process/route.ts requires.
+    // Unset = the endpoint always responds NOT_CONFIGURED, regardless of
+    // what calls it — there is no external scheduler wired to call it in
+    // this environment either, so production queue execution stays
+    // NOT_CONFIGURED end-to-end until both exist.
+    processorSecret: readOptional("JOBS_PROCESSOR_SECRET"),
+  },
 };
 
 /** True when every credential a connector needs to operate is present. */

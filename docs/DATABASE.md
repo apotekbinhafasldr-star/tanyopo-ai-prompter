@@ -197,7 +197,15 @@ One existing table also changed: `prompter_ai_jobs.job_type`'s CHECK constraint 
 |---|---|---|
 | `prompter_subscriptions` | One row per tenant (PK `tenant_id`, lazily created as `FREE`/`ACTIVE` — same pattern as `prompter_budget_policies`). `billing_provider` and `success_fee_rate_bps` are both nullable and stay `null` until a real payment processor and commercial success-fee rate are chosen — no code path sets either today. See [ROADMAP.md](ROADMAP.md) "Billing foundation". | **Owner only** for updates; every tenant member can read their own tenant's row |
 
-No other table changed for this pass, except that `prompter_attributions` (schema-only since Phase 2) is now actually written to by `services/attribution.ts#recordSingleTouchAttribution()` — no schema change, just the first application code that populates it.
+`prompter_attributions` (schema-only since Phase 2) is also now actually written to by `services/attribution.ts#recordSingleTouchAttribution()` — no schema change, just the first application code that populates it.
+
+## Payment provider abstraction (Final Blocker Resolution pass)
+
+| Table | Purpose | Write access |
+|---|---|---|
+| `prompter_invoices` | Per-tenant invoice records. `provider`/`external_invoice_id`/`amount` are all null until a real payment processor issues one — structure only, no fabricated data. Unique on `(provider, external_invoice_id)` for idempotent webhook redelivery once a provider exists. | Select-only from the app (tenant-scoped); every row is written by the service-role client from a verified payment-provider webhook, same pattern as `prompter_product_snapshots` |
+
+See [INTEGRATIONS.md](INTEGRATIONS.md) "Payment provider architecture" for `lib/billing/payment-provider.ts`.
 
 ## Architecture correction — AI Router usage-accounting columns
 

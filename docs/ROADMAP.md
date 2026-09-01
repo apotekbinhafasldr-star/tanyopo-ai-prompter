@@ -158,6 +158,17 @@ Attribution write path (`services/attribution.ts#recordSingleTouchAttribution()`
 
 Budget Guard's `monthly_limit` also went from stored-but-unenforced to a real hard-stop in this same pass — see Phase 2's updated note above. `prompter_budget_policies` still has no platform-scoped columns, so **per-platform limits remain unimplemented** — a real, documented gap.
 
+## Payment provider abstraction (Final Blocker Resolution pass)
+
+Extends the billing foundation above with the pieces needed to make "no payment processor chosen yet" an architecture-level non-blocker rather than an unfinished corner:
+
+- `lib/billing/payment-provider.ts#PaymentProvider` + `NullPaymentProvider` + `getPaymentProvider()` — see [INTEGRATIONS.md](INTEGRATIONS.md) "Payment provider architecture" for the full shape. Unit tested (`tests/unit/lib/null-payment-provider.test.ts`): every method either throws `PaymentProviderConfigError` or (webhook verification) fails closed, never simulates success.
+- `prompter_invoices` (new migration, tenant-scoped, select-only from the app — every row would be written by a real processor's webhook, none exists yet so the table is empty in practice) + `/billing`'s new Invoice card, rendering a real (currently empty) list rather than a placeholder.
+- `/billing` gained a real plan-change form (`features/billing/actions.ts#changePlanAction`, `features/billing/plan-form.tsx`) — Owner-only, audit-logged (`subscription.plan_changed`), and explicitly labeled as a governance change only ("tidak ada tagihan atau proration yang diproses") since no processor is connected to actually bill anything.
+- `PAYMENT_PROVIDER_NAME`/`PAYMENT_PROVIDER_API_KEY`/`PAYMENT_PROVIDER_WEBHOOK_SECRET` added to `lib/env.ts`/`.env.example` — generic, provider-neutral names a future adapter reads, all blank today.
+
+**What this does not do:** integrate any real processor, invent a price, or process a real payment. That remains explicitly out of scope until a processor is chosen — this pass only makes sure that choice doesn't block anything else.
+
 ## What "done" means for a phase
 
 - `npm run lint`, `npm run typecheck`, `npm run test`, `npm run build` all pass

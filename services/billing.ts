@@ -1,9 +1,10 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Database } from "@/types/database";
+import type { Database, InvoiceStatus, SubscriptionPlan } from "@/types/database";
 
 type Subscription = Database["public"]["Tables"]["prompter_subscriptions"]["Row"];
+type Invoice = Database["public"]["Tables"]["prompter_invoices"]["Row"];
 
 const DEFAULT_SUBSCRIPTION: Omit<Subscription, "tenant_id"> = {
   plan: "FREE",
@@ -93,4 +94,97 @@ export async function getVerifiedAttributedValueThisMonth(
 
   if (error || !data) return 0;
   return data.reduce((sum, row) => sum + Number(row.attributed_value ?? 0), 0);
+}
+
+/** Real invoice rows for the tenant — empty until a real payment provider
+ * actually issues one. Never a fabricated row. */
+export async function listInvoices(
+  supabase: SupabaseClient<Database>,
+  tenantId: string,
+  limit = 20,
+): Promise<Invoice[]> {
+  const { data } = await supabase
+    .from("prompter_invoices")
+    .select("*")
+    .eq("tenant_id", tenantId)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  return data ?? [];
+}
+
+/**
+ * Idempotent upsert for a real payment provider's invoice payload,
+ * keyed on (provider, external_invoice_id) — a webhook redelivery
+ * updates the same row (e.g. DRAFT -> PAID) rather than creating a
+ * duplicate. Not called by anything yet (no provider is integrated),
+ * ready for the payment webhook route a real adapter will add.
+ */
+export async function recordInvoiceFromProvider(
+  admin: SupabaseClient<Database>,
+  tenantId: string,
+  input: {
+    provider: string;
+    externalInvoiceId: string;
+    status: InvoiceStatus;
+    amount: number | null;
+    currency: string;
+    description?: string | null;
+    periodStart?: string | null;
+    periodEnd?: string | null;
+    issuedAt?: string | null;
+    paidAt?: string | null;
+  },
+): Promise<{ invoiceId: string }> {
+  const { data, error } = await admin
+    .from("prompter_invoices")
+    .upsert(
+      {
+        tenant_id: tenantId,
+        provider: input.provider,
+        external_invoice_id: input.externalInvoiceId,
+        status: input.status,
+        amount: input.amount,
+        currency: input.currency,
+        description: input.description ?? null,
+        period_start: input.periodStart ?? null,
+        period_end: input.periodEnd ?? null,
+        issued_at: input.issuedAt ?? null,
+        paid_at: input.paidAt ?? null,
+      },
+      { onConflict: "provider,external_invoice_id" },
+    )
+    .select("id")
+    .single();
+
+  if (error || !data) {
+    throw new Error(error?.message ?? "Gagal menyimpan invoice.");
+  }
+
+  return { invoiceId: data.id };
+}
+
+/**
+ * Owner-only plan change. Only ever changes the *stored* plan tier —
+ * there is no payment provider configured to actually charge a proration
+ * or new price, so this is a governance/usage-gating change today, not a
+ * billing event. A real checkout (lib/billing/payment-provider.ts) will
+ * drive this via a webhook once a provider exists, same as everywhere
+ * else in this app: the write path already exists, only the trigger
+ * changes later.
+ */
+export async function changePlan(
+  supabase: SupabaseClient<Database>,
+  tenantId: string,
+  plan: SubscriptionPlan,
+): Promise<{ error: string | null }> {
+  const { error } = await supabase
+    .from("prompter_subscriptions")
+    .upsert({ tenant_id: tenantId, plan });
+
+  if (error) {
+    return { error: "Gagal mengubah paket." };
+  }
+
+  return { error: null };
 }
