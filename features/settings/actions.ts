@@ -5,7 +5,8 @@ import { createClient } from "@/lib/supabase/server";
 import { requireSessionContext } from "@/services/session";
 import { budgetPolicySchema } from "@/schemas/budget";
 import { globalPreferencesSchema } from "@/schemas/global-preferences";
-import type { AutomationMode, AutopilotPolicyType, FeatureFlagKey } from "@/types/database";
+import { COMPLIANCE_FLAG_TYPES } from "@/services/compliance";
+import type { AutomationMode, AutopilotPolicyType, ComplianceFlagType, ComplianceStatus, FeatureFlagKey } from "@/types/database";
 
 export interface SettingsActionState {
   error: string | null;
@@ -301,5 +302,66 @@ export async function toggleFeatureFlagAction(
 
   revalidatePath("/settings");
   revalidatePath("/connections");
+  return { error: null };
+}
+
+/**
+ * Sets one compliance readiness flag's status (product spec §16) —
+ * never a "fully compliant" assertion, just one of the four honest
+ * statuses. Global scope only (market_country_code null) in this pass.
+ * Owner-only, same governance tier as Budget Guard settings, since this
+ * carries real legal-readiness signal for the business.
+ */
+export async function updateComplianceFlagAction(
+  _prevState: SettingsActionState,
+  formData: FormData,
+): Promise<SettingsActionState> {
+  const session = await requireSessionContext({ allowIncompleteOnboarding: true });
+
+  if (session.role !== "owner") {
+    return { error: "Hanya Owner yang dapat mengubah status compliance." };
+  }
+
+  const flagType = formData.get("flagType");
+  const status = formData.get("status");
+  const notes = formData.get("notes");
+  const url = formData.get("url");
+
+  if (typeof flagType !== "string" || !COMPLIANCE_FLAG_TYPES.includes(flagType as ComplianceFlagType)) {
+    return { error: "Jenis compliance tidak valid." };
+  }
+  const validStatuses: ComplianceStatus[] = ["COMPLIANCE_REVIEW_REQUIRED", "SUPPORTED", "RESTRICTED", "NOT_CONFIGURED"];
+  if (typeof status !== "string" || !validStatuses.includes(status as ComplianceStatus)) {
+    return { error: "Status tidak valid." };
+  }
+
+  const supabase = await createClient();
+
+  const { error } = await supabase.from("prompter_compliance_flags").upsert(
+    {
+      tenant_id: session.tenantId,
+      market_country_code: "",
+      flag_type: flagType as ComplianceFlagType,
+      status: status as ComplianceStatus,
+      notes: typeof notes === "string" && notes.trim() ? notes.trim() : null,
+      url: typeof url === "string" && url.trim() ? url.trim() : null,
+    },
+    { onConflict: "tenant_id,market_country_code,flag_type" },
+  );
+
+  if (error) {
+    return { error: "Gagal menyimpan status compliance." };
+  }
+
+  await supabase.from("prompter_audit_logs").insert({
+    tenant_id: session.tenantId,
+    actor_user_id: session.userId,
+    action: "compliance_flag.updated",
+    resource_type: "prompter_compliance_flags",
+    resource_id: null,
+    context: { flag_type: flagType, status },
+  });
+
+  revalidatePath("/settings");
   return { error: null };
 }

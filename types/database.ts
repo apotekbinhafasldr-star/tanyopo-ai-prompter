@@ -649,7 +649,8 @@ export interface Database {
         Row: {
           id: string;
           tenant_id: string;
-          market_country_code: string | null;
+          /** '' means "applies to every market this tenant targets" — never NULL. */
+          market_country_code: string;
           flag_type: ComplianceFlagType;
           status: ComplianceStatus;
           notes: string | null;
@@ -660,7 +661,7 @@ export interface Database {
         Insert: {
           id?: string;
           tenant_id: string;
-          market_country_code?: string | null;
+          market_country_code?: string;
           flag_type: ComplianceFlagType;
           status?: ComplianceStatus;
           notes?: string | null;

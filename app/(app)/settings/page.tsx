@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { User, Building2, ShieldCheck, Bot, Globe } from "lucide-react";
+import { User, Building2, ShieldCheck, Bot, Globe, ShieldAlert } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { requireSessionContext } from "@/services/session";
@@ -12,9 +12,11 @@ import { EmergencyStopButton } from "@/features/settings/emergency-stop-button";
 import { AutopilotPolicyToggles } from "@/features/settings/autopilot-policy-toggles";
 import { GlobalPreferencesForm } from "@/features/settings/global-preferences-form";
 import { FeatureFlagToggles } from "@/features/settings/feature-flag-toggles";
+import { ComplianceFlagsForm } from "@/features/settings/compliance-flags-form";
 import { getDictionary } from "@/lib/i18n/dictionary";
 import { DEFAULT_LOCALE } from "@/lib/i18n/config";
 import { getFeatureFlags } from "@/lib/feature-flags";
+import { listComplianceFlags } from "@/services/compliance";
 
 export const metadata: Metadata = { title: "Settings — Tanyopo AI Promoter" };
 
@@ -31,21 +33,28 @@ export default async function SettingsPage() {
   const session = await requireSessionContext({ allowIncompleteOnboarding: true });
   const supabase = await createClient();
 
-  const [budgetPolicy, automationSettings, { data: autopilotPolicies }, { data: brandProfile }, featureFlags] =
-    await Promise.all([
-      getOrCreateBudgetPolicy(supabase, session.tenantId),
-      getOrCreateAutomationSettings(supabase, session.tenantId),
-      supabase
-        .from("prompter_autopilot_policies")
-        .select("policy_type, enabled")
-        .eq("tenant_id", session.tenantId),
-      supabase
-        .from("prompter_brand_profiles")
-        .select("country_code, default_language, default_timezone, default_currency")
-        .eq("tenant_id", session.tenantId)
-        .maybeSingle(),
-      getFeatureFlags(supabase, session.tenantId),
-    ]);
+  const [
+    budgetPolicy,
+    automationSettings,
+    { data: autopilotPolicies },
+    { data: brandProfile },
+    featureFlags,
+    complianceFlags,
+  ] = await Promise.all([
+    getOrCreateBudgetPolicy(supabase, session.tenantId),
+    getOrCreateAutomationSettings(supabase, session.tenantId),
+    supabase
+      .from("prompter_autopilot_policies")
+      .select("policy_type, enabled")
+      .eq("tenant_id", session.tenantId),
+    supabase
+      .from("prompter_brand_profiles")
+      .select("country_code, default_language, default_timezone, default_currency")
+      .eq("tenant_id", session.tenantId)
+      .maybeSingle(),
+    getFeatureFlags(supabase, session.tenantId),
+    listComplianceFlags(supabase, session.tenantId),
+  ]);
 
   const dictionary = await getDictionary(session.locale);
   const isOwner = session.role === "owner";
@@ -160,6 +169,23 @@ export default async function SettingsPage() {
               readOnly={!isOwner}
             />
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center gap-2 space-y-0">
+          <ShieldAlert className="size-4 text-muted-foreground" aria-hidden />
+          <CardTitle>Compliance Readiness</CardTitle>
+          <CardDescription className="sr-only">
+            Status kesiapan compliance per area — bukan jaminan kepatuhan penuh
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="pt-4">
+          <p className="mb-3 text-xs text-muted-foreground">
+            Status ini adalah metadata kesiapan yang Anda tetapkan sendiri — bukan penilaian hukum otomatis dari
+            AI atau sistem. &quot;Belum Dikonfigurasi&quot; secara default untuk setiap area.
+          </p>
+          <ComplianceFlagsForm flags={complianceFlags} readOnly={!isOwner} />
         </CardContent>
       </Card>
 
