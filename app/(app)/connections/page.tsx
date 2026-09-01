@@ -126,7 +126,7 @@ export default async function ConnectionsPage({
           title="Website"
           subtitle="SEO & tracking"
           status="NOT_AVAILABLE"
-          note="Direncanakan Phase 5 (SEO)."
+          note="Website bukan koneksi OAuth — kelola rekomendasi SEO untuk situs Anda di halaman SEO."
         />
 
         <PlaceholderCard

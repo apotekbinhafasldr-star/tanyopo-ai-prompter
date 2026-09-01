@@ -12,6 +12,9 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "."),
+      // See tests/unit/stubs/server-only.ts — the real package throws
+      // outside Next's "react-server" bundler condition.
+      "server-only": path.resolve(__dirname, "tests/unit/stubs/server-only.ts"),
     },
   },
 });
