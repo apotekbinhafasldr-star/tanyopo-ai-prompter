@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { requireSessionContext } from "@/services/session";
 import { createClient } from "@/lib/supabase/server";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
+import { sumByCurrency } from "@/lib/fx/convert";
 import { ConversionForm } from "@/features/analytics/conversion-form";
 import { GenerateInsightButton } from "@/features/analytics/generate-insight-button";
 
@@ -49,7 +50,14 @@ export default async function AnalyticsPage() {
   ]);
 
   const campaignNameById = new Map((campaigns ?? []).map((c) => [c.id, c.name]));
-  const totalConversionValue = (conversions ?? []).reduce((sum, c) => sum + (c.value ?? 0), 0);
+  // Grouped by currency, never summed across currencies (product spec
+  // §13) — no FX provider is configured, so a blind sum across e.g. IDR
+  // and USD conversions would silently misreport the total.
+  const conversionTotalsByCurrency = sumByCurrency(
+    conversions ?? [],
+    (c) => c.currency,
+    (c) => c.value,
+  );
   const hasRealMetrics = (metrics ?? []).length > 0;
   const hasAnyData = hasRealMetrics || (conversions ?? []).length > 0;
   const trends = (insight?.trends as { metric: string; observation: string; direction: string }[] | undefined) ?? [];
@@ -158,8 +166,14 @@ export default async function AnalyticsPage() {
             <TrendingUp className="size-4 text-muted-foreground" aria-hidden />
             <CardTitle>Konversi</CardTitle>
           </div>
-          {conversions && conversions.length > 0 ? (
-            <Badge variant="brand">{formatCurrency(totalConversionValue)} tercatat</Badge>
+          {conversionTotalsByCurrency.length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {conversionTotalsByCurrency.map(({ currency, total }) => (
+                <Badge key={currency} variant="brand">
+                  {formatCurrency(total, currency, session.locale)} tercatat
+                </Badge>
+              ))}
+            </div>
           ) : null}
         </CardHeader>
         <CardContent className="flex flex-col gap-6 pt-4">

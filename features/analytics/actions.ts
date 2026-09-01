@@ -8,6 +8,7 @@ import { AnalyticsInsightSchema } from "@/schemas/ai/analytics-insight";
 import { buildSystemPreamble, buildAnalyticsInsightPrompt } from "@/lib/ai/prompts";
 import { runAiJob } from "@/services/ai-jobs";
 import { recordSingleTouchAttribution } from "@/services/attribution";
+import { sumByCurrency } from "@/lib/fx/convert";
 import type { ConversionEventType, Json } from "@/types/database";
 
 export interface AnalyticsActionState {
@@ -91,7 +92,7 @@ export async function generateAnalyticsInsightAction(): Promise<AnalyticsActionS
       .from("prompter_marketing_metrics")
       .select("platform, spend, impressions, clicks, reach")
       .eq("tenant_id", session.tenantId),
-    supabase.from("prompter_conversions").select("event_type, value").eq("tenant_id", session.tenantId),
+    supabase.from("prompter_conversions").select("event_type, value, currency").eq("tenant_id", session.tenantId),
   ]);
 
   if ((metrics?.length ?? 0) === 0 && (conversions?.length ?? 0) === 0) {
@@ -109,18 +110,23 @@ export async function generateAnalyticsInsightAction(): Promise<AnalyticsActionS
   }
   const channelMetrics = Array.from(channelAgg.entries()).map(([channel, agg]) => ({ channel, ...agg }));
 
-  const conversionAgg = new Map<string, { value: number; count: number }>();
+  // Keyed by event_type + currency together — never summed across
+  // currencies (product spec §13), since a tenant with both IDR and USD
+  // conversions must not have those silently added into one number.
+  const conversionAgg = new Map<string, { eventType: string; currency: string; value: number; count: number }>();
   for (const c of conversions ?? []) {
-    const agg = conversionAgg.get(c.event_type) ?? { value: 0, count: 0 };
+    const key = `${c.event_type}:${c.currency}`;
+    const agg = conversionAgg.get(key) ?? { eventType: c.event_type, currency: c.currency, value: 0, count: 0 };
     agg.value += c.value ?? 0;
     agg.count += 1;
-    conversionAgg.set(c.event_type, agg);
+    conversionAgg.set(key, agg);
   }
-  const conversionsSummary = Array.from(conversionAgg.entries()).map(([eventType, agg]) => ({
-    eventType,
-    ...agg,
-  }));
-  const totalConversionValue = conversionsSummary.reduce((sum, c) => sum + c.value, 0);
+  const conversionsSummary = Array.from(conversionAgg.values());
+  const totalConversionValueByCurrency = sumByCurrency(
+    conversions ?? [],
+    (c) => c.currency,
+    (c) => c.value,
+  );
 
   const { data: brandProfile } = await supabase
     .from("prompter_brand_profiles")
@@ -135,7 +141,11 @@ export async function generateAnalyticsInsightAction(): Promise<AnalyticsActionS
     jobType: "ANALYTICS_INSIGHT",
     schema: AnalyticsInsightSchema,
     system: buildSystemPreamble(brandProfile),
-    prompt: buildAnalyticsInsightPrompt({ channelMetrics, conversions: conversionsSummary, totalConversionValue }),
+    prompt: buildAnalyticsInsightPrompt({
+      channelMetrics,
+      conversions: conversionsSummary,
+      totalConversionValueByCurrency,
+    }),
     inputReference: { channel_count: channelMetrics.length, conversion_row_count: conversions?.length ?? 0 },
   });
 
