@@ -50,4 +50,39 @@ describe("checkBudgetGuard", () => {
     });
     expect(result.allowed).toBe(true);
   });
+
+  it("rejects when month-to-date spend plus this campaign's projected remaining-month cost exceeds the monthly limit", () => {
+    // Reference date: 2026-06-25 — 6 days remain in June (25,26,27,28,29,30).
+    const referenceDate = new Date(Date.UTC(2026, 5, 25));
+    const result = checkBudgetGuard(makePolicy({ monthly_limit: 1_000_000 }), {
+      dailyBudget: 200_000,
+      totalBudget: null,
+      monthToDateSpend: 500_000,
+      referenceDate,
+    });
+    // 500_000 already spent + 200_000 * 6 remaining days = 1_700_000 > 1_000_000.
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toMatch(/bulanan/i);
+  });
+
+  it("allows when month-to-date spend plus projected remaining-month cost stays within the monthly limit", () => {
+    const referenceDate = new Date(Date.UTC(2026, 5, 25));
+    const result = checkBudgetGuard(makePolicy({ monthly_limit: 5_000_000 }), {
+      dailyBudget: 200_000,
+      totalBudget: null,
+      monthToDateSpend: 500_000,
+      referenceDate,
+    });
+    expect(result.allowed).toBe(true);
+  });
+
+  it("treats an omitted month-to-date spend as zero rather than skipping the check", () => {
+    const referenceDate = new Date(Date.UTC(2026, 5, 30));
+    const result = checkBudgetGuard(makePolicy({ monthly_limit: 100_000 }), {
+      dailyBudget: null,
+      totalBudget: 200_000,
+      referenceDate,
+    });
+    expect(result.allowed).toBe(false);
+  });
 });

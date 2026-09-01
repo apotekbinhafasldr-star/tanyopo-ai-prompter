@@ -8,7 +8,7 @@ import { CampaignProposalSchema } from "@/schemas/ai/campaign-proposal";
 import { buildSystemPreamble, buildCampaignProposalPrompt } from "@/lib/ai/prompts";
 import { runAiJob } from "@/services/ai-jobs";
 import { syncChannelCampaigns, setChannelCampaignsStatus } from "@/services/channel-campaigns";
-import { getOrCreateBudgetPolicy, checkBudgetGuard } from "@/services/budget-guard";
+import { getOrCreateBudgetPolicy, getMonthToDateSpend, checkBudgetGuard } from "@/services/budget-guard";
 import type { Json } from "@/types/database";
 
 export interface CampaignActionState {
@@ -193,9 +193,11 @@ export async function submitForApprovalAction(campaignId: string): Promise<Campa
   }
 
   const policy = await getOrCreateBudgetPolicy(supabase, session.tenantId);
+  const monthToDateSpend = await getMonthToDateSpend(supabase, session.tenantId);
   const guardResult = checkBudgetGuard(policy, {
     dailyBudget: campaign.daily_budget,
     totalBudget: campaign.total_budget,
+    monthToDateSpend,
   });
 
   if (!guardResult.allowed) {

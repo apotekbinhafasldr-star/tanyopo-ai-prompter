@@ -47,3 +47,32 @@ export async function getOrCreateBudgetPolicy(
 
   return created ?? { tenant_id: tenantId, ...DEFAULT_POLICY };
 }
+
+/**
+ * Sums real recorded spend (prompter_marketing_metrics.spend — only ever
+ * written by a connector syncing actual platform data, never fabricated)
+ * for the tenant since the 1st of the current calendar month. Feeds
+ * checkBudgetGuard()'s monthly hard-stop so it's checked against actual
+ * cumulative spend, not just the shape of the campaign being submitted.
+ * Returns 0 (never throws) on a query error — the monthly check then
+ * degrades to "this campaign's own projected contribution only", which is
+ * still strictly safer than skipping the check entirely.
+ */
+export async function getMonthToDateSpend(
+  supabase: SupabaseClient<Database>,
+  tenantId: string,
+  referenceDate: Date = new Date(),
+): Promise<number> {
+  const monthStart = new Date(referenceDate.getFullYear(), referenceDate.getMonth(), 1)
+    .toISOString()
+    .slice(0, 10);
+
+  const { data, error } = await supabase
+    .from("prompter_marketing_metrics")
+    .select("spend")
+    .eq("tenant_id", tenantId)
+    .gte("date", monthStart);
+
+  if (error || !data) return 0;
+  return data.reduce((sum, row) => sum + Number(row.spend ?? 0), 0);
+}

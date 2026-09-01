@@ -8,7 +8,7 @@ import { runAiJob } from "@/services/ai-jobs";
 import { OptimizationRecommendationSchema, type OptimizationRecommendation } from "@/schemas/ai/optimization-recommendation";
 import { computeProfitEstimate } from "@/lib/profit-estimate";
 import { checkBudgetGuard } from "@/lib/budget-guard";
-import { getOrCreateBudgetPolicy } from "@/services/budget-guard";
+import { getOrCreateBudgetPolicy, getMonthToDateSpend } from "@/services/budget-guard";
 import { policyTypeForAction } from "@/lib/autopilot-policy";
 import type { Channel, Json, OptimizationActionType, RiskLevel } from "@/types/database";
 
@@ -273,7 +273,12 @@ async function submitRecommendationCore(
 
   if ((actionType === "INCREASE_BUDGET" || actionType === "DECREASE_BUDGET") && suggestedDailyBudget !== null) {
     const policy = await getOrCreateBudgetPolicy(supabase, tenantId);
-    const guardResult = checkBudgetGuard(policy, { dailyBudget: suggestedDailyBudget, totalBudget: null });
+    const monthToDateSpend = await getMonthToDateSpend(supabase, tenantId);
+    const guardResult = checkBudgetGuard(policy, {
+      dailyBudget: suggestedDailyBudget,
+      totalBudget: null,
+      monthToDateSpend,
+    });
     if (!guardResult.allowed) {
       return { error: `Ditolak oleh Budget Guard: ${guardResult.reason}` };
     }

@@ -45,7 +45,7 @@ Development proceeds phase by phase. A phase is not started until the previous o
 - `prompter_attributions` is schema-only — nothing writes to it yet (no attribution model is computed until real conversion data exists)
 - Approval Center only handles `CAMPAIGN_LAUNCH`; the other approval types in the schema (`BUDGET_CHANGE`, `CAMPAIGN_SCALE`, `CONTENT_PUBLISH`, `AUTOPILOT_ACTION`) have no feature behind them yet
 - Conversions are manual-entry only — no ad-platform conversion API or UMKMpro conversion bridge (Phase 4)
-- Budget Guard checks `daily_limit`/`campaign_limit` only; `monthly_limit`, `require_approval_above`, and `autopilot_limit` are stored but not yet enforced
+- Budget Guard checks `daily_limit`, `campaign_limit`, and `monthly_limit` (the last as a projection — real month-to-date `prompter_marketing_metrics` spend plus this campaign's remaining-month contribution, vs. the limit); `require_approval_above` and `autopilot_limit` are stored but not yet enforced. There is still no per-platform limit — `prompter_budget_policies` has no platform-scoped columns, a real gap against the product spec's "per-platform limits" requirement, and would need a schema migration to add.
 
 ## Phase 3 — Meta Foundation ✅ (this delivery)
 
