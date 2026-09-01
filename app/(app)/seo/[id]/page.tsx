@@ -7,6 +7,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { requireSessionContext } from "@/services/session";
 import { createClient } from "@/lib/supabase/server";
 import { GenerateRecommendationsButton } from "@/features/seo/generate-recommendations-button";
+import { countryLabel } from "@/lib/i18n/countries";
 
 export const metadata: Metadata = { title: "Detail Project SEO — Tanyopo AI Promoter" };
 
@@ -69,6 +70,11 @@ export default async function SeoProjectDetailPage({ params }: { params: Promise
       <div>
         <p className="text-xs text-muted-foreground">Project SEO</p>
         <h1 className="text-xl font-semibold tracking-tight text-foreground">{project.website_url}</h1>
+        {project.country_code ? (
+          <Badge variant="neutral" className="mt-1">
+            Target pasar: {countryLabel(project.country_code, session.locale)}
+          </Badge>
+        ) : null}
       </div>
 
       <Card>

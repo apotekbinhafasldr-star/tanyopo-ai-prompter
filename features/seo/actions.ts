@@ -39,12 +39,20 @@ export async function createSeoProjectAction(
 
   const supabase = await createClient();
 
+  const { data: brandProfile } = await supabase
+    .from("prompter_brand_profiles")
+    .select("country_code, default_language")
+    .eq("tenant_id", session.tenantId)
+    .maybeSingle();
+
   const { data, error } = await supabase
     .from("prompter_seo_projects")
     .insert({
       tenant_id: session.tenantId,
       website_url: parsed.data.websiteUrl,
       target_keywords: parsed.data.targetKeywords,
+      country_code: brandProfile?.country_code ?? null,
+      language: brandProfile?.default_language ?? null,
     })
     .select("id")
     .single();
@@ -91,6 +99,8 @@ export async function generateSeoRecommendationsAction(projectId: string): Promi
     prompt: buildSeoRecommendationsPrompt({
       websiteUrl: project.website_url,
       targetKeywords: (project.target_keywords as string[]) ?? [],
+      countryCode: project.country_code,
+      language: project.language,
     }),
     inputReference: { seo_project_id: projectId },
   });

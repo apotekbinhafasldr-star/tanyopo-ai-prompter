@@ -163,11 +163,17 @@ export function buildCampaignProposalPrompt(
 export interface SeoRecommendationsInputs {
   websiteUrl: string;
   targetKeywords: string[];
+  /** Target market for this SEO project — never assumed to be Indonesia (product spec §18). */
+  countryCode?: string | null;
+  language?: string | null;
 }
 
 export function buildSeoRecommendationsPrompt(inputs: SeoRecommendationsInputs): string {
   return [
     `Buat rekomendasi SEO untuk website berikut: ${inputs.websiteUrl}`,
+    inputs.countryCode
+      ? `Target pasar geografis untuk SEO ini: ${inputs.countryCode}${inputs.language ? ` (bahasa: ${inputs.language})` : ""}. Sesuaikan rekomendasi kata kunci dan konten dengan mesin pencari, bahasa, dan kebiasaan pencarian pasar ini — jangan berasumsi pasar Indonesia kecuali memang target pasarnya Indonesia.`
+      : "Target pasar geografis belum ditentukan — jangan berasumsi pasar Indonesia; dasarkan rekomendasi pada konteks yang tersedia saja.",
     inputs.targetKeywords.length > 0
       ? `Kata kunci target yang sudah dipilih pengguna: ${inputs.targetKeywords.join(", ")}`
       : "Pengguna belum menentukan kata kunci target — usulkan kata kunci yang relevan berdasarkan URL dan konteks bisnis.",
