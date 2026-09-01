@@ -1,15 +1,36 @@
-export function formatCurrency(value: number | null | undefined, currency = "IDR") {
+import type { Locale } from "@/types/database";
+
+/** Locale -> real Intl locale tag. Defaults preserve exactly the
+ * pre-Global-Edition behavior (always "id-ID") for every call site that
+ * doesn't pass a locale. */
+function toIntlLocale(locale: Locale): string {
+  return locale === "en" ? "en-US" : "id-ID";
+}
+
+export function formatCurrency(value: number | null | undefined, currency = "IDR", locale: Locale = "id") {
   if (value === null || value === undefined) return "—";
-  return new Intl.NumberFormat("id-ID", {
+  return new Intl.NumberFormat(toIntlLocale(locale), {
     style: "currency",
     currency,
     maximumFractionDigits: 0,
   }).format(value);
 }
 
-export function formatDate(value: string | null | undefined) {
+/** `timeZone` renders the timestamp in that IANA zone (e.g. the tenant's
+ * prompter_brand_profiles.default_timezone) rather than the server
+ * runtime's own zone — product spec §17 "render times in user locale" /
+ * "avoid assuming Asia/Jakarta globally". Omitted (the pre-existing
+ * behavior at every call site that doesn't pass it) leaves the runtime's
+ * own default zone, unchanged from before. */
+export function formatDate(
+  value: string | null | undefined,
+  options: { locale?: Locale; timeZone?: string } = {},
+) {
   if (!value) return "—";
-  return new Intl.DateTimeFormat("id-ID", { dateStyle: "medium" }).format(new Date(value));
+  return new Intl.DateTimeFormat(toIntlLocale(options.locale ?? "id"), {
+    dateStyle: "medium",
+    timeZone: options.timeZone,
+  }).format(new Date(value));
 }
 
 const PRODUCT_TYPE_LABEL: Record<string, string> = {
@@ -62,4 +83,21 @@ const CAMPAIGN_STATUS_LABEL: Record<string, string> = {
 
 export function campaignStatusLabel(status: string) {
   return CAMPAIGN_STATUS_LABEL[status] ?? status;
+}
+
+const CAMPAIGN_STATUS_VARIANT: Record<
+  string,
+  "neutral" | "warning" | "brand" | "success" | "danger"
+> = {
+  DRAFT: "neutral",
+  AWAITING_APPROVAL: "warning",
+  SCHEDULED: "brand",
+  ACTIVE: "success",
+  PAUSED: "warning",
+  COMPLETED: "success",
+  FAILED: "danger",
+};
+
+export function campaignStatusVariant(status: string) {
+  return CAMPAIGN_STATUS_VARIANT[status] ?? "neutral";
 }

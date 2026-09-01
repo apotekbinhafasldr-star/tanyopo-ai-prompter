@@ -6,10 +6,19 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { businessCategories } from "@/schemas/onboarding";
+import { SUPPORTED_CURRENCIES } from "@/schemas/global-preferences";
 import type { ActionState } from "@/features/products/actions";
-import type { Database } from "@/types/database";
+import type { Database, Json } from "@/types/database";
 
 type Product = Database["public"]["Tables"]["prompter_products"]["Row"];
+
+const selectClass =
+  "h-10 rounded-[var(--radius-md)] border border-border-strong bg-surface px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40";
+
+function targetCountriesToText(value: Json | undefined): string {
+  if (!Array.isArray(value)) return "";
+  return value.filter((v): v is string => typeof v === "string").join(", ");
+}
 
 const initialState: ActionState = { error: null };
 
@@ -17,10 +26,14 @@ export function ProductForm({
   action,
   product,
   submitLabel,
+  defaultCurrency = "IDR",
 }: {
   action: (prevState: ActionState, formData: FormData) => Promise<ActionState>;
   product?: Product;
   submitLabel: string;
+  /** Tenant's own configured currency (session.defaultCurrency) — used
+   * only when creating a new product with no currency of its own yet. */
+  defaultCurrency?: string;
 }) {
   const [state, formAction, pending] = useActionState(action, initialState);
 
@@ -69,8 +82,19 @@ export function ProductForm({
         </div>
 
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="price">Harga (IDR)</Label>
+          <Label htmlFor="price">Harga</Label>
           <Input id="price" name="price" type="number" min={0} step="0.01" defaultValue={product?.price ?? ""} />
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="currency">Mata Uang</Label>
+          <select id="currency" name="currency" defaultValue={product?.currency ?? defaultCurrency} className={selectClass}>
+            {SUPPORTED_CURRENCIES.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
         </div>
 
         <div className="flex flex-col gap-1.5">
@@ -93,6 +117,28 @@ export function ProductForm({
             defaultValue={product?.website_url ?? ""}
             placeholder="https://"
           />
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="language">Bahasa Produk (opsional)</Label>
+          <select id="language" name="language" defaultValue={product?.language ?? ""} className={selectClass}>
+            <option value="">— (ikuti bahasa bisnis)</option>
+            <option value="id">Bahasa Indonesia</option>
+            <option value="en">English</option>
+          </select>
+        </div>
+
+        <div className="flex flex-col gap-1.5 sm:col-span-2">
+          <Label htmlFor="targetCountries">Target Negara Pemasaran (opsional)</Label>
+          <Input
+            id="targetCountries"
+            name="targetCountries"
+            defaultValue={targetCountriesToText(product?.target_countries)}
+            placeholder="Contoh: ID, MY, SG"
+          />
+          <p className="text-xs text-muted-foreground">
+            Kode negara 2 huruf (ISO 3166-1), pisahkan dengan koma. Kosongkan jika belum ditentukan.
+          </p>
         </div>
       </div>
 

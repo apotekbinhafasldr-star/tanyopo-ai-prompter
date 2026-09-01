@@ -16,6 +16,7 @@ describe("MarketingBlueprintSchema", () => {
     content_ideas: ["Behind the scene proses roasting"],
     risks: [],
     disclaimers: "",
+    localization_strategy: "",
   };
 
   it("accepts a well-formed blueprint", () => {
@@ -85,8 +86,9 @@ describe("ContentGenerationSchema", () => {
   });
 
   it("rejects a missing video_script field", () => {
-    const { video_script: _video_script, ...rest } = valid;
-    const result = ContentGenerationSchema.safeParse(rest);
+    const withoutVideoScript: Partial<typeof valid> = { ...valid };
+    delete withoutVideoScript.video_script;
+    const result = ContentGenerationSchema.safeParse(withoutVideoScript);
     expect(result.success).toBe(false);
   });
 });

@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { requireSessionContext } from "@/services/session";
 import { createClient } from "@/lib/supabase/server";
-import { formatDate, channelLabel, campaignStatusLabel, goalLabel } from "@/lib/utils/format";
+import { formatDate, channelLabel, campaignStatusLabel, campaignStatusVariant, goalLabel } from "@/lib/utils/format";
 
 export const metadata: Metadata = { title: "Campaigns — Tanyopo AI Promoter" };
 
@@ -32,8 +32,8 @@ export default async function CampaignsPage() {
         <div>
           <h1 className="text-xl font-semibold tracking-tight text-foreground">Campaigns</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Draft campaign yang dibuat AI dari Promote Wizard. Peluncuran nyata tersedia setelah Approval
-            Center &amp; Connection Center aktif (Phase 2/3).
+            Campaign yang dibuat AI dari Promote Wizard. Ajukan untuk persetujuan di halaman detail — peluncuran
+            nyata ke channel tersedia setelah Connection Center aktif (Phase 3).
           </p>
         </div>
         <Button asChild>
@@ -84,7 +84,7 @@ export default async function CampaignsPage() {
                   </td>
                   <td className="px-4 py-3 text-muted-foreground">{goalLabel(c.objective)}</td>
                   <td className="px-4 py-3">
-                    <Badge variant={c.status === "DRAFT" ? "neutral" : "brand"}>
+                    <Badge variant={campaignStatusVariant(c.status)}>
                       {campaignStatusLabel(c.status)}
                     </Badge>
                   </td>

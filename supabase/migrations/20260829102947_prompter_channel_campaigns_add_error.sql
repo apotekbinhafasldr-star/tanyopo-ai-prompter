@@ -1,0 +1,22 @@
+-- ============================================================================
+-- RECOVERY / DOCUMENTATION MIGRATION -- reconciles repository history with
+-- schema that is ALREADY LIVE on the shared Supabase project (umkmpro-ai,
+-- ref wjjyqovhmwenbcvbnkgx). This file was reconstructed on 2026-09-01 from the
+-- project's own `supabase_migrations.schema_migrations` ledger (version
+-- 20260829102947), which recorded this exact SQL as already applied on the live
+-- database but never had a corresponding file committed to this repository
+-- (Stage 1 production integration verification, Item 1 -- schema drift).
+--
+-- This file's version prefix matches the version already recorded as
+-- applied in `supabase_migrations.schema_migrations` on the live project,
+-- so a standard `supabase db push` against that project will recognize it
+-- as already-applied and skip it -- it will NOT be re-executed there.
+-- Defensive IF NOT EXISTS / DROP-IF-EXISTS-THEN-CREATE guards have been
+-- added below (where Postgres syntax allows) purely so this file is also
+-- safe to run once, from scratch, against a project that does NOT yet have
+-- this schema (e.g. a fresh dev/staging replica) -- it must NOT be run
+-- against the live umkmpro-ai project itself, since that would attempt to
+-- recreate objects that already exist there under the same names.
+-- ============================================================================
+
+alter table public.prompter_channel_campaigns add column if not exists error text;

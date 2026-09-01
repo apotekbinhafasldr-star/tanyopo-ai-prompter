@@ -11,6 +11,7 @@ import { requireSessionContext } from "@/services/session";
 import { createClient } from "@/lib/supabase/server";
 import { formatCurrency, formatDate, productTypeLabel, channelLabel, campaignStatusLabel } from "@/lib/utils/format";
 import { publicStorageUrl } from "@/lib/utils/storage-url";
+import { computeProfitEstimate } from "@/lib/profit-estimate";
 import { MediaUploader } from "@/features/products/media-uploader";
 import { GenerateBlueprintButton } from "@/features/products/generate-blueprint-button";
 import { deleteProductMediaAction, uploadProductMediaAction } from "@/features/products/actions";
@@ -51,6 +52,25 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
       .eq("product_id", id)
       .order("created_at", { ascending: false }),
   ]);
+
+  const campaignIds = (campaigns ?? []).map((c) => c.id);
+
+  const [{ data: purchaseConversions }, { data: metrics }] =
+    campaignIds.length > 0
+      ? await Promise.all([
+          supabase
+            .from("prompter_conversions")
+            .select("value")
+            .in("master_campaign_id", campaignIds)
+            .eq("event_type", "PURCHASE"),
+          supabase.from("prompter_marketing_metrics").select("spend").in("master_campaign_id", campaignIds),
+        ])
+      : [{ data: [] }, { data: [] }];
+
+  const revenue = (purchaseConversions ?? []).reduce((sum, c) => sum + (c.value ?? 0), 0);
+  const unitsSold = (purchaseConversions ?? []).length;
+  const adSpend = (metrics ?? []).reduce((sum, m) => sum + m.spend, 0);
+  const profitEstimate = computeProfitEstimate({ revenue, adSpend, hpp: product.hpp, unitsSold });
 
   const overviewTab = (
     <div className="flex flex-col gap-6">
@@ -162,6 +182,25 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
                 <p className="text-xs font-medium text-muted-foreground">Positioning</p>
                 <p className="text-sm text-foreground">{blueprint.positioning}</p>
               </div>
+              {blueprint.localization_strategy ? (
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground">Strategi Lokalisasi</p>
+                  <p className="text-sm text-foreground">{blueprint.localization_strategy}</p>
+                  {blueprint.home_market || blueprint.target_currency ? (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {[
+                        blueprint.home_market ? `Pasar asal: ${blueprint.home_market}` : null,
+                        Array.isArray(blueprint.target_markets) && blueprint.target_markets.length > 0
+                          ? `Target: ${(blueprint.target_markets as string[]).join(", ")}`
+                          : null,
+                        blueprint.target_currency ? `Mata uang: ${blueprint.target_currency}` : null,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
             </CardContent>
           </Card>
 
@@ -283,13 +322,72 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
           {
             id: "analytics",
             label: "Analytics",
-            content: (
-              <EmptyState
-                icon={Package}
-                title="Analytics belum tersedia"
-                description="Analitik per produk akan aktif setelah campaign nyata berjalan (Phase 2)."
-              />
-            ),
+            content:
+              campaignIds.length === 0 ? (
+                <EmptyState
+                  icon={Package}
+                  title="Belum ada data untuk dianalisis"
+                  description="Estimasi kontribusi marketing muncul setelah produk ini punya campaign dan konversi Purchase tercatat."
+                />
+              ) : (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Estimasi Kontribusi Marketing</CardTitle>
+                  </CardHeader>
+                  <CardContent className="flex flex-col gap-4 pt-4">
+                    <p className="text-xs text-muted-foreground">
+                      Pendapatan − HPP − biaya iklan, dihitung dari konversi Purchase produk ini. Ini
+                      perkiraan, bukan laporan keuangan resmi, dan <strong>bukan laba bersih</strong> —
+                      biaya operasional lain (gaji, sewa, dll.) tidak termasuk di sini. Asumsi 1 unit
+                      terjual per konversi Purchase, dan biaya iklan hanya mencakup data yang sudah
+                      tercatat di Analytics (sinkronkan insight dari halaman detail campaign untuk
+                      campaign yang sudah Aktif).
+                    </p>
+                    <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <div>
+                        <dt className="text-xs text-muted-foreground">Pendapatan (Purchase)</dt>
+                        <dd className="text-sm font-medium text-foreground">
+                          {formatCurrency(profitEstimate.revenue, product.currency)}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-muted-foreground">Unit Terjual (perkiraan)</dt>
+                        <dd className="text-sm font-medium text-foreground">{unitsSold}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-muted-foreground">Biaya Iklan</dt>
+                        <dd className="text-sm font-medium text-foreground">
+                          {formatCurrency(profitEstimate.adSpend, product.currency)}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-muted-foreground">HPP</dt>
+                        <dd className="text-sm font-medium text-foreground">
+                          {product.hpp !== null ? formatCurrency(product.hpp, product.currency) : "Belum diisi"}
+                        </dd>
+                      </div>
+                    </dl>
+                    <div className="rounded-[var(--radius-md)] bg-surface-muted p-4">
+                      <p className="text-xs text-muted-foreground">Estimasi Kontribusi Marketing (bukan laba bersih)</p>
+                      {profitEstimate.netProfit !== null ? (
+                        <p
+                          className={
+                            profitEstimate.netProfit >= 0
+                              ? "text-lg font-semibold text-success"
+                              : "text-lg font-semibold text-danger"
+                          }
+                        >
+                          {formatCurrency(profitEstimate.netProfit, product.currency)}
+                        </p>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">
+                          Isi HPP produk (di halaman Edit) untuk menghitung estimasi kontribusi marketing.
+                        </p>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              ),
           },
         ]}
       />

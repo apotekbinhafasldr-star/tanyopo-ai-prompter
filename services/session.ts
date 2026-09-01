@@ -2,7 +2,8 @@ import "server-only";
 
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import type { TenantRole } from "@/types/database";
+import type { Locale, TenantRole } from "@/types/database";
+import { DEFAULT_LOCALE } from "@/lib/i18n/config";
 
 export interface SessionContext {
   userId: string;
@@ -12,6 +13,16 @@ export interface SessionContext {
   tenantId: string;
   businessName: string;
   onboardingCompleted: boolean;
+  /** UI + AI-generation locale (prompter_brand_profiles.default_language).
+   * Defaults to DEFAULT_LOCALE ('id') before onboarding sets one — existing
+   * Indonesia tenants are never affected. */
+  locale: Locale;
+  /** Tenant's configured currency (prompter_brand_profiles.default_currency)
+   * — used to default new-record currency pickers (e.g. product creation)
+   * to the tenant's own market instead of assuming IDR. Defaults to 'IDR'
+   * before onboarding sets one, matching every other pre-Global-Edition
+   * default. */
+  defaultCurrency: string;
 }
 
 /**
@@ -51,7 +62,7 @@ export async function requireSessionContext(
 
   const { data: brandProfile } = await supabase
     .from("prompter_brand_profiles")
-    .select("onboarding_completed")
+    .select("onboarding_completed, default_language, default_currency")
     .eq("tenant_id", profile.tenant_id)
     .maybeSingle();
 
@@ -69,5 +80,7 @@ export async function requireSessionContext(
     tenantId: profile.tenant_id,
     businessName: tenant?.nama_usaha ?? "Bisnis Anda",
     onboardingCompleted,
+    locale: brandProfile?.default_language ?? DEFAULT_LOCALE,
+    defaultCurrency: brandProfile?.default_currency ?? "IDR",
   };
 }

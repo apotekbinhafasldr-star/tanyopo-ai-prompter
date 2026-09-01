@@ -33,9 +33,14 @@ export async function completeOnboardingAction(
 ): Promise<OnboardingActionState> {
   const parsed = onboardingSchema.safeParse({
     brandName: formData.get("brandName"),
+    countryCode: formData.get("countryCode"),
+    language: formData.get("language"),
+    timezone: formData.get("timezone"),
+    currency: formData.get("currency"),
     businessCategory: formData.get("businessCategory"),
     whatDoYouSell: formData.get("whatDoYouSell"),
     primaryGoal: formData.get("primaryGoal"),
+    targetMarketCountryCode: formData.get("targetMarketCountryCode") ?? "",
   });
 
   if (!parsed.success) {
@@ -51,11 +56,22 @@ export async function completeOnboardingAction(
   const { error } = await supabase.from("prompter_brand_profiles").upsert({
     tenant_id: tenantId,
     brand_name: parsed.data.brandName,
+    country_code: parsed.data.countryCode,
+    default_language: parsed.data.language,
+    default_timezone: parsed.data.timezone,
+    default_currency: parsed.data.currency,
+    billing_country: parsed.data.countryCode,
     business_category: parsed.data.businessCategory as never,
     what_do_you_sell: parsed.data.whatDoYouSell,
     primary_goal: parsed.data.primaryGoal as never,
+    // Reuses the existing target_market free-text field (already read by
+    // lib/ai/prompts.ts#buildSystemPreamble) rather than adding a new
+    // column — a country code is a valid, if terse, value for it, and a
+    // standalone international user without UMKMpro can still describe
+    // their target market in more detail later from Settings.
+    target_market: parsed.data.targetMarketCountryCode || undefined,
     onboarding_completed: true,
-    onboarding_step: 7,
+    onboarding_step: 8,
   });
 
   if (error) {
@@ -81,7 +97,7 @@ export async function skipOnboardingAction() {
     await supabase.from("prompter_brand_profiles").upsert({
       tenant_id: tenantId,
       onboarding_completed: true,
-      onboarding_step: 7,
+      onboarding_step: 8,
     });
   }
 

@@ -9,14 +9,22 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils/cn";
 import { businessCategories, primaryGoals } from "@/schemas/onboarding";
+import { SUPPORTED_CURRENCIES } from "@/schemas/global-preferences";
+import { QUICK_PICK_COUNTRY_CODES, countryLabel } from "@/lib/i18n/countries";
+import { listTimezones } from "@/lib/i18n/timezones";
+import { DEFAULT_LOCALE } from "@/lib/i18n/config";
+import type { Locale } from "@/types/database";
 import {
   completeOnboardingAction,
   skipOnboardingAction,
   type OnboardingActionState,
 } from "@/features/onboarding/actions";
 
-const TOTAL_STEPS = 6;
+const TOTAL_STEPS = 8;
 const initialState: OnboardingActionState = { error: null };
+
+const selectClass =
+  "h-10 rounded-[var(--radius-md)] border border-border-strong bg-surface px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40";
 
 function OptionGrid({
   options,
@@ -52,18 +60,27 @@ function OptionGrid({
 export function OnboardingWizard() {
   const [step, setStep] = useState(1);
   const [brandName, setBrandName] = useState("");
+  const [countryCode, setCountryCode] = useState("ID");
+  const [language, setLanguage] = useState<Locale>(DEFAULT_LOCALE);
+  const [timezone, setTimezone] = useState("Asia/Jakarta");
+  const [currency, setCurrency] = useState("IDR");
   const [businessCategory, setBusinessCategory] = useState("");
   const [whatDoYouSell, setWhatDoYouSell] = useState("");
   const [primaryGoal, setPrimaryGoal] = useState("");
+  const [targetMarketCountryCode, setTargetMarketCountryCode] = useState("");
   const [state, formAction, pending] = useActionState(completeOnboardingAction, initialState);
+  const timezones = listTimezones();
+  const isEn = language === "en";
 
   const canAdvanceFrom: Record<number, boolean> = {
     1: brandName.trim().length >= 2,
-    2: businessCategory.length > 0,
-    3: whatDoYouSell.trim().length >= 3,
-    4: primaryGoal.length > 0,
-    5: true,
+    2: countryCode.length === 2 && timezone.length > 0,
+    3: businessCategory.length > 0,
+    4: whatDoYouSell.trim().length >= 3,
+    5: primaryGoal.length > 0,
     6: true,
+    7: true,
+    8: true,
   };
 
   return (
@@ -83,9 +100,14 @@ export function OnboardingWizard() {
 
         <form action={formAction} className="flex flex-col gap-6">
           <input type="hidden" name="brandName" value={brandName} />
+          <input type="hidden" name="countryCode" value={countryCode} />
+          <input type="hidden" name="language" value={language} />
+          <input type="hidden" name="timezone" value={timezone} />
+          <input type="hidden" name="currency" value={currency} />
           <input type="hidden" name="businessCategory" value={businessCategory} />
           <input type="hidden" name="whatDoYouSell" value={whatDoYouSell} />
           <input type="hidden" name="primaryGoal" value={primaryGoal} />
+          <input type="hidden" name="targetMarketCountryCode" value={targetMarketCountryCode} />
 
           {step === 1 && (
             <div className="flex flex-col gap-3">
@@ -110,6 +132,82 @@ export function OnboardingWizard() {
 
           {step === 2 && (
             <div className="flex flex-col gap-3">
+              <h2 className="text-lg font-semibold text-foreground">
+                {isEn ? "Market & global preferences" : "Pasar & Preferensi Global"}
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                {isEn
+                  ? "Where does your business operate from? You can change this later in Settings."
+                  : "Dari mana bisnis Anda beroperasi? Anda bisa mengubahnya nanti di Settings."}
+              </p>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="countryCodeSelect">{isEn ? "Business country" : "Negara bisnis"}</Label>
+                  <select
+                    id="countryCodeSelect"
+                    value={countryCode}
+                    onChange={(e) => setCountryCode(e.target.value)}
+                    className={selectClass}
+                  >
+                    {QUICK_PICK_COUNTRY_CODES.map((code) => (
+                      <option key={code} value={code}>
+                        {countryLabel(code, language)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="languageSelect">{isEn ? "Language" : "Bahasa"}</Label>
+                  <select
+                    id="languageSelect"
+                    value={language}
+                    onChange={(e) => setLanguage(e.target.value as Locale)}
+                    className={selectClass}
+                  >
+                    <option value="id">Bahasa Indonesia</option>
+                    <option value="en">English</option>
+                  </select>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="timezoneSelect">{isEn ? "Timezone" : "Zona waktu"}</Label>
+                  <select
+                    id="timezoneSelect"
+                    value={timezone}
+                    onChange={(e) => setTimezone(e.target.value)}
+                    className={selectClass}
+                  >
+                    {!timezones.includes(timezone) ? <option value={timezone}>{timezone}</option> : null}
+                    {timezones.map((tz) => (
+                      <option key={tz} value={tz}>
+                        {tz}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="currencySelect">{isEn ? "Default currency" : "Mata uang default"}</Label>
+                  <select
+                    id="currencySelect"
+                    value={currency}
+                    onChange={(e) => setCurrency(e.target.value)}
+                    className={selectClass}
+                  >
+                    {SUPPORTED_CURRENCIES.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {step === 3 && (
+            <div className="flex flex-col gap-3">
               <h2 className="text-lg font-semibold text-foreground">Apa jenis bisnis Anda?</h2>
               <p className="text-sm text-muted-foreground">
                 Pilih yang paling sesuai — Anda bisa mengubahnya nanti.
@@ -122,7 +220,7 @@ export function OnboardingWizard() {
             </div>
           )}
 
-          {step === 3 && (
+          {step === 4 && (
             <div className="flex flex-col gap-3">
               <h2 className="text-lg font-semibold text-foreground">Apa yang Anda jual?</h2>
               <p className="text-sm text-muted-foreground">
@@ -138,7 +236,7 @@ export function OnboardingWizard() {
             </div>
           )}
 
-          {step === 4 && (
+          {step === 5 && (
             <div className="flex flex-col gap-3">
               <h2 className="text-lg font-semibold text-foreground">
                 Apa tujuan utama Anda?
@@ -150,7 +248,32 @@ export function OnboardingWizard() {
             </div>
           )}
 
-          {step === 5 && (
+          {step === 6 && (
+            <div className="flex flex-col gap-3">
+              <h2 className="text-lg font-semibold text-foreground">
+                {isEn ? "Campaign target market (optional)" : "Target Pasar Campaign (opsional)"}
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                {isEn
+                  ? "If your campaign target differs from your business country (e.g. business in Indonesia, campaign targeting Malaysia), set it here. Leave blank if it's the same as your business country."
+                  : "Jika target campaign Anda berbeda dari negara bisnis (mis. bisnis di Indonesia, target campaign di Malaysia), pilih di sini. Kosongkan jika sama dengan negara bisnis."}
+              </p>
+              <select
+                value={targetMarketCountryCode}
+                onChange={(e) => setTargetMarketCountryCode(e.target.value)}
+                className={selectClass}
+              >
+                <option value="">{isEn ? "Same as business country" : "Sama dengan negara bisnis"}</option>
+                {QUICK_PICK_COUNTRY_CODES.map((code) => (
+                  <option key={code} value={code}>
+                    {countryLabel(code, language)}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {step === 7 && (
             <div className="flex flex-col items-center gap-3 py-4 text-center">
               <div className="flex size-12 items-center justify-center rounded-full bg-brand-muted">
                 <Package className="size-6 text-brand" aria-hidden />
@@ -164,7 +287,7 @@ export function OnboardingWizard() {
             </div>
           )}
 
-          {step === 6 && (
+          {step === 8 && (
             <div className="flex flex-col items-center gap-3 py-4 text-center">
               <div className="flex size-12 items-center justify-center rounded-full bg-brand-muted">
                 <Radio className="size-6 text-brand" aria-hidden />
@@ -211,7 +334,7 @@ export function OnboardingWizard() {
           </div>
         </form>
 
-        {step >= 5 ? (
+        {step >= 7 ? (
           <form action={skipOnboardingAction} className="mt-3 text-center">
             <button
               type="submit"

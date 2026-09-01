@@ -28,6 +28,20 @@ RLS on every `prompter_*` table uses UMKMpro AI's existing helper functions rath
 
 A user who registers directly through Promoter (`/register`) still gets a `tenants` + `user_profiles` row via the same shared trigger — `jenis_usaha` is set to `"lainnya"` since it isn't a UMKMpro business type. Real marketing context (business category, what they sell, primary goal, tone of voice, etc.) is collected in `/onboarding` and stored in `prompter_brand_profiles`, which is entirely Promoter's own table.
 
+### Data access boundary — UMKMpro's operational domain
+
+The shared project's `public` schema has ~79 non-`prompter_` tables today (POS, inventory, HR, workshop, F&B, tax, payroll, ...) — all owned and evolved by UMKMpro AI. Promoter's access to that domain is deliberately narrow:
+
+| UMKMpro domain | Example tables | Shared or private | Promoter's access |
+|---|---|---|---|
+| Identity | `auth.users` | Shared | Session only, via Supabase Auth — never read as a table |
+| Tenant / membership | `tenants`, `user_profiles` | Shared | Read-only reference (`tenant_id` FK, `fn_current_tenant_id()`/`fn_current_role()`) — Promoter never writes to either |
+| Product / inventory | `products` (UMKMpro's own, 36 columns), `product_batches`, `warehouses`, `warehouse_stock`, `inventory_movements`, `purchase_orders`, `stock_opname_*` | Private | **None.** Promoter never queries these directly. A product reaches Promoter only through the signed `/api/v1/integrations/umkmpro/products` API, landing in Promoter's own `prompter_products` (mirror) and `prompter_product_snapshots` (append-only history) — see below |
+| Sales / orders | `transactions`, `transaction_items`, `online_orders`, `pesanan_meja`, `receivables` | Private | **None.** Conversion/revenue signal comes only through the explicit, signed `/api/v1/integrations/umkmpro/conversions` API into Promoter's own `prompter_conversions` — never a join or direct read |
+| HR / operations | `employees`, `attendance`, `payroll_notes`, `kontrak_karyawan`, `leave_requests`, ... | Private | **None.** Not marketing-relevant; no Promoter code references these tables at all |
+
+Verified for this correction: a repository-wide search for any `.from("<umkmpro-table>")` call outside the `prompter_` prefix, across `app/`, `features/`, `services/`, `lib/`, found none — every Promoter data access is either a `prompter_*` table, the shared `tenants`/`user_profiles` reference read, or the signed UMKMpro integration API. There is no `organizations`/`organization_members` table in this schema at all — `tenants` **is** the organization entity and `user_profiles` **is** the membership record (role + tenant_id), so "shared tenant model" here means literally the same two tables, not a lookalike duplicate.
+
 ## Phase 0 schema
 
 Migration: `supabase/migrations/20260829080000_prompter_foundation_schema.sql` (+ a follow-up linter fix in `20260829080100_prompter_fix_function_search_path.sql`).
@@ -85,9 +99,127 @@ Also created in the Phase 1 migration, all public-read (so they can be embedded 
 | Bucket | Limit | Status |
 |---|---|---|
 | `product-media` | 100 MB, image/video | In use (product media upload) |
-| `creative-assets` | 100 MB, image/video | Reserved — Phase 2/3 |
+| `creative-assets` | 100 MB, image/video | Reserved — Phase 3+ |
 | `brand-assets` | 5 MB, image/svg | Reserved — logo upload, not yet built |
 | `generated-content` | 100 MB, image/video | Reserved — AI-generated creative, not yet built |
+
+## Phase 2 schema
+
+Migration: `supabase/migrations/20260829140000_prompter_phase2_schema.sql`. Same additive-only rule as Phase 0/1.
+
+| Table | Purpose | Write access |
+|---|---|---|
+| `prompter_budget_policies` | One row per tenant (lazily created via `services/budget-guard.ts#getOrCreateBudgetPolicy()`). Hard limits (`daily_limit`, `campaign_limit`) checked before a campaign can be submitted. | **Owner only** — financial governance, stricter than the owner/marketing pattern used elsewhere |
+| `prompter_channel_campaigns` | Per-channel row under a master campaign (`unique(master_campaign_id, channel)`), materialized from the campaign's `channels` + the AI proposal's `budget_allocation`. `status` mirrors the parent master campaign. `external_campaign_id` stays `null` until a Phase 3+ connector actually creates the ad — nothing in this app writes a fake one. | owner/marketing |
+| `prompter_approvals` | Approval Center queue. Phase 2 only creates `CAMPAIGN_LAUNCH` rows (`resource_type = 'prompter_master_campaigns'`); the other types in the CHECK constraint (`BUDGET_CHANGE`, `CAMPAIGN_SCALE`, `CONTENT_PUBLISH`, `AUTOPILOT_ACTION`) are forward-compatible reservations. | Insert: owner/marketing (`requested_by` must be the caller). **Decide (update): owner only** — enforced by RLS, not just the UI, giving a real separation of duties between who submits and who approves. |
+| `prompter_marketing_metrics` | Normalized daily metrics per channel campaign (spend, impressions, reach, clicks, conversions, revenue, ...). Empty until a Phase 3+ connector syncs real platform data — `/analytics` reads this table and shows an honest empty state, never a fabricated number. | owner/marketing |
+| `prompter_conversions` | Conversion events. Phase 2 supports manual entry only (`source` defaults to `'manual'`) via the Analytics page's "Catat Konversi" form — there's no ad-platform conversion API or UMKMpro bridge yet (Phase 4). | owner/marketing |
+| `prompter_attributions` | Attribution schema (`LAST_CLICK`/`FIRST_CLICK`/`MANUAL`/`UMKMPRO_VERIFIED` models). Modeled now so a future attribution engine doesn't need a schema migration on launch day — **no code path writes to this table yet**. | owner/marketing |
+
+### Campaign status machine (Phase 2)
+
+```
+DRAFT --submit (passes Budget Guard)--> AWAITING_APPROVAL --Owner approves--> SCHEDULED
+  ^                                           |
+  |___________Owner rejects, or submitter cancels___________|
+```
+
+As of Phase 2, `ACTIVE`, `PAUSED`, `COMPLETED`, `FAILED` exist in the CHECK constraint (both `prompter_master_campaigns.status` and `prompter_channel_campaigns.status`) for forward compatibility, but no code path sets them yet — those transitions require a real platform connector to confirm the campaign is actually live, per the product spec's status-transparency rule (never claim "berhasil tayang" without external confirmation). Phase 3 adds exactly one such path — see below.
+
+## Phase 3 schema
+
+Migrations: `supabase/migrations/20260829160000_prompter_phase3_schema.sql` and a small follow-up (`20260829160100_prompter_channel_campaigns_add_error.sql`, adds `prompter_channel_campaigns.error`). Same additive-only rule as Phase 0-2.
+
+| Table | Purpose | Write access |
+|---|---|---|
+| `prompter_platform_capabilities` | Global connector capability registry (`platform` × `capability` → `enabled`/`requires_oauth`/`requires_approval`/`api_version`), not tenant-scoped. Seeded by the migration itself. | **None** — no INSERT/UPDATE/DELETE policy exists at all; a capability change is a new migration, never a runtime write. |
+| `prompter_connected_accounts` | OAuth connection metadata per tenant per platform (`unique(tenant_id, platform)`) — external account id/name, `status`, `scopes`, `expires_at`. **Never the token.** A missing row means `NOT_CONNECTED`; a row is only ever written after a real OAuth callback succeeds. | Owner only |
+| `prompter_oauth_credentials` | Encrypted tokens (`lib/crypto/token-cipher.ts`, AES-256-GCM). RLS enabled with **zero policies** — see [SECURITY.md](SECURITY.md) "OAuth token storage." Only the service-role client can touch this table. | Service-role only (no app-level policy) |
+
+`platform` here (`META`/`TIKTOK`/`X`) names an OAuth connector/provider, deliberately distinct from the `Channel` enum used on campaigns/content (`FACEBOOK`/`INSTAGRAM`/`TIKTOK`/`X`/`SEO`) — a single Meta connection covers both the Facebook and Instagram channels, matching the Connection Center's one "Facebook & Instagram" card.
+
+### The one path to `ACTIVE`
+
+`features/campaigns/launch-actions.ts#launchChannelCampaignAction()` is the only code in this repository that sets `prompter_channel_campaigns.status = 'ACTIVE'` — and only after Meta's Graph API has confirmed the campaign, ad set, creative, and ad were all actually created. A failure at any step is stored in the new `error` column and the row's status becomes `FAILED` instead; nothing is left in an ambiguous or fabricated state.
+
+## Phase 4 schema
+
+Migration: `supabase/migrations/20260829180000_prompter_phase4_schema.sql`. Same additive-only rule as Phase 0-3.
+
+| Table | Purpose | Write access |
+|---|---|---|
+| `prompter_product_snapshots` | Append-only historical snapshot of a product as UMKMpro AI reported it at sync time (product spec §48). A campaign built from a snapshot stays historically accurate even after the source product's price/stock later changes in UMKMpro — `linked_product_id` points at the live, mutable `prompter_products` mirror the rest of the app queries; the snapshot itself is never mutated. | Service-role only (no app-level INSERT/UPDATE/DELETE policy) |
+| `prompter_promotion_handoffs` | One-time "🚀 PROMOSIKAN DENGAN AI" handoff (product spec §47). UMKMpro AI creates one via the signed API, then redirects its user to `/promote?handoff=<id>`; Promoter's own tenant-scoped RLS SELECT is what "validates this belongs to the visiting user's tenant" means — a handoff for a different tenant simply never comes back from the query a logged-in user's browser makes. `status` moves `PENDING` → `CONSUMED` when `/promote` resolves it, or `EXPIRED` after `expires_at` (30 minutes). `unique(tenant_id, source_system, idempotency_key)` makes a retried UMKMpro request safe. | Insert: service-role only. Update (marking consumed): any tenant member |
+| `prompter_webhook_events` | Idempotent receipt log for the generic webhook endpoint (product spec §56-57). `unique(source_system, external_event_id)` makes redelivery a safe no-op — a duplicate insert is caught and the existing row's id is returned instead of erroring. This table is the audit trail for webhook deliveries; it does not drive any further automated processing today. | Service-role only |
+
+Two existing tables also gained a Phase 4 column/constraint:
+
+- `prompter_products` — `unique(tenant_id, source_system, source_product_id)`. Every `'promoter'`-sourced row keeps `source_product_id = null`, and Postgres treats multiple `NULL`s in a unique constraint as mutually non-conflicting, so this constraint only actually constrains `'umkmpro'`-sourced rows — exactly what makes `upsertProductFromUmkmpro()` (`services/umkmpro.ts`) a safe upsert rather than a duplicate-row risk on every re-sync.
+- `prompter_conversions` — new `external_event_id` column plus `unique(tenant_id, source, external_event_id)`, same NULL-distinctness trick: Phase 2's manual entries (`external_event_id IS NULL`) never collide with each other or with UMKMpro-sourced rows.
+
+### UMKMpro AI integration surface
+
+`/api/v1/integrations/umkmpro/{products,promotions,conversions,webhooks}` — signed service-to-service routes, no Supabase user session involved. See [INTEGRATIONS.md](INTEGRATIONS.md) and [SECURITY.md](SECURITY.md) for the authentication design; `services/umkmpro.ts` is the data-access layer every route calls into.
+
+## Phase 5 schema
+
+Migration: `supabase/migrations/20260829200000_prompter_phase5_schema.sql`. Same additive-only rule as Phase 0-4. Write access on every new table follows the Phase 1 pattern (owner/marketing write, any tenant member read).
+
+| Table | Purpose |
+|---|---|
+| `prompter_growth_goals` | One row per tenant per social platform (`unique(tenant_id, platform)`), upserted on edit — a follower target the business sets for itself. No automation ever writes to this table; it exists only to give a real, organic growth effort something to track against. |
+| `prompter_follower_snapshots` | Manually-logged follower count history (`unique(tenant_id, platform, recorded_at)` — logging again for today's date corrects rather than duplicates). `source` is a CHECK-constrained `'manual'` today; kept as text rather than a boolean specifically so a future real follower-count API integration doesn't need a schema migration to add a new source value — it needs the actual API code first, which doesn't exist for any platform yet (Meta's Marketing API used elsewhere in this app is ads-only, not an organic-follower reader). |
+| `prompter_seo_projects` | One row per website a tenant wants SEO help for. `target_keywords` is the user's own starting list, kept separate from the AI's own suggestions below so a regenerated recommendation never overwrites what the user typed. |
+| `prompter_seo_recommendations` | One row per project (`unique(project_id)`, upserted on regenerate — same pattern as `prompter_marketing_blueprints`). AI-generated: summary, refined target keywords, on-page fixes, content plan. The AI has no way to actually crawl the target site — see [AI_SYSTEM.md](AI_SYSTEM.md) and [INTEGRATIONS.md](INTEGRATIONS.md) for how that limitation is surfaced honestly rather than presented as a real audit. |
+
+Two existing tables also changed:
+
+- `prompter_content_items` gained `scheduled_at timestamptz` (nullable) — the content calendar (`/content`, "Kalender" tab) groups items by this date. Setting it on a `DRAFT` item moves it to `SCHEDULED`; clearing it on a `SCHEDULED` item reverts it to `DRAFT` — see `features/content/actions.ts#scheduleContentAction()`.
+- `prompter_ai_jobs.job_type`'s CHECK constraint gained `'SEO_RECOMMENDATIONS'`.
+
+## Phase 7 schema
+
+Migration: `supabase/migrations/20260829240000_prompter_phase7_schema.sql`. Same additive-only rule as Phase 0-6. Write access on every new table follows the Phase 1 pattern (owner/marketing write, any tenant member read), except where noted.
+
+| Table | Purpose | Write access |
+|---|---|---|
+| `prompter_analytics_insights` | One row per tenant (PK `tenant_id`, upserted on regenerate — same pattern as `prompter_marketing_blueprints`). Analytics Agent output: `summary`, `trends`, `top_channel`, `underperforming_channels`, `risks`, plus `ai_job_id`/`model`. Generation refuses (no AI call, no row written) when the tenant has zero `prompter_marketing_metrics` and zero `prompter_conversions` rows. | owner/marketing |
+| `prompter_optimization_recommendations` | One row per master campaign (`unique(master_campaign_id)`, upserted on regenerate). Optimization Agent output: `summary` plus a `recommendations` array (channel, `action_type`, `suggested_daily_budget`, `rationale`, `risk_level`), each reasoned from that channel's real spend/conversions/estimated marketing contribution, plus `ai_job_id`/`model`. Generation refuses when the campaign has no channel data. | owner/marketing |
+| `prompter_autopilot_policies` | One row per tenant per `policy_type` (`AUTO_PAUSE_UNDERPERFORMING`/`AUTO_PROPOSE_BUDGET_REALLOCATION`). `enabled` gates whether a matching Optimization Agent recommendation is auto-routed to the Approval Center when `prompter_automation_settings.automation_mode = 'autopilot'` — it never gates execution itself, which always requires an Owner's Approve decision. | **Owner only** — same governance level as `prompter_budget_policies` |
+
+One existing table also changed: `prompter_ai_jobs.job_type`'s CHECK constraint gained `'ANALYTICS_INSIGHT'` and `'OPTIMIZATION_RECOMMENDATION'`.
+
+`prompter_approvals.approval_type = 'AUTOPILOT_ACTION'` rows (reserved since the Phase 2 migration, unused until now) are the first to actually be created in Phase 7 — `context` (JSONB) carries `source` (`'optimization_agent'` or `'autopilot_policy'`), `master_campaign_id`, `channel`, `action_type`, `suggested_daily_budget`, `rationale`, and `risk_level`, giving `/approvals` and `features/approvals/actions.ts#executeAutopilotAction()` everything needed to both display and execute the decision without a second lookup.
+
+## Billing foundation (Final Production Completion pass)
+
+| Table | Purpose | Write access |
+|---|---|---|
+| `prompter_subscriptions` | One row per tenant (PK `tenant_id`, lazily created as `FREE`/`ACTIVE` — same pattern as `prompter_budget_policies`). `billing_provider` and `success_fee_rate_bps` are both nullable and stay `null` until a real payment processor and commercial success-fee rate are chosen — no code path sets either today. See [ROADMAP.md](ROADMAP.md) "Billing foundation". | **Owner only** for updates; every tenant member can read their own tenant's row |
+
+`prompter_attributions` (schema-only since Phase 2) is also now actually written to by `services/attribution.ts#recordSingleTouchAttribution()` — no schema change, just the first application code that populates it.
+
+## Payment provider abstraction (Final Blocker Resolution pass)
+
+| Table | Purpose | Write access |
+|---|---|---|
+| `prompter_invoices` | Per-tenant invoice records. `provider`/`external_invoice_id`/`amount` are all null until a real payment processor issues one — structure only, no fabricated data. Unique on `(provider, external_invoice_id)` for idempotent webhook redelivery once a provider exists. | Select-only from the app (tenant-scoped); every row is written by the service-role client from a verified payment-provider webhook, same pattern as `prompter_product_snapshots` |
+
+See [INTEGRATIONS.md](INTEGRATIONS.md) "Payment provider architecture" for `lib/billing/payment-provider.ts`.
+
+## Background job queue (Final Blocker Resolution pass)
+
+| Table | Purpose | Write access |
+|---|---|---|
+| `prompter_jobs` | Provider-neutral background job queue (DB-backed default implementation). `job_type` covers `AI_GENERATION`/`CONTENT_GENERATION`/`CAMPAIGN_EXECUTION`/`ANALYTICS_SYNC`/`WEBHOOK_PROCESSING`/`SEO_JOB`/`OPTIMIZATION_JOB`/`EXTERNAL_API_RETRY`. Idempotent on `(tenant_id, job_type, idempotency_key)` when a key is given. No existing feature enqueues into this yet — see [INTEGRATIONS.md](INTEGRATIONS.md) "Background job architecture". | Select-only from the app (tenant-scoped); every write (enqueue/claim/complete/fail/cancel) goes through the service-role client (`services/jobs.ts`) |
+
+Also added: `prompter_claim_next_job(p_job_types)`, a `SECURITY DEFINER` function that atomically claims one due `PENDING` job (`for update skip locked`) and marks it `RUNNING`. Unlike `fn_current_tenant_id()`/`fn_current_role()` (also `SECURITY DEFINER`, callable by any signed-in user because they only ever resolve the caller's own identity), this one can see across every tenant's jobs — so `EXECUTE` is explicitly revoked from `anon`/`authenticated` and granted only to `service_role`, rather than left at the Postgres default of `PUBLIC`. Verified live end-to-end before being relied on: enqueue → claim (status `PENDING`→`RUNNING`, `attempts` incremented) → a second claim attempt on the same job_type returns null (no double-claim) → complete → an idempotent re-insert on the same key raises `23505` as designed. Test data was deleted after verification.
+
+## Architecture correction — AI Router usage-accounting columns
+
+Migration: `supabase/migrations/20260829250000_prompter_ai_router_usage_columns.sql`. Not a new phase — a hardening pass that added the multi-provider AI Router (`lib/ai/router.ts`, see [AI_SYSTEM.md](AI_SYSTEM.md)). Same additive-only rule as every phase before it.
+
+`prompter_ai_jobs` gained four nullable columns: `provider` (which AI provider — `"openai"`/`"anthropic"` — actually produced the result, set by the router, never guessed by feature code), `actor_user_id` (the user who triggered the generation, `references user_profiles(id) on delete set null`), `fallback_provider` (set only when the router's primary provider failed live and a configured fallback served the request instead — names the primary that failed), and `error_category` (a CHECK-constrained coarse failure category — `AUTH`/`RATE_LIMIT`/`CONNECTION`/`API`/`REFUSAL`/`INVALID_OUTPUT`/`CONFIG`/`UNKNOWN` — so AI usage accounting can query without parsing vendor-specific error text). No RLS change was needed — the existing Phase 1 policy (`for all`, owner/marketing, tenant-scoped) already covers these new columns at the row level.
 
 ## TypeScript types
 

@@ -6,7 +6,6 @@ import { createClient } from "@/lib/supabase/server";
 import { requireSessionContext } from "@/services/session";
 import { productSchema, ALLOWED_PRODUCT_MEDIA_TYPES, MAX_PRODUCT_MEDIA_BYTES } from "@/schemas/products";
 import { MarketingBlueprintSchema } from "@/schemas/ai/marketing-blueprint";
-import { getAIProvider } from "@/lib/ai/get-provider";
 import { buildSystemPreamble, buildMarketingBlueprintPrompt } from "@/lib/ai/prompts";
 import { runAiJob } from "@/services/ai-jobs";
 import type { BusinessCategory } from "@/types/database";
@@ -22,10 +21,26 @@ function parseProductForm(formData: FormData) {
     productType: formData.get("productType"),
     category: formData.get("category"),
     price: formData.get("price") || undefined,
+    currency: formData.get("currency") || undefined,
     stock: formData.get("stock") || undefined,
     hpp: formData.get("hpp") || undefined,
     websiteUrl: formData.get("websiteUrl"),
+    targetCountries: formData.get("targetCountries"),
+    language: formData.get("language") || undefined,
   });
+}
+
+/** "id, my, sg" -> ["ID","MY","SG"], de-duplicated, blanks dropped. */
+function parseTargetCountries(input: string | undefined): string[] {
+  if (!input) return [];
+  return Array.from(
+    new Set(
+      input
+        .split(",")
+        .map((c) => c.trim().toUpperCase())
+        .filter((c) => /^[A-Z]{2}$/.test(c)),
+    ),
+  );
 }
 
 export async function createProductAction(
@@ -49,9 +64,12 @@ export async function createProductAction(
       product_type: parsed.data.productType as BusinessCategory,
       category: parsed.data.category || null,
       price: parsed.data.price,
+      currency: parsed.data.currency,
       stock: parsed.data.stock,
       hpp: parsed.data.hpp,
       website_url: parsed.data.websiteUrl || null,
+      target_countries: parseTargetCountries(parsed.data.targetCountries),
+      language: parsed.data.language || null,
     })
     .select("id")
     .single();
@@ -85,9 +103,12 @@ export async function updateProductAction(
       product_type: parsed.data.productType as BusinessCategory,
       category: parsed.data.category || null,
       price: parsed.data.price,
+      currency: parsed.data.currency,
       stock: parsed.data.stock,
       hpp: parsed.data.hpp,
       website_url: parsed.data.websiteUrl || null,
+      target_countries: parseTargetCountries(parsed.data.targetCountries),
+      language: parsed.data.language || null,
     })
     .eq("id", productId)
     .eq("tenant_id", session.tenantId);
@@ -184,11 +205,6 @@ export async function generateMarketingBlueprintAction(productId: string): Promi
   const session = await requireSessionContext();
   const supabase = await createClient();
 
-  const provider = getAIProvider();
-  if (!provider) {
-    return { error: "AI belum dikonfigurasi. Tambahkan AI_PROVIDER_API_KEY untuk mengaktifkan fitur ini." };
-  }
-
   const { data: product, error: productError } = await supabase
     .from("prompter_products")
     .select("*")
@@ -208,12 +224,12 @@ export async function generateMarketingBlueprintAction(productId: string): Promi
 
   const result = await runAiJob({
     supabase,
-    provider,
     tenantId: session.tenantId,
+    actorUserId: session.userId,
     jobType: "MARKETING_BLUEPRINT",
     schema: MarketingBlueprintSchema,
     system: buildSystemPreamble(brandProfile),
-    prompt: buildMarketingBlueprintPrompt(product),
+    prompt: buildMarketingBlueprintPrompt(product, brandProfile?.country_code ?? null),
     inputReference: { product_id: productId },
   });
 
@@ -236,8 +252,15 @@ export async function generateMarketingBlueprintAction(productId: string): Promi
       content_ideas: result.data.content_ideas,
       risks: result.data.risks,
       disclaimers: result.data.disclaimers,
+      // Real tenant/product data, never AI-invented (product spec §10) —
+      // localization_strategy is the one field the AI actually reasons about.
+      home_market: brandProfile?.country_code ?? null,
+      target_markets: Array.isArray(product.target_countries) ? product.target_countries : [],
+      target_languages: product.language ? [product.language] : [],
+      target_currency: product.currency,
+      localization_strategy: result.data.localization_strategy || null,
       ai_job_id: result.jobId,
-      model: "claude-opus-5",
+      model: result.model,
     },
     { onConflict: "product_id" },
   );

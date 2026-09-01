@@ -3,13 +3,14 @@ import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import type { z } from "zod";
-import type {
-  AIProvider,
-  StructuredGenerationRequest,
-  StructuredGenerationResult,
+import {
+  AIProviderError,
+  type AIProvider,
+  type StructuredGenerationRequest,
+  type StructuredGenerationResult,
 } from "@/lib/ai/provider";
 
-const MODEL = "claude-opus-5";
+const DEFAULT_MODEL = "claude-opus-5";
 const DEFAULT_MAX_TOKENS = 4000;
 
 export class AnthropicProvider implements AIProvider {
@@ -27,7 +28,7 @@ export class AnthropicProvider implements AIProvider {
     let message;
     try {
       message = await this.client.messages.parse({
-        model: MODEL,
+        model: request.model ?? DEFAULT_MODEL,
         max_tokens: request.maxTokens ?? DEFAULT_MAX_TOKENS,
         system: request.system,
         messages: [{ role: "user", content: request.prompt }],
@@ -39,32 +40,34 @@ export class AnthropicProvider implements AIProvider {
       // Most-specific-first: distinguish retryable from non-retryable
       // failures rather than surfacing one generic message.
       if (err instanceof Anthropic.AuthenticationError) {
-        throw new Error("AI provider menolak kredensial. Periksa AI_PROVIDER_API_KEY.");
+        throw new AIProviderError("Anthropic menolak kredensial. Periksa ANTHROPIC_API_KEY.", "AUTH");
       }
       if (err instanceof Anthropic.RateLimitError) {
-        throw new Error("AI provider sedang sibuk. Coba lagi sebentar lagi.");
+        throw new AIProviderError("Anthropic sedang sibuk. Coba lagi sebentar lagi.", "RATE_LIMIT");
       }
       if (err instanceof Anthropic.APIConnectionError) {
-        throw new Error("Tidak dapat menghubungi AI provider. Periksa koneksi jaringan.");
+        throw new AIProviderError("Tidak dapat menghubungi Anthropic. Periksa koneksi jaringan.", "CONNECTION");
       }
       if (err instanceof Anthropic.APIError) {
-        throw new Error(`AI provider mengembalikan error (${err.status}).`);
+        throw new AIProviderError(`Anthropic mengembalikan error (${err.status}).`, "API");
       }
       throw err;
     }
 
     if (message.stop_reason === "refusal") {
-      throw new Error(
+      throw new AIProviderError(
         `AI menolak membuat konten ini${message.stop_details?.category ? ` (${message.stop_details.category})` : ""}.`,
+        "REFUSAL",
       );
     }
 
     if (!message.parsed_output) {
-      throw new Error("Respons AI tidak sesuai format yang diharapkan.");
+      throw new AIProviderError("Respons Anthropic tidak sesuai format yang diharapkan.", "INVALID_OUTPUT");
     }
 
     return {
       data: message.parsed_output,
+      provider: this.name,
       model: message.model,
       tokensInput: message.usage.input_tokens,
       tokensOutput: message.usage.output_tokens,
