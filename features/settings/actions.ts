@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { requireSessionContext } from "@/services/session";
 import { budgetPolicySchema } from "@/schemas/budget";
 import { globalPreferencesSchema } from "@/schemas/global-preferences";
-import type { AutomationMode, AutopilotPolicyType } from "@/types/database";
+import type { AutomationMode, AutopilotPolicyType, FeatureFlagKey } from "@/types/database";
 
 export interface SettingsActionState {
   error: string | null;
@@ -261,5 +261,45 @@ export async function updateGlobalPreferencesAction(
   });
 
   revalidatePath("/settings");
+  return { error: null };
+}
+
+/**
+ * Toggles one Global Edition feature flag (product spec §21). Owner-only.
+ * A missing row means OFF (lib/feature-flags.ts#isFeatureEnabled()) — this
+ * only ever writes the tenant's own explicit choice, never auto-enrolls it.
+ */
+export async function toggleFeatureFlagAction(
+  flagKey: FeatureFlagKey,
+  enabled: boolean,
+): Promise<SettingsActionState> {
+  const session = await requireSessionContext({ allowIncompleteOnboarding: true });
+
+  if (session.role !== "owner") {
+    return { error: "Hanya Owner yang dapat mengubah feature flag." };
+  }
+
+  const supabase = await createClient();
+
+  const { error } = await supabase.from("prompter_feature_flags").upsert(
+    { tenant_id: session.tenantId, flag_key: flagKey, enabled },
+    { onConflict: "tenant_id,flag_key" },
+  );
+
+  if (error) {
+    return { error: "Gagal menyimpan feature flag." };
+  }
+
+  await supabase.from("prompter_audit_logs").insert({
+    tenant_id: session.tenantId,
+    actor_user_id: session.userId,
+    action: enabled ? "feature_flag.enabled" : "feature_flag.disabled",
+    resource_type: "prompter_feature_flags",
+    resource_id: null,
+    context: { flag_key: flagKey },
+  });
+
+  revalidatePath("/settings");
+  revalidatePath("/connections");
   return { error: null };
 }

@@ -6,8 +6,10 @@ import { StatusPill, type ConnectionStatus } from "@/components/ui/status-pill";
 import { requireSessionContext } from "@/services/session";
 import { createClient } from "@/lib/supabase/server";
 import { getConnector } from "@/lib/connectors/get-connector";
+import { getCapabilities, type CapabilityRow } from "@/lib/connectors/capability-registry";
 import { formatDate } from "@/lib/utils/format";
 import { DisconnectButton } from "@/features/connections/disconnect-button";
+import { isFeatureEnabled } from "@/lib/feature-flags";
 import type { ConnectorPlatform } from "@/types/database";
 
 export const metadata: Metadata = { title: "Connections — Tanyopo AI Promoter" };
@@ -84,12 +86,26 @@ export default async function ConnectionsPage({
   const session = await requireSessionContext();
   const supabase = await createClient();
 
-  const { data: connectedAccounts } = await supabase
-    .from("prompter_connected_accounts")
-    .select("platform, external_account_name, status, expires_at, last_refreshed_at")
-    .eq("tenant_id", session.tenantId);
+  const [{ data: connectedAccounts }, { data: brandProfile }, showRegionalCapabilities] = await Promise.all([
+    supabase
+      .from("prompter_connected_accounts")
+      .select("platform, external_account_name, status, expires_at, last_refreshed_at")
+      .eq("tenant_id", session.tenantId),
+    supabase.from("prompter_brand_profiles").select("country_code").eq("tenant_id", session.tenantId).maybeSingle(),
+    isFeatureEnabled(supabase, session.tenantId, "regional_capabilities"),
+  ]);
 
   const accountByPlatform = new Map((connectedAccounts ?? []).map((a) => [a.platform, a]));
+
+  const capabilitiesByPlatform = showRegionalCapabilities
+    ? new Map(
+        await Promise.all(
+          (["META", "TIKTOK", "X"] as const).map(
+            async (platform) => [platform, await getCapabilities(supabase, platform, brandProfile?.country_code ?? undefined)] as const,
+          ),
+        ),
+      )
+    : new Map<ConnectorPlatform, CapabilityRow[]>();
 
   return (
     <div className="flex flex-1 flex-col gap-6 p-8">
@@ -118,6 +134,7 @@ export default async function ConnectionsPage({
             platform={platform}
             account={accountByPlatform.get(platform)}
             isOwner={session.role === "owner"}
+            capabilities={capabilitiesByPlatform.get(platform)}
           />
         ))}
 
@@ -145,10 +162,12 @@ function ConnectorCard({
   platform,
   account,
   isOwner,
+  capabilities,
 }: {
   platform: ConnectorPlatform;
   account: ConnectedAccountRow | undefined;
   isOwner: boolean;
+  capabilities?: CapabilityRow[];
 }) {
   const info = PLATFORM_INFO[platform];
   const Icon = info.icon;
@@ -193,9 +212,41 @@ function ConnectorCard({
             <a href={info.authorizePath}>Hubungkan</a>
           </Button>
         )}
+
+        {capabilities && capabilities.length > 0 ? (
+          <div className="border-t border-border pt-3">
+            <p className="mb-2 text-xs font-medium text-muted-foreground">
+              Kapabilitas {capabilities[0]?.countryCode ? `(${capabilities[0].countryCode})` : "(global)"}
+            </p>
+            <ul className="flex flex-col gap-1">
+              {capabilities.map((cap) => (
+                <li key={cap.capability} className="flex items-center justify-between gap-2 text-xs">
+                  <span className="text-muted-foreground">{cap.capability}</span>
+                  <StatusPill status={capabilityStatusToPill(cap.status)} />
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
       </CardContent>
     </Card>
   );
+}
+
+function capabilityStatusToPill(status: CapabilityRow["status"]): ConnectionStatus {
+  switch (status) {
+    case "SUPPORTED":
+      return "CONNECTED";
+    case "REQUIRES_APPROVAL":
+      return "ACTION_REQUIRED";
+    case "BLOCKED_EXTERNAL":
+      return "EXPIRED";
+    case "UNSUPPORTED":
+      return "NOT_AVAILABLE";
+    case "NOT_CONFIGURED":
+    default:
+      return "NOT_CONFIGURED";
+  }
 }
 
 function PlaceholderCard({

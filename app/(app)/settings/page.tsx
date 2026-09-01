@@ -11,8 +11,10 @@ import { AutomationModeForm } from "@/features/settings/automation-mode-form";
 import { EmergencyStopButton } from "@/features/settings/emergency-stop-button";
 import { AutopilotPolicyToggles } from "@/features/settings/autopilot-policy-toggles";
 import { GlobalPreferencesForm } from "@/features/settings/global-preferences-form";
+import { FeatureFlagToggles } from "@/features/settings/feature-flag-toggles";
 import { getDictionary } from "@/lib/i18n/dictionary";
 import { DEFAULT_LOCALE } from "@/lib/i18n/config";
+import { getFeatureFlags } from "@/lib/feature-flags";
 
 export const metadata: Metadata = { title: "Settings — Tanyopo AI Promoter" };
 
@@ -29,19 +31,21 @@ export default async function SettingsPage() {
   const session = await requireSessionContext({ allowIncompleteOnboarding: true });
   const supabase = await createClient();
 
-  const [budgetPolicy, automationSettings, { data: autopilotPolicies }, { data: brandProfile }] = await Promise.all([
-    getOrCreateBudgetPolicy(supabase, session.tenantId),
-    getOrCreateAutomationSettings(supabase, session.tenantId),
-    supabase
-      .from("prompter_autopilot_policies")
-      .select("policy_type, enabled")
-      .eq("tenant_id", session.tenantId),
-    supabase
-      .from("prompter_brand_profiles")
-      .select("country_code, default_language, default_timezone, default_currency")
-      .eq("tenant_id", session.tenantId)
-      .maybeSingle(),
-  ]);
+  const [budgetPolicy, automationSettings, { data: autopilotPolicies }, { data: brandProfile }, featureFlags] =
+    await Promise.all([
+      getOrCreateBudgetPolicy(supabase, session.tenantId),
+      getOrCreateAutomationSettings(supabase, session.tenantId),
+      supabase
+        .from("prompter_autopilot_policies")
+        .select("policy_type, enabled")
+        .eq("tenant_id", session.tenantId),
+      supabase
+        .from("prompter_brand_profiles")
+        .select("country_code, default_language, default_timezone, default_currency")
+        .eq("tenant_id", session.tenantId)
+        .maybeSingle(),
+      getFeatureFlags(supabase, session.tenantId),
+    ]);
 
   const dictionary = await getDictionary(session.locale);
   const isOwner = session.role === "owner";
@@ -156,6 +160,22 @@ export default async function SettingsPage() {
               readOnly={!isOwner}
             />
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center gap-2 space-y-0">
+          <Globe className="size-4 text-muted-foreground" aria-hidden />
+          <CardTitle>Global Edition Feature Flags</CardTitle>
+          <CardDescription className="sr-only">
+            Kontrol opt-in per fitur Global Edition untuk tenant ini
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="pt-4">
+          <p className="mb-3 text-xs text-muted-foreground">
+            Tidak aktif secara default — mengaktifkan salah satu tidak memengaruhi tenant lain.
+          </p>
+          <FeatureFlagToggles flags={featureFlags} readOnly={!isOwner} />
         </CardContent>
       </Card>
     </div>
