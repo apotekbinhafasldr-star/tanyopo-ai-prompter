@@ -98,6 +98,27 @@ Today `getPaymentProvider()` always returns `NullPaymentProvider` — every meth
 
 Supporting schema (`prompter_subscriptions`, `prompter_invoices`) and the `/billing` page already exist and read/write real data — see [ROADMAP.md](ROADMAP.md) "Billing foundation" and "Payment provider abstraction". Absence of a configured processor does not block any other part of the app: `/billing` renders an honest "not configured" state, and plan changes still work as a pure governance/usage-gating change (no proration, no charge) until a real processor exists to actually bill one.
 
+## Background job architecture (Final Blocker Resolution pass)
+
+Provider-neutral, same discipline as everything else above: business logic depends only on `lib/jobs/job-queue.ts#JobQueueProvider`, never on how jobs are actually claimed/run.
+
+```ts
+interface JobQueueProvider {
+  readonly name: string;
+  enqueue(input): Promise<{ jobId, alreadyExisted }>;
+  claimNext(jobTypes?): Promise<Job | null>;
+  complete(jobId, result?): Promise<void>;
+  fail(jobId, errorMessage): Promise<void>;   // backoff-delayed retry, or terminal FAILED past max_attempts
+  cancel(jobId): Promise<{ canceled }>;       // PENDING only — never interrupts a RUNNING job
+}
+```
+
+Today's only implementation, `lib/jobs/providers/supabase-job-queue.ts#SupabaseJobQueue`, is a DB-backed "local/development" queue: `prompter_jobs` + `prompter_claim_next_job()` (an atomic `for update skip locked` claim, `SECURITY DEFINER`, revoked from `anon`/`authenticated`, granted only to `service_role` — verified live end-to-end: enqueue → claim → double-claim returns null → idempotent re-insert raises the expected unique-violation → complete, then cleaned up). A real external provider (SQS, Cloud Tasks, a Redis-backed queue, ...) could implement the same interface later with zero caller changes.
+
+`app/api/internal/jobs/process/route.ts` claims and runs due jobs — gated by a bearer secret (`JOBS_PROCESSOR_SECRET`, unset in every environment this app has run in, so the route always responds `NOT_CONFIGURED`) and, separately, by there being no external scheduler configured to call it at all. Its `JOB_HANDLERS` registry starts **empty on purpose** — a job of a type with no registered handler fails immediately with a clear "no handler registered" error rather than the route guessing what to do with it. This is also the "no uncontrolled AI loops" boundary: an `AI_GENERATION` job can only ever run through whatever governed pipeline (Budget Guard, Approval Center, `runAiJob()`) its future handler is written to call — the queue itself never grants an AI call new authority.
+
+**No existing feature is rewired to enqueue into this queue in this pass.** Campaign submission/launch, AI generation, metrics sync, etc. all still run exactly as documented in their own phase sections above — synchronously, through their already-verified Budget-Guard/Approval-Center-gated pipelines. Adopting the queue for a genuinely async/retryable need (e.g. a failed metrics sync retry) is a deliberate, scoped follow-up, not bundled into this pass, specifically to avoid destabilizing those already-verified flows. In practice this means `prompter_jobs` is empty and the processor route is a no-op in every environment this app has run in — the architecture exists and is verified correct; production autonomous execution is a separate, still-`NOT_CONFIGURED` decision (external scheduler + a chosen job type's handler).
+
 ## Current state (Phase 7)
 
 Meta, TikTok, and X connectors and OAuth flows are all implemented and structurally complete but unverified against a live ad account on any of the three (see above) — `/connections` renders real Connect/Disconnect flows for all three, gated by each connector's own `isConfigured()`. UMKMpro AI integration is implemented and its signed-authentication layer was verified against a real running local server (see [ROADMAP.md](ROADMAP.md) Phase 4 for what was and wasn't exercisable in this environment). As of Phase 7, `getInsights`, `pauseCampaign`, and `updateBudget` are wired to real UI-triggered actions (metrics sync, and Owner-approved autopilot execution) for the first time — see [ROADMAP.md](ROADMAP.md) Phase 7 and [SECURITY.md](SECURITY.md) "Automation safety" for the approval/Budget Guard/Emergency Stop boundaries around when `pauseCampaign`/`updateBudget` are actually allowed to run.

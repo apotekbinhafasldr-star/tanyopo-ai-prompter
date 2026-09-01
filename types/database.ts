@@ -89,6 +89,16 @@ export type AttributionModel = "LAST_CLICK" | "FIRST_CLICK" | "MANUAL" | "UMKMPR
 export type SubscriptionPlan = "FREE" | "PRO" | "BUSINESS" | "GROWTH" | "AGENCY" | "UMKMPRO_BUNDLE";
 export type SubscriptionStatus = "ACTIVE" | "TRIALING" | "PAST_DUE" | "CANCELED";
 export type InvoiceStatus = "DRAFT" | "OPEN" | "PAID" | "VOID" | "UNCOLLECTIBLE";
+export type JobType =
+  | "AI_GENERATION"
+  | "CONTENT_GENERATION"
+  | "CAMPAIGN_EXECUTION"
+  | "ANALYTICS_SYNC"
+  | "WEBHOOK_PROCESSING"
+  | "SEO_JOB"
+  | "OPTIMIZATION_JOB"
+  | "EXTERNAL_API_RETRY";
+export type JobStatus = "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELED";
 export type HandoffStatus = "PENDING" | "CONSUMED" | "EXPIRED";
 export type WebhookEventStatus = "RECEIVED" | "PROCESSED" | "FAILED" | "IGNORED";
 
@@ -581,6 +591,44 @@ export interface Database {
           paid_at?: string | null;
         };
         Update: Partial<Omit<Database["public"]["Tables"]["prompter_invoices"]["Insert"], "tenant_id">>;
+        Relationships: [];
+      };
+      prompter_jobs: {
+        Row: {
+          id: string;
+          tenant_id: string;
+          job_type: JobType;
+          status: JobStatus;
+          payload: Json;
+          result: Json | null;
+          error: string | null;
+          attempts: number;
+          max_attempts: number;
+          idempotency_key: string | null;
+          created_by: string | null;
+          run_at: string;
+          started_at: string | null;
+          finished_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          tenant_id: string;
+          job_type: JobType;
+          status?: JobStatus;
+          payload?: Json;
+          result?: Json | null;
+          error?: string | null;
+          attempts?: number;
+          max_attempts?: number;
+          idempotency_key?: string | null;
+          created_by?: string | null;
+          run_at?: string;
+          started_at?: string | null;
+          finished_at?: string | null;
+        };
+        Update: Partial<Omit<Database["public"]["Tables"]["prompter_jobs"]["Insert"], "tenant_id" | "job_type">>;
         Relationships: [];
       };
       prompter_channel_campaigns: {
@@ -1127,6 +1175,10 @@ export interface Database {
       fn_current_role: {
         Args: Record<string, never>;
         Returns: TenantRole;
+      };
+      prompter_claim_next_job: {
+        Args: { p_job_types: JobType[] | null };
+        Returns: Database["public"]["Tables"]["prompter_jobs"]["Row"] | null;
       };
     };
     Enums: Record<string, never>;

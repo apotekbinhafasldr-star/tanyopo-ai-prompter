@@ -169,6 +169,10 @@ Extends the billing foundation above with the pieces needed to make "no payment 
 
 **What this does not do:** integrate any real processor, invent a price, or process a real payment. That remains explicitly out of scope until a processor is chosen — this pass only makes sure that choice doesn't block anything else.
 
+## Background job architecture (Final Blocker Resolution pass)
+
+See [INTEGRATIONS.md](INTEGRATIONS.md) "Background job architecture" for the full shape (`lib/jobs/job-queue.ts#JobQueueProvider`, `lib/jobs/providers/supabase-job-queue.ts`, `prompter_jobs` + `prompter_claim_next_job()`, `app/api/internal/jobs/process/route.ts`). In one line: a provider-neutral, retryable, idempotent, auditable job queue exists and is verified correct (live end-to-end RPC test, 20+ new unit tests), but nothing enqueues into it yet — this pass resolves the *architecture* gap (Meta/TikTok/X credentials and a payment processor not blocking Global Edition development) without rewiring any already-verified synchronous, Budget-Guard/Approval-Center-gated flow into it.
+
 ## What "done" means for a phase
 
 - `npm run lint`, `npm run typecheck`, `npm run test`, `npm run build` all pass

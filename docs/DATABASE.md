@@ -207,6 +207,14 @@ One existing table also changed: `prompter_ai_jobs.job_type`'s CHECK constraint 
 
 See [INTEGRATIONS.md](INTEGRATIONS.md) "Payment provider architecture" for `lib/billing/payment-provider.ts`.
 
+## Background job queue (Final Blocker Resolution pass)
+
+| Table | Purpose | Write access |
+|---|---|---|
+| `prompter_jobs` | Provider-neutral background job queue (DB-backed default implementation). `job_type` covers `AI_GENERATION`/`CONTENT_GENERATION`/`CAMPAIGN_EXECUTION`/`ANALYTICS_SYNC`/`WEBHOOK_PROCESSING`/`SEO_JOB`/`OPTIMIZATION_JOB`/`EXTERNAL_API_RETRY`. Idempotent on `(tenant_id, job_type, idempotency_key)` when a key is given. No existing feature enqueues into this yet — see [INTEGRATIONS.md](INTEGRATIONS.md) "Background job architecture". | Select-only from the app (tenant-scoped); every write (enqueue/claim/complete/fail/cancel) goes through the service-role client (`services/jobs.ts`) |
+
+Also added: `prompter_claim_next_job(p_job_types)`, a `SECURITY DEFINER` function that atomically claims one due `PENDING` job (`for update skip locked`) and marks it `RUNNING`. Unlike `fn_current_tenant_id()`/`fn_current_role()` (also `SECURITY DEFINER`, callable by any signed-in user because they only ever resolve the caller's own identity), this one can see across every tenant's jobs — so `EXECUTE` is explicitly revoked from `anon`/`authenticated` and granted only to `service_role`, rather than left at the Postgres default of `PUBLIC`. Verified live end-to-end before being relied on: enqueue → claim (status `PENDING`→`RUNNING`, `attempts` incremented) → a second claim attempt on the same job_type returns null (no double-claim) → complete → an idempotent re-insert on the same key raises `23505` as designed. Test data was deleted after verification.
+
 ## Architecture correction — AI Router usage-accounting columns
 
 Migration: `supabase/migrations/20260829250000_prompter_ai_router_usage_columns.sql`. Not a new phase — a hardening pass that added the multi-provider AI Router (`lib/ai/router.ts`, see [AI_SYSTEM.md](AI_SYSTEM.md)). Same additive-only rule as every phase before it.
