@@ -1,42 +1,96 @@
-import type { Database } from "@/types/database";
+import type { Database, Locale } from "@/types/database";
 
 type BrandProfile = Database["public"]["Tables"]["prompter_brand_profiles"]["Row"] | null;
 type Product = Database["public"]["Tables"]["prompter_products"]["Row"];
 
-const GUARDRAILS = `Aturan wajib:
+/**
+ * Product spec §9's explicit AI-localization guardrails, added to every
+ * generation alongside the pre-existing claims/testimonial/policy rules.
+ * "Localized" means natural language and cultural adaptation for the
+ * target market — never an excuse to target by protected characteristics,
+ * assert legal compliance, invent local statistics, or promise an outcome.
+ */
+const GUARDRAILS_ID = `Aturan wajib:
 - Jangan membuat klaim yang menyesatkan, klaim medis tanpa dasar, atau janji hasil finansial.
 - Jangan membuat testimoni palsu atau kesan urgensi/scarcity yang tidak benar.
 - Jangan mempromosikan produk ilegal atau melanggar kebijakan iklan platform umum (Meta, TikTok, X).
+- Jika target pasar campaign berbeda dari pasar asal bisnis, sesuaikan bahasa dan konteks budaya secara natural — bukan sekadar terjemahan literal.
+- Jangan pernah menargetkan audiens berdasarkan ras, agama, etnis, orientasi seksual, disabilitas, atau karakteristik dilindungi lainnya.
+- Jangan pernah mengklaim kepatuhan hukum/regulasi suatu negara secara otomatis — itu keputusan manusia, bukan AI.
+- Jangan pernah mengarang statistik atau data pasar lokal yang tidak diberikan sebagai konteks.
+- Jangan pernah menjanjikan hasil, ranking, atau angka performa tertentu.
 - Jika ada risiko klaim yang meragukan, sebutkan di field yang relevan agar pengguna bisa meninjau — jangan menghilangkannya begitu saja.`;
+
+const GUARDRAILS_EN = `Mandatory rules:
+- Never make misleading claims, unsubstantiated medical claims, or promise financial results.
+- Never fabricate testimonials or a false sense of urgency/scarcity.
+- Never promote an illegal product or violate a major platform's ad policy (Meta, TikTok, X).
+- If the campaign's target market differs from the business's home market, adapt language and cultural context naturally — never a literal word-for-word translation.
+- Never target an audience by race, religion, ethnicity, sexual orientation, disability, or other protected characteristics.
+- Never automatically claim legal/regulatory compliance for any country — that is a human decision, not the AI's to make.
+- Never fabricate local market statistics or data that wasn't given as context.
+- Never promise a specific result, ranking, or performance number.
+- If a claim carries real risk, surface it in the relevant field so the user can review it — never silently drop it.`;
 
 /**
  * Shared system-prompt preamble for every AI generation call — brand
  * context plus the guardrails from docs/AI_SYSTEM.md. Every feature-level
- * prompt builder below composes on top of this.
+ * prompt builder below composes on top of this. Writes in the tenant's
+ * own language (prompter_brand_profiles.default_language) — a genuine
+ * language switch, not a translation instruction bolted onto an
+ * Indonesian-only prompt, so output is naturally localized rather than
+ * literally translated (product spec §9).
  */
 export function buildSystemPreamble(brandProfile: BrandProfile): string {
-  const lines = [
-    "Anda adalah asisten strategi marketing untuk Tanyopo AI Promoter, platform AI marketing untuk UMKM dan bisnis di Indonesia.",
-    "Tulis dalam Bahasa Indonesia yang natural kecuali diminta lain.",
-  ];
+  const locale: Locale = brandProfile?.default_language ?? "id";
+  const isEn = locale === "en";
+
+  const lines = isEn
+    ? [
+        "You are a marketing strategy assistant for Tanyopo AI Promoter, an AI marketing platform for small businesses globally.",
+        "Write in natural English unless asked otherwise.",
+      ]
+    : [
+        "Anda adalah asisten strategi marketing untuk Tanyopo AI Promoter, platform AI marketing untuk UMKM dan bisnis di Indonesia.",
+        "Tulis dalam Bahasa Indonesia yang natural kecuali diminta lain.",
+      ];
 
   if (brandProfile?.brand_name) {
-    lines.push(`Nama brand: ${brandProfile.brand_name}.`);
+    lines.push(isEn ? `Brand name: ${brandProfile.brand_name}.` : `Nama brand: ${brandProfile.brand_name}.`);
   }
   if (brandProfile?.business_description) {
-    lines.push(`Deskripsi bisnis: ${brandProfile.business_description}`);
+    lines.push(
+      isEn
+        ? `Business description: ${brandProfile.business_description}`
+        : `Deskripsi bisnis: ${brandProfile.business_description}`,
+    );
   }
   if (brandProfile?.tone_of_voice) {
-    lines.push(`Tone of voice yang diinginkan: ${brandProfile.tone_of_voice}.`);
+    lines.push(
+      isEn
+        ? `Desired tone of voice: ${brandProfile.tone_of_voice}.`
+        : `Tone of voice yang diinginkan: ${brandProfile.tone_of_voice}.`,
+    );
+  }
+  if (brandProfile?.country_code) {
+    lines.push(
+      isEn
+        ? `Business home market (country): ${brandProfile.country_code}.`
+        : `Pasar asal bisnis (negara): ${brandProfile.country_code}.`,
+    );
   }
   if (brandProfile?.target_market) {
-    lines.push(`Target pasar: ${brandProfile.target_market}.`);
+    lines.push(isEn ? `Target market: ${brandProfile.target_market}.` : `Target pasar: ${brandProfile.target_market}.`);
   }
   if (brandProfile?.prohibited_claims) {
-    lines.push(`Klaim yang HARUS dihindari: ${brandProfile.prohibited_claims}`);
+    lines.push(
+      isEn
+        ? `Claims that MUST be avoided: ${brandProfile.prohibited_claims}`
+        : `Klaim yang HARUS dihindari: ${brandProfile.prohibited_claims}`,
+    );
   }
 
-  lines.push(GUARDRAILS);
+  lines.push(isEn ? GUARDRAILS_EN : GUARDRAILS_ID);
   return lines.join("\n");
 }
 
@@ -47,16 +101,29 @@ function describeProduct(product: Product): string {
     product.category ? `Kategori: ${product.category}` : null,
     product.description ? `Deskripsi: ${product.description}` : null,
     product.price ? `Harga: ${product.price} ${product.currency}` : null,
+    Array.isArray(product.target_countries) && product.target_countries.length > 0
+      ? `Target negara produk: ${product.target_countries.join(", ")}`
+      : null,
   ];
   return parts.filter(Boolean).join("\n");
 }
 
-export function buildMarketingBlueprintPrompt(product: Product): string {
+export function buildMarketingBlueprintPrompt(product: Product, homeMarket: string | null): string {
+  const targetCountries = Array.isArray(product.target_countries) ? product.target_countries : [];
+  const hasDistinctTargetMarket =
+    targetCountries.length > 0 && !(targetCountries.length === 1 && targetCountries[0] === homeMarket);
+
   return [
     "Buat Marketing Blueprint terstruktur untuk produk berikut.",
     describeProduct(product),
-    "Hasilkan summary, USP, benefits, pain points yang diselesaikan, target persona (1-4), positioning, marketing angles, recommended channels, ide konten, risiko, dan disclaimer bila perlu.",
-  ].join("\n\n");
+    homeMarket ? `Pasar asal bisnis: ${homeMarket}.` : null,
+    hasDistinctTargetMarket
+      ? "Target pasar produk berbeda dari (atau lebih luas dari) pasar asal bisnis — isi localization_strategy dengan bagaimana positioning/konten harus disesuaikan untuk target pasar tersebut (bahasa, konteks budaya, mata uang), bukan sekadar terjemahan literal. Jangan mengklaim kepatuhan hukum negara manapun dan jangan mengarang statistik pasar lokal."
+      : "Target pasar produk sama dengan pasar asal bisnis — localization_strategy boleh berupa string kosong.",
+    "Hasilkan summary, USP, benefits, pain points yang diselesaikan, target persona (1-4), positioning, marketing angles, recommended channels, ide konten, risiko, disclaimer bila perlu, dan localization_strategy.",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 export interface CampaignProposalInputs {

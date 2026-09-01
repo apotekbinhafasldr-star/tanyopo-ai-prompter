@@ -420,6 +420,11 @@ export interface Database {
           content_ideas: Json;
           risks: Json;
           disclaimers: string | null;
+          home_market: string | null;
+          target_markets: Json;
+          target_languages: Json;
+          target_currency: string | null;
+          localization_strategy: string | null;
           ai_job_id: string | null;
           model: string | null;
           created_at: string;
@@ -440,6 +445,11 @@ export interface Database {
           content_ideas?: Json;
           risks?: Json;
           disclaimers?: string | null;
+          home_market?: string | null;
+          target_markets?: Json;
+          target_languages?: Json;
+          target_currency?: string | null;
+          localization_strategy?: string | null;
           ai_job_id?: string | null;
           model?: string | null;
         };

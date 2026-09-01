@@ -29,6 +29,14 @@ export const MarketingBlueprintSchema = z.object({
   disclaimers: z
     .string()
     .describe("Any required disclaimer text, empty string if none apply"),
+  localization_strategy: z
+    .string()
+    .describe(
+      "How to adapt positioning/content/tone for the target market(s) given (product spec §9-10) — cultural " +
+        "context, language, currency framing. Empty string when the target market is the same as the home " +
+        "market and there's nothing to adapt. Never a legal/compliance claim, never a fabricated local " +
+        "statistic, never a promised result or ranking.",
+    ),
 });
 
 export type MarketingBlueprint = z.infer<typeof MarketingBlueprintSchema>;

@@ -16,6 +16,7 @@ describe("MarketingBlueprintSchema", () => {
     content_ideas: ["Behind the scene proses roasting"],
     risks: [],
     disclaimers: "",
+    localization_strategy: "",
   };
 
   it("accepts a well-formed blueprint", () => {

@@ -182,6 +182,25 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
                 <p className="text-xs font-medium text-muted-foreground">Positioning</p>
                 <p className="text-sm text-foreground">{blueprint.positioning}</p>
               </div>
+              {blueprint.localization_strategy ? (
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground">Strategi Lokalisasi</p>
+                  <p className="text-sm text-foreground">{blueprint.localization_strategy}</p>
+                  {blueprint.home_market || blueprint.target_currency ? (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {[
+                        blueprint.home_market ? `Pasar asal: ${blueprint.home_market}` : null,
+                        Array.isArray(blueprint.target_markets) && blueprint.target_markets.length > 0
+                          ? `Target: ${(blueprint.target_markets as string[]).join(", ")}`
+                          : null,
+                        blueprint.target_currency ? `Mata uang: ${blueprint.target_currency}` : null,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
             </CardContent>
           </Card>
 

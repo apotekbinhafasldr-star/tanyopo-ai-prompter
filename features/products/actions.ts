@@ -229,7 +229,7 @@ export async function generateMarketingBlueprintAction(productId: string): Promi
     jobType: "MARKETING_BLUEPRINT",
     schema: MarketingBlueprintSchema,
     system: buildSystemPreamble(brandProfile),
-    prompt: buildMarketingBlueprintPrompt(product),
+    prompt: buildMarketingBlueprintPrompt(product, brandProfile?.country_code ?? null),
     inputReference: { product_id: productId },
   });
 
@@ -252,6 +252,13 @@ export async function generateMarketingBlueprintAction(productId: string): Promi
       content_ideas: result.data.content_ideas,
       risks: result.data.risks,
       disclaimers: result.data.disclaimers,
+      // Real tenant/product data, never AI-invented (product spec §10) —
+      // localization_strategy is the one field the AI actually reasons about.
+      home_market: brandProfile?.country_code ?? null,
+      target_markets: Array.isArray(product.target_countries) ? product.target_countries : [],
+      target_languages: product.language ? [product.language] : [],
+      target_currency: product.currency,
+      localization_strategy: result.data.localization_strategy || null,
       ai_job_id: result.jobId,
       model: result.model,
     },
