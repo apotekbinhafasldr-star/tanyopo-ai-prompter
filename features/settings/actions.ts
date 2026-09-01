@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { requireSessionContext } from "@/services/session";
 import { budgetPolicySchema } from "@/schemas/budget";
+import { globalPreferencesSchema } from "@/schemas/global-preferences";
 import type { AutomationMode, AutopilotPolicyType } from "@/types/database";
 
 export interface SettingsActionState {
@@ -193,6 +194,70 @@ export async function updateAutopilotPolicyAction(
     resource_type: "prompter_autopilot_policies",
     resource_id: null,
     context: { policy_type: policyType },
+  });
+
+  revalidatePath("/settings");
+  return { error: null };
+}
+
+/**
+ * Business home market + UI/AI language (product spec §2-3). Owner or
+ * marketing can change it, same governance level as the brand profile
+ * itself (features/onboarding/actions.ts) — not the stricter owner-only
+ * tier used for Budget Guard/automation, since this doesn't touch money
+ * or execution safety. target_market_country_code stays independent of
+ * country_code — a campaign's target market is never assumed to equal
+ * the business's home market (product spec §8).
+ */
+export async function updateGlobalPreferencesAction(
+  _prevState: SettingsActionState,
+  formData: FormData,
+): Promise<SettingsActionState> {
+  const session = await requireSessionContext({ allowIncompleteOnboarding: true });
+
+  if (session.role !== "owner" && session.role !== "marketing") {
+    return { error: "Anda tidak memiliki izin untuk mengubah preferensi ini." };
+  }
+
+  const parsed = globalPreferencesSchema.safeParse({
+    countryCode: formData.get("countryCode"),
+    language: formData.get("language"),
+    timezone: formData.get("timezone"),
+    currency: formData.get("currency"),
+    targetMarketCountryCode: formData.get("targetMarketCountryCode") ?? "",
+  });
+
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Data tidak valid." };
+  }
+
+  const supabase = await createClient();
+
+  const { error } = await supabase.from("prompter_brand_profiles").upsert({
+    tenant_id: session.tenantId,
+    country_code: parsed.data.countryCode,
+    default_language: parsed.data.language,
+    default_timezone: parsed.data.timezone,
+    default_currency: parsed.data.currency,
+    billing_country: parsed.data.countryCode,
+  });
+
+  if (error) {
+    return { error: "Gagal menyimpan preferensi global." };
+  }
+
+  await supabase.from("prompter_audit_logs").insert({
+    tenant_id: session.tenantId,
+    actor_user_id: session.userId,
+    action: "brand_profile.global_preferences_updated",
+    resource_type: "prompter_brand_profiles",
+    resource_id: null,
+    context: {
+      country_code: parsed.data.countryCode,
+      language: parsed.data.language,
+      timezone: parsed.data.timezone,
+      currency: parsed.data.currency,
+    },
   });
 
   revalidatePath("/settings");

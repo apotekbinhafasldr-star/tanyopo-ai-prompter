@@ -108,6 +108,7 @@ export type ComplianceFlagType =
   | "PLATFORM_AD_RESTRICTION"
   | "TERMS_PRIVACY_LINK";
 export type ComplianceStatus = "COMPLIANCE_REVIEW_REQUIRED" | "SUPPORTED" | "RESTRICTED" | "NOT_CONFIGURED";
+export type Locale = "id" | "en";
 export type FeatureFlagKey =
   | "global_onboarding"
   | "multi_currency"
