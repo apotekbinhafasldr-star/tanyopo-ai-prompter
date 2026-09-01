@@ -45,6 +45,13 @@ Namespace: `/api/v1/integrations/umkmpro/*` (`products`, `promotions`, `conversi
 
 Product handoff creates a `product_snapshots` row (Phase 4) rather than a live foreign key to UMKMpro's `products` table, so a campaign built from a snapshot stays valid even if the source product's price or details later change in UMKMpro.
 
-## Current state (Phase 0)
+## Current state (Connection Center recovery)
 
-No connector code exists yet. `/connections` renders a stub stating the phase it ships in. This document exists now so the capability boundaries are decided before any connector code is written.
+`/connections` is live — it reads real `prompter_connected_accounts` rows and the `prompter_platform_capabilities` registry per tenant, never a hard-coded status. Implemented:
+
+- `lib/connectors/types.ts` — the `PlatformConnector` interface and `ConnectorResult<T>` (ok / NOT_CONFIGURED / UNSUPPORTED / ERROR), matching the shape sketched above.
+- `lib/connectors/meta-connector.ts`, `tiktok-connector.ts`, `x-connector.ts` — real OAuth authorization-URL construction, callback token exchange, CSRF state verification (`lib/connectors/oauth-state.ts`), and encrypted token persistence (`lib/crypto/token-cipher.ts`, AES-256-GCM keyed by `TOKEN_ENCRYPTION_KEY`). `connect`/`disconnect`/`verifyConnection`/`getAccountMetadata` are functional for Meta once real credentials exist. TikTok/X share the same connect/disconnect/verify plumbing; their campaign/ad/budget/analytics methods stay `UNSUPPORTED` in this codebase regardless of what the capability registry allows (see each connector's docstring for why).
+- `app/api/connections/{meta,tiktok,x}/{start,callback}/route.ts` — thin routes over `lib/connectors/oauth-route-helpers.ts`.
+- `app/api/v1/integrations/umkmpro/{products,promotions,conversions,webhooks}/route.ts` — the UMKMpro namespace, gated by `lib/umkmpro/auth.ts` (bearer service-token + HMAC webhook signature) and implemented via `lib/umkmpro/handoff.ts` (append-only snapshots, idempotent handoffs/webhooks/conversions).
+
+None of this has been exercised against a real Meta/TikTok/X/UMKMpro credential — every environment variable connector code depends on is absent in this codebase's own dev/CI environment, so `isConfigured()` correctly returns false and every connect attempt reports `NOT_CONFIGURED` end-to-end. This is implementation, not live verification.

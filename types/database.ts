@@ -66,6 +66,28 @@ export type TenantRole =
   | "hr"
   | "marketing";
 
+/** Platforms with an OAuth connector. Mirrors the live CHECK constraint. */
+export type ConnectorPlatform = "META" | "TIKTOK" | "X";
+export type ConnectorCapability =
+  | "CONNECT_ACCOUNT"
+  | "READ_ANALYTICS"
+  | "PUBLISH_CONTENT"
+  | "CREATE_CAMPAIGN"
+  | "CREATE_AD"
+  | "UPDATE_BUDGET"
+  | "PAUSE_CAMPAIGN";
+/** Mirrors prompter_connected_accounts.status's live CHECK constraint. */
+export type StoredConnectionStatus = "CONNECTED" | "EXPIRED" | "ACTION_REQUIRED" | "DISCONNECTED";
+export type WebhookEventStatus = "RECEIVED" | "PROCESSED" | "FAILED" | "IGNORED";
+export type PromotionHandoffStatus = "PENDING" | "CONSUMED" | "EXPIRED";
+export type ConversionEventType =
+  | "LEAD"
+  | "SIGNUP"
+  | "ADD_TO_CART"
+  | "CHECKOUT"
+  | "PURCHASE"
+  | "SUBSCRIPTION";
+
 export interface Database {
   public: {
     Tables: {
@@ -426,6 +448,234 @@ export interface Database {
         Update: Partial<
           Omit<Database["public"]["Tables"]["prompter_content_items"]["Insert"], "tenant_id">
         >;
+        Relationships: [];
+      };
+      prompter_conversions: {
+        Row: {
+          id: string;
+          tenant_id: string;
+          master_campaign_id: string | null;
+          channel_campaign_id: string | null;
+          customer_reference: string | null;
+          order_reference: string | null;
+          source: string;
+          event_type: ConversionEventType;
+          value: number | null;
+          currency: string;
+          occurred_at: string;
+          metadata: Json;
+          external_event_id: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          tenant_id: string;
+          master_campaign_id?: string | null;
+          channel_campaign_id?: string | null;
+          customer_reference?: string | null;
+          order_reference?: string | null;
+          source?: string;
+          event_type: ConversionEventType;
+          value?: number | null;
+          currency?: string;
+          occurred_at?: string;
+          metadata?: Json;
+          external_event_id?: string | null;
+        };
+        Update: never; // conversions are recorded once, never edited
+        Relationships: [];
+      };
+      prompter_platform_capabilities: {
+        Row: {
+          platform: ConnectorPlatform;
+          capability: ConnectorCapability;
+          enabled: boolean;
+          requires_oauth: boolean;
+          requires_approval: boolean;
+          api_version: string | null;
+          notes: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: never; // global registry, seeded by migrations only — see docs/DATABASE.md
+        Update: never;
+        Relationships: [];
+      };
+      prompter_connected_accounts: {
+        Row: {
+          id: string;
+          tenant_id: string;
+          platform: ConnectorPlatform;
+          external_account_id: string;
+          external_account_name: string | null;
+          status: StoredConnectionStatus;
+          scopes: string[];
+          expires_at: string | null;
+          refreshable: boolean;
+          last_refreshed_at: string | null;
+          connected_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          tenant_id: string;
+          platform: ConnectorPlatform;
+          external_account_id: string;
+          external_account_name?: string | null;
+          status?: StoredConnectionStatus;
+          scopes?: string[];
+          expires_at?: string | null;
+          refreshable?: boolean;
+          last_refreshed_at?: string | null;
+          connected_by?: string | null;
+        };
+        Update: Partial<
+          Omit<
+            Database["public"]["Tables"]["prompter_connected_accounts"]["Insert"],
+            "tenant_id" | "platform"
+          >
+        >;
+        Relationships: [];
+      };
+      prompter_oauth_credentials: {
+        Row: {
+          id: string;
+          tenant_id: string;
+          connected_account_id: string;
+          encrypted_access_token: string;
+          encrypted_refresh_token: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        // Zero RLS policy on this table (service-role only) — see
+        // supabase/migrations/20260829102304_prompter_phase3_schema.sql.
+        // Only lib/supabase/admin.ts's createAdminClient() may touch it.
+        Insert: {
+          id?: string;
+          tenant_id: string;
+          connected_account_id: string;
+          encrypted_access_token: string;
+          encrypted_refresh_token?: string | null;
+        };
+        Update: Partial<
+          Omit<
+            Database["public"]["Tables"]["prompter_oauth_credentials"]["Insert"],
+            "tenant_id" | "connected_account_id"
+          >
+        >;
+        Relationships: [];
+      };
+      prompter_product_snapshots: {
+        Row: {
+          id: string;
+          tenant_id: string;
+          source_system: string;
+          source_product_id: string;
+          linked_product_id: string | null;
+          name: string;
+          description: string | null;
+          price: number | null;
+          currency: string;
+          stock: number | null;
+          hpp: number | null;
+          category: string | null;
+          images: Json;
+          snapshot_at: string;
+          source_updated_at: string | null;
+          created_at: string;
+        };
+        // Append-only, written only by the service-role client — see
+        // supabase/migrations/20260829104743_prompter_phase4_schema.sql.
+        Insert: {
+          id?: string;
+          tenant_id: string;
+          source_system?: string;
+          source_product_id: string;
+          linked_product_id?: string | null;
+          name: string;
+          description?: string | null;
+          price?: number | null;
+          currency?: string;
+          stock?: number | null;
+          hpp?: number | null;
+          category?: string | null;
+          images?: Json;
+          snapshot_at?: string;
+          source_updated_at?: string | null;
+        };
+        // The row's business data is append-only, but linked_product_id
+        // is deliberately set in a second write right after insert (see
+        // lib/umkmpro/handoff.ts#recordProductSnapshot) once the mirrored
+        // prompter_products row's id is known.
+        Update: {
+          linked_product_id?: string | null;
+        };
+        Relationships: [];
+      };
+      prompter_promotion_handoffs: {
+        Row: {
+          id: string;
+          tenant_id: string;
+          snapshot_id: string | null;
+          product_id: string | null;
+          source_system: string;
+          external_user_reference: string | null;
+          status: PromotionHandoffStatus;
+          idempotency_key: string | null;
+          expires_at: string;
+          consumed_at: string | null;
+          created_at: string;
+        };
+        // Written only by the service-role client from a signed UMKMpro
+        // request; the app's own users may only mark one CONSUMED.
+        Insert: {
+          id?: string;
+          tenant_id: string;
+          snapshot_id?: string | null;
+          product_id?: string | null;
+          source_system?: string;
+          external_user_reference?: string | null;
+          status?: PromotionHandoffStatus;
+          idempotency_key?: string | null;
+          expires_at?: string;
+        };
+        Update: {
+          status?: PromotionHandoffStatus;
+          consumed_at?: string | null;
+        };
+        Relationships: [];
+      };
+      prompter_webhook_events: {
+        Row: {
+          id: string;
+          tenant_id: string | null;
+          source_system: string;
+          external_event_id: string;
+          event_type: string;
+          payload: Json;
+          status: WebhookEventStatus;
+          error: string | null;
+          received_at: string;
+          processed_at: string | null;
+        };
+        // Idempotent receipt log, written only by the service-role client.
+        Insert: {
+          id?: string;
+          tenant_id?: string | null;
+          source_system?: string;
+          external_event_id: string;
+          event_type: string;
+          payload?: Json;
+          status?: WebhookEventStatus;
+          error?: string | null;
+          processed_at?: string | null;
+        };
+        Update: {
+          status?: WebhookEventStatus;
+          error?: string | null;
+          processed_at?: string | null;
+        };
         Relationships: [];
       };
     };

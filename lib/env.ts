@@ -35,6 +35,8 @@ export const serverEnv = {
   aiProviderApiKey: readOptional("AI_PROVIDER_API_KEY"),
   aiProviderName: process.env.AI_PROVIDER_NAME ?? "not_configured",
   openaiApiKey: readOptional("OPENAI_API_KEY"),
+  /** AES-256-GCM key (see lib/crypto/token-cipher.ts) for OAuth tokens at rest. */
+  tokenEncryptionKey: readOptional("TOKEN_ENCRYPTION_KEY"),
   meta: {
     appId: readOptional("META_APP_ID"),
     appSecret: readOptional("META_APP_SECRET"),
