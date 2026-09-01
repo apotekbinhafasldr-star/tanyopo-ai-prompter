@@ -21,10 +21,26 @@ function parseProductForm(formData: FormData) {
     productType: formData.get("productType"),
     category: formData.get("category"),
     price: formData.get("price") || undefined,
+    currency: formData.get("currency") || undefined,
     stock: formData.get("stock") || undefined,
     hpp: formData.get("hpp") || undefined,
     websiteUrl: formData.get("websiteUrl"),
+    targetCountries: formData.get("targetCountries"),
+    language: formData.get("language") || undefined,
   });
+}
+
+/** "id, my, sg" -> ["ID","MY","SG"], de-duplicated, blanks dropped. */
+function parseTargetCountries(input: string | undefined): string[] {
+  if (!input) return [];
+  return Array.from(
+    new Set(
+      input
+        .split(",")
+        .map((c) => c.trim().toUpperCase())
+        .filter((c) => /^[A-Z]{2}$/.test(c)),
+    ),
+  );
 }
 
 export async function createProductAction(
@@ -48,9 +64,12 @@ export async function createProductAction(
       product_type: parsed.data.productType as BusinessCategory,
       category: parsed.data.category || null,
       price: parsed.data.price,
+      currency: parsed.data.currency,
       stock: parsed.data.stock,
       hpp: parsed.data.hpp,
       website_url: parsed.data.websiteUrl || null,
+      target_countries: parseTargetCountries(parsed.data.targetCountries),
+      language: parsed.data.language || null,
     })
     .select("id")
     .single();
@@ -84,9 +103,12 @@ export async function updateProductAction(
       product_type: parsed.data.productType as BusinessCategory,
       category: parsed.data.category || null,
       price: parsed.data.price,
+      currency: parsed.data.currency,
       stock: parsed.data.stock,
       hpp: parsed.data.hpp,
       website_url: parsed.data.websiteUrl || null,
+      target_countries: parseTargetCountries(parsed.data.targetCountries),
+      language: parsed.data.language || null,
     })
     .eq("id", productId)
     .eq("tenant_id", session.tenantId);

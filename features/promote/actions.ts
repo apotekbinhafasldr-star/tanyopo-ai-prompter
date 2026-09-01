@@ -94,6 +94,13 @@ export async function generateCampaignDraftAction(
       target_country: inputs.targetCountry,
       target_region: inputs.targetRegion,
       target_city: inputs.targetCity,
+      // Target market language/currency (product spec §8, §10) — derived
+      // automatically rather than adding another wizard step: the
+      // campaign targets whatever currency the product itself is priced
+      // in, and the tenant's own business language, unless a future
+      // enhancement lets a user override either explicitly.
+      target_language: brandProfile?.default_language ?? null,
+      target_currency: product.currency,
       audience_notes: inputs.audienceNotes,
       daily_budget: inputs.dailyBudget,
       total_budget: inputs.totalBudget,

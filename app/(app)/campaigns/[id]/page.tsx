@@ -221,6 +221,19 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
                 {[campaign.target_city, campaign.target_region, campaign.target_country].filter(Boolean).join(", ") || "—"}
               </dd>
             </div>
+            {campaign.target_language || campaign.target_currency ? (
+              <div>
+                <dt className="text-xs text-muted-foreground">Target Pasar</dt>
+                <dd className="text-sm font-medium text-foreground">
+                  {[
+                    campaign.target_language === "en" ? "English" : campaign.target_language === "id" ? "Indonesia" : null,
+                    campaign.target_currency,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ") || "—"}
+                </dd>
+              </div>
+            ) : null}
             <div>
               <dt className="text-xs text-muted-foreground">Budget Harian</dt>
               <dd className="text-sm font-medium text-foreground">{formatCurrency(campaign.daily_budget, campaign.currency)}</dd>
