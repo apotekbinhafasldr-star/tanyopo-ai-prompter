@@ -272,11 +272,23 @@ async function submitRecommendationCore(
   }
 
   if ((actionType === "INCREASE_BUDGET" || actionType === "DECREASE_BUDGET") && suggestedDailyBudget !== null) {
+    const { data: masterCampaign, error: masterCampaignError } = await supabase
+      .from("prompter_master_campaigns")
+      .select("currency")
+      .eq("id", masterCampaignId)
+      .eq("tenant_id", tenantId)
+      .single();
+
+    if (masterCampaignError || !masterCampaign) {
+      return { error: "Campaign induk tidak ditemukan — tidak dapat memverifikasi Budget Guard." };
+    }
+
     const policy = await getOrCreateBudgetPolicy(supabase, tenantId);
     const monthToDateSpend = await getMonthToDateSpend(supabase, tenantId);
     const guardResult = checkBudgetGuard(policy, {
       dailyBudget: suggestedDailyBudget,
       totalBudget: null,
+      campaignCurrency: masterCampaign.currency,
       monthToDateSpend,
     });
     if (!guardResult.allowed) {

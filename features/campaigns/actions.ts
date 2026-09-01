@@ -179,7 +179,7 @@ export async function submitForApprovalAction(campaignId: string): Promise<Campa
 
   const { data: campaign, error: campaignError } = await supabase
     .from("prompter_master_campaigns")
-    .select("id, status, daily_budget, total_budget")
+    .select("id, status, daily_budget, total_budget, currency")
     .eq("id", campaignId)
     .eq("tenant_id", session.tenantId)
     .single();
@@ -197,6 +197,7 @@ export async function submitForApprovalAction(campaignId: string): Promise<Campa
   const guardResult = checkBudgetGuard(policy, {
     dailyBudget: campaign.daily_budget,
     totalBudget: campaign.total_budget,
+    campaignCurrency: campaign.currency,
     monthToDateSpend,
   });
 

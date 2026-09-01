@@ -21,7 +21,11 @@ function makePolicy(overrides: Partial<BudgetPolicy> = {}): BudgetPolicy {
 
 describe("checkBudgetGuard", () => {
   it("allows any budget when no limits are configured", () => {
-    const result = checkBudgetGuard(makePolicy(), { dailyBudget: 10_000_000, totalBudget: 100_000_000 });
+    const result = checkBudgetGuard(makePolicy(), {
+      dailyBudget: 10_000_000,
+      totalBudget: 100_000_000,
+      campaignCurrency: "IDR",
+    });
     expect(result.allowed).toBe(true);
   });
 
@@ -29,6 +33,7 @@ describe("checkBudgetGuard", () => {
     const result = checkBudgetGuard(makePolicy({ daily_limit: 50_000 }), {
       dailyBudget: 100_000,
       totalBudget: null,
+      campaignCurrency: "IDR",
     });
     expect(result.allowed).toBe(false);
     expect(result.reason).toMatch(/harian/i);
@@ -38,6 +43,7 @@ describe("checkBudgetGuard", () => {
     const result = checkBudgetGuard(makePolicy({ campaign_limit: 1_000_000 }), {
       dailyBudget: null,
       totalBudget: 5_000_000,
+      campaignCurrency: "IDR",
     });
     expect(result.allowed).toBe(false);
     expect(result.reason).toMatch(/campaign/i);
@@ -47,6 +53,7 @@ describe("checkBudgetGuard", () => {
     const result = checkBudgetGuard(makePolicy({ daily_limit: 50_000, campaign_limit: 1_000_000 }), {
       dailyBudget: 50_000,
       totalBudget: 1_000_000,
+      campaignCurrency: "IDR",
     });
     expect(result.allowed).toBe(true);
   });
@@ -59,6 +66,7 @@ describe("checkBudgetGuard", () => {
       totalBudget: null,
       monthToDateSpend: 500_000,
       referenceDate,
+      campaignCurrency: "IDR",
     });
     // 500_000 already spent + 200_000 * 6 remaining days = 1_700_000 > 1_000_000.
     expect(result.allowed).toBe(false);
@@ -72,6 +80,7 @@ describe("checkBudgetGuard", () => {
       totalBudget: null,
       monthToDateSpend: 500_000,
       referenceDate,
+      campaignCurrency: "IDR",
     });
     expect(result.allowed).toBe(true);
   });
@@ -82,7 +91,38 @@ describe("checkBudgetGuard", () => {
       dailyBudget: null,
       totalBudget: 200_000,
       referenceDate,
+      campaignCurrency: "IDR",
     });
     expect(result.allowed).toBe(false);
+  });
+
+  it("rejects outright when the campaign's currency differs from the policy's currency, even with no limits configured", () => {
+    const result = checkBudgetGuard(makePolicy({ currency: "IDR" }), {
+      dailyBudget: 10,
+      totalBudget: 10,
+      campaignCurrency: "USD",
+    });
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toMatch(/mata uang/i);
+  });
+
+  it("never compares a USD campaign's raw numbers against an IDR limit as if they were the same unit", () => {
+    // Without the currency guard this would incorrectly pass: 400 < 50_000.
+    const result = checkBudgetGuard(makePolicy({ currency: "IDR", daily_limit: 50_000 }), {
+      dailyBudget: 400,
+      totalBudget: null,
+      campaignCurrency: "USD",
+    });
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toMatch(/mata uang/i);
+  });
+
+  it("allows normal limit checks to proceed once the campaign currency matches the policy currency", () => {
+    const result = checkBudgetGuard(makePolicy({ currency: "USD", daily_limit: 500 }), {
+      dailyBudget: 400,
+      totalBudget: null,
+      campaignCurrency: "USD",
+    });
+    expect(result.allowed).toBe(true);
   });
 });

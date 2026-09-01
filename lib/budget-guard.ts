@@ -7,6 +7,16 @@ export interface BudgetCheckInput {
   dailyBudget: number | null;
   totalBudget: number | null;
   /**
+   * The currency the campaign's own budget numbers are denominated in
+   * (product.currency, propagated onto prompter_master_campaigns.currency
+   * at creation — product spec §8/§13). Compared against policy.currency
+   * before any numeric comparison: Budget Guard never assumes two
+   * currencies are the same unit, and this app has no invented FX rate to
+   * silently convert one into the other for a real spend-authorization
+   * gate.
+   */
+  campaignCurrency: string;
+  /**
    * Actual spend already recorded this calendar month for the tenant
    * (sum of prompter_marketing_metrics.spend since the 1st), so the
    * monthly check is a hard-stop against real cumulative spend, not just
@@ -35,6 +45,13 @@ export interface BudgetCheckResult {
  * testable. See tests/unit/lib/budget-guard.test.ts.
  */
 export function checkBudgetGuard(policy: BudgetPolicy, input: BudgetCheckInput): BudgetCheckResult {
+  if (input.campaignCurrency !== policy.currency) {
+    return {
+      allowed: false,
+      reason: `Mata uang campaign (${input.campaignCurrency}) berbeda dari mata uang kebijakan Budget Guard (${policy.currency}) — sistem tidak melakukan konversi otomatis untuk keputusan budget. Samakan mata uang produk/campaign dengan kebijakan, atau perbarui mata uang Budget Guard di Settings.`,
+    };
+  }
+
   if (policy.daily_limit != null && input.dailyBudget != null && input.dailyBudget > policy.daily_limit) {
     return {
       allowed: false,
