@@ -26,10 +26,14 @@ export function ProductForm({
   action,
   product,
   submitLabel,
+  defaultCurrency = "IDR",
 }: {
   action: (prevState: ActionState, formData: FormData) => Promise<ActionState>;
   product?: Product;
   submitLabel: string;
+  /** Tenant's own configured currency (session.defaultCurrency) — used
+   * only when creating a new product with no currency of its own yet. */
+  defaultCurrency?: string;
 }) {
   const [state, formAction, pending] = useActionState(action, initialState);
 
@@ -84,7 +88,7 @@ export function ProductForm({
 
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="currency">Mata Uang</Label>
-          <select id="currency" name="currency" defaultValue={product?.currency ?? "IDR"} className={selectClass}>
+          <select id="currency" name="currency" defaultValue={product?.currency ?? defaultCurrency} className={selectClass}>
             {SUPPORTED_CURRENCIES.map((c) => (
               <option key={c} value={c}>
                 {c}

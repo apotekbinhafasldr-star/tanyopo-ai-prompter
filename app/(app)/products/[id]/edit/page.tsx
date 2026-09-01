@@ -37,7 +37,12 @@ export default async function EditProductPage({ params }: { params: Promise<{ id
           <CardTitle>Detail Produk</CardTitle>
         </CardHeader>
         <CardContent className="pt-4">
-          <ProductForm action={boundAction} product={product} submitLabel="Simpan Perubahan" />
+          <ProductForm
+            action={boundAction}
+            product={product}
+            submitLabel="Simpan Perubahan"
+            defaultCurrency={session.defaultCurrency}
+          />
         </CardContent>
       </Card>
     </div>

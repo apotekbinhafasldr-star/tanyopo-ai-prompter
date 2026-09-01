@@ -7,7 +7,7 @@ import { requireSessionContext } from "@/services/session";
 export const metadata: Metadata = { title: "Tambah Produk — Tanyopo AI Promoter" };
 
 export default async function NewProductPage() {
-  await requireSessionContext();
+  const session = await requireSessionContext();
 
   return (
     <div className="flex flex-1 flex-col gap-6 p-8">
@@ -23,7 +23,11 @@ export default async function NewProductPage() {
           <CardTitle>Detail Produk</CardTitle>
         </CardHeader>
         <CardContent className="pt-4">
-          <ProductForm action={createProductAction} submitLabel="Simpan Produk" />
+          <ProductForm
+            action={createProductAction}
+            submitLabel="Simpan Produk"
+            defaultCurrency={session.defaultCurrency}
+          />
         </CardContent>
       </Card>
     </div>
