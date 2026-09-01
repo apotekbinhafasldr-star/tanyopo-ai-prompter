@@ -8,6 +8,7 @@ import type {
   UmkmproPromotionHandoffInput,
   UmkmproWebhookEventInput,
 } from "@/schemas/umkmpro";
+import { recordSingleTouchAttribution } from "@/services/attribution";
 
 /**
  * Data-access layer for /api/v1/integrations/umkmpro/* (product spec
@@ -184,6 +185,19 @@ export async function recordConversionFromUmkmpro(
   if (error || !data) {
     throw new Error(error?.message ?? "Gagal menyimpan data konversi dari UMKMpro AI.");
   }
+
+  // Single-touch attribution to whichever campaign UMKMpro AI passed —
+  // see services/attribution.ts. Re-runs (and self-corrects) on a resend
+  // with the same external_event_id, matching this function's own
+  // overwrite-on-resend semantics. No-ops when neither campaign id is set.
+  await recordSingleTouchAttribution(admin, {
+    tenantId,
+    conversionId: data.id,
+    masterCampaignId: input.masterCampaignId ?? null,
+    channelCampaignId: input.channelCampaignId ?? null,
+    value: input.value ?? null,
+    model: "UMKMPRO_VERIFIED",
+  });
 
   return { conversionId: data.id };
 }

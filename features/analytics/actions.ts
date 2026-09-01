@@ -7,6 +7,7 @@ import { manualConversionSchema } from "@/schemas/conversion";
 import { AnalyticsInsightSchema } from "@/schemas/ai/analytics-insight";
 import { buildSystemPreamble, buildAnalyticsInsightPrompt } from "@/lib/ai/prompts";
 import { runAiJob } from "@/services/ai-jobs";
+import { recordSingleTouchAttribution } from "@/services/attribution";
 import type { ConversionEventType, Json } from "@/types/database";
 
 export interface AnalyticsActionState {
@@ -32,19 +33,36 @@ export async function logConversionAction(
   const session = await requireSessionContext();
   const supabase = await createClient();
 
-  const { error } = await supabase.from("prompter_conversions").insert({
-    tenant_id: session.tenantId,
-    master_campaign_id: parsed.data.campaignId || null,
-    event_type: parsed.data.eventType as ConversionEventType,
-    value: parsed.data.value,
-    customer_reference: parsed.data.customerReference || null,
-    source: "manual",
-    occurred_at: parsed.data.occurredAt ? new Date(parsed.data.occurredAt).toISOString() : new Date().toISOString(),
-  });
+  const masterCampaignId = parsed.data.campaignId || null;
 
-  if (error) {
+  const { data: conversion, error } = await supabase
+    .from("prompter_conversions")
+    .insert({
+      tenant_id: session.tenantId,
+      master_campaign_id: masterCampaignId,
+      event_type: parsed.data.eventType as ConversionEventType,
+      value: parsed.data.value,
+      customer_reference: parsed.data.customerReference || null,
+      source: "manual",
+      occurred_at: parsed.data.occurredAt ? new Date(parsed.data.occurredAt).toISOString() : new Date().toISOString(),
+    })
+    .select("id")
+    .single();
+
+  if (error || !conversion) {
     return { error: "Gagal mencatat konversi." };
   }
+
+  // Single-touch attribution to whichever campaign the user picked — see
+  // services/attribution.ts. No-ops when no campaign was picked.
+  await recordSingleTouchAttribution(supabase, {
+    tenantId: session.tenantId,
+    conversionId: conversion.id,
+    masterCampaignId,
+    channelCampaignId: null,
+    value: parsed.data.value ?? null,
+    model: "MANUAL",
+  });
 
   revalidatePath("/analytics");
   return { error: null };

@@ -42,7 +42,7 @@ Development proceeds phase by phase. A phase is not started until the previous o
 - Audit log (`prompter_audit_logs`) now records `campaign.submitted_for_approval`, `campaign.approved`, `campaign.launch_rejected`, `budget_policy.updated` — alongside Phase 0's `onboarding.completed`
 
 **Known Phase 2 simplifications:**
-- `prompter_attributions` is schema-only — nothing writes to it yet (no attribution model is computed until real conversion data exists)
+- `prompter_attributions` now gets a single-touch row (`services/attribution.ts`) whenever a conversion is recorded with a known campaign link — `MANUAL` for the manual-entry form, `UMKMPRO_VERIFIED` for UMKMpro AI's conversions feed. A conversion recorded with no campaign link stays unattributed (never guessed). True multi-touch/weighted models are still future work — this only ever writes one 100%-weight row per conversion.
 - Approval Center only handles `CAMPAIGN_LAUNCH`; the other approval types in the schema (`BUDGET_CHANGE`, `CAMPAIGN_SCALE`, `CONTENT_PUBLISH`, `AUTOPILOT_ACTION`) have no feature behind them yet
 - Conversions are manual-entry only — no ad-platform conversion API or UMKMpro conversion bridge (Phase 4)
 - Budget Guard checks `daily_limit`, `campaign_limit`, and `monthly_limit` (the last as a projection — real month-to-date `prompter_marketing_metrics` spend plus this campaign's remaining-month contribution, vs. the limit); `require_approval_above` and `autopilot_limit` are stored but not yet enforced. There is still no per-platform limit — `prompter_budget_policies` has no platform-scoped columns, a real gap against the product spec's "per-platform limits" requirement, and would need a schema migration to add.
