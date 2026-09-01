@@ -13,6 +13,10 @@ const DEFAULT_SUBSCRIPTION: Omit<Subscription, "tenant_id"> = {
   success_fee_rate_bps: null,
   current_period_start: null,
   current_period_end: null,
+  billing_country: null,
+  invoice_currency: null,
+  payment_provider_customer_reference: null,
+  tax_metadata: {},
   created_at: new Date(0).toISOString(),
   updated_at: new Date(0).toISOString(),
 };
