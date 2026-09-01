@@ -12,7 +12,7 @@ Two products, one ecosystem. Promoter's source code is fully separate from UMKMp
 
 1. **One Supabase project.** Not two — see [DATABASE.md](DATABASE.md) for why and how tenancy still stays cleanly separated.
 2. **One tenant identity.** `auth.users`, `public.tenants`, `public.user_profiles` are owned by UMKMpro AI's schema. Promoter reads them for auth/tenancy and never writes to them directly.
-3. **An eventual API bridge.** UMKMpro AI's "🚀 PROMOSIKAN DENGAN AI" button will call into Promoter's `/api/v1/integrations/umkmpro/*` namespace (Phase 4). Promoter does not require UMKMpro AI to function — a user can sign up and use Promoter standalone.
+3. **An API bridge.** UMKMpro AI's "🚀 PROMOSIKAN DENGAN AI" button calls into Promoter's `/api/v1/integrations/umkmpro/*` namespace (Phase 4 — see [INTEGRATIONS.md](INTEGRATIONS.md)). Promoter does not require UMKMpro AI to function — a user can sign up and use Promoter standalone.
 
 ## Tech stack
 
@@ -21,7 +21,7 @@ Two products, one ecosystem. Promoter's source code is fully separate from UMKMp
 - **UI:** React 19, Tailwind CSS v4 (CSS-first `@theme` tokens, no `tailwind.config.js`), a small local `components/ui/` primitive set (no external component library) built with `class-variance-authority` + `tailwind-merge`
 - **Icons:** `lucide-react`
 - **Backend:** Supabase (Postgres, Auth, Storage, Edge Functions), reached via `@supabase/ssr` and `@supabase/supabase-js`
-- **AI:** Anthropic (`@anthropic-ai/sdk`) behind a vendor-neutral `AIProvider` interface — see [AI_SYSTEM.md](AI_SYSTEM.md)
+- **AI:** OpenAI (`openai`) and Anthropic (`@anthropic-ai/sdk`) behind a vendor-neutral `AIProvider` interface, selected per request by the Tanyopo AI Router — see [AI_SYSTEM.md](AI_SYSTEM.md)
 - **Validation:** Zod, schemas live in `schemas/`
 
 ## Folder structure
@@ -33,24 +33,47 @@ app/                    Route segments (App Router)
   onboarding/             Post-signup wizard, standalone layout (no sidebar)
   (app)/                  Authenticated app shell (sidebar) — dashboard and
                           every feature area
+  api/connections/{meta,  OAuth route handlers (authorize, callback) —
+    tiktok,x}/             thin wrappers around lib/connectors/oauth-*.ts
+  api/v1/integrations/    Signed service routes for UMKMpro AI (products,
+    umkmpro/               promotions, conversions, webhooks) — no
+                          Supabase session, HMAC-signed instead
 components/
   ui/                    Design-system primitives (Button, Card, Input, ...)
   layout/                Sidebar and other shell chrome
   shared/                Cross-feature building blocks (e.g. ComingSoon)
 features/                Feature-scoped UI + server actions, grouped by
                           domain (auth, onboarding, dashboard, marketing,
-                          products, promote, campaigns, content, ...)
+                          products, promote, campaigns, content, approvals,
+                          analytics, settings, connections, growth, seo, ...)
 lib/
   supabase/              client.ts (browser), server.ts (SSR), admin.ts
                           (service-role, server-only)
   ai/                    provider.ts (vendor-neutral interface),
-                          anthropic-provider.ts, get-provider.ts,
+                          openai-provider.ts, anthropic-provider.ts,
+                          task-classes.ts, routing-config.ts (pure),
+                          router.ts (Tanyopo AI Router),
                           prompts.ts (shared prompt builders)
+  connectors/            types.ts (PlatformConnector interface),
+                          meta-connector.ts, tiktok-connector.ts,
+                          x-connector.ts, get-connector.ts,
+                          oauth-authorize.ts, oauth-callback.ts (shared
+                          OAuth route handlers all three platforms use)
+  crypto/                token-cipher.ts (AES-256-GCM for OAuth tokens)
+  umkmpro/                signature.ts (pure HMAC sign/verify), auth.ts
+                          (server-only env wrapper), route-helpers.ts
+  budget-guard.ts         Pure Budget Guard check — see services/budget-guard.ts
+  profit-estimate.ts      Pure revenue − COGS − ad spend calculation
+  autopilot-policy.ts      Pure action-type → autopilot-policy-type mapping
+  growth-progress.ts      Pure follower-goal progress-bar calculation
+  rate-limit.ts            Pure in-memory fixed-window limiter
+  api/response.ts          Shared { data, error, meta } envelope helpers
   env.ts                 Typed env access; missing optional vars resolve to
                           undefined rather than throwing
   utils/, constants/      Small shared helpers (cn(), nav config, ...)
 services/                Server-only data-access functions shared across
-                          routes (e.g. services/session.ts, services/ai-jobs.ts)
+                          routes (session.ts, ai-jobs.ts, budget-guard.ts,
+                          channel-campaigns.ts, umkmpro.ts)
 schemas/                 Zod schemas, one file per domain
 types/                   Hand-scoped Supabase Database type (see DATABASE.md
                           for why this isn't the full generated schema)
@@ -72,4 +95,4 @@ docs/                     This documentation set
 
 ## What's real vs. what's still a stub
 
-As of Phase 1, **Products, Promote, Campaigns, and Content** are real — they read and write actual tenant data and (when `AI_PROVIDER_API_KEY` is configured) call a real AI provider. **Growth, SEO, Analytics, AI Marketing, Connections, Approvals, Billing** are still routed and reachable from the sidebar but render `components/shared/coming-soon.tsx` stating which phase builds them — see [ROADMAP.md](ROADMAP.md). No stub page pretends to have working data or a working button behind it, and no Phase 1 feature fakes a result when its AI provider isn't configured (see [AI_SYSTEM.md](AI_SYSTEM.md)).
+As of Phase 7, **Products, Promote, Campaigns, Content (including the content calendar), Approvals, Analytics (including the Analytics and Optimization Agents), Connections, the UMKMpro AI integration, Growth, SEO, and Automation/Autopilot settings** are real — they read and write actual tenant data, enforce the campaign approval/Budget Guard flow, (when `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` is configured) call a real AI provider, routed by task class, for blueprint/campaign/content/SEO/analytics-insight/optimization-recommendation generation, (when each platform's app credentials are configured) run a real OAuth flow for Meta, TikTok, or X and can launch a campaign to a connected ad account, sync real performance metrics, and execute an Owner-approved pause/budget-change action, and (when `UMKMPRO_SERVICE_TOKEN`/`SUPABASE_SECRET_KEY` are configured) accept genuinely signature-verified product syncs, promotion handoffs, conversions, and webhooks from UMKMpro AI. Growth's follower tracking is honestly manual-entry-only (no platform exposes an organic-follower API this app can read), SEO's AI recommendations are explicitly labeled as reasoning from a URL rather than a real site crawl, TikTok/X campaign launches honestly stop at ad-set targeting pending a verified location-catalog mapping, and "Autopilot" never executes unattended — it only auto-routes a recommendation to the Approval Center, with real execution still gated on an Owner's Approve decision — see [ROADMAP.md](ROADMAP.md) Phases 5-7 and [INTEGRATIONS.md](INTEGRATIONS.md) for the full caveats. **AI Marketing, Billing** are still routed and reachable from the sidebar but render `components/shared/coming-soon.tsx` stating which phase builds them. No stub page pretends to have working data or a working button behind it, no feature fakes a result when its AI provider, ad-platform, or UMKMpro credentials aren't configured (see [AI_SYSTEM.md](AI_SYSTEM.md), [INTEGRATIONS.md](INTEGRATIONS.md)), and `prompter_channel_campaigns.status` only ever reaches `ACTIVE` after the target platform's own API confirms the campaign exists.

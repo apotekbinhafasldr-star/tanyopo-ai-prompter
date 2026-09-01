@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { MetricCard } from "@/features/dashboard/metric-card";
 import { AiInsightCard } from "@/features/dashboard/ai-insight-card";
 import { requireSessionContext } from "@/services/session";
+import { createClient } from "@/lib/supabase/server";
 
 export const metadata: Metadata = {
   title: "Overview — Tanyopo AI Promoter",
@@ -29,6 +30,13 @@ function greeting() {
 
 export default async function DashboardPage() {
   const session = await requireSessionContext();
+  const supabase = await createClient();
+
+  const { data: insight } = await supabase
+    .from("prompter_analytics_insights")
+    .select("summary, top_channel, underperforming_channels, updated_at")
+    .eq("tenant_id", session.tenantId)
+    .maybeSingle();
 
   return (
     <div className="flex flex-1 flex-col gap-8 p-8">
@@ -59,7 +67,7 @@ export default async function DashboardPage() {
         <MetricCard label="Trafik Website" icon={Globe} />
       </div>
 
-      <AiInsightCard />
+      <AiInsightCard insight={insight ?? null} />
     </div>
   );
 }

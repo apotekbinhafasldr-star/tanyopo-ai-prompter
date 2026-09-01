@@ -58,7 +58,10 @@ export async function proxy(request: NextRequest) {
 
   if (!user && !isPublicPath) {
     const redirectUrl = new URL("/login", request.url);
-    redirectUrl.searchParams.set("next", pathname);
+    // Preserve the query string too, not just the path — a UMKMpro handoff
+    // redirect (e.g. /promote?handoff=<id>) would otherwise lose the
+    // handoff id for a visitor who isn't logged into Promoter yet.
+    redirectUrl.searchParams.set("next", pathname + request.nextUrl.search);
     return NextResponse.redirect(redirectUrl);
   }
 

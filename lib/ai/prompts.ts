@@ -93,6 +93,89 @@ export function buildCampaignProposalPrompt(
     .join("\n\n");
 }
 
+export interface SeoRecommendationsInputs {
+  websiteUrl: string;
+  targetKeywords: string[];
+}
+
+export function buildSeoRecommendationsPrompt(inputs: SeoRecommendationsInputs): string {
+  return [
+    `Buat rekomendasi SEO untuk website berikut: ${inputs.websiteUrl}`,
+    inputs.targetKeywords.length > 0
+      ? `Kata kunci target yang sudah dipilih pengguna: ${inputs.targetKeywords.join(", ")}`
+      : "Pengguna belum menentukan kata kunci target — usulkan kata kunci yang relevan berdasarkan URL dan konteks bisnis.",
+    "Anda tidak memiliki akses untuk benar-benar mengunjungi atau meng-crawl website ini — dasarkan rekomendasi pada URL, nama domain, dan konteks bisnis yang diberikan, bukan seolah-olah Anda sudah memeriksa isi halaman sebenarnya.",
+    "Hasilkan ringkasan peluang SEO, daftar kata kunci target (dengan intent dan alasan), rekomendasi on-page (isu, rekomendasi, prioritas HIGH/MEDIUM/LOW), dan content plan (judul artikel, kata kunci target, jenis konten, angle singkat).",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+export interface AnalyticsInsightInputs {
+  channelMetrics: { channel: string; spend: number; impressions: number; clicks: number; reach: number }[];
+  conversions: { eventType: string; value: number; count: number }[];
+  totalConversionValue: number;
+}
+
+export function buildAnalyticsInsightPrompt(inputs: AnalyticsInsightInputs): string {
+  const metricsLines = inputs.channelMetrics.map(
+    (m) =>
+      `- ${m.channel}: spend ${m.spend}, impressions ${m.impressions}, clicks ${m.clicks}, reach ${m.reach}`,
+  );
+  const conversionLines = inputs.conversions.map(
+    (c) => `- ${c.eventType}: ${c.count} kejadian, total nilai ${c.value}`,
+  );
+
+  return [
+    "Analisis data marketing tenant ini dan buat ringkasan performa.",
+    "Data spend/impressions/clicks/reach per channel (hanya channel yang tercantum di sini yang punya data — jangan menyebut channel lain):",
+    metricsLines.length > 0 ? metricsLines.join("\n") : "(tidak ada data spend/impressions untuk channel manapun)",
+    "Data konversi:",
+    conversionLines.length > 0 ? conversionLines.join("\n") : "(tidak ada data konversi)",
+    `Total nilai konversi tercatat: ${inputs.totalConversionValue}`,
+    "PENTING: Hanya gunakan angka dan channel yang benar-benar ada di data di atas. Jangan mengarang angka, channel, atau tren yang tidak didukung data ini. Jika data terlalu sedikit untuk menyimpulkan sesuatu, katakan itu di summary atau risks, jangan dipaksakan.",
+    "Hasilkan summary, daftar tren (metric, observasi, arah UP/DOWN/FLAT), channel terbaik (atau null jika tidak bisa ditentukan), channel yang kurang optimal, dan risiko/catatan kualitas data.",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+export interface OptimizationChannelPerformance {
+  channel: string;
+  status: string;
+  dailyBudget: number | null;
+  spend: number;
+  conversionCount: number;
+  conversionValue: number;
+  estimatedContribution: number | null;
+}
+
+export interface OptimizationRecommendationInputs {
+  campaignName: string;
+  channels: OptimizationChannelPerformance[];
+}
+
+export function buildOptimizationRecommendationPrompt(inputs: OptimizationRecommendationInputs): string {
+  const lines = inputs.channels.map((c) => {
+    const roas = c.spend > 0 ? (c.conversionValue / c.spend).toFixed(2) : "tidak ada spend";
+    const contribution =
+      c.estimatedContribution !== null
+        ? `estimasi kontribusi marketing ${c.estimatedContribution}`
+        : "estimasi kontribusi marketing tidak dapat dihitung (HPP produk belum diisi)";
+    return `- ${c.channel} (status ${c.status}): budget harian ${c.dailyBudget ?? "belum diatur"}, spend tercatat ${c.spend}, ${c.conversionCount} konversi senilai ${c.conversionValue} (ROAS ~${roas}), ${contribution}`;
+  });
+
+  return [
+    `Bandingkan performa channel pada campaign "${inputs.campaignName}" berikut, dan berikan rekomendasi optimasi per channel.`,
+    lines.join("\n"),
+    "PENTING — pertimbangkan profitabilitas (estimasi kontribusi marketing = pendapatan − HPP − biaya iklan), bukan hanya ROAS. Sebuah channel dengan ROAS tinggi tapi estimasi kontribusi marketing rendah/negatif TIDAK boleh otomatis direkomendasikan untuk dinaikkan budgetnya — jelaskan alasan ini di rationale jika relevan. 'Estimasi kontribusi marketing' bukan laba bersih (belum termasuk biaya operasional lain) — jangan menyebutnya laba bersih.",
+    "Hanya gunakan channel dan angka yang benar-benar tercantum di atas — jangan mengarang channel lain atau data yang tidak ada.",
+    "Untuk setiap channel yang tercantum, hasilkan satu rekomendasi: action_type (INCREASE_BUDGET/DECREASE_BUDGET/PAUSE_CHANNEL/NO_ACTION), rationale, suggested_daily_budget (hanya untuk INCREASE_BUDGET/DECREASE_BUDGET, selain itu null), dan risk_level (LOW/MEDIUM/HIGH — seberapa besar risiko jika rekomendasi ini salah/perlu ditinjau lebih hati-hati).",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
 export interface ContentGenerationInputs {
   platform: string;
   contentType: string;

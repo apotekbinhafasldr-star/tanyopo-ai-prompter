@@ -10,7 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 
 const initialState: AuthActionState = { error: null };
 
-export function LoginForm() {
+export function LoginForm({ next }: { next?: string }) {
   const [state, formAction, pending] = useActionState(loginAction, initialState);
 
   return (
@@ -21,6 +21,7 @@ export function LoginForm() {
       </CardHeader>
       <CardContent className="pt-6">
         <form action={formAction} className="flex flex-col gap-4" noValidate>
+          {next ? <input type="hidden" name="next" value={next} /> : null}
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="email">Email</Label>
             <Input

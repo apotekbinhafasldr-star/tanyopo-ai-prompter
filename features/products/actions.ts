@@ -6,7 +6,6 @@ import { createClient } from "@/lib/supabase/server";
 import { requireSessionContext } from "@/services/session";
 import { productSchema, ALLOWED_PRODUCT_MEDIA_TYPES, MAX_PRODUCT_MEDIA_BYTES } from "@/schemas/products";
 import { MarketingBlueprintSchema } from "@/schemas/ai/marketing-blueprint";
-import { getAIProvider } from "@/lib/ai/get-provider";
 import { buildSystemPreamble, buildMarketingBlueprintPrompt } from "@/lib/ai/prompts";
 import { runAiJob } from "@/services/ai-jobs";
 import type { BusinessCategory } from "@/types/database";
@@ -184,11 +183,6 @@ export async function generateMarketingBlueprintAction(productId: string): Promi
   const session = await requireSessionContext();
   const supabase = await createClient();
 
-  const provider = getAIProvider();
-  if (!provider) {
-    return { error: "AI belum dikonfigurasi. Tambahkan AI_PROVIDER_API_KEY untuk mengaktifkan fitur ini." };
-  }
-
   const { data: product, error: productError } = await supabase
     .from("prompter_products")
     .select("*")
@@ -208,8 +202,8 @@ export async function generateMarketingBlueprintAction(productId: string): Promi
 
   const result = await runAiJob({
     supabase,
-    provider,
     tenantId: session.tenantId,
+    actorUserId: session.userId,
     jobType: "MARKETING_BLUEPRINT",
     schema: MarketingBlueprintSchema,
     system: buildSystemPreamble(brandProfile),
@@ -237,7 +231,7 @@ export async function generateMarketingBlueprintAction(productId: string): Promi
       risks: result.data.risks,
       disclaimers: result.data.disclaimers,
       ai_job_id: result.jobId,
-      model: "claude-opus-5",
+      model: result.model,
     },
     { onConflict: "product_id" },
   );

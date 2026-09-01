@@ -1,8 +1,15 @@
 import type { Metadata } from "next";
-import { User, Building2 } from "lucide-react";
+import { User, Building2, ShieldCheck, Bot } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { requireSessionContext } from "@/services/session";
+import { createClient } from "@/lib/supabase/server";
+import { getOrCreateBudgetPolicy } from "@/services/budget-guard";
+import { getOrCreateAutomationSettings } from "@/services/automation-settings";
+import { BudgetPolicyForm } from "@/features/settings/budget-policy-form";
+import { AutomationModeForm } from "@/features/settings/automation-mode-form";
+import { EmergencyStopButton } from "@/features/settings/emergency-stop-button";
+import { AutopilotPolicyToggles } from "@/features/settings/autopilot-policy-toggles";
 
 export const metadata: Metadata = { title: "Settings — Tanyopo AI Promoter" };
 
@@ -17,6 +24,18 @@ const ROLE_LABEL: Record<string, string> = {
 
 export default async function SettingsPage() {
   const session = await requireSessionContext({ allowIncompleteOnboarding: true });
+  const supabase = await createClient();
+
+  const [budgetPolicy, automationSettings, { data: autopilotPolicies }] = await Promise.all([
+    getOrCreateBudgetPolicy(supabase, session.tenantId),
+    getOrCreateAutomationSettings(supabase, session.tenantId),
+    supabase
+      .from("prompter_autopilot_policies")
+      .select("policy_type, enabled")
+      .eq("tenant_id", session.tenantId),
+  ]);
+
+  const isOwner = session.role === "owner";
 
   return (
     <div className="flex flex-1 flex-col gap-6 p-8">
@@ -64,9 +83,51 @@ export default async function SettingsPage() {
             <dd className="text-sm font-medium text-foreground">{session.businessName}</dd>
           </dl>
           <p className="mt-4 text-xs text-muted-foreground">
-            Pengaturan brand, tim, otomasi, dan API akan tersedia pada fase pengembangan
-            berikutnya.
+            Pengaturan brand, tim, dan API akan tersedia pada fase pengembangan berikutnya.
           </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center gap-2 space-y-0">
+          <ShieldCheck className="size-4 text-muted-foreground" aria-hidden />
+          <CardTitle>Budget Guard</CardTitle>
+          <CardDescription className="sr-only">
+            Batas budget yang diperiksa sebelum campaign diajukan
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="pt-4">
+          <BudgetPolicyForm policy={budgetPolicy} readOnly={!isOwner} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center gap-2 space-y-0">
+          <Bot className="size-4 text-muted-foreground" aria-hidden />
+          <CardTitle>Automation &amp; Autopilot</CardTitle>
+          <CardDescription className="sr-only">
+            Mode automation, kebijakan autopilot, dan Emergency Stop
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-6 pt-4">
+          <EmergencyStopButton
+            active={automationSettings.emergency_stop_active}
+            activatedAt={automationSettings.emergency_stop_activated_at}
+            reason={automationSettings.emergency_stop_reason}
+          />
+
+          <div className="border-t border-border pt-4">
+            <AutomationModeForm currentMode={automationSettings.automation_mode} readOnly={!isOwner} />
+          </div>
+
+          <div className="border-t border-border pt-4">
+            <p className="mb-3 text-sm font-medium text-foreground">Kebijakan Autopilot</p>
+            <AutopilotPolicyToggles
+              policies={autopilotPolicies ?? []}
+              automationMode={automationSettings.automation_mode}
+              readOnly={!isOwner}
+            />
+          </div>
         </CardContent>
       </Card>
     </div>
