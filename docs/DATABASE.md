@@ -191,6 +191,14 @@ One existing table also changed: `prompter_ai_jobs.job_type`'s CHECK constraint 
 
 `prompter_approvals.approval_type = 'AUTOPILOT_ACTION'` rows (reserved since the Phase 2 migration, unused until now) are the first to actually be created in Phase 7 — `context` (JSONB) carries `source` (`'optimization_agent'` or `'autopilot_policy'`), `master_campaign_id`, `channel`, `action_type`, `suggested_daily_budget`, `rationale`, and `risk_level`, giving `/approvals` and `features/approvals/actions.ts#executeAutopilotAction()` everything needed to both display and execute the decision without a second lookup.
 
+## Billing foundation (Final Production Completion pass)
+
+| Table | Purpose | Write access |
+|---|---|---|
+| `prompter_subscriptions` | One row per tenant (PK `tenant_id`, lazily created as `FREE`/`ACTIVE` — same pattern as `prompter_budget_policies`). `billing_provider` and `success_fee_rate_bps` are both nullable and stay `null` until a real payment processor and commercial success-fee rate are chosen — no code path sets either today. See [ROADMAP.md](ROADMAP.md) "Billing foundation". | **Owner only** for updates; every tenant member can read their own tenant's row |
+
+No other table changed for this pass, except that `prompter_attributions` (schema-only since Phase 2) is now actually written to by `services/attribution.ts#recordSingleTouchAttribution()` — no schema change, just the first application code that populates it.
+
 ## Architecture correction — AI Router usage-accounting columns
 
 Migration: `supabase/migrations/20260829250000_prompter_ai_router_usage_columns.sql`. Not a new phase — a hardening pass that added the multi-provider AI Router (`lib/ai/router.ts`, see [AI_SYSTEM.md](AI_SYSTEM.md)). Same additive-only rule as every phase before it.

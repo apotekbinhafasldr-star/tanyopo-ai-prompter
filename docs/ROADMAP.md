@@ -145,6 +145,19 @@ Not a phase — a hardening pass over already-complete Phase 0-7 work, requested
 
 **Honesty note:** neither `OPENAI_API_KEY` nor `ANTHROPIC_API_KEY` is configured in this repository's own working environments — live generation against a real provider has not been exercised as part of this correction. See [SECURITY.md](SECURITY.md) and the session's live-verification report for exactly what remains `NOT_VERIFIED` versus what passed lint/typecheck/unit-tests/build.
 
+## Billing foundation — provider-neutral (Final Production Completion pass)
+
+Not a phase — Phase 2's plan explicitly deferred billing, and no phase since built it. Adds the minimum honest foundation the product spec's hybrid model (Freemium + Subscription + AI Usage + optional Success Fee) needs, without inventing anything not yet decided:
+
+- `prompter_subscriptions` (one row per tenant, lazily created as `FREE`/`ACTIVE` on first access — same pattern as `prompter_budget_policies`): `plan` (`FREE`/`PRO`/`BUSINESS`/`GROWTH`/`AGENCY`/`UMKMPRO_BUNDLE`), `status`, `billing_provider` (null = no payment processor connected, `NOT_CONFIGURED`), `success_fee_rate_bps` (null = no commercial rate decided yet, no fee ever calculated).
+- `/billing` (`app/(app)/billing/page.tsx`) replaces the `ComingSoon` stub: shows the tenant's real plan/status, real AI usage this month (`services/billing.ts#getMonthlyAiJobCount()`, counted from `prompter_ai_jobs` — the same table every AI feature already writes to), and a success-fee calculation (`lib/billing/success-fee.ts#calculateSuccessFee()`, unit tested) computed **only** from `prompter_attributions` rows where `attribution_model = 'UMKMPRO_VERIFIED'` — never manual self-reported conversions, never total business revenue, per the product spec's explicit constraint.
+- **No prices are invented anywhere.** Every plan tier exists as a name only; there is no price column, no checkout, no invoice. `billing_provider`/`success_fee_rate_bps` being null is rendered honestly as "not configured yet," never hidden or defaulted to a guessed number.
+- **No payment processor is integrated.** This is architecture only — a real Stripe/Midtrans/Xendit (or similar) integration is future work once one is chosen; this pass deliberately stops short of picking one.
+
+Attribution write path (`services/attribution.ts#recordSingleTouchAttribution()`) was also completed as part of this same pass — `prompter_attributions` had been schema-only since Phase 2 (see Phase 2's known simplifications above). Every conversion recorded with a known campaign link now gets one single-touch attribution row (`MANUAL` for the manual entry form, `UMKMPRO_VERIFIED` for UMKMpro AI's conversions feed) — which is what makes the success-fee calculation above possible to compute from real data rather than nothing at all. True multi-touch/weighted attribution remains future work.
+
+Budget Guard's `monthly_limit` also went from stored-but-unenforced to a real hard-stop in this same pass — see Phase 2's updated note above. `prompter_budget_policies` still has no platform-scoped columns, so **per-platform limits remain unimplemented** — a real, documented gap.
+
 ## What "done" means for a phase
 
 - `npm run lint`, `npm run typecheck`, `npm run test`, `npm run build` all pass

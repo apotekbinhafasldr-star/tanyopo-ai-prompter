@@ -86,6 +86,8 @@ export type ConversionEventType =
   | "PURCHASE"
   | "SUBSCRIPTION";
 export type AttributionModel = "LAST_CLICK" | "FIRST_CLICK" | "MANUAL" | "UMKMPRO_VERIFIED";
+export type SubscriptionPlan = "FREE" | "PRO" | "BUSINESS" | "GROWTH" | "AGENCY" | "UMKMPRO_BUNDLE";
+export type SubscriptionStatus = "ACTIVE" | "TRIALING" | "PAST_DUE" | "CANCELED";
 export type HandoffStatus = "PENDING" | "CONSUMED" | "EXPIRED";
 export type WebhookEventStatus = "RECEIVED" | "PROCESSED" | "FAILED" | "IGNORED";
 
@@ -517,6 +519,32 @@ export interface Database {
         };
         Update: Partial<
           Omit<Database["public"]["Tables"]["prompter_budget_policies"]["Insert"], "tenant_id">
+        >;
+        Relationships: [];
+      };
+      prompter_subscriptions: {
+        Row: {
+          tenant_id: string;
+          plan: SubscriptionPlan;
+          status: SubscriptionStatus;
+          billing_provider: string | null;
+          success_fee_rate_bps: number | null;
+          current_period_start: string | null;
+          current_period_end: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          tenant_id: string;
+          plan?: SubscriptionPlan;
+          status?: SubscriptionStatus;
+          billing_provider?: string | null;
+          success_fee_rate_bps?: number | null;
+          current_period_start?: string | null;
+          current_period_end?: string | null;
+        };
+        Update: Partial<
+          Omit<Database["public"]["Tables"]["prompter_subscriptions"]["Insert"], "tenant_id">
         >;
         Relationships: [];
       };
