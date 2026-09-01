@@ -1,3 +1,24 @@
+-- ============================================================================
+-- RECOVERY / DOCUMENTATION MIGRATION -- reconciles repository history with
+-- schema that is ALREADY LIVE on the shared Supabase project (umkmpro-ai,
+-- ref wjjyqovhmwenbcvbnkgx). This file was reconstructed on 2026-09-01 from the
+-- project's own `supabase_migrations.schema_migrations` ledger (version
+-- 20260829104743), which recorded this exact SQL as already applied on the live
+-- database but never had a corresponding file committed to this repository
+-- (Stage 1 production integration verification, Item 1 -- schema drift).
+--
+-- This file's version prefix matches the version already recorded as
+-- applied in `supabase_migrations.schema_migrations` on the live project,
+-- so a standard `supabase db push` against that project will recognize it
+-- as already-applied and skip it -- it will NOT be re-executed there.
+-- Defensive IF NOT EXISTS / DROP-IF-EXISTS-THEN-CREATE guards have been
+-- added below (where Postgres syntax allows) purely so this file is also
+-- safe to run once, from scratch, against a project that does NOT yet have
+-- this schema (e.g. a fresh dev/staging replica) -- it must NOT be run
+-- against the live umkmpro-ai project itself, since that would attempt to
+-- recreate objects that already exist there under the same names.
+-- ============================================================================
+
 -- Tanyopo AI Promoter — Phase 4 schema (UMKMpro Integration)
 --
 -- Additive only, same rules as Phase 0-3. No UMKMpro table is touched.
@@ -16,6 +37,7 @@
 -- unique constraint — so this only actually constrains 'umkmpro'-sourced
 -- rows, which is exactly what product sync needs.
 -- ============================================================================
+alter table public.prompter_products drop constraint if exists prompter_products_source_unique;
 alter table public.prompter_products
   add constraint prompter_products_source_unique unique (tenant_id, source_system, source_product_id);
 
@@ -24,8 +46,9 @@ alter table public.prompter_products
 -- Same NULL-distinctness trick — Phase 2's manual entries (external_event_id
 -- IS NULL) never collide with each other or with umkmpro-sourced rows.
 -- ============================================================================
-alter table public.prompter_conversions add column external_event_id text;
+alter table public.prompter_conversions add column if not exists external_event_id text;
 
+alter table public.prompter_conversions drop constraint if exists prompter_conversions_external_event_unique;
 alter table public.prompter_conversions
   add constraint prompter_conversions_external_event_unique unique (tenant_id, source, external_event_id);
 
@@ -38,7 +61,7 @@ alter table public.prompter_conversions
 -- prompter_products mirror that the rest of the app (Promote Wizard,
 -- Marketing Blueprint, ...) actually queries.
 -- ============================================================================
-create table public.prompter_product_snapshots (
+create table if not exists public.prompter_product_snapshots (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null references public.tenants(id) on delete cascade,
   source_system text not null default 'umkmpro',
@@ -60,11 +83,12 @@ create table public.prompter_product_snapshots (
 comment on table public.prompter_product_snapshots is
   'Tanyopo AI Promoter: append-only historical product snapshots from UMKMpro AI (product spec §48). Never mutated, only inserted.';
 
-create index idx_prompter_product_snapshots_tenant on public.prompter_product_snapshots (tenant_id, snapshot_at desc);
-create index idx_prompter_product_snapshots_source on public.prompter_product_snapshots (tenant_id, source_system, source_product_id);
+create index if not exists idx_prompter_product_snapshots_tenant on public.prompter_product_snapshots (tenant_id, snapshot_at desc);
+create index if not exists idx_prompter_product_snapshots_source on public.prompter_product_snapshots (tenant_id, source_system, source_product_id);
 
 alter table public.prompter_product_snapshots enable row level security;
 
+drop policy if exists "Lihat snapshot produk tenant sendiri" on public.prompter_product_snapshots;
 create policy "Lihat snapshot produk tenant sendiri"
   on public.prompter_product_snapshots for select
   using (tenant_id = public.fn_current_tenant_id());
@@ -80,7 +104,7 @@ create policy "Lihat snapshot produk tenant sendiri"
 -- "validates organization/user" — the visiting user simply can't see a
 -- handoff belonging to a different tenant, full stop.
 -- ============================================================================
-create table public.prompter_promotion_handoffs (
+create table if not exists public.prompter_promotion_handoffs (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null references public.tenants(id) on delete cascade,
   snapshot_id uuid references public.prompter_product_snapshots(id) on delete set null,
@@ -98,14 +122,16 @@ create table public.prompter_promotion_handoffs (
 comment on table public.prompter_promotion_handoffs is
   'Tanyopo AI Promoter: one-time "Promosikan dengan AI" handoff from UMKMpro. Consumed by /promote?handoff=<id>.';
 
-create index idx_prompter_promotion_handoffs_tenant on public.prompter_promotion_handoffs (tenant_id, created_at desc);
+create index if not exists idx_prompter_promotion_handoffs_tenant on public.prompter_promotion_handoffs (tenant_id, created_at desc);
 
 alter table public.prompter_promotion_handoffs enable row level security;
 
+drop policy if exists "Lihat handoff tenant sendiri" on public.prompter_promotion_handoffs;
 create policy "Lihat handoff tenant sendiri"
   on public.prompter_promotion_handoffs for select
   using (tenant_id = public.fn_current_tenant_id());
 
+drop policy if exists "Tenant sendiri bisa menandai handoff terpakai" on public.prompter_promotion_handoffs;
 create policy "Tenant sendiri bisa menandai handoff terpakai"
   on public.prompter_promotion_handoffs for update
   using (tenant_id = public.fn_current_tenant_id())
@@ -120,7 +146,7 @@ create policy "Tenant sendiri bisa menandai handoff terpakai"
 -- (product spec §56-57). `external_event_id` is UMKMpro's own event id;
 -- the unique constraint is what makes redelivery a safe no-op.
 -- ============================================================================
-create table public.prompter_webhook_events (
+create table if not exists public.prompter_webhook_events (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid references public.tenants(id) on delete cascade,
   source_system text not null default 'umkmpro',
@@ -137,10 +163,11 @@ create table public.prompter_webhook_events (
 comment on table public.prompter_webhook_events is
   'Tanyopo AI Promoter: idempotent webhook receipt log. tenant_id is null only when the tenant could not be resolved (status = IGNORED).';
 
-create index idx_prompter_webhook_events_tenant on public.prompter_webhook_events (tenant_id, received_at desc);
+create index if not exists idx_prompter_webhook_events_tenant on public.prompter_webhook_events (tenant_id, received_at desc);
 
 alter table public.prompter_webhook_events enable row level security;
 
+drop policy if exists "Lihat webhook event tenant sendiri" on public.prompter_webhook_events;
 create policy "Lihat webhook event tenant sendiri"
   on public.prompter_webhook_events for select
   using (tenant_id = public.fn_current_tenant_id());

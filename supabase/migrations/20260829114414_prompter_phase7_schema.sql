@@ -1,3 +1,24 @@
+-- ============================================================================
+-- RECOVERY / DOCUMENTATION MIGRATION -- reconciles repository history with
+-- schema that is ALREADY LIVE on the shared Supabase project (umkmpro-ai,
+-- ref wjjyqovhmwenbcvbnkgx). This file was reconstructed on 2026-09-01 from the
+-- project's own `supabase_migrations.schema_migrations` ledger (version
+-- 20260829114414), which recorded this exact SQL as already applied on the live
+-- database but never had a corresponding file committed to this repository
+-- (Stage 1 production integration verification, Item 1 -- schema drift).
+--
+-- This file's version prefix matches the version already recorded as
+-- applied in `supabase_migrations.schema_migrations` on the live project,
+-- so a standard `supabase db push` against that project will recognize it
+-- as already-applied and skip it -- it will NOT be re-executed there.
+-- Defensive IF NOT EXISTS / DROP-IF-EXISTS-THEN-CREATE guards have been
+-- added below (where Postgres syntax allows) purely so this file is also
+-- safe to run once, from scratch, against a project that does NOT yet have
+-- this schema (e.g. a fresh dev/staging replica) -- it must NOT be run
+-- against the live umkmpro-ai project itself, since that would attempt to
+-- recreate objects that already exist there under the same names.
+-- ============================================================================
+
 -- Tanyopo AI Promoter — Phase 7 schema (Advanced AI)
 --
 -- Additive only, same rules as Phase 0-6. No UMKMpro table is touched.
@@ -13,7 +34,7 @@
 -- ============================================================================
 -- prompter_ai_jobs.job_type gains two Phase 7 generation types
 -- ============================================================================
-alter table public.prompter_ai_jobs drop constraint prompter_ai_jobs_job_type_check;
+alter table public.prompter_ai_jobs drop constraint if exists prompter_ai_jobs_job_type_check;
 
 alter table public.prompter_ai_jobs add constraint prompter_ai_jobs_job_type_check
   check (job_type in (
@@ -31,7 +52,7 @@ alter table public.prompter_ai_jobs add constraint prompter_ai_jobs_job_type_che
 -- store for the "Tanyopo Intelligence" card (dashboard + /analytics),
 -- replacing its Phase 0 always-empty stub with real, persisted output.
 -- ============================================================================
-create table public.prompter_analytics_insights (
+create table if not exists public.prompter_analytics_insights (
   tenant_id uuid primary key references public.tenants(id) on delete cascade,
   summary text,
   trends jsonb not null default '[]'::jsonb,
@@ -47,16 +68,19 @@ create table public.prompter_analytics_insights (
 comment on table public.prompter_analytics_insights is
   'Tanyopo AI Promoter: one AI-generated performance summary per tenant, upserted on regenerate. Only ever generated from real metrics/conversions data.';
 
+drop trigger if exists trg_prompter_analytics_insights_updated_at on public.prompter_analytics_insights;
 create trigger trg_prompter_analytics_insights_updated_at
   before update on public.prompter_analytics_insights
   for each row execute function public.prompter_set_updated_at();
 
 alter table public.prompter_analytics_insights enable row level security;
 
+drop policy if exists "Lihat analytics insight tenant sendiri" on public.prompter_analytics_insights;
 create policy "Lihat analytics insight tenant sendiri"
   on public.prompter_analytics_insights for select
   using (tenant_id = public.fn_current_tenant_id());
 
+drop policy if exists "Owner/marketing kelola analytics insight" on public.prompter_analytics_insights;
 create policy "Owner/marketing kelola analytics insight"
   on public.prompter_analytics_insights for all
   using (tenant_id = public.fn_current_tenant_id() and public.fn_current_role() in ('owner', 'marketing'))
@@ -75,7 +99,7 @@ create policy "Owner/marketing kelola analytics insight"
 -- features/campaigns/optimization-actions.ts. This table never causes a
 -- budget change or pause on its own; it only ever proposes one.
 -- ============================================================================
-create table public.prompter_optimization_recommendations (
+create table if not exists public.prompter_optimization_recommendations (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null references public.tenants(id) on delete cascade,
   master_campaign_id uuid not null references public.prompter_master_campaigns(id) on delete cascade,
@@ -91,16 +115,19 @@ create table public.prompter_optimization_recommendations (
 comment on table public.prompter_optimization_recommendations is
   'Tanyopo AI Promoter: AI-generated cross-channel budget/pause suggestions for one campaign. A suggestion, never an executed action.';
 
+drop trigger if exists trg_prompter_optimization_recommendations_updated_at on public.prompter_optimization_recommendations;
 create trigger trg_prompter_optimization_recommendations_updated_at
   before update on public.prompter_optimization_recommendations
   for each row execute function public.prompter_set_updated_at();
 
 alter table public.prompter_optimization_recommendations enable row level security;
 
+drop policy if exists "Lihat optimization recommendation tenant sendiri" on public.prompter_optimization_recommendations;
 create policy "Lihat optimization recommendation tenant sendiri"
   on public.prompter_optimization_recommendations for select
   using (tenant_id = public.fn_current_tenant_id());
 
+drop policy if exists "Owner/marketing kelola optimization recommendation" on public.prompter_optimization_recommendations;
 create policy "Owner/marketing kelola optimization recommendation"
   on public.prompter_optimization_recommendations for all
   using (tenant_id = public.fn_current_tenant_id() and public.fn_current_role() in ('owner', 'marketing'))
@@ -119,7 +146,7 @@ create policy "Owner/marketing kelola optimization recommendation"
 -- real ad platform. See docs/SECURITY.md "Automation safety" for the
 -- full boundary list this table is one part of.
 -- ============================================================================
-create table public.prompter_autopilot_policies (
+create table if not exists public.prompter_autopilot_policies (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null references public.tenants(id) on delete cascade,
   policy_type text not null check (
@@ -135,16 +162,19 @@ create table public.prompter_autopilot_policies (
 comment on table public.prompter_autopilot_policies is
   'Tanyopo AI Promoter: per-tenant autopilot policy toggles. Enabling one only auto-routes a matching AI suggestion to the Approval Center — it never grants direct execution.';
 
+drop trigger if exists trg_prompter_autopilot_policies_updated_at on public.prompter_autopilot_policies;
 create trigger trg_prompter_autopilot_policies_updated_at
   before update on public.prompter_autopilot_policies
   for each row execute function public.prompter_set_updated_at();
 
 alter table public.prompter_autopilot_policies enable row level security;
 
+drop policy if exists "Lihat autopilot policy tenant sendiri" on public.prompter_autopilot_policies;
 create policy "Lihat autopilot policy tenant sendiri"
   on public.prompter_autopilot_policies for select
   using (tenant_id = public.fn_current_tenant_id());
 
+drop policy if exists "Owner kelola autopilot policy" on public.prompter_autopilot_policies;
 create policy "Owner kelola autopilot policy"
   on public.prompter_autopilot_policies for all
   using (tenant_id = public.fn_current_tenant_id() and public.fn_current_role() = 'owner')

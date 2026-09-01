@@ -1,3 +1,24 @@
+-- ============================================================================
+-- RECOVERY / DOCUMENTATION MIGRATION -- reconciles repository history with
+-- schema that is ALREADY LIVE on the shared Supabase project (umkmpro-ai,
+-- ref wjjyqovhmwenbcvbnkgx). This file was reconstructed on 2026-09-01 from the
+-- project's own `supabase_migrations.schema_migrations` ledger (version
+-- 20260829102304), which recorded this exact SQL as already applied on the live
+-- database but never had a corresponding file committed to this repository
+-- (Stage 1 production integration verification, Item 1 -- schema drift).
+--
+-- This file's version prefix matches the version already recorded as
+-- applied in `supabase_migrations.schema_migrations` on the live project,
+-- so a standard `supabase db push` against that project will recognize it
+-- as already-applied and skip it -- it will NOT be re-executed there.
+-- Defensive IF NOT EXISTS / DROP-IF-EXISTS-THEN-CREATE guards have been
+-- added below (where Postgres syntax allows) purely so this file is also
+-- safe to run once, from scratch, against a project that does NOT yet have
+-- this schema (e.g. a fresh dev/staging replica) -- it must NOT be run
+-- against the live umkmpro-ai project itself, since that would attempt to
+-- recreate objects that already exist there under the same names.
+-- ============================================================================
+
 -- Tanyopo AI Promoter — Phase 3 schema (Meta Foundation)
 --
 -- Additive only, same rules as Phase 0-2. No UMKMpro table is touched.
@@ -16,7 +37,7 @@
 -- can never write to it (a future capability change is a migration, not a
 -- runtime write).
 -- ============================================================================
-create table public.prompter_platform_capabilities (
+create table if not exists public.prompter_platform_capabilities (
   platform text not null check (platform in ('META', 'TIKTOK', 'X')),
   capability text not null check (
     capability in (
@@ -37,12 +58,14 @@ create table public.prompter_platform_capabilities (
 comment on table public.prompter_platform_capabilities is
   'Tanyopo AI Promoter: global connector capability registry. Read-only from the app — seeded by migrations.';
 
+drop trigger if exists trg_prompter_platform_capabilities_updated_at on public.prompter_platform_capabilities;
 create trigger trg_prompter_platform_capabilities_updated_at
   before update on public.prompter_platform_capabilities
   for each row execute function public.prompter_set_updated_at();
 
 alter table public.prompter_platform_capabilities enable row level security;
 
+drop policy if exists "Semua pengguna login bisa lihat capability registry" on public.prompter_platform_capabilities;
 create policy "Semua pengguna login bisa lihat capability registry"
   on public.prompter_platform_capabilities for select
   to authenticated
@@ -56,7 +79,7 @@ create policy "Semua pengguna login bisa lihat capability registry"
 -- CONNECTED status — a row is only written after a real OAuth callback
 -- succeeds (see app/api/connections/meta/callback).
 -- ============================================================================
-create table public.prompter_connected_accounts (
+create table if not exists public.prompter_connected_accounts (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null references public.tenants(id) on delete cascade,
   platform text not null check (platform in ('META', 'TIKTOK', 'X')),
@@ -78,18 +101,21 @@ create table public.prompter_connected_accounts (
 comment on table public.prompter_connected_accounts is
   'Tanyopo AI Promoter: OAuth connection metadata (never tokens). A missing row means NOT_CONNECTED.';
 
-create index idx_prompter_connected_accounts_tenant on public.prompter_connected_accounts (tenant_id);
+create index if not exists idx_prompter_connected_accounts_tenant on public.prompter_connected_accounts (tenant_id);
 
+drop trigger if exists trg_prompter_connected_accounts_updated_at on public.prompter_connected_accounts;
 create trigger trg_prompter_connected_accounts_updated_at
   before update on public.prompter_connected_accounts
   for each row execute function public.prompter_set_updated_at();
 
 alter table public.prompter_connected_accounts enable row level security;
 
+drop policy if exists "Lihat koneksi tenant sendiri" on public.prompter_connected_accounts;
 create policy "Lihat koneksi tenant sendiri"
   on public.prompter_connected_accounts for select
   using (tenant_id = public.fn_current_tenant_id());
 
+drop policy if exists "Owner kelola koneksi platform" on public.prompter_connected_accounts;
 create policy "Owner kelola koneksi platform"
   on public.prompter_connected_accounts for all
   using (tenant_id = public.fn_current_tenant_id() and public.fn_current_role() = 'owner')
@@ -108,7 +134,7 @@ create policy "Owner kelola koneksi platform"
 -- browser, never displayed." This mirrors the same enabled-with-no-policy
 -- pattern already used by UMKMpro's own ai_assistant_usage_log table.
 -- ============================================================================
-create table public.prompter_oauth_credentials (
+create table if not exists public.prompter_oauth_credentials (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null references public.tenants(id) on delete cascade,
   connected_account_id uuid not null references public.prompter_connected_accounts(id) on delete cascade,
@@ -122,6 +148,7 @@ create table public.prompter_oauth_credentials (
 comment on table public.prompter_oauth_credentials is
   'Tanyopo AI Promoter: encrypted OAuth tokens. RLS enabled with NO policies — service-role access only, by design.';
 
+drop trigger if exists trg_prompter_oauth_credentials_updated_at on public.prompter_oauth_credentials;
 create trigger trg_prompter_oauth_credentials_updated_at
   before update on public.prompter_oauth_credentials
   for each row execute function public.prompter_set_updated_at();
@@ -159,4 +186,5 @@ values
   ('X', 'CREATE_AD', false, true, false, null, 'Connector belum dibangun — direncanakan Phase 6.'),
   ('X', 'UPDATE_BUDGET', false, true, false, null, 'Connector belum dibangun — direncanakan Phase 6.'),
   ('X', 'PAUSE_CAMPAIGN', false, true, false, null, 'Connector belum dibangun — direncanakan Phase 6.'),
-  ('X', 'PUBLISH_CONTENT', false, true, false, null, 'Connector belum dibangun — direncanakan Phase 6.');
+  ('X', 'PUBLISH_CONTENT', false, true, false, null, 'Connector belum dibangun — direncanakan Phase 6.')
+on conflict do nothing;
