@@ -2,12 +2,15 @@ import type { Metadata } from "next";
 import {
   Hero,
   HowItWorks,
-  Capabilities,
-  Channels,
-  Audiences,
+  AiTeam,
+  Omnichannel,
+  AnalyticsShowcase,
+  ProfitAware,
   UmkmproIntegration,
-  Security,
-  PricingTeaser,
+  GlobalEdition,
+  Trust,
+  Pricing,
+  Faq,
   FinalCta,
 } from "@/features/marketing/sections";
 
@@ -20,12 +23,15 @@ export default function LandingPage() {
     <>
       <Hero />
       <HowItWorks />
-      <Capabilities />
-      <Channels />
-      <Audiences />
+      <AiTeam />
+      <Omnichannel />
+      <AnalyticsShowcase />
+      <ProfitAware />
       <UmkmproIntegration />
-      <Security />
-      <PricingTeaser />
+      <GlobalEdition />
+      <Trust />
+      <Pricing />
+      <Faq />
       <FinalCta />
     </>
   );

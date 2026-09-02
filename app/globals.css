@@ -35,6 +35,14 @@
 
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.04);
   --shadow-md: 0 4px 12px -2px rgb(0 0 0 / 0.06), 0 2px 4px -2px rgb(0 0 0 / 0.04);
+
+  /* Marketing-page-only accents — a second brand hue for gradient depth.
+     Never used in the authenticated app shell, kept restrained (two hues,
+     no neon), additive to the tokens above. */
+  --brand-2: #6d28d9;
+  --ink: #0b0b12;
+  --shadow-lg: 0 24px 48px -12px rgb(24 24 27 / 0.18), 0 8px 16px -8px rgb(24 24 27 / 0.08);
+  --shadow-glow: 0 0 0 1px rgb(67 56 202 / 0.08), 0 16px 40px -12px rgb(67 56 202 / 0.25);
 }
 
 @theme inline {
@@ -49,6 +57,8 @@
   --color-brand: var(--brand);
   --color-brand-foreground: var(--brand-foreground);
   --color-brand-muted: var(--brand-muted);
+  --color-brand-2: var(--brand-2);
+  --color-ink: var(--ink);
 
   --color-success: var(--success);
   --color-success-muted: var(--success-muted);
@@ -87,4 +97,53 @@ body {
 ::selection {
   background: var(--brand-muted);
   color: var(--brand);
+}
+
+/* ============================================================================
+   Marketing page only — subtle, performant motion. Respects
+   prefers-reduced-motion throughout (see .reveal below and each keyframe's
+   media-query guard).
+   ========================================================================= */
+
+@keyframes marketing-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+
+@keyframes marketing-fade-up {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.marketing-float {
+  animation: marketing-float 6s ease-in-out infinite;
+}
+
+.reveal {
+  opacity: 0;
+}
+
+.reveal.is-visible {
+  animation: marketing-fade-up 0.6s ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .marketing-float {
+    animation: none;
+  }
+  .reveal,
+  .reveal.is-visible {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }
