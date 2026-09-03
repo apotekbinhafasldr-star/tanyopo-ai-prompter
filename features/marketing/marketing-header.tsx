@@ -9,8 +9,8 @@ import { brand } from "@/features/marketing/brand";
 
 const NAV_LINKS = [
   { href: "#produk", label: "Produk" },
+  { href: "#ai-agents", label: "AI Team" },
   { href: "#cara-kerja", label: "Cara Kerja" },
-  { href: "#ai-agents", label: "AI Agents" },
   { href: "#analitik", label: "Analitik" },
   { href: "#harga", label: "Harga" },
 ];

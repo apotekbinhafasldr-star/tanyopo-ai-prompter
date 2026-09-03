@@ -22,8 +22,8 @@ export default function LandingPage() {
   return (
     <>
       <Hero />
-      <HowItWorks />
       <AiTeam />
+      <HowItWorks />
       <Omnichannel />
       <AnalyticsShowcase />
       <ProfitAware />
