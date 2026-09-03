@@ -193,10 +193,19 @@ export async function deleteProductMediaAction(formData: FormData): Promise<void
     return;
   }
 
+  // Every other mutation in this file scopes to the caller's own tenant
+  // explicitly rather than relying on RLS alone (defense in depth) — this
+  // action was missing that second layer.
+  const session = await requireSessionContext();
   const supabase = await createClient();
 
   await supabase.storage.from("product-media").remove([storagePath]);
-  await supabase.from("prompter_product_media").delete().eq("id", mediaId);
+  await supabase
+    .from("prompter_product_media")
+    .delete()
+    .eq("id", mediaId)
+    .eq("product_id", productId)
+    .eq("tenant_id", session.tenantId);
 
   revalidatePath(`/products/${productId}`);
 }
