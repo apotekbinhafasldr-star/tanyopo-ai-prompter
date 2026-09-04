@@ -12,11 +12,12 @@ export interface TeamSlide {
   /** A pre-rendered icon element (not a component reference — component
    * references can't cross the server/client boundary as props). */
   icon: ReactNode;
-  eyebrow: string;
-  name: string;
+  /** First word(s) of the title, in white. */
+  titleLead: string;
+  /** Remaining word(s) of the title, in the brand gradient — mirrors the
+   * two-tone title treatment from the reference feature cards. */
+  titleAccent: string;
   message: string;
-  tags: string[];
-  ui: ReactNode;
   ctaLabel: string;
   ctaHref: string;
 }
@@ -82,65 +83,46 @@ export function TeamCarousel({ slides }: { slides: TeamSlide[] }) {
             }}
             role="group"
             aria-roledescription="slide"
-            aria-label={`${index + 1} dari ${slides.length}: ${slide.name}`}
-            className="w-[85%] shrink-0 snap-center sm:w-[72%] lg:w-[62%]"
+            aria-label={`${index + 1} dari ${slides.length}: ${slide.titleLead} ${slide.titleAccent}`}
+            className="w-[85%] shrink-0 snap-center sm:w-[60%] lg:w-[42%]"
           >
-            <article className="group grid overflow-hidden rounded-[var(--radius-xl)] border border-border bg-surface shadow-[var(--shadow-md)] transition-shadow duration-300 hover:shadow-[var(--shadow-lg)] sm:grid-cols-2">
-              {/* Photo, with the feature name + icon overlaid inside it — never
-                  pushed below into the text column, so the card reads its
-                  capability at a glance. */}
-              <div className="relative aspect-[4/3] overflow-hidden bg-surface-muted sm:aspect-auto">
-                <Image
-                  src={slide.image}
-                  alt={slide.imageAlt}
-                  fill
-                  sizes="(min-width: 1024px) 40vw, (min-width: 640px) 55vw, 85vw"
-                  className="object-cover transition-transform duration-500 motion-reduce:transition-none group-hover:scale-[1.03]"
-                />
-                <div
-                  aria-hidden
-                  className="absolute inset-0 bg-gradient-to-t from-ink/85 via-ink/10 to-transparent"
-                />
-                <div className="absolute inset-x-3 bottom-3 flex items-center gap-2">
-                  <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand to-brand-2 text-brand-foreground shadow-[var(--shadow-sm)] [&_svg]:size-4">
-                    {slide.icon}
-                  </span>
-                  <span className="text-sm font-semibold leading-tight text-white drop-shadow-sm sm:text-base">
-                    {slide.name}
-                  </span>
-                </div>
-              </div>
+            {/* Full-bleed photo card — title, icon, and description all live
+                inside the image itself (a scrim + overlay), not in a
+                separate text panel below or beside it. */}
+            <a
+              href={slide.ctaHref}
+              aria-label={`${slide.titleLead} ${slide.titleAccent} — ${slide.message}`}
+              className="group relative flex aspect-[4/5] w-full flex-col justify-end overflow-hidden rounded-[var(--radius-xl)] border border-border shadow-[var(--shadow-md)] transition-shadow duration-300 hover:shadow-[var(--shadow-lg)] focus-visible:shadow-[var(--shadow-lg)] sm:aspect-[3/4]"
+            >
+              <Image
+                src={slide.image}
+                alt={slide.imageAlt}
+                fill
+                sizes="(min-width: 1024px) 40vw, (min-width: 640px) 55vw, 85vw"
+                className="object-cover transition-transform duration-500 motion-reduce:transition-none group-hover:scale-[1.03]"
+              />
+              <div
+                aria-hidden
+                className="absolute inset-0 bg-gradient-to-t from-ink via-ink/55 to-ink/5"
+              />
 
-              <div className="flex flex-col gap-2 p-4 sm:justify-center sm:gap-3 sm:p-7">
-                <span className="text-xs font-semibold uppercase tracking-wide text-brand">
-                  {slide.eyebrow}
+              <div className="relative flex flex-col gap-2 p-4 sm:p-5">
+                <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand to-brand-2 text-brand-foreground shadow-[var(--shadow-sm)] [&_svg]:size-4">
+                  {slide.icon}
                 </span>
-                <p className="line-clamp-2 text-sm leading-relaxed text-muted-foreground sm:line-clamp-none">
-                  {slide.message}
-                </p>
-
-                <div className="flex flex-wrap gap-1.5">
-                  {slide.tags.map((tag) => (
-                    <span
-                      key={tag}
-                      className="rounded-full border border-border bg-surface-muted px-2.5 py-1 text-[11px] font-medium text-muted-foreground"
-                    >
-                      {tag}
-                    </span>
-                  ))}
-                </div>
-
-                <div className="pt-1 sm:pt-2">{slide.ui}</div>
-
-                <a
-                  href={slide.ctaHref}
-                  className="mt-1 inline-flex items-center gap-1.5 text-sm font-semibold text-brand transition-colors hover:text-brand-2"
-                >
+                <h3 className="text-lg font-semibold leading-tight text-white sm:text-xl">
+                  {slide.titleLead}{" "}
+                  <span className="bg-gradient-to-r from-[#22d3ee] via-[#3b82f6] to-[#8b5cf6] bg-clip-text text-transparent">
+                    {slide.titleAccent}
+                  </span>
+                </h3>
+                <p className="text-sm leading-relaxed text-white/75">{slide.message}</p>
+                <span className="mt-1 inline-flex items-center gap-1.5 text-sm font-semibold text-white/90 transition-colors group-hover:text-white">
                   {slide.ctaLabel}
                   <ChevronRight className="size-4" aria-hidden />
-                </a>
+                </span>
               </div>
-            </article>
+            </a>
           </div>
         ))}
       </div>
@@ -165,7 +147,7 @@ export function TeamCarousel({ slides }: { slides: TeamSlide[] }) {
             <button
               key={slide.id}
               type="button"
-              aria-label={`Ke slide ${index + 1}: ${slide.name}`}
+              aria-label={`Ke slide ${index + 1}: ${slide.titleLead} ${slide.titleAccent}`}
               aria-current={index === activeIndex}
               onClick={() => goTo(index)}
               className={cn(
@@ -192,7 +174,7 @@ export function TeamCarousel({ slides }: { slides: TeamSlide[] }) {
           <button
             key={slide.id}
             type="button"
-            aria-label={`Ke slide ${index + 1}: ${slide.name}`}
+            aria-label={`Ke slide ${index + 1}: ${slide.titleLead} ${slide.titleAccent}`}
             aria-current={index === activeIndex}
             onClick={() => goTo(index)}
             className={cn(

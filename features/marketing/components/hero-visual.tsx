@@ -34,6 +34,17 @@ export function HeroVisual() {
         Rekomendasi AI Aktif
       </div>
 
+      {/* Floating caption, echoing the reference's handwritten-style note
+          near the presenter — a gradient underline stands in for a script
+          font so it renders identically everywhere. */}
+      <div className="absolute right-2 top-[30%] z-10 max-w-[9.5rem] rounded-2xl border border-white/15 bg-white/10 px-3 py-2 text-xs italic leading-snug text-white shadow-[0_8px_24px_-8px_rgba(139,92,246,0.5)] backdrop-blur sm:right-5 sm:max-w-[10.5rem] sm:text-sm">
+        Dari Ide, Jadi Hasil Nyata
+        <span
+          aria-hidden
+          className="mt-1.5 block h-0.5 w-9 rounded-full bg-gradient-to-r from-[#22d3ee] to-[#8b5cf6]"
+        />
+      </div>
+
       <div className="relative aspect-[4/3] w-full overflow-hidden rounded-[var(--radius-xl)] border border-white/10 shadow-[0_0_0_1px_rgba(59,130,246,0.15),0_24px_64px_-16px_rgba(0,0,0,0.55)] sm:aspect-[3/4] lg:aspect-[4/5]">
         <Image
           src="https://images.unsplash.com/photo-1581065178047-8ee15951ede6?w=1200&q=80&auto=format&fit=crop"

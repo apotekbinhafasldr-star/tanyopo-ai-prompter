@@ -2,53 +2,15 @@ import { ShieldCheck, Search, Target, FileText, Megaphone, BarChart3, Sparkles }
 import { Reveal } from "@/features/marketing/components/reveal";
 import { TeamCarousel, type TeamSlide } from "@/features/marketing/components/team-carousel";
 
-function TagPills({ items }: { items: string[] }) {
-  return (
-    <div className="flex flex-wrap gap-1.5">
-      {items.map((item) => (
-        <span
-          key={item}
-          className="rounded-full bg-brand-muted px-2.5 py-1 text-[11px] font-medium text-brand"
-        >
-          {item}
-        </span>
-      ))}
-    </div>
-  );
-}
-
-function ChannelRow({ items }: { items: string[] }) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      <div className="flex flex-wrap gap-1.5">
-        {items.map((item) => (
-          <span
-            key={item}
-            className="rounded-full border border-border bg-surface px-2.5 py-1 text-[11px] font-medium text-muted-foreground"
-          >
-            {item}
-          </span>
-        ))}
-      </div>
-      <p className="text-[11px] text-muted-foreground">
-        Status koneksi nyata terlihat di Connection Center Anda — belum aktif tetap tampil belum
-        aktif.
-      </p>
-    </div>
-  );
-}
-
 const SLIDES: TeamSlide[] = [
   {
     id: "product-analysis",
     image: "https://images.unsplash.com/photo-1544168190-79c17527004f?w=1200&q=75&auto=format&fit=crop",
     imageAlt: "Profesional bisnis menganalisis data produk dan pasar di meja kerja",
     icon: <Search aria-hidden />,
-    eyebrow: "Analisis",
-    name: "Analisis Produk",
+    titleLead: "Analisis",
+    titleAccent: "Produk",
     message: "Pahami pasar, target audiens, dan peluang terbaik untuk bisnis Anda.",
-    tags: ["Pasar", "Audience", "Peluang"],
-    ui: <TagPills items={["Kategori teridentifikasi", "Audiens: Urban 25-40", "Peluang bersaing"]} />,
     ctaLabel: "Lihat cara kerja analisis",
     ctaHref: "#cara-kerja",
   },
@@ -57,13 +19,9 @@ const SLIDES: TeamSlide[] = [
     image: "https://images.unsplash.com/photo-1758873268238-0b93e41fdcf5?w=1200&q=75&auto=format&fit=crop",
     imageAlt: "Strategist marketing menyusun rencana di depan papan diagram",
     icon: <Target aria-hidden />,
-    eyebrow: "Strategi",
-    name: "Strategi Marketing",
+    titleLead: "Strategi",
+    titleAccent: "Marketing",
     message: "Susun strategi yang tepat sasaran dan berbasis data.",
-    tags: ["Target", "Positioning", "Strategi"],
-    ui: (
-      <TagPills items={["Positioning: Premium lokal", "Audiens: Urban 25-40", "USP teridentifikasi"]} />
-    ),
     ctaLabel: "Lihat cara kerja strategi",
     ctaHref: "#cara-kerja",
   },
@@ -72,24 +30,20 @@ const SLIDES: TeamSlide[] = [
     image: "https://images.unsplash.com/photo-1573911932098-5e3e90f59f15?w=1200&q=75&auto=format&fit=crop",
     imageAlt: "Kreator konten mengambil foto produk dengan smartphone",
     icon: <FileText aria-hidden />,
-    eyebrow: "Konten",
-    name: "Konten & Copywriting",
+    titleLead: "Konten &",
+    titleAccent: "Copywriting",
     message: "Buat ide, caption, hook, CTA, dan konten yang mendorong tindakan.",
-    tags: ["Caption", "Hook", "CTA"],
-    ui: <TagPills items={["3 ide caption", "Hook video pendek", "Set hashtag"]} />,
     ctaLabel: "Lihat contoh konten",
     ctaHref: "#cara-kerja",
   },
   {
     id: "campaign",
-    image: "https://images.unsplash.com/photo-1603086360919-8b8eacad64bc?w=1200&q=75&auto=format&fit=crop",
-    imageAlt: "Digital marketer mengelola alur kerja campaign multi-channel",
+    image: "https://images.unsplash.com/photo-1766066014773-0074bf4911de?w=1200&q=75&auto=format&fit=crop",
+    imageAlt: "Digital marketer profesional membawa laptop di kantor",
     icon: <Megaphone aria-hidden />,
-    eyebrow: "Iklan",
-    name: "Iklan Multi-Channel",
+    titleLead: "Iklan",
+    titleAccent: "Multi-Channel",
     message: "Kelola campaign lintas channel melalui alur kerja yang lebih sederhana.",
-    tags: ["Campaign", "Channel", "Audience"],
-    ui: <ChannelRow items={["Instagram", "Facebook", "TikTok", "X", "Website"]} />,
     ctaLabel: "Lihat alur campaign",
     ctaHref: "#cara-kerja",
   },
@@ -98,33 +52,20 @@ const SLIDES: TeamSlide[] = [
     image: "https://images.unsplash.com/photo-1579389082289-3d6922d506c4?w=1200&q=75&auto=format&fit=crop",
     imageAlt: "Profesional mempelajari data performa marketing di laptop",
     icon: <BarChart3 aria-hidden />,
-    eyebrow: "Analitik",
-    name: "Analitik & Laporan",
+    titleLead: "Analitik &",
+    titleAccent: "Laporan",
     message: "Pantau performa dan pahami hasil campaign dengan lebih mudah.",
-    tags: ["Insight", "Performa", "Laporan"],
-    ui: (
-      <div className="flex flex-col gap-1.5">
-        <TagPills items={["Atribusi per channel", "Estimasi kontribusi marketing", "Tren revenue"]} />
-        <p className="text-[11px] text-muted-foreground">
-          Estimasi kontribusi marketing, bukan laba bersih akuntansi.
-        </p>
-      </div>
-    ),
     ctaLabel: "Lihat analitik profit-aware",
     ctaHref: "#analitik",
   },
   {
     id: "optimization",
-    image: "https://images.unsplash.com/photo-1720501828093-c792c10e3f0b?w=1200&q=75&auto=format&fit=crop",
-    imageAlt: "Profesional marketing meninjau rekomendasi pertumbuhan dari AI",
+    image: "https://images.unsplash.com/photo-1783538771515-78a987fcdbbf?w=1200&q=75&auto=format&fit=crop",
+    imageAlt: "Profesional bekerja fokus di laptop meninjau rekomendasi pertumbuhan",
     icon: <Sparkles aria-hidden />,
-    eyebrow: "Optimasi",
-    name: "Optimasi Growth",
+    titleLead: "Optimasi",
+    titleAccent: "Growth",
     message: "Gunakan rekomendasi AI untuk meningkatkan performa secara berkelanjutan.",
-    tags: ["AI Insight", "Optimasi", "Growth"],
-    ui: (
-      <TagPills items={["Analisis efisiensi budget", "Rekomendasi penyesuaian", "Peringatan anomali"]} />
-    ),
     ctaLabel: "Lihat contoh optimasi",
     ctaHref: "#analitik",
   },

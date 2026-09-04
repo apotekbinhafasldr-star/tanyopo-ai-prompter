@@ -37,7 +37,10 @@ export function Hero() {
               AI Marketing & Growth Platform
             </div>
 
-            <h1 className="max-w-xl text-4xl font-semibold leading-[1.05] tracking-[-0.02em] text-white sm:text-5xl lg:text-6xl">
+            {/* text-3xl on the smallest screens (below the 640px `sm` step)
+                keeps the full slogan reliably clear of the viewport edge on
+                320-430px phones — text-4xl left too little margin there. */}
+            <h1 className="max-w-xl text-3xl font-semibold leading-[1.15] tracking-[-0.02em] text-white sm:text-5xl sm:leading-[1.05] lg:text-6xl">
               Marketing Lebih Cepat. Bisnis Melaju Lebih Jauh.{" "}
               <span className="bg-gradient-to-r from-[#22d3ee] via-[#3b82f6] to-[#8b5cf6] bg-clip-text text-transparent">
                 Bersama LINOE.
@@ -54,7 +57,7 @@ export function Hero() {
               <Button
                 asChild
                 size="lg"
-                className="bg-gradient-to-r from-[#22d3ee] via-[#3b82f6] to-[#8b5cf6] text-white shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_20px_48px_-12px_rgba(59,130,246,0.55)] transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_0_0_1px_rgba(255,255,255,0.12),0_24px_56px_-12px_rgba(139,92,246,0.6)] motion-reduce:hover:translate-y-0 active:translate-y-0"
+                className="bg-gradient-to-r from-[#22d3ee] via-[#3b82f6] to-[#8b5cf6] text-sm text-white shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_20px_48px_-12px_rgba(59,130,246,0.55)] transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_0_0_1px_rgba(255,255,255,0.12),0_24px_56px_-12px_rgba(139,92,246,0.6)] motion-reduce:hover:translate-y-0 active:translate-y-0 sm:text-base"
               >
                 <Link href="/register">
                   Mulai Promosikan
@@ -65,7 +68,7 @@ export function Hero() {
                 asChild
                 size="lg"
                 variant="outline"
-                className="border-white/25 text-white transition-all duration-300 hover:-translate-y-0.5 hover:border-white/40 hover:bg-white/10 motion-reduce:hover:translate-y-0 active:translate-y-0"
+                className="border-white/25 text-sm text-white transition-all duration-300 hover:-translate-y-0.5 hover:border-white/40 hover:bg-white/10 motion-reduce:hover:translate-y-0 active:translate-y-0 sm:text-base"
               >
                 <a href="#cara-kerja">
                   <PlayCircle className="size-4" aria-hidden />
