@@ -14,6 +14,8 @@ export interface LinoeLogoProps {
   /** Pass `null` to render a non-interactive mark (e.g. inside a page that's already a link, or a static footer/auth screen). */
   href?: string | null;
   className?: string;
+  /** "onDark" swaps the badge chip and wordmark for light-on-dark treatment — for use over a dark hero backdrop (e.g. the transparent header before scroll). */
+  tone?: "default" | "onDark";
 }
 
 /**
@@ -39,12 +41,18 @@ export function LinoeLogo({
   showByline = false,
   href = "/",
   className,
+  tone = "default",
 }: LinoeLogoProps) {
+  const onDark = tone === "onDark";
+
   const mark = (
     <span
       className={cn(
         BADGE_SIZE[size],
-        "flex shrink-0 items-center justify-center rounded-[var(--radius-lg)] bg-ink shadow-[var(--shadow-glow)]",
+        "flex shrink-0 items-center justify-center rounded-[var(--radius-lg)]",
+        onDark
+          ? "border border-white/15 bg-white/10 backdrop-blur"
+          : "bg-ink shadow-[var(--shadow-glow)]",
       )}
     >
       <LinoeMark className={ICON_SIZE[size]} />
@@ -56,11 +64,17 @@ export function LinoeLogo({
       {mark}
       {showWordmark ? (
         <span className="flex items-baseline gap-1.5">
-          <span className={cn(TEXT_SIZE[size], "font-bold tracking-tight text-foreground")}>
+          <span
+            className={cn(
+              TEXT_SIZE[size],
+              "font-bold tracking-tight",
+              onDark ? "text-white" : "text-foreground",
+            )}
+          >
             {brand.name}
           </span>
           {showByline ? (
-            <span className="text-xs font-medium text-muted-foreground">
+            <span className={cn("text-xs font-medium", onDark ? "text-white/70" : "text-muted-foreground")}>
               by {brand.parentCompany}
             </span>
           ) : null}

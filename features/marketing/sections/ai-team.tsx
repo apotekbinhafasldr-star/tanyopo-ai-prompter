@@ -1,4 +1,4 @@
-import { ShieldCheck, TrendingUp } from "lucide-react";
+import { ShieldCheck } from "lucide-react";
 import { Reveal } from "@/features/marketing/components/reveal";
 import { TeamCarousel, type TeamSlide } from "@/features/marketing/components/team-carousel";
 
@@ -38,25 +38,26 @@ function ChannelRow({ items }: { items: string[] }) {
   );
 }
 
-function TrendMini({ label }: { label: string }) {
-  return (
-    <div className="flex items-center gap-2 rounded-[var(--radius-md)] border border-border bg-surface-muted/60 px-3 py-2.5">
-      <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-success-muted text-success">
-        <TrendingUp className="size-3.5" aria-hidden />
-      </span>
-      <p className="text-xs text-foreground">{label}</p>
-    </div>
-  );
-}
-
 const SLIDES: TeamSlide[] = [
+  {
+    id: "product-analysis",
+    image: "https://images.unsplash.com/photo-1758518729908-d4220a678d81?w=1200&q=75&auto=format&fit=crop",
+    imageAlt: "Tim bisnis meninjau data produk dan riset pasar bersama",
+    eyebrow: "Analisis",
+    name: "Analisis Produk",
+    message: "Pahami pasar, target audiens, dan peluang terbaik untuk bisnis Anda.",
+    tags: ["Riset Pasar", "Target Audiens", "Peluang Produk"],
+    ui: <TagPills items={["Kategori teridentifikasi", "Audiens: Urban 25-40", "Peluang bersaing"]} />,
+    ctaLabel: "Lihat cara kerja analisis",
+    ctaHref: "#cara-kerja",
+  },
   {
     id: "strategy",
     image: "https://images.unsplash.com/photo-1580894732444-8ecded7900cd?w=1200&q=75&auto=format&fit=crop",
-    imageAlt: "Ilustrasi strategist meninjau intelijen campaign di depan whiteboard",
+    imageAlt: "Strategist meninjau intelijen campaign di depan whiteboard",
     eyebrow: "Strategi",
-    name: "AI Strategi Marketing",
-    message: "Strategi yang memahami produk, pasar, dan tujuan bisnis Anda.",
+    name: "Strategi Marketing",
+    message: "Susun strategi yang tepat sasaran dan berbasis data.",
     tags: ["Positioning", "Target Audience", "USP"],
     ui: (
       <TagPills items={["Positioning: Premium lokal", "Audiens: Urban 25-40", "USP teridentifikasi"]} />
@@ -67,10 +68,10 @@ const SLIDES: TeamSlide[] = [
   {
     id: "content",
     image: "https://images.unsplash.com/photo-1737729991003-521d47240eb3?w=1200&q=75&auto=format&fit=crop",
-    imageAlt: "Ilustrasi kreator konten menyusun ide caption dan konsep kreatif",
+    imageAlt: "Kreator konten menyusun ide caption dan konsep kreatif",
     eyebrow: "Konten",
-    name: "AI Kreator Konten",
-    message: "Konten yang dirancang untuk menarik perhatian dan menghasilkan tindakan.",
+    name: "Konten & Copywriting",
+    message: "Buat ide, caption, hook, CTA, dan konten yang mendorong tindakan.",
     tags: ["Caption", "Hook", "Hashtag"],
     ui: <TagPills items={["3 ide caption", "Hook video pendek", "Set hashtag"]} />,
     ctaLabel: "Lihat contoh konten",
@@ -79,46 +80,22 @@ const SLIDES: TeamSlide[] = [
   {
     id: "campaign",
     image: "https://images.unsplash.com/photo-1754039985001-ccafee437736?w=1200&q=75&auto=format&fit=crop",
-    imageAlt: "Ilustrasi manajer campaign memantau aktivitas multi-channel di beberapa layar",
-    eyebrow: "Campaign",
-    name: "AI Manajer Campaign",
-    message: "Dari ide hingga campaign multi-channel dalam satu alur.",
+    imageAlt: "Manajer campaign memantau aktivitas multi-channel di beberapa layar",
+    eyebrow: "Iklan",
+    name: "Iklan Multi-Channel",
+    message: "Kelola campaign lintas channel dari satu alur kerja yang lebih sederhana.",
     tags: ["Multi-channel", "Orkestrasi", "Approval"],
     ui: <ChannelRow items={["Instagram", "Facebook", "TikTok", "X", "Website"]} />,
     ctaLabel: "Lihat alur campaign",
     ctaHref: "#cara-kerja",
   },
   {
-    id: "optimization",
-    image: "https://images.unsplash.com/photo-1748609160056-7b95f30041f0?w=1200&q=75&auto=format&fit=crop",
-    imageAlt: "Ilustrasi profesional performance marketing meninjau data efisiensi campaign di tablet",
-    eyebrow: "Optimasi",
-    name: "AI Optimasi Iklan",
-    message: "AI membantu menemukan peluang untuk meningkatkan efisiensi setiap campaign.",
-    tags: ["CTR", "CPA", "ROAS"],
-    ui: <TagPills items={["Analisis efisiensi budget", "Rekomendasi penyesuaian", "Peringatan anomali"]} />,
-    ctaLabel: "Lihat contoh optimasi",
-    ctaHref: "#analitik",
-  },
-  {
-    id: "growth",
-    image: "https://images.unsplash.com/photo-1758691736580-a41e0cfe9e9f?w=1200&q=75&auto=format&fit=crop",
-    imageAlt: "Ilustrasi pemilik bisnis meninjau sinyal pertumbuhan bersama tim",
-    eyebrow: "Growth",
-    name: "Growth Intelligence",
-    message: "Temukan apa yang mendorong pertumbuhan — dan apa yang harus dilakukan berikutnya.",
-    tags: ["Sinyal", "Rekomendasi", "Tren"],
-    ui: <TrendMini label="Sinyal pertumbuhan diperbarui setiap ada data baru" />,
-    ctaLabel: "Lihat sinyal pertumbuhan",
-    ctaHref: "#analitik",
-  },
-  {
     id: "analytics",
     image: "https://images.unsplash.com/photo-1770013413878-2530e2c3d82b?w=1200&q=75&auto=format&fit=crop",
-    imageAlt: "Ilustrasi pemilik UMKM memeriksa performa produk dan bisnisnya",
+    imageAlt: "Pemilik UMKM memeriksa performa produk dan bisnisnya",
     eyebrow: "Analitik",
-    name: "Analytics & Profit Intelligence",
-    message: "Bukan hanya melihat penjualan. Pahami dampak marketing terhadap bisnis Anda.",
+    name: "Analitik & Laporan",
+    message: "Pantau performa dan pahami hasil campaign dengan lebih mudah.",
     tags: ["Revenue", "Atribusi", "Kontribusi Marketing"],
     ui: (
       <div className="flex flex-col gap-1.5">
@@ -129,6 +106,20 @@ const SLIDES: TeamSlide[] = [
       </div>
     ),
     ctaLabel: "Lihat analitik profit-aware",
+    ctaHref: "#analitik",
+  },
+  {
+    id: "optimization",
+    image: "https://images.unsplash.com/photo-1758691736580-a41e0cfe9e9f?w=1200&q=75&auto=format&fit=crop",
+    imageAlt: "Profesional marketing meninjau rekomendasi pertumbuhan bersama tim",
+    eyebrow: "Optimasi",
+    name: "Optimasi Growth",
+    message: "Gunakan rekomendasi AI untuk meningkatkan performa secara berkelanjutan.",
+    tags: ["CTR", "CPA", "ROAS"],
+    ui: (
+      <TagPills items={["Analisis efisiensi budget", "Rekomendasi penyesuaian", "Peringatan anomali"]} />
+    ),
+    ctaLabel: "Lihat contoh optimasi",
     ctaHref: "#analitik",
   },
 ];
@@ -142,11 +133,11 @@ export function AiTeam() {
             AI Marketing Team
           </span>
           <h2 className="mt-2 text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
-            Kenali Tim Marketing AI Anda
+            Tim Marketing AI Lengkap untuk Bisnis Anda
           </h2>
           <p className="mx-auto mt-2 max-w-xl text-sm text-muted-foreground sm:text-base">
-            Kapabilitas AI yang bekerja terkoordinasi untuk membantu setiap tahap pemasaran bisnis
-            Anda.
+            Dari strategi hingga optimasi, LINOE membantu setiap tahap pemasaran bisnis Anda
+            dengan AI.
           </p>
         </Reveal>
       </div>
