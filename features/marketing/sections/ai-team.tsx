@@ -38,8 +38,9 @@ const SLIDES: TeamSlide[] = [
   },
   {
     id: "campaign",
-    image: "https://images.unsplash.com/photo-1766066014773-0074bf4911de?w=1200&q=75&auto=format&fit=crop",
-    imageAlt: "Digital marketer profesional membawa laptop di kantor",
+    image: "/brand/linoe/feature-cards/iklan-multi-channel.png",
+    imageAlt: "Profesional LINOE mengelola iklan multi-channel dari ponsel",
+    imagePosition: "85% 30%",
     icon: <Megaphone aria-hidden />,
     titleLead: "Iklan",
     titleAccent: "Multi-Channel",

@@ -9,6 +9,10 @@ export interface TeamSlide {
   id: string;
   image: string;
   imageAlt: string;
+  /** CSS object-position for the photo. Defaults to centered; some source
+   * assets are wide crops with the person on one side, so this lets a
+   * slide keep that person in frame without cropping the card shape. */
+  imagePosition?: string;
   /** A pre-rendered icon element (not a component reference — component
    * references can't cross the server/client boundary as props). */
   icon: ReactNode;
@@ -99,6 +103,7 @@ export function TeamCarousel({ slides }: { slides: TeamSlide[] }) {
                 alt={slide.imageAlt}
                 fill
                 sizes="(min-width: 1024px) 40vw, (min-width: 640px) 55vw, 85vw"
+                style={{ objectPosition: slide.imagePosition ?? "50% 50%" }}
                 className="object-cover transition-transform duration-500 motion-reduce:transition-none group-hover:scale-[1.03]"
               />
               <div
