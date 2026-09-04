@@ -45,14 +45,19 @@ export function HeroVisual() {
         />
       </div>
 
-      <div className="relative aspect-[4/3] w-full overflow-hidden rounded-[var(--radius-xl)] border border-white/10 shadow-[0_0_0_1px_rgba(59,130,246,0.15),0_24px_64px_-16px_rgba(0,0,0,0.55)] sm:aspect-[3/4] lg:aspect-[4/5]">
+      {/* aspect-[3/4] (not the previous 4/3) closely matches this photo's own
+          ~2:3 portrait proportions — at 4/3 mobile only showed ~50% of the
+          image's height, cropping out either her face or the tablet
+          depending on object-position; no position could show both at
+          once. At 3/4, ~90% of the height is visible, so both fit. */}
+      <div className="relative aspect-[3/4] w-full overflow-hidden rounded-[var(--radius-xl)] border border-white/10 shadow-[0_0_0_1px_rgba(59,130,246,0.15),0_24px_64px_-16px_rgba(0,0,0,0.55)] lg:aspect-[4/5]">
         <Image
           src="/brand/linoe/07-hero-wanita-linoe-final.png"
           alt="Presenter LINOE memegang tablet bermerek LINOE, tersenyum percaya diri"
           fill
           priority
           sizes="(min-width: 1024px) 42vw, (min-width: 640px) 60vw, 92vw"
-          className="object-cover object-[50%_40%]"
+          className="object-cover object-[50%_45%]"
         />
         <div aria-hidden className="absolute inset-0 bg-gradient-to-t from-ink/85 via-transparent to-transparent" />
       </div>
