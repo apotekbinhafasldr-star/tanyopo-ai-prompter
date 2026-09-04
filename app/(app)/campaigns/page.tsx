@@ -8,7 +8,7 @@ import { requireSessionContext } from "@/services/session";
 import { createClient } from "@/lib/supabase/server";
 import { formatDate, channelLabel, campaignStatusLabel, campaignStatusVariant, goalLabel } from "@/lib/utils/format";
 
-export const metadata: Metadata = { title: "Campaigns — Tanyopo AI Promoter" };
+export const metadata: Metadata = { title: "Campaigns — LINOE" };
 
 export default async function CampaignsPage() {
   const session = await requireSessionContext();

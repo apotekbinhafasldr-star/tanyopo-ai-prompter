@@ -17,7 +17,7 @@ import { requireSessionContext } from "@/services/session";
 import { createClient } from "@/lib/supabase/server";
 
 export const metadata: Metadata = {
-  title: "Overview — Tanyopo AI Promoter",
+  title: "Overview — LINOE",
 };
 
 function greeting() {

@@ -10,7 +10,7 @@ import { sumByCurrency } from "@/lib/fx/convert";
 import { ConversionForm } from "@/features/analytics/conversion-form";
 import { GenerateInsightButton } from "@/features/analytics/generate-insight-button";
 
-export const metadata: Metadata = { title: "Analytics — Tanyopo AI Promoter" };
+export const metadata: Metadata = { title: "Analytics — LINOE" };
 
 const EVENT_LABEL: Record<string, string> = {
   LEAD: "Lead",

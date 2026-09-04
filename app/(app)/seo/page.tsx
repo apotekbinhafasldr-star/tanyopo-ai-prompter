@@ -9,7 +9,7 @@ import { createClient } from "@/lib/supabase/server";
 import { formatDate } from "@/lib/utils/format";
 import { SeoProjectForm } from "@/features/seo/project-form";
 
-export const metadata: Metadata = { title: "SEO — Tanyopo AI Promoter" };
+export const metadata: Metadata = { title: "SEO — LINOE" };
 
 export default async function SeoPage() {
   const session = await requireSessionContext();

@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { ComingSoon } from "@/components/shared/coming-soon";
 import { requireSessionContext } from "@/services/session";
 
-export const metadata: Metadata = { title: "AI Marketing — Tanyopo AI Promoter" };
+export const metadata: Metadata = { title: "AI Marketing — LINOE" };
 
 export default async function AiMarketingPage() {
   await requireSessionContext();

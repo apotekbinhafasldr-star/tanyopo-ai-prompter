@@ -4,8 +4,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Menu, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { LinoeLogo } from "@/components/brand/linoe-logo";
 import { cn } from "@/lib/utils/cn";
-import { brand } from "@/features/marketing/brand";
 
 const NAV_LINKS = [
   { href: "#produk", label: "Produk" },
@@ -47,14 +47,9 @@ export function MarketingHeader() {
       )}
     >
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
-        <Link href="/" className="flex items-center gap-2" onClick={() => setMenuOpen(false)}>
-          <span className="flex size-8 items-center justify-center rounded-[var(--radius-md)] bg-gradient-to-br from-brand to-brand-2 text-sm font-bold text-brand-foreground shadow-[var(--shadow-sm)]">
-            {brand.initial}
-          </span>
-          <span className="text-sm font-semibold tracking-tight text-foreground sm:text-base">
-            {brand.shortName}
-          </span>
-        </Link>
+        <span onClick={() => setMenuOpen(false)}>
+          <LinoeLogo size="sm" />
+        </span>
 
         <nav className="hidden items-center gap-7 text-sm font-medium text-muted-foreground lg:flex">
           {NAV_LINKS.map((link) => (

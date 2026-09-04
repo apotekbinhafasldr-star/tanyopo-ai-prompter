@@ -29,19 +29,16 @@ export function Hero() {
         </div>
 
         <h1 className="max-w-3xl text-4xl font-semibold leading-[1.05] tracking-[-0.02em] text-foreground sm:text-6xl">
-          Turn Your Product Into{" "}
+          Marketing Lebih Cepat. Bisnis Melaju Lebih Jauh.{" "}
           <span className="bg-gradient-to-r from-brand to-brand-2 bg-clip-text text-transparent">
-            Growth.
+            Bersama LINOE.
           </span>
         </h1>
-        <p className="text-lg font-medium text-muted-foreground sm:text-xl">
-          Ubah Produk Menjadi Pertumbuhan.
-        </p>
 
         <p className="max-w-xl text-balance text-sm leading-relaxed text-muted-foreground sm:text-base">
-          Tim marketing AI yang memahami produk Anda, menyusun strategi, membuat konten,
-          menyiapkan campaign, menganalisis hasil, dan terus mengoptimasi — sementara Anda tetap
-          memegang kendali penuh atas akun, izin, dan budget.
+          LINOE membantu Anda menganalisis produk, menyusun strategi, membuat konten, menjalankan
+          campaign, memantau hasil, dan mengoptimasi pertumbuhan — semua dengan AI dalam satu
+          platform.
         </p>
 
         <div className="flex w-full flex-col gap-3 pt-2 sm:w-auto sm:flex-row">

@@ -3,12 +3,12 @@ import { Reveal } from "@/features/marketing/components/reveal";
 
 const FAQS = [
   {
-    q: "Apa itu Tanyopo AI Promoter?",
+    q: "Apa itu LINOE?",
     a: "Tim marketing AI yang membantu memahami produk Anda, menyusun strategi, membuat konten, menyiapkan campaign, menganalisis hasil, dan terus mengoptimasi — dengan Anda tetap memegang kendali penuh.",
   },
   {
     q: "Bisakah saya pakai tanpa UMKMpro AI?",
-    a: "Bisa. Integrasi dengan UMKMpro AI sepenuhnya opsional. Anda bisa menambahkan produk secara langsung dan menggunakan seluruh fitur Tanyopo AI Promoter sebagai bisnis mandiri.",
+    a: "Bisa. Integrasi dengan UMKMpro AI sepenuhnya opsional. Anda bisa menambahkan produk secara langsung dan menggunakan seluruh fitur LINOE sebagai bisnis mandiri.",
   },
   {
     q: "Apakah AI mengontrol budget iklan saya?",

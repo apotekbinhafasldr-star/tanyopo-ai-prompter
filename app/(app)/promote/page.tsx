@@ -3,7 +3,7 @@ import { requireSessionContext } from "@/services/session";
 import { createClient } from "@/lib/supabase/server";
 import { PromoteWizard } from "@/features/promote/promote-wizard";
 
-export const metadata: Metadata = { title: "Promote — Tanyopo AI Promoter" };
+export const metadata: Metadata = { title: "Promote — LINOE" };
 
 /**
  * Resolves a `?handoff=<id>` query param from UMKMpro AI's "🚀 PROMOSIKAN

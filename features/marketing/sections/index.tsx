@@ -1,6 +1,7 @@
 export { Hero } from "@/features/marketing/sections/hero";
 export { HowItWorks } from "@/features/marketing/sections/how-it-works";
 export { AiTeam } from "@/features/marketing/sections/ai-team";
+export { AdPersonaBridge } from "@/features/marketing/sections/adpersona-bridge";
 export { Omnichannel } from "@/features/marketing/sections/omnichannel";
 export { AnalyticsShowcase } from "@/features/marketing/sections/analytics-showcase";
 export { ProfitAware } from "@/features/marketing/sections/profit-aware";

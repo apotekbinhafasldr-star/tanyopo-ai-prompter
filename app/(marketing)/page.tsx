@@ -3,6 +3,7 @@ import {
   Hero,
   HowItWorks,
   AiTeam,
+  AdPersonaBridge,
   Omnichannel,
   AnalyticsShowcase,
   ProfitAware,
@@ -15,7 +16,9 @@ import {
 } from "@/features/marketing/sections";
 
 export const metadata: Metadata = {
-  title: "Tanyopo AI Promoter — Tim Marketing AI untuk Bisnis Anda",
+  title: "LINOE — AI Marketing & Growth Platform by Tanyopo",
+  description:
+    "LINOE membantu Anda menganalisis produk, menyusun strategi, membuat konten, menjalankan campaign, memantau hasil, dan mengoptimasi pertumbuhan — semua dengan AI dalam satu platform.",
 };
 
 export default function LandingPage() {
@@ -23,6 +26,7 @@ export default function LandingPage() {
     <>
       <Hero />
       <AiTeam />
+      <AdPersonaBridge />
       <HowItWorks />
       <Omnichannel />
       <AnalyticsShowcase />

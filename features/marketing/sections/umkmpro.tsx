@@ -4,7 +4,7 @@ import { Reveal } from "@/features/marketing/components/reveal";
 const FLOW = [
   { icon: Store, label: "UMKMpro AI" },
   { icon: ArrowRight, label: null, isConnector: true },
-  { icon: Rocket, label: "Tanyopo AI Promoter" },
+  { icon: Rocket, label: "LINOE" },
   { icon: ArrowRight, label: null, isConnector: true },
   { icon: LineChart, label: "Insight Konversi" },
 ];
@@ -19,7 +19,7 @@ export function UmkmproIntegration() {
           </h2>
           <p className="mx-auto mt-3 max-w-xl text-sm text-muted-foreground sm:text-base">
             <strong className="text-foreground">UMKMpro AI</strong> mengelola bisnis Anda —{" "}
-            <strong className="text-foreground">Tanyopo AI Promoter</strong> menumbuhkannya.
+            <strong className="text-foreground">LINOE</strong> menumbuhkannya.
             Kirim produk, stok, dan data bisnis dengan satu klik.
           </p>
         </Reveal>
@@ -41,7 +41,7 @@ export function UmkmproIntegration() {
         </Reveal>
 
         <p className="mt-6 text-xs text-muted-foreground">
-          Integrasi ini sepenuhnya opsional — Tanyopo AI Promoter tetap berjalan penuh untuk
+          Integrasi ini sepenuhnya opsional — LINOE tetap berjalan penuh untuk
           bisnis yang tidak memakai UMKMpro AI sama sekali.
         </p>
       </div>

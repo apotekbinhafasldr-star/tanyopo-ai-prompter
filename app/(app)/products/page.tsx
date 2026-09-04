@@ -10,7 +10,7 @@ import { createClient } from "@/lib/supabase/server";
 import { formatCurrency, productTypeLabel } from "@/lib/utils/format";
 import { publicStorageUrl } from "@/lib/utils/storage-url";
 
-export const metadata: Metadata = { title: "Products — Tanyopo AI Promoter" };
+export const metadata: Metadata = { title: "Products — LINOE" };
 
 export default async function ProductsPage() {
   const session = await requireSessionContext();

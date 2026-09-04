@@ -12,7 +12,7 @@ import { ScheduleForm } from "@/features/content/schedule-form";
 import type { ContentGeneration } from "@/schemas/ai/content-generation";
 import type { Database } from "@/types/database";
 
-export const metadata: Metadata = { title: "Content — Tanyopo AI Promoter" };
+export const metadata: Metadata = { title: "Content — LINOE" };
 
 type ContentItem = Pick<
   Database["public"]["Tables"]["prompter_content_items"]["Row"],
