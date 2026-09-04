@@ -13,6 +13,13 @@ export interface TeamSlide {
    * assets are wide crops with the person on one side, so this lets a
    * slide keep that person in frame without cropping the card shape. */
   imagePosition?: string;
+  /** True when the supplied image already has its own icon, title, and
+   * description composed into the photo (a founder-supplied finished card
+   * graphic) — in that case the scrim and text overlay below are skipped
+   * so nothing renders twice on top of the image's own baked-in text. The
+   * accessible name still carries the title/description for screen
+   * readers, since text baked into pixels isn't readable to them. */
+  imageIsComplete?: boolean;
   /** A pre-rendered icon element (not a component reference — component
    * references can't cross the server/client boundary as props). */
   icon: ReactNode;
@@ -106,27 +113,31 @@ export function TeamCarousel({ slides }: { slides: TeamSlide[] }) {
                 style={{ objectPosition: slide.imagePosition ?? "50% 50%" }}
                 className="object-cover transition-transform duration-500 motion-reduce:transition-none group-hover:scale-[1.03]"
               />
-              <div
-                aria-hidden
-                className="absolute inset-0 bg-gradient-to-t from-ink via-ink/55 to-ink/5"
-              />
 
-              <div className="relative flex flex-col gap-2 p-4 sm:p-5">
-                <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand to-brand-2 text-brand-foreground shadow-[var(--shadow-sm)] [&_svg]:size-4">
-                  {slide.icon}
-                </span>
-                <h3 className="text-lg font-semibold leading-tight text-white sm:text-xl">
-                  {slide.titleLead}{" "}
-                  <span className="bg-gradient-to-r from-[#22d3ee] via-[#3b82f6] to-[#8b5cf6] bg-clip-text text-transparent">
-                    {slide.titleAccent}
-                  </span>
-                </h3>
-                <p className="text-sm leading-relaxed text-white/75">{slide.message}</p>
-                <span className="mt-1 inline-flex items-center gap-1.5 text-sm font-semibold text-white/90 transition-colors group-hover:text-white">
-                  {slide.ctaLabel}
-                  <ChevronRight className="size-4" aria-hidden />
-                </span>
-              </div>
+              {!slide.imageIsComplete ? (
+                <>
+                  <div
+                    aria-hidden
+                    className="absolute inset-0 bg-gradient-to-t from-ink via-ink/55 to-ink/5"
+                  />
+                  <div className="relative flex flex-col gap-2 p-4 sm:p-5">
+                    <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand to-brand-2 text-brand-foreground shadow-[var(--shadow-sm)] [&_svg]:size-4">
+                      {slide.icon}
+                    </span>
+                    <h3 className="text-lg font-semibold leading-tight text-white sm:text-xl">
+                      {slide.titleLead}{" "}
+                      <span className="bg-gradient-to-r from-[#22d3ee] via-[#3b82f6] to-[#8b5cf6] bg-clip-text text-transparent">
+                        {slide.titleAccent}
+                      </span>
+                    </h3>
+                    <p className="text-sm leading-relaxed text-white/75">{slide.message}</p>
+                    <span className="mt-1 inline-flex items-center gap-1.5 text-sm font-semibold text-white/90 transition-colors group-hover:text-white">
+                      {slide.ctaLabel}
+                      <ChevronRight className="size-4" aria-hidden />
+                    </span>
+                  </div>
+                </>
+              ) : null}
             </a>
           </div>
         ))}
