@@ -1,7 +1,7 @@
 import Link from "next/link";
-import { Zap } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { brand } from "@/lib/brand";
+import { LinoeMark } from "@/components/brand/linoe-mark";
 
 const BADGE_SIZE = { sm: "size-8", md: "size-9", lg: "size-12" } as const;
 const ICON_SIZE = { sm: "size-4", md: "size-4.5", lg: "size-6" } as const;
@@ -17,11 +17,13 @@ export interface LinoeLogoProps {
 }
 
 /**
- * LINOE brand mark: a gradient badge (electric blue -> violet, matching the
- * existing --brand/--brand-2 tokens) with an abstract speed/motion glyph
- * (lucide's Zap — reused rather than a hand-rolled SVG path, since it's
- * already a project dependency and reads instantly as "fast/energy") plus
- * an optional wordmark and "by Tanyopo" byline. One component so the mark
+ * LINOE brand mark: a dark (near-black) badge holding the LinoeMark — an
+ * abstract "L" ribbon with left-side motion streaks, in its own cyan ->
+ * electric blue -> violet gradient (components/brand/linoe-mark.tsx). A
+ * dark chip rather than a brand-gradient one so the mark's own gradient
+ * reads clearly instead of competing with a second gradient behind it —
+ * and so the whole page isn't gradient-on-gradient everywhere. Plus an
+ * optional wordmark and "by Tanyopo" byline. One component so the mark
  * stays consistent across the marketing header/footer, auth screens, and
  * the authenticated app sidebar.
  *
@@ -42,10 +44,10 @@ export function LinoeLogo({
     <span
       className={cn(
         BADGE_SIZE[size],
-        "flex shrink-0 items-center justify-center rounded-[var(--radius-lg)] bg-gradient-to-br from-brand to-brand-2 text-brand-foreground shadow-[var(--shadow-glow)]",
+        "flex shrink-0 items-center justify-center rounded-[var(--radius-lg)] bg-ink shadow-[var(--shadow-glow)]",
       )}
     >
-      <Zap className={cn(ICON_SIZE[size], "fill-current")} strokeWidth={2.25} aria-hidden />
+      <LinoeMark className={ICON_SIZE[size]} />
     </span>
   );
 

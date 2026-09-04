@@ -83,7 +83,7 @@ export function TeamCarousel({ slides }: { slides: TeamSlide[] }) {
             className="w-[85%] shrink-0 snap-center sm:w-[72%] lg:w-[62%]"
           >
             <article className="group grid overflow-hidden rounded-[var(--radius-xl)] border border-border bg-surface shadow-[var(--shadow-md)] transition-shadow duration-300 hover:shadow-[var(--shadow-lg)] sm:grid-cols-2">
-              <div className="relative aspect-[4/3] overflow-hidden bg-surface-muted sm:aspect-auto">
+              <div className="relative aspect-[16/10] overflow-hidden bg-surface-muted sm:aspect-auto">
                 <Image
                   src={slide.image}
                   alt={slide.imageAlt}
@@ -100,16 +100,18 @@ export function TeamCarousel({ slides }: { slides: TeamSlide[] }) {
                 </div>
               </div>
 
-              <div className="flex flex-col gap-3 p-5 sm:justify-center sm:p-7">
+              <div className="flex flex-col gap-2 p-4 sm:justify-center sm:gap-3 sm:p-7">
                 <span className="hidden text-xs font-semibold uppercase tracking-wide text-brand sm:inline">
                   {slide.eyebrow}
                 </span>
-                <h3 className="text-lg font-semibold tracking-tight text-foreground sm:text-xl">
+                <h3 className="text-base font-semibold tracking-tight text-foreground sm:text-xl">
                   {slide.name}
                 </h3>
-                <p className="text-sm leading-relaxed text-muted-foreground">{slide.message}</p>
+                <p className="line-clamp-2 text-sm leading-relaxed text-muted-foreground sm:line-clamp-none">
+                  {slide.message}
+                </p>
 
-                <div className="flex flex-wrap gap-1.5 pt-1">
+                <div className="flex flex-wrap gap-1.5">
                   {slide.tags.map((tag) => (
                     <span
                       key={tag}
@@ -120,7 +122,7 @@ export function TeamCarousel({ slides }: { slides: TeamSlide[] }) {
                   ))}
                 </div>
 
-                <div className="pt-2">{slide.ui}</div>
+                <div className="pt-1 sm:pt-2">{slide.ui}</div>
 
                 <a
                   href={slide.ctaHref}
