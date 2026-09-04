@@ -36,12 +36,12 @@ export function HeroVisual() {
 
       <div className="relative aspect-[4/3] w-full overflow-hidden rounded-[var(--radius-xl)] border border-white/10 shadow-[0_0_0_1px_rgba(59,130,246,0.15),0_24px_64px_-16px_rgba(0,0,0,0.55)] sm:aspect-[3/4] lg:aspect-[4/5]">
         <Image
-          src="https://images.unsplash.com/photo-1611432579402-7037e3e2c1e4?w=1200&q=80&auto=format&fit=crop"
-          alt="Presenter LINOE, perempuan profesional memegang tablet sambil tersenyum"
+          src="https://images.unsplash.com/photo-1581065178047-8ee15951ede6?w=1200&q=80&auto=format&fit=crop"
+          alt="Presenter LINOE, perempuan profesional Asia Tenggara tersenyum percaya diri"
           fill
           priority
           sizes="(min-width: 1024px) 42vw, (min-width: 640px) 60vw, 92vw"
-          className="object-cover object-[50%_12%]"
+          className="object-cover object-[50%_15%]"
         />
         <div aria-hidden className="absolute inset-0 bg-gradient-to-t from-ink/85 via-transparent to-transparent" />
       </div>

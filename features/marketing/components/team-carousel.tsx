@@ -9,6 +9,9 @@ export interface TeamSlide {
   id: string;
   image: string;
   imageAlt: string;
+  /** A pre-rendered icon element (not a component reference — component
+   * references can't cross the server/client boundary as props). */
+  icon: ReactNode;
   eyebrow: string;
   name: string;
   message: string;
@@ -83,7 +86,10 @@ export function TeamCarousel({ slides }: { slides: TeamSlide[] }) {
             className="w-[85%] shrink-0 snap-center sm:w-[72%] lg:w-[62%]"
           >
             <article className="group grid overflow-hidden rounded-[var(--radius-xl)] border border-border bg-surface shadow-[var(--shadow-md)] transition-shadow duration-300 hover:shadow-[var(--shadow-lg)] sm:grid-cols-2">
-              <div className="relative aspect-[16/10] overflow-hidden bg-surface-muted sm:aspect-auto">
+              {/* Photo, with the feature name + icon overlaid inside it — never
+                  pushed below into the text column, so the card reads its
+                  capability at a glance. */}
+              <div className="relative aspect-[4/3] overflow-hidden bg-surface-muted sm:aspect-auto">
                 <Image
                   src={slide.image}
                   alt={slide.imageAlt}
@@ -93,20 +99,22 @@ export function TeamCarousel({ slides }: { slides: TeamSlide[] }) {
                 />
                 <div
                   aria-hidden
-                  className="absolute inset-0 bg-gradient-to-t from-ink/70 via-ink/0 to-ink/0 sm:bg-gradient-to-r"
+                  className="absolute inset-0 bg-gradient-to-t from-ink/85 via-ink/10 to-transparent"
                 />
-                <div className="absolute bottom-3 left-3 inline-flex items-center gap-1.5 rounded-full bg-surface/90 px-2.5 py-1 text-[11px] font-medium text-foreground backdrop-blur sm:hidden">
-                  {slide.eyebrow}
+                <div className="absolute inset-x-3 bottom-3 flex items-center gap-2">
+                  <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand to-brand-2 text-brand-foreground shadow-[var(--shadow-sm)] [&_svg]:size-4">
+                    {slide.icon}
+                  </span>
+                  <span className="text-sm font-semibold leading-tight text-white drop-shadow-sm sm:text-base">
+                    {slide.name}
+                  </span>
                 </div>
               </div>
 
               <div className="flex flex-col gap-2 p-4 sm:justify-center sm:gap-3 sm:p-7">
-                <span className="hidden text-xs font-semibold uppercase tracking-wide text-brand sm:inline">
+                <span className="text-xs font-semibold uppercase tracking-wide text-brand">
                   {slide.eyebrow}
                 </span>
-                <h3 className="text-base font-semibold tracking-tight text-foreground sm:text-xl">
-                  {slide.name}
-                </h3>
                 <p className="line-clamp-2 text-sm leading-relaxed text-muted-foreground sm:line-clamp-none">
                   {slide.message}
                 </p>
