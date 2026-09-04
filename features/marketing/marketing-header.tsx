@@ -48,7 +48,7 @@ export function MarketingHeader() {
     >
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
         <span onClick={() => setMenuOpen(false)}>
-          <LinoeLogo size="sm" />
+          <LinoeLogo size="md" />
         </span>
 
         <nav className="hidden items-center gap-7 text-sm font-medium text-muted-foreground lg:flex">

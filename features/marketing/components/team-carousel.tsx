@@ -10,9 +10,7 @@ export interface TeamSlide {
   image: string;
   imageAlt: string;
   eyebrow: string;
-  eyebrowEn: string;
   name: string;
-  nameEn: string;
   message: string;
   tags: string[];
   ui: ReactNode;
@@ -104,7 +102,7 @@ export function TeamCarousel({ slides }: { slides: TeamSlide[] }) {
 
               <div className="flex flex-col gap-3 p-5 sm:justify-center sm:p-7">
                 <span className="hidden text-xs font-semibold uppercase tracking-wide text-brand sm:inline">
-                  {slide.eyebrow} <span className="text-muted-foreground">· {slide.eyebrowEn}</span>
+                  {slide.eyebrow}
                 </span>
                 <h3 className="text-lg font-semibold tracking-tight text-foreground sm:text-xl">
                   {slide.name}

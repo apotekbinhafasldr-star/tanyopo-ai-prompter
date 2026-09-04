@@ -18,11 +18,12 @@ export function GlobalEdition() {
             Global Edition
           </div>
           <h2 className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
-            Dibangun untuk Tumbuh Lintas Batas
+            Produk Lokal. Peluang Global.
           </h2>
           <p className="mx-auto mt-2 max-w-xl text-sm text-muted-foreground sm:text-base">
-            Mulai dari Indonesia, dirancang untuk bisnis global — tanpa mengorbankan bisnis lokal
-            yang sudah berjalan hari ini.
+            Dari Indonesia untuk pasar dunia — LINOE dirancang untuk membantu bisnis memasarkan
+            lebih efektif lintas pasar, tanpa mengorbankan bisnis lokal yang sudah berjalan hari
+            ini.
           </p>
         </Reveal>
 

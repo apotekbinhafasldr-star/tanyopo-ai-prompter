@@ -17,23 +17,6 @@ function TagPills({ items }: { items: string[] }) {
   );
 }
 
-function MetricStrip({
-  items,
-}: {
-  items: { label: string; value: string }[];
-}) {
-  return (
-    <div className="flex gap-4 rounded-[var(--radius-md)] border border-border bg-surface-muted/60 px-3 py-2.5">
-      {items.map((item) => (
-        <div key={item.label}>
-          <p className="text-sm font-semibold text-foreground">{item.value}</p>
-          <p className="text-[11px] text-muted-foreground">{item.label} · Contoh</p>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 function ChannelRow({ items }: { items: string[] }) {
   return (
     <div className="flex flex-col gap-1.5">
@@ -72,9 +55,7 @@ const SLIDES: TeamSlide[] = [
     image: "https://images.unsplash.com/photo-1580894732444-8ecded7900cd?w=1200&q=75&auto=format&fit=crop",
     imageAlt: "Ilustrasi strategist meninjau intelijen campaign di depan whiteboard",
     eyebrow: "Strategi",
-    eyebrowEn: "Strategy",
     name: "AI Strategi Marketing",
-    nameEn: "AI Marketing Strategist",
     message: "Strategi yang memahami produk, pasar, dan tujuan bisnis Anda.",
     tags: ["Positioning", "Target Audience", "USP"],
     ui: (
@@ -88,9 +69,7 @@ const SLIDES: TeamSlide[] = [
     image: "https://images.unsplash.com/photo-1737729991003-521d47240eb3?w=1200&q=75&auto=format&fit=crop",
     imageAlt: "Ilustrasi kreator konten menyusun ide caption dan konsep kreatif",
     eyebrow: "Konten",
-    eyebrowEn: "Content",
     name: "AI Kreator Konten",
-    nameEn: "AI Content Creator",
     message: "Konten yang dirancang untuk menarik perhatian dan menghasilkan tindakan.",
     tags: ["Caption", "Hook", "Hashtag"],
     ui: <TagPills items={["3 ide caption", "Hook video pendek", "Set hashtag"]} />,
@@ -102,9 +81,7 @@ const SLIDES: TeamSlide[] = [
     image: "https://images.unsplash.com/photo-1754039985001-ccafee437736?w=1200&q=75&auto=format&fit=crop",
     imageAlt: "Ilustrasi manajer campaign memantau aktivitas multi-channel di beberapa layar",
     eyebrow: "Campaign",
-    eyebrowEn: "Campaign",
     name: "AI Manajer Campaign",
-    nameEn: "AI Campaign Manager",
     message: "Dari ide hingga campaign multi-channel dalam satu alur.",
     tags: ["Multi-channel", "Orkestrasi", "Approval"],
     ui: <ChannelRow items={["Instagram", "Facebook", "TikTok", "X", "Website"]} />,
@@ -116,20 +93,10 @@ const SLIDES: TeamSlide[] = [
     image: "https://images.unsplash.com/photo-1748609160056-7b95f30041f0?w=1200&q=75&auto=format&fit=crop",
     imageAlt: "Ilustrasi profesional performance marketing meninjau data efisiensi campaign di tablet",
     eyebrow: "Optimasi",
-    eyebrowEn: "Optimization",
     name: "AI Optimasi Iklan",
-    nameEn: "AI Ads Optimizer",
     message: "AI membantu menemukan peluang untuk meningkatkan efisiensi setiap campaign.",
     tags: ["CTR", "CPA", "ROAS"],
-    ui: (
-      <MetricStrip
-        items={[
-          { label: "CTR", value: "3.8%" },
-          { label: "CPA", value: "Rp 24rb" },
-          { label: "ROAS", value: "4.2x" },
-        ]}
-      />
-    ),
+    ui: <TagPills items={["Analisis efisiensi budget", "Rekomendasi penyesuaian", "Peringatan anomali"]} />,
     ctaLabel: "Lihat contoh optimasi",
     ctaHref: "#analitik",
   },
@@ -138,12 +105,10 @@ const SLIDES: TeamSlide[] = [
     image: "https://images.unsplash.com/photo-1758691736580-a41e0cfe9e9f?w=1200&q=75&auto=format&fit=crop",
     imageAlt: "Ilustrasi pemilik bisnis meninjau sinyal pertumbuhan bersama tim",
     eyebrow: "Growth",
-    eyebrowEn: "Growth",
     name: "Growth Intelligence",
-    nameEn: "Growth Intelligence",
     message: "Temukan apa yang mendorong pertumbuhan — dan apa yang harus dilakukan berikutnya.",
     tags: ["Sinyal", "Rekomendasi", "Tren"],
-    ui: <TrendMini label="Konversi naik 3 minggu berturut-turut · Contoh" />,
+    ui: <TrendMini label="Sinyal pertumbuhan diperbarui setiap ada data baru" />,
     ctaLabel: "Lihat sinyal pertumbuhan",
     ctaHref: "#analitik",
   },
@@ -152,20 +117,12 @@ const SLIDES: TeamSlide[] = [
     image: "https://images.unsplash.com/photo-1770013413878-2530e2c3d82b?w=1200&q=75&auto=format&fit=crop",
     imageAlt: "Ilustrasi pemilik UMKM memeriksa performa produk dan bisnisnya",
     eyebrow: "Analitik",
-    eyebrowEn: "Analytics",
     name: "Analytics & Profit Intelligence",
-    nameEn: "Analytics & Profit Intelligence",
     message: "Bukan hanya melihat penjualan. Pahami dampak marketing terhadap bisnis Anda.",
     tags: ["Revenue", "Atribusi", "Kontribusi Marketing"],
     ui: (
       <div className="flex flex-col gap-1.5">
-        <MetricStrip
-          items={[
-            { label: "Revenue", value: "Rp 84jt" },
-            { label: "Konversi", value: "312" },
-            { label: "Kontribusi", value: "Rp 19jt" },
-          ]}
-        />
+        <TagPills items={["Atribusi per channel", "Estimasi kontribusi marketing", "Tren revenue"]} />
         <p className="text-[11px] text-muted-foreground">
           Estimasi kontribusi marketing, bukan laba bersih akuntansi.
         </p>
@@ -188,8 +145,8 @@ export function AiTeam() {
             Kenali Tim Marketing AI Anda
           </h2>
           <p className="mx-auto mt-2 max-w-xl text-sm text-muted-foreground sm:text-base">
-            Meet your AI marketing team — enam kapabilitas AI yang bekerja terorkestrasi,
-            masing-masing fokus pada satu bagian dari siklus marketing Anda.
+            Kapabilitas AI yang bekerja terkoordinasi untuk membantu setiap tahap pemasaran bisnis
+            Anda.
           </p>
         </Reveal>
       </div>

@@ -3,9 +3,9 @@ import { Zap } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { brand } from "@/lib/brand";
 
-const BADGE_SIZE = { sm: "size-7", md: "size-8", lg: "size-10" } as const;
-const ICON_SIZE = { sm: "size-3.5", md: "size-4", lg: "size-5" } as const;
-const TEXT_SIZE = { sm: "text-sm", md: "text-base", lg: "text-lg" } as const;
+const BADGE_SIZE = { sm: "size-8", md: "size-9", lg: "size-12" } as const;
+const ICON_SIZE = { sm: "size-4", md: "size-4.5", lg: "size-6" } as const;
+const TEXT_SIZE = { sm: "text-base", md: "text-lg", lg: "text-2xl" } as const;
 
 export interface LinoeLogoProps {
   size?: keyof typeof BADGE_SIZE;
@@ -24,6 +24,12 @@ export interface LinoeLogoProps {
  * an optional wordmark and "by Tanyopo" byline. One component so the mark
  * stays consistent across the marketing header/footer, auth screens, and
  * the authenticated app sidebar.
+ *
+ * NOTE — brand asset status: this is a frontend-safe programmatic
+ * direction, not a final trademark asset. No vector/binary master logo
+ * exists in this repository; a designer-produced SVG (and a real favicon/
+ * app-icon export from it) is still pending and should replace this glyph
+ * in place, without any other component needing to change.
  */
 export function LinoeLogo({
   size = "md",
@@ -36,10 +42,10 @@ export function LinoeLogo({
     <span
       className={cn(
         BADGE_SIZE[size],
-        "flex shrink-0 items-center justify-center rounded-[var(--radius-md)] bg-gradient-to-br from-brand to-brand-2 text-brand-foreground shadow-[var(--shadow-sm)]",
+        "flex shrink-0 items-center justify-center rounded-[var(--radius-lg)] bg-gradient-to-br from-brand to-brand-2 text-brand-foreground shadow-[var(--shadow-glow)]",
       )}
     >
-      <Zap className={cn(ICON_SIZE[size], "fill-current")} aria-hidden />
+      <Zap className={cn(ICON_SIZE[size], "fill-current")} strokeWidth={2.25} aria-hidden />
     </span>
   );
 
