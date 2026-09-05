@@ -51,7 +51,14 @@ export async function requireSessionContext(
     .single();
 
   if (profileError || !profile) {
-    redirect("/login");
+    // A valid Supabase session with no matching user_profiles row (the row
+    // is created by an external trigger owned by a separate Supabase
+    // project — see docs/DATABASE.md) is unresolvable here. Redirecting to
+    // /login would loop forever: the user is still authenticated, so
+    // proxy.ts's AUTH_ONLY_PATHS check immediately bounces /login back to
+    // /dashboard, which lands right back here. /session-error is not an
+    // auth-only path, so the user can actually see it and sign out.
+    redirect("/session-error");
   }
 
   const { data: tenant } = await supabase

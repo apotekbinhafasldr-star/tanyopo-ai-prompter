@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { publicEnv } from "@/lib/env";
 
-const PUBLIC_PATHS = ["/", "/login", "/register"];
+const PUBLIC_PATHS = ["/", "/login", "/register", "/forgot-password"];
 const AUTH_ONLY_PATHS = ["/login", "/register"];
 
 function isPublicAsset(pathname: string) {
@@ -10,6 +10,10 @@ function isPublicAsset(pathname: string) {
     pathname.startsWith("/_next") ||
     pathname.startsWith("/api/v1/integrations") || // signed service auth, not cookie auth
     pathname === "/favicon.ico" ||
+    // Handles its own auth (exchanges a Supabase recovery/PKCE code for a
+    // session) — the request arrives with no session cookie yet, so cookie
+    // gating below would otherwise bounce it to /login before it can run.
+    pathname === "/auth/callback" ||
     /\.(svg|png|jpg|jpeg|gif|webp|ico|css|js|map)$/.test(pathname)
   );
 }

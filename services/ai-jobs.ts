@@ -5,6 +5,7 @@ import type { z } from "zod";
 import { routeStructuredGeneration, AIRoutingNotConfiguredError } from "@/lib/ai/router";
 import { AIProviderError } from "@/lib/ai/provider";
 import { TASK_CLASS_BY_JOB_TYPE } from "@/lib/ai/task-classes";
+import { getOrCreateSubscription, checkAiUsageEntitlement } from "@/services/billing";
 import type { AiJobType, Database, Json } from "@/types/database";
 
 interface RunAiJobParams<T> {
@@ -40,6 +41,18 @@ export type RunAiJobResult<T> =
 export async function runAiJob<T>(params: RunAiJobParams<T>): Promise<RunAiJobResult<T>> {
   const { supabase, tenantId, actorUserId, jobType, schema, system, prompt, inputReference } = params;
   const taskClass = TASK_CLASS_BY_JOB_TYPE[jobType];
+
+  // Every AI generation in the app funnels through here, so this is the one
+  // place a trial's expiry can actually mean something server-side (see
+  // services/billing.ts#checkAiUsageEntitlement) rather than only being
+  // text on the Billing page. No job row is created for a blocked call —
+  // same "don't record a job nobody actually ran" rule as the
+  // AIRoutingNotConfiguredError branch below.
+  const subscription = await getOrCreateSubscription(supabase, tenantId);
+  const entitlement = checkAiUsageEntitlement(subscription);
+  if (!entitlement.allowed) {
+    return { ok: false, error: entitlement.reason ?? "Akses AI tidak diizinkan untuk paket Anda saat ini.", jobId: null };
+  }
 
   const { data: job, error: insertError } = await supabase
     .from("prompter_ai_jobs")

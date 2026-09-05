@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { Globe, ChevronDown, ArrowRight } from "lucide-react";
+import { Globe, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useActiveSection } from "@/features/marketing/hooks/use-active-section";
 import { cn } from "@/lib/utils/cn";
 
 // The approved vertical LINOE logo — the exact same asset/component used in
@@ -28,8 +28,6 @@ const NAV_ITEMS = [
   { label: "Harga", href: "#harga" },
 ] as const;
 
-const SECTION_IDS = NAV_ITEMS.map((item) => item.href.slice(1));
-
 /**
  * Real, visible, keyboard-accessible navigation integrated into the top of
  * the desktop hero — replacing invisible click-only hotspots for the logo,
@@ -39,27 +37,10 @@ const SECTION_IDS = NAV_ITEMS.map((item) => item.href.slice(1));
  * horizontal logo and nav text in hero.tsx.
  */
 export function HeroIntegratedNav() {
-  const [activeHref, setActiveHref] = useState<string>("#produk");
-
-  useEffect(() => {
-    const sections = SECTION_IDS.map((id) => document.getElementById(id)).filter(
-      (el): el is HTMLElement => el !== null,
-    );
-    if (sections.length === 0) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const visible = entries
-          .filter((entry) => entry.isIntersecting)
-          .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
-        if (visible) setActiveHref(`#${visible.target.id}`);
-      },
-      { rootMargin: "-40% 0px -50% 0px", threshold: [0, 0.25, 0.5, 0.75, 1] },
-    );
-
-    sections.forEach((section) => observer.observe(section));
-    return () => observer.disconnect();
-  }, []);
+  const activeHref = useActiveSection(
+    NAV_ITEMS.map((item) => item.href),
+    "#produk",
+  );
 
   return (
     <div className="flex h-full items-center justify-between gap-3 px-4 sm:px-6">
@@ -99,20 +80,29 @@ export function HeroIntegratedNav() {
             </a>
           );
         })}
-        <span className="cursor-default text-white/55">Studi Kasus</span>
+        {/* No case-study/social-proof section exists anywhere in the app
+            (checked before adding this) — rendered as inert text with an
+            explicit "Segera" tag rather than styled to look like a working
+            link, per the navbar-consistency fix: a real destination must
+            look clickable, and one that doesn't exist yet must not. */}
+        <span className="inline-flex cursor-default items-center gap-1.5 text-white/45">
+          Studi Kasus
+          <span className="rounded-full border border-white/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white/50">
+            Segera
+          </span>
+        </span>
       </nav>
 
       <div className="flex shrink-0 items-center gap-2">
-        {/* Decorative only — there is no locale-switching feature elsewhere
-            in the app to wire this up to, so it stays static rather than
-            inventing one. */}
+        {/* Current-language indicator only — no chevron (a chevron implies a
+            dropdown), since there is no locale-switching feature elsewhere
+            in the app to wire this up to. Not a link, not a button. */}
         <span
           aria-hidden
-          className="flex items-center gap-1 text-xs font-medium text-white/60"
+          className="flex cursor-default items-center gap-1 text-xs font-medium text-white/50"
         >
           <Globe className="size-3.5" aria-hidden />
           ID
-          <ChevronDown className="size-3" aria-hidden />
         </span>
         <Button
           asChild

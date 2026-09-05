@@ -103,6 +103,7 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
     .from("prompter_master_campaigns")
     .select("id, status, name, objective, daily_budget, total_budget, ai_proposal")
     .eq("id", channelCampaign.master_campaign_id)
+    .eq("tenant_id", session.tenantId)
     .single();
 
   if (masterError || !masterCampaign) {

@@ -2,7 +2,8 @@
 
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { loginSchema, registerSchema } from "@/schemas/auth";
+import { loginSchema, registerSchema, forgotPasswordSchema, resetPasswordSchema } from "@/schemas/auth";
+import { publicEnv } from "@/lib/env";
 
 export interface AuthActionState {
   error: string | null;
@@ -109,4 +110,72 @@ export async function logoutAction() {
   const supabase = await createClient();
   await supabase.auth.signOut();
   redirect("/login");
+}
+
+/**
+ * Always returns a generic success message regardless of whether the email
+ * exists — Supabase's own behavior for resetPasswordForEmail, kept here so
+ * this action never becomes an account-enumeration oracle.
+ */
+export async function forgotPasswordAction(
+  _prevState: AuthActionState,
+  formData: FormData,
+): Promise<AuthActionState> {
+  const parsed = forgotPasswordSchema.safeParse({ email: formData.get("email") });
+
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Data tidak valid" };
+  }
+
+  const supabase = await createClient();
+  await supabase.auth.resetPasswordForEmail(parsed.data.email, {
+    redirectTo: `${publicEnv.appUrl}/auth/callback?next=/reset-password`,
+  });
+
+  return {
+    error: null,
+    info: "Jika email tersebut terdaftar, kami telah mengirimkan tautan untuk mengatur ulang kata sandi. Silakan cek kotak masuk (dan folder spam) Anda.",
+  };
+}
+
+/**
+ * Only callable with an active recovery session (established by
+ * app/auth/callback/route.ts after a valid, unexpired reset link). Signs the
+ * user out afterward so they must explicitly log back in with the new
+ * password, rather than silently continuing on the one-time recovery
+ * session.
+ */
+export async function resetPasswordAction(
+  _prevState: AuthActionState,
+  formData: FormData,
+): Promise<AuthActionState> {
+  const parsed = resetPasswordSchema.safeParse({
+    password: formData.get("password"),
+    confirmPassword: formData.get("confirmPassword"),
+  });
+
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Data tidak valid" };
+  }
+
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return {
+      error: "Tautan reset kata sandi ini sudah kedaluwarsa atau tidak valid. Silakan minta tautan baru.",
+    };
+  }
+
+  const { error } = await supabase.auth.updateUser({ password: parsed.data.password });
+
+  if (error) {
+    return { error: "Gagal memperbarui kata sandi. Silakan coba lagi." };
+  }
+
+  await supabase.auth.signOut();
+  redirect("/login?reset=success");
 }

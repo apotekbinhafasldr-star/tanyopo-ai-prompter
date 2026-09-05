@@ -38,6 +38,7 @@ export async function regenerateCampaignProposalAction(campaignId: string): Prom
     .from("prompter_products")
     .select("*")
     .eq("id", campaign.product_id)
+    .eq("tenant_id", session.tenantId)
     .single();
 
   if (productError || !product) {

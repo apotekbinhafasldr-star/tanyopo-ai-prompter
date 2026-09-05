@@ -10,7 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 
 const initialState: AuthActionState = { error: null };
 
-export function LoginForm({ next }: { next?: string }) {
+export function LoginForm({ next, resetSuccess }: { next?: string; resetSuccess?: boolean }) {
   const [state, formAction, pending] = useActionState(loginAction, initialState);
 
   return (
@@ -20,6 +20,11 @@ export function LoginForm({ next }: { next?: string }) {
         <CardDescription>Kelola promosi dan campaign AI Anda.</CardDescription>
       </CardHeader>
       <CardContent className="pt-6">
+        {resetSuccess ? (
+          <p className="mb-4 rounded-[var(--radius-md)] border border-brand/30 bg-brand/5 p-3 text-sm text-foreground">
+            Kata sandi Anda berhasil diperbarui. Silakan masuk dengan kata sandi baru.
+          </p>
+        ) : null}
         <form action={formAction} className="flex flex-col gap-4" noValidate>
           {next ? <input type="hidden" name="next" value={next} /> : null}
           <div className="flex flex-col gap-1.5">
@@ -34,7 +39,12 @@ export function LoginForm({ next }: { next?: string }) {
             />
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="password">Kata Sandi</Label>
+            <div className="flex items-center justify-between">
+              <Label htmlFor="password">Kata Sandi</Label>
+              <Link href="/forgot-password" className="text-xs font-medium text-brand hover:underline">
+                Lupa kata sandi?
+              </Link>
+            </div>
             <Input
               id="password"
               name="password"

@@ -6,6 +6,11 @@ import type { Database, InvoiceStatus, SubscriptionPlan } from "@/types/database
 type Subscription = Database["public"]["Tables"]["prompter_subscriptions"]["Row"];
 type Invoice = Database["public"]["Tables"]["prompter_invoices"]["Row"];
 
+/** A new tenant's one and only trial window — server/DB-driven (not
+ * client/localStorage), started exactly once at subscription-row creation
+ * and never renewable by refreshing or clearing browser state. */
+export const TRIAL_DURATION_DAYS = 14;
+
 const DEFAULT_SUBSCRIPTION: Omit<Subscription, "tenant_id"> = {
   plan: "FREE",
   status: "ACTIVE",
@@ -22,12 +27,15 @@ const DEFAULT_SUBSCRIPTION: Omit<Subscription, "tenant_id"> = {
 };
 
 /**
- * Loads the tenant's subscription, creating a FREE-plan row on first
- * access if none exists — same lazy-create pattern as
+ * Loads the tenant's subscription, starting a real 14-day trial on first
+ * access if no row exists yet — same lazy-create pattern as
  * services/budget-guard.ts#getOrCreateBudgetPolicy() and
- * services/automation-settings.ts#getOrCreateAutomationSettings(). A
- * missing row never falls back to a paid plan; it falls back to the
- * safest state (Free, no processor, no fee).
+ * services/automation-settings.ts#getOrCreateAutomationSettings(). Once
+ * created, `current_period_start/end` and `status: 'TRIALING'` are fixed for
+ * that tenant — there is no code path that resets or extends them, so this
+ * is a one-time, per-workspace trial, not a per-session or per-browser one.
+ * A row that already existed before this change (status ACTIVE, no period
+ * set) is left untouched — see getTrialState()'s handling of that case.
  */
 export async function getOrCreateSubscription(
   supabase: SupabaseClient<Database>,
@@ -43,13 +51,78 @@ export async function getOrCreateSubscription(
     return existing;
   }
 
+  const now = new Date();
+  const trialEnd = new Date(now.getTime() + TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1000);
+
   const { data: created } = await supabase
     .from("prompter_subscriptions")
-    .insert({ tenant_id: tenantId })
+    .insert({
+      tenant_id: tenantId,
+      status: "TRIALING",
+      current_period_start: now.toISOString(),
+      current_period_end: trialEnd.toISOString(),
+    })
     .select("*")
     .single();
 
-  return created ?? { tenant_id: tenantId, ...DEFAULT_SUBSCRIPTION };
+  return (
+    created ?? {
+      tenant_id: tenantId,
+      ...DEFAULT_SUBSCRIPTION,
+      status: "TRIALING",
+      current_period_start: now.toISOString(),
+      current_period_end: trialEnd.toISOString(),
+    }
+  );
+}
+
+export interface TrialState {
+  isTrialing: boolean;
+  /** null when not trialing, or for a legacy pre-trial row with no period set. */
+  daysRemaining: number | null;
+  expired: boolean;
+}
+
+/** Pure, no I/O — derives trial status/remaining days from a subscription
+ * row already loaded via getOrCreateSubscription(). */
+export function getTrialState(subscription: Subscription, referenceDate: Date = new Date()): TrialState {
+  if (subscription.status !== "TRIALING" || !subscription.current_period_end) {
+    return { isTrialing: false, daysRemaining: null, expired: false };
+  }
+
+  const end = new Date(subscription.current_period_end);
+  const msRemaining = end.getTime() - referenceDate.getTime();
+  const daysRemaining = Math.max(0, Math.ceil(msRemaining / (24 * 60 * 60 * 1000)));
+
+  return { isTrialing: true, daysRemaining, expired: msRemaining <= 0 };
+}
+
+export interface EntitlementCheckResult {
+  allowed: boolean;
+  reason: string | null;
+}
+
+/**
+ * The one server-side gate a trial needs to actually mean something:
+ * called from services/ai-jobs.ts#runAiJob() before every AI generation, so
+ * an expired trial can't keep generating AI output regardless of what the
+ * client sends. A tenant that was ever moved to a real plan/status (via
+ * changePlan(), or a pre-existing ACTIVE row from before this trial system
+ * existed) is never blocked here — this only ever stops a TRIALING tenant
+ * whose period has actually elapsed.
+ */
+export function checkAiUsageEntitlement(subscription: Subscription, referenceDate: Date = new Date()): EntitlementCheckResult {
+  const trial = getTrialState(subscription, referenceDate);
+
+  if (trial.isTrialing && trial.expired) {
+    return {
+      allowed: false,
+      reason:
+        "Masa trial 14 hari Anda telah berakhir. Pilih paket di halaman Billing untuk melanjutkan menggunakan fitur AI.",
+    };
+  }
+
+  return { allowed: true, reason: null };
 }
 
 /**
@@ -176,6 +249,11 @@ export async function recordInvoiceFromProvider(
  * drive this via a webhook once a provider exists, same as everywhere
  * else in this app: the write path already exists, only the trigger
  * changes later.
+ *
+ * Also ends an in-progress trial: an Owner explicitly choosing a plan here
+ * is a deliberate "I'm committing to this" action, so status moves to
+ * ACTIVE regardless of how many trial days were left — there's no payment
+ * step yet to gate that transition on.
  */
 export async function changePlan(
   supabase: SupabaseClient<Database>,
@@ -184,7 +262,7 @@ export async function changePlan(
 ): Promise<{ error: string | null }> {
   const { error } = await supabase
     .from("prompter_subscriptions")
-    .upsert({ tenant_id: tenantId, plan });
+    .upsert({ tenant_id: tenantId, plan, status: "ACTIVE" });
 
   if (error) {
     return { error: "Gagal mengubah paket." };

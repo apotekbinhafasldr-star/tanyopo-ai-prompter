@@ -193,10 +193,20 @@ export async function deleteProductMediaAction(formData: FormData): Promise<void
     return;
   }
 
+  // Defense-in-depth: every other resource-scoped action in this file
+  // explicitly re-verifies tenant ownership rather than relying solely on
+  // RLS (which already blocks this — storage.objects and
+  // prompter_product_media policies are both tenant-scoped). Kept
+  // consistent with that pattern rather than being the one exception.
+  const session = await requireSessionContext();
   const supabase = await createClient();
 
   await supabase.storage.from("product-media").remove([storagePath]);
-  await supabase.from("prompter_product_media").delete().eq("id", mediaId);
+  await supabase
+    .from("prompter_product_media")
+    .delete()
+    .eq("id", mediaId)
+    .eq("tenant_id", session.tenantId);
 
   revalidatePath(`/products/${productId}`);
 }

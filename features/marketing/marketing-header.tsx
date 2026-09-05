@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Menu, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { LinoeLogo } from "@/components/brand/linoe-logo";
+import { useActiveSection } from "@/features/marketing/hooks/use-active-section";
 import { cn } from "@/lib/utils/cn";
 
 const NAV_LINKS = [
@@ -19,6 +20,16 @@ export function MarketingHeader() {
   const [scrolled, setScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [isDesktopWidth, setIsDesktopWidth] = useState(false);
+  // Same scroll-spy the hero's own nav (hero-integrated-nav.tsx) uses — this
+  // header previously had no active-state at all, so the underline
+  // indicator would appear to "vanish" the moment a user scrolled past the
+  // hero and this header took over from HeroIntegratedNav. Kept consistent
+  // between the two so switching navs mid-scroll isn't visible as a feature
+  // dropping out.
+  const activeHref = useActiveSection(
+    NAV_LINKS.map((link) => link.href),
+    "#produk",
+  );
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 8);
@@ -98,15 +109,30 @@ export function MarketingHeader() {
             onDark ? "text-white/75" : "text-muted-foreground",
           )}
         >
-          {NAV_LINKS.map((link) => (
-            <a
-              key={link.href}
-              href={link.href}
-              className={cn("transition-colors", onDark ? "hover:text-white" : "hover:text-foreground")}
-            >
-              {link.label}
-            </a>
-          ))}
+          {NAV_LINKS.map((link) => {
+            const isActive = activeHref === link.href;
+            return (
+              <a
+                key={link.href}
+                href={link.href}
+                aria-current={isActive ? "true" : undefined}
+                className={cn(
+                  "relative py-1 transition-colors",
+                  onDark ? "hover:text-white" : "hover:text-foreground",
+                  isActive && (onDark ? "text-white" : "text-foreground"),
+                )}
+              >
+                {link.label}
+                <span
+                  aria-hidden
+                  className={cn(
+                    "absolute inset-x-0 -bottom-1 h-px rounded-full bg-gradient-to-r from-[#22d3ee] to-[#8b5cf6] transition-opacity duration-300",
+                    isActive ? "opacity-100" : "opacity-0",
+                  )}
+                />
+              </a>
+            );
+          })}
         </nav>
 
         <div className="hidden items-center gap-2 desktop:flex">

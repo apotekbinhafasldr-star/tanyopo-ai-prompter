@@ -154,19 +154,34 @@ export async function createPromotionHandoff(
  * than erroring, since a corrected resend is expected behavior for a
  * conversions feed (unlike the webhook receipt log below, which is a pure
  * once-only record).
+ *
+ * This runs on the admin (RLS-bypassing) client against a trusted,
+ * signature-authenticated caller — not a user-facing IDOR risk — but a
+ * malformed UMKMpro payload could still pair the right tenantId with a
+ * campaign id belonging to a *different* tenant, corrupting that other
+ * tenant's attribution/analytics numbers even though the row itself stays
+ * correctly scoped to `tenantId`. Cross-checked here rather than trusted
+ * as-is; a mismatched id is dropped (recorded as "no campaign attached")
+ * instead of either rejecting the whole conversion or silently
+ * cross-linking it.
  */
 export async function recordConversionFromUmkmpro(
   admin: AdminClient,
   tenantId: string,
   input: UmkmproConversionInput,
 ): Promise<{ conversionId: string }> {
+  const [masterCampaignId, channelCampaignId] = await Promise.all([
+    verifyCampaignBelongsToTenant(admin, "prompter_master_campaigns", input.masterCampaignId, tenantId),
+    verifyCampaignBelongsToTenant(admin, "prompter_channel_campaigns", input.channelCampaignId, tenantId),
+  ]);
+
   const { data, error } = await admin
     .from("prompter_conversions")
     .upsert(
       {
         tenant_id: tenantId,
-        master_campaign_id: input.masterCampaignId ?? null,
-        channel_campaign_id: input.channelCampaignId ?? null,
+        master_campaign_id: masterCampaignId,
+        channel_campaign_id: channelCampaignId,
         customer_reference: input.customerReference ?? null,
         order_reference: input.orderReference ?? null,
         source: "umkmpro",
@@ -193,13 +208,27 @@ export async function recordConversionFromUmkmpro(
   await recordSingleTouchAttribution(admin, {
     tenantId,
     conversionId: data.id,
-    masterCampaignId: input.masterCampaignId ?? null,
-    channelCampaignId: input.channelCampaignId ?? null,
+    masterCampaignId,
+    channelCampaignId,
     value: input.value ?? null,
     model: "UMKMPRO_VERIFIED",
   });
 
   return { conversionId: data.id };
+}
+
+/** Returns `id` unchanged if it exists and belongs to `tenantId`, otherwise
+ * `null` — see recordConversionFromUmkmpro()'s doc comment for why this
+ * check exists on an otherwise-trusted server-to-server path. */
+async function verifyCampaignBelongsToTenant(
+  admin: AdminClient,
+  table: "prompter_master_campaigns" | "prompter_channel_campaigns",
+  id: string | null | undefined,
+  tenantId: string,
+): Promise<string | null> {
+  if (!id) return null;
+  const { data } = await admin.from(table).select("id").eq("id", id).eq("tenant_id", tenantId).maybeSingle();
+  return data ? id : null;
 }
 
 export interface WebhookReceiptResult {

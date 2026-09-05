@@ -79,7 +79,12 @@ export async function generateOptimizationRecommendationsAction(
       .in("channel_campaign_id", channelCampaignIds)
       .eq("event_type", "PURCHASE"),
     campaign.product_id
-      ? supabase.from("prompter_products").select("hpp").eq("id", campaign.product_id).single()
+      ? supabase
+          .from("prompter_products")
+          .select("hpp")
+          .eq("id", campaign.product_id)
+          .eq("tenant_id", session.tenantId)
+          .single()
       : Promise.resolve({ data: null }),
   ]);
 

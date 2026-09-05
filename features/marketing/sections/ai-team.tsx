@@ -42,7 +42,7 @@ const SLIDES: TeamSlide[] = [
   {
     id: "campaign",
     image: "/brand/linoe/feature-cards/03-iklan-multi-channel-final.png",
-    imageAlt: "Iklan Multi-Channel LINOE — jalankan iklan di TikTok, IG, Facebook, YouTube, dan platform lainnya dengan AI",
+    imageAlt: "Iklan Multi-Channel LINOE — jalankan iklan di TikTok, Instagram, Facebook, dan X dengan AI",
     imageIsComplete: true,
     icon: <Megaphone aria-hidden />,
     titleLead: "Iklan",

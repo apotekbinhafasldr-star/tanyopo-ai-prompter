@@ -1,0 +1,10 @@
+import type { Metadata } from "next";
+import { ResetPasswordForm } from "@/features/auth/reset-password-form";
+
+export const metadata: Metadata = {
+  title: "Atur Kata Sandi Baru — LINOE",
+};
+
+export default function ResetPasswordPage() {
+  return <ResetPasswordForm />;
+}

@@ -7,6 +7,7 @@ import { requireSessionContext } from "@/services/session";
 import { createClient } from "@/lib/supabase/server";
 import {
   getOrCreateSubscription,
+  getTrialState,
   getMonthlyAiJobCount,
   getVerifiedAttributedValueThisMonth,
   listInvoices,
@@ -58,6 +59,8 @@ export default async function BillingPage() {
     verifiedAttributedValue,
   });
 
+  const trial = getTrialState(subscription);
+
   const paymentProvider = getPaymentProvider();
   const isOwner = session.role === "owner";
 
@@ -81,6 +84,19 @@ export default async function BillingPage() {
             <Badge variant="brand">{PLAN_LABEL[subscription.plan] ?? subscription.plan}</Badge>
             <Badge variant={STATUS_VARIANT[subscription.status] ?? "neutral"}>{subscription.status}</Badge>
           </div>
+          {trial.isTrialing ? (
+            <p
+              className={
+                trial.expired
+                  ? "rounded-[var(--radius-md)] border border-danger/30 bg-danger/5 p-3 text-sm text-danger"
+                  : "rounded-[var(--radius-md)] border border-brand/30 bg-brand/5 p-3 text-sm text-foreground"
+              }
+            >
+              {trial.expired
+                ? "Masa trial 14 hari Anda telah berakhir. Pilih paket di bawah untuk melanjutkan menggunakan fitur AI."
+                : `Sisa masa trial: ${trial.daysRemaining} hari lagi. Pilih paket kapan pun untuk melanjutkan tanpa jeda.`}
+            </p>
+          ) : null}
           <p className="text-xs text-muted-foreground">
             {subscription.billing_provider
               ? `Pemroses pembayaran: ${subscription.billing_provider}.`
