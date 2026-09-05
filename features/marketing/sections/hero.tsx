@@ -141,14 +141,20 @@ export function Hero() {
             final hero asset, installed as-is (not reconstructed from
             separate elements): it already bakes in the headline, CTAs,
             presenter + tablet, and dashboard preview in one composition.
+            Flush against the top of the section (no top padding) — the
+            real header stays invisible while unscrolled here (see
+            marketing-header.tsx), so the padding once reserved for it is
+            no longer needed and only ever showed as empty black space.
             Real CTA links are kept for keyboard/screen-reader users (see
             DESKTOP_HERO_CTA_CLASS above) without duplicating the artwork's
             own visible text. */}
-        <div className="relative mx-auto hidden max-w-7xl px-4 pb-16 pt-24 sm:px-6 sm:pb-20 sm:pt-28 desktop:block desktop:pb-20 desktop:pt-32">
+        <div className="relative mx-auto hidden max-w-7xl px-4 pb-16 pt-24 sm:px-6 sm:pb-20 sm:pt-28 desktop:block desktop:pb-20 desktop:pt-0">
           {/* This inner wrapper has no padding of its own, so its box exactly
               matches the rendered image — the hotspots below are positioned
-              in percentages of THIS box, not the padded outer container. */}
-          <div className="relative">
+              in percentages of THIS box, not the padded outer container.
+              overflow-hidden lets the left-edge mask strip below clip
+              cleanly against the image's own edge. */}
+          <div className="relative overflow-hidden">
             <Image
               src="/brand/linoe/08-hero-desktop-final.jpg"
               alt="LINOE — AI Marketing & Growth Platform. Marketing Lebih Cepat. Bisnis Melaju Lebih Jauh. Bersama LINOE. LINOE membantu Anda menganalisis produk, menyusun strategi, membuat konten, menjalankan campaign, memantau hasil, dan mengoptimasi pertumbuhan — semua dengan AI dalam satu platform. Presenter memegang tablet LINOE di samping pratinjau dashboard LINOE."
@@ -158,6 +164,16 @@ export function Hero() {
               sizes="(min-width: 1536px) 1280px, 90vw"
               className="h-auto w-full"
             />
+            {/* The supplied asset has a ~4px stray white line baked into its
+                left edge (verified via pixel probing — present at every row,
+                unrelated to any content behind it). Masking it with a strip
+                matching the hero's own dark background is a display-only
+                fix: the image file itself is never modified, cropped, or
+                regenerated. The image's right edge has no such artifact —
+                its white pixels there are the dashboard card's own design,
+                confirmed by sampling rows above and below the card where the
+                edge is correctly dark — so only the left edge is masked. */}
+            <div aria-hidden className="pointer-events-none absolute inset-y-0 left-0 w-[0.55%] bg-ink" />
             {HERO_IMAGE_HOTSPOTS.map((hotspot) => {
               const style = {
                 left: `${hotspot.rect.left}%`,
