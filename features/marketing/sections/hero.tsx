@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Sparkles, ArrowRight, PlayCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { HeroVisual } from "@/features/marketing/components/hero-visual";
+import { HeroIntegratedNav } from "@/features/marketing/components/hero-integrated-nav";
 import { ProductVisual } from "@/features/marketing/components/product-visual";
 
 // Real CTA links kept for keyboard/screen-reader users on the desktop hero,
@@ -19,9 +20,13 @@ const DESKTOP_HERO_CTA_CLASS =
 // to find each button's actual edges), then expressed as percentages of
 // the image's own box so they stay aligned as it scales responsively.
 // Each targets an existing route/anchor already used elsewhere on this
-// page — nothing new was invented. "Studi Kasus" has no existing route/
-// section to point to, so it's intentionally left non-interactive rather
-// than guessing one.
+// page — nothing new was invented.
+//
+// Only the main CTA row (Mulai Promosikan Sekarang / Lihat Cara Kerja)
+// still uses this invisible-hotspot approach — that row is locked/
+// unchanged. The logo, nav links, and Masuk/Mulai Sekarang are now real,
+// visible elements (HeroIntegratedNav below) instead, since invisible
+// hotspots can't show hover/focus/active states.
 type HeroHotspot = {
   label: string;
   href: string;
@@ -30,11 +35,6 @@ type HeroHotspot = {
 };
 
 const HERO_IMAGE_HOTSPOTS: HeroHotspot[] = [
-  { label: "Beranda", href: "#produk", rect: { left: 32.68, top: 1.68, width: 5.53, height: 7.13 } },
-  { label: "Fitur", href: "#ai-agents", rect: { left: 39.19, top: 1.68, width: 3.71, height: 7.13 } },
-  { label: "Harga", href: "#harga", rect: { left: 43.88, top: 1.68, width: 4.23, height: 7.13 } },
-  { label: "Masuk", href: "/login", external: true, rect: { left: 78.65, top: 2.73, width: 8.33, height: 5.24 } },
-  { label: "Mulai Sekarang", href: "/register", external: true, rect: { left: 86.98, top: 0.21, width: 12.5, height: 7.97 } },
   {
     label: "Mulai Promosikan Sekarang",
     href: "/register",
@@ -141,14 +141,14 @@ export function Hero() {
             final hero asset, installed as-is (not reconstructed from
             separate elements): it already bakes in the headline, CTAs,
             presenter + tablet, and dashboard preview in one composition.
-            Flush against the top of the section (no top padding) — the
-            real header stays invisible while unscrolled here (see
-            marketing-header.tsx), so the padding once reserved for it is
-            no longer needed and only ever showed as empty black space.
+            A small top padding (desktop:pt-2) gives it a touch of breathing
+            room from the browser edge without recreating the large empty
+            band a previous round removed — the real header still stays
+            invisible while unscrolled here (see marketing-header.tsx).
             Real CTA links are kept for keyboard/screen-reader users (see
             DESKTOP_HERO_CTA_CLASS above) without duplicating the artwork's
             own visible text. */}
-        <div className="relative mx-auto hidden max-w-7xl px-4 pb-16 pt-24 sm:px-6 sm:pb-20 sm:pt-28 desktop:block desktop:pb-20 desktop:pt-0">
+        <div className="relative mx-auto hidden max-w-7xl px-4 pb-16 pt-24 sm:px-6 sm:pb-20 sm:pt-28 desktop:block desktop:pb-20 desktop:pt-2">
           {/* This inner wrapper has no padding of its own, so its box exactly
               matches the rendered image — the hotspots below are positioned
               in percentages of THIS box, not the padded outer container.
@@ -174,6 +174,19 @@ export function Hero() {
                 confirmed by sampling rows above and below the card where the
                 edge is correctly dark — so only the left edge is masked. */}
             <div aria-hidden className="pointer-events-none absolute inset-y-0 left-0 w-[0.55%] bg-ink" />
+            {/* Covers the baked-in horizontal logo and Beranda/Fitur/Harga/
+                Studi Kasus/language/Masuk/Mulai Sekarang row so
+                HeroIntegratedNav's real elements replace them cleanly.
+                Solid (not faded) — a gradient fade here let the old baked-in
+                logo's swoosh mark ghost through its semi-transparent zone.
+                Height is capped just above where the presenter's hair
+                enters the frame (verified via pixel probing — it starts
+                around 9.4% of the image's height), so her photo is never
+                covered. */}
+            <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-[9.2%] bg-ink" />
+            <div className="absolute inset-x-0 top-0 h-[42px]">
+              <HeroIntegratedNav />
+            </div>
             {HERO_IMAGE_HOTSPOTS.map((hotspot) => {
               const style = {
                 left: `${hotspot.rect.left}%`,

@@ -18,12 +18,24 @@ const NAV_LINKS = [
 export function MarketingHeader() {
   const [scrolled, setScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [isDesktopWidth, setIsDesktopWidth] = useState(false);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 8);
     onScroll();
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  // Mirrors the `desktop:` breakpoint (900px, see app/globals.css) in JS so
+  // this header can be made `inert` while it's invisible — see the `inert`
+  // prop below for why.
+  useEffect(() => {
+    const query = window.matchMedia("(min-width: 900px)");
+    const onChange = () => setIsDesktopWidth(query.matches);
+    onChange();
+    query.addEventListener("change", onChange);
+    return () => query.removeEventListener("change", onChange);
   }, []);
 
   // Lock body scroll while the mobile menu is open.
@@ -42,9 +54,18 @@ export function MarketingHeader() {
   // the header renders light-on-dark; scrolled state switches to the
   // normal light-surface header once the page background is light again.
   const onDark = !scrolled;
+  // True exactly when this header is invisible (see the opacity-0 class
+  // below): desktop width, not yet scrolled. `inert` removes it from the
+  // tab order and the accessibility tree while it's in that state — the
+  // hero's own real, visible HeroIntegratedNav (features/marketing/
+  // components/hero-integrated-nav.tsx) covers the same ground during this
+  // exact window, so without this a keyboard/screen-reader user would hit
+  // both an invisible and a visible copy of the same links back to back.
+  const hiddenOnDesktop = isDesktopWidth && !scrolled;
 
   return (
     <header
+      inert={hiddenOnDesktop || undefined}
       className={cn(
         // `fixed` (not `sticky`) so the header is removed from normal flow
         // entirely and truly overlaps the hero's top edge instead of
