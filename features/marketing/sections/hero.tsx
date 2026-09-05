@@ -12,6 +12,44 @@ import { ProductVisual } from "@/features/marketing/components/product-visual";
 const DESKTOP_HERO_CTA_CLASS =
   "sr-only focus-visible:not-sr-only focus-visible:absolute focus-visible:left-4 focus-visible:top-4 focus-visible:z-20 focus-visible:rounded-[var(--radius-md)] focus-visible:px-4 focus-visible:py-2 focus-visible:text-sm focus-visible:font-semibold focus-visible:text-white focus-visible:shadow-lg";
 
+// Transparent, click/keyboard-accessible hotspots aligned over the controls
+// baked into the approved desktop hero image (public/brand/linoe/
+// 08-hero-desktop-final.jpg, 1536x477 native). Positions were measured
+// directly from the image's own pixels (per-pixel brightness/color probing
+// to find each button's actual edges), then expressed as percentages of
+// the image's own box so they stay aligned as it scales responsively.
+// Each targets an existing route/anchor already used elsewhere on this
+// page — nothing new was invented. "Studi Kasus" has no existing route/
+// section to point to, so it's intentionally left non-interactive rather
+// than guessing one.
+type HeroHotspot = {
+  label: string;
+  href: string;
+  external?: boolean; // true = real navigation (next/link), false = in-page anchor
+  rect: { left: number; top: number; width: number; height: number }; // % of image box
+};
+
+const HERO_IMAGE_HOTSPOTS: HeroHotspot[] = [
+  { label: "Beranda", href: "#produk", rect: { left: 32.68, top: 1.68, width: 5.53, height: 7.13 } },
+  { label: "Fitur", href: "#ai-agents", rect: { left: 39.19, top: 1.68, width: 3.71, height: 7.13 } },
+  { label: "Harga", href: "#harga", rect: { left: 43.88, top: 1.68, width: 4.23, height: 7.13 } },
+  { label: "Masuk", href: "/login", external: true, rect: { left: 78.65, top: 2.73, width: 8.33, height: 5.24 } },
+  { label: "Mulai Sekarang", href: "/register", external: true, rect: { left: 86.98, top: 0.21, width: 12.5, height: 7.97 } },
+  {
+    label: "Mulai Promosikan Sekarang",
+    href: "/register",
+    external: true,
+    rect: { left: 3.78, top: 74.63, width: 18.03, height: 11.95 },
+  },
+  { label: "Lihat Cara Kerja", href: "#cara-kerja", rect: { left: 22.98, top: 74.63, width: 10.68, height: 11.95 } },
+];
+
+// Fully transparent — no fill/border ever, even on hover — a focus ring is
+// the only visual feedback, and only while keyboard-focused (never a
+// permanent visible addition to the approved artwork).
+const HERO_HOTSPOT_CLASS =
+  "absolute rounded-[var(--radius-sm)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80";
+
 export function Hero() {
   return (
     <>
@@ -107,15 +145,33 @@ export function Hero() {
             DESKTOP_HERO_CTA_CLASS above) without duplicating the artwork's
             own visible text. */}
         <div className="relative mx-auto hidden max-w-7xl px-4 pb-16 pt-24 sm:px-6 sm:pb-20 sm:pt-28 desktop:block desktop:pb-20 desktop:pt-32">
-          <Image
-            src="/brand/linoe/08-hero-desktop-final.jpg"
-            alt="LINOE — AI Marketing & Growth Platform. Marketing Lebih Cepat. Bisnis Melaju Lebih Jauh. Bersama LINOE. LINOE membantu Anda menganalisis produk, menyusun strategi, membuat konten, menjalankan campaign, memantau hasil, dan mengoptimasi pertumbuhan — semua dengan AI dalam satu platform. Presenter memegang tablet LINOE di samping pratinjau dashboard LINOE."
-            width={1536}
-            height={477}
-            priority
-            sizes="(min-width: 1536px) 1280px, 90vw"
-            className="h-auto w-full"
-          />
+          {/* This inner wrapper has no padding of its own, so its box exactly
+              matches the rendered image — the hotspots below are positioned
+              in percentages of THIS box, not the padded outer container. */}
+          <div className="relative">
+            <Image
+              src="/brand/linoe/08-hero-desktop-final.jpg"
+              alt="LINOE — AI Marketing & Growth Platform. Marketing Lebih Cepat. Bisnis Melaju Lebih Jauh. Bersama LINOE. LINOE membantu Anda menganalisis produk, menyusun strategi, membuat konten, menjalankan campaign, memantau hasil, dan mengoptimasi pertumbuhan — semua dengan AI dalam satu platform. Presenter memegang tablet LINOE di samping pratinjau dashboard LINOE."
+              width={1536}
+              height={477}
+              priority
+              sizes="(min-width: 1536px) 1280px, 90vw"
+              className="h-auto w-full"
+            />
+            {HERO_IMAGE_HOTSPOTS.map((hotspot) => {
+              const style = {
+                left: `${hotspot.rect.left}%`,
+                top: `${hotspot.rect.top}%`,
+                width: `${hotspot.rect.width}%`,
+                height: `${hotspot.rect.height}%`,
+              };
+              return hotspot.external ? (
+                <Link key={hotspot.label} href={hotspot.href} aria-label={hotspot.label} className={HERO_HOTSPOT_CLASS} style={style} />
+              ) : (
+                <a key={hotspot.label} href={hotspot.href} aria-label={hotspot.label} className={HERO_HOTSPOT_CLASS} style={style} />
+              );
+            })}
+          </div>
           <Link
             href="/register"
             className={`${DESKTOP_HERO_CTA_CLASS} bg-gradient-to-r from-[#22d3ee] via-[#3b82f6] to-[#8b5cf6]`}
