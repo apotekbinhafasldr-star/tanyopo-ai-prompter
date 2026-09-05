@@ -99,11 +99,16 @@ export function TeamCarousel({ slides }: { slides: TeamSlide[] }) {
           >
             {/* Full-bleed photo card — title, icon, and description all live
                 inside the image itself (a scrim + overlay), not in a
-                separate text panel below or beside it. */}
+                separate text panel below or beside it. aspect-[5/8] (0.625)
+                closely matches the supplied complete-card photos' own
+                ~0.61-0.63 native ratio, so object-cover crops only a few px
+                per edge — the previous 4/5 (mobile) / 3/4 (desktop) ratios
+                were far enough off (0.8 / 0.75) to crop the baked-in bottom
+                CTA text on every one of them. */}
             <a
               href={slide.ctaHref}
               aria-label={`${slide.titleLead} ${slide.titleAccent} — ${slide.message}`}
-              className="group relative flex aspect-[4/5] w-full flex-col justify-end overflow-hidden rounded-[var(--radius-xl)] border border-border shadow-[var(--shadow-md)] transition-shadow duration-300 hover:shadow-[var(--shadow-lg)] focus-visible:shadow-[var(--shadow-lg)] sm:aspect-[3/4]"
+              className="group relative flex aspect-[5/8] w-full flex-col justify-end overflow-hidden rounded-[var(--radius-xl)] border border-border shadow-[var(--shadow-md)] transition-shadow duration-300 hover:shadow-[var(--shadow-lg)] focus-visible:shadow-[var(--shadow-lg)]"
             >
               <Image
                 src={slide.image}
