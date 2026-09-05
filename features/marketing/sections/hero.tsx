@@ -31,8 +31,8 @@ export function Hero() {
           }}
         />
 
-        <div className="relative mx-auto grid max-w-6xl gap-8 px-4 pb-14 pt-24 sm:gap-10 sm:px-6 sm:pb-20 sm:pt-28 lg:max-w-7xl lg:grid-cols-[1fr_0.85fr_1.15fr] lg:items-center lg:gap-6 lg:pb-28 lg:pt-32">
-          <div className="flex flex-col items-center gap-4 text-center sm:gap-5 lg:items-start lg:text-left">
+        <div className="relative mx-auto grid max-w-6xl gap-8 px-4 pb-14 pt-24 sm:gap-10 sm:px-6 sm:pb-20 sm:pt-28 desktop:max-w-7xl desktop:grid-cols-[1fr_0.85fr_1.15fr] desktop:items-center desktop:gap-6 desktop:pb-28 desktop:pt-32">
+          <div className="flex flex-col items-center gap-4 text-center sm:gap-5 desktop:items-start desktop:text-left">
             <div className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/[0.06] px-3 py-1 text-xs font-medium text-white/80 backdrop-blur">
               <Sparkles className="size-3.5 text-[#67e8f9]" aria-hidden />
               AI Marketing & Growth Platform
@@ -41,7 +41,7 @@ export function Hero() {
             {/* text-3xl on the smallest screens (below the 640px `sm` step)
                 keeps the full slogan reliably clear of the viewport edge on
                 320-430px phones — text-4xl left too little margin there. */}
-            <h1 className="max-w-xl text-3xl font-semibold leading-[1.15] tracking-[-0.02em] text-white sm:text-5xl sm:leading-[1.05] lg:text-6xl">
+            <h1 className="max-w-xl text-3xl font-semibold leading-[1.15] tracking-[-0.02em] text-white sm:text-5xl sm:leading-[1.05] desktop:text-6xl">
               Marketing Lebih Cepat. Bisnis Melaju Lebih Jauh.{" "}
               <span className="bg-gradient-to-r from-[#22d3ee] via-[#3b82f6] to-[#8b5cf6] bg-clip-text text-transparent">
                 Bersama LINOE.
@@ -88,9 +88,10 @@ export function Hero() {
           <HeroVisual />
 
           {/* Desktop-only third column: the dashboard/product UI, replacing
-              the overlapping Tanyopo Intelligence card (hidden at lg:) so the
-              hero reads as one horizontal 3-column composition at >=1024px. */}
-          <div className="hidden lg:block">
+              the overlapping Tanyopo Intelligence card (hidden at desktop:)
+              so the hero reads as one horizontal 3-column composition at the
+              custom 900px `desktop:` breakpoint (see app/globals.css). */}
+          <div className="hidden desktop:block">
             <HeroDashboardPanel />
           </div>
         </div>

@@ -50,7 +50,7 @@ export function HeroVisual() {
           image's height, cropping out either her face or the tablet
           depending on object-position; no position could show both at
           once. At 3/4, ~90% of the height is visible, so both fit. */}
-      <div className="relative aspect-[3/4] w-full overflow-hidden rounded-[var(--radius-xl)] border border-white/10 shadow-[0_0_0_1px_rgba(59,130,246,0.15),0_24px_64px_-16px_rgba(0,0,0,0.55)] lg:aspect-[4/5]">
+      <div className="relative aspect-[3/4] w-full overflow-hidden rounded-[var(--radius-xl)] border border-white/10 shadow-[0_0_0_1px_rgba(59,130,246,0.15),0_24px_64px_-16px_rgba(0,0,0,0.55)] desktop:aspect-[4/5]">
         <Image
           src="/brand/linoe/07-hero-wanita-linoe-final.png"
           alt="Presenter LINOE memegang tablet bermerek LINOE, tersenyum percaya diri"
@@ -63,9 +63,10 @@ export function HeroVisual() {
       </div>
 
       {/* Tanyopo Intelligence dashboard — pulled up over the photo's lower
-          edge. Hidden at lg: since the desktop hero gets its own dedicated
-          third-column dashboard panel (HeroDashboardPanel) instead. */}
-      <div className="relative -mt-10 mx-3 rounded-[var(--radius-lg)] border border-white/10 bg-surface/97 p-3.5 shadow-[0_24px_48px_-12px_rgba(0,0,0,0.5)] backdrop-blur sm:-mt-12 sm:mx-6 sm:p-4 lg:hidden">
+          edge. Hidden at desktop: (900px, see app/globals.css) since the
+          desktop hero gets its own dedicated third-column dashboard panel
+          (HeroDashboardPanel) instead. */}
+      <div className="relative -mt-10 mx-3 rounded-[var(--radius-lg)] border border-white/10 bg-surface/97 p-3.5 shadow-[0_24px_48px_-12px_rgba(0,0,0,0.5)] backdrop-blur sm:-mt-12 sm:mx-6 sm:p-4 desktop:hidden">
         <div className="mb-2.5 flex items-center gap-2">
           <span className="flex size-6 items-center justify-center rounded-full bg-gradient-to-br from-[#22d3ee] via-[#3b82f6] to-[#8b5cf6] text-white">
             <Brain className="size-3.5" aria-hidden />

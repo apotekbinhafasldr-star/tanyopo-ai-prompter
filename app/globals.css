@@ -46,6 +46,13 @@
 }
 
 @theme inline {
+  /* Marketing hero + header switch to their horizontal desktop composition
+     at 900px, not Tailwind's default `lg:` (1024px) — real-device testing
+     showed some devices/zoom levels report a CSS viewport under 1024px
+     while still needing the desktop layout. Only the hero and header use
+     this; everything else keeps Tailwind's default breakpoints. */
+  --breakpoint-desktop: 56.25rem;
+
   --color-background: var(--background);
   --color-surface: var(--surface);
   --color-surface-muted: var(--surface-muted);

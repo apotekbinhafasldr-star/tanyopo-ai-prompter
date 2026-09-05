@@ -64,7 +64,7 @@ export function MarketingHeader() {
 
         <nav
           className={cn(
-            "hidden items-center gap-7 text-sm font-medium lg:flex",
+            "hidden items-center gap-7 text-sm font-medium desktop:flex",
             onDark ? "text-white/75" : "text-muted-foreground",
           )}
         >
@@ -79,7 +79,7 @@ export function MarketingHeader() {
           ))}
         </nav>
 
-        <div className="hidden items-center gap-2 lg:flex">
+        <div className="hidden items-center gap-2 desktop:flex">
           <Button
             asChild
             variant="ghost"
@@ -97,7 +97,7 @@ export function MarketingHeader() {
           </Button>
         </div>
 
-        <div className="flex items-center gap-2 lg:hidden">
+        <div className="flex items-center gap-2 desktop:hidden">
           <Button asChild size="sm" className="bg-gradient-to-r from-brand to-brand-2">
             <Link href="/register">Mulai</Link>
           </Button>
@@ -120,7 +120,7 @@ export function MarketingHeader() {
       {menuOpen ? (
         <div
           id="marketing-mobile-nav"
-          className="border-t border-border bg-surface px-4 pb-6 pt-2 lg:hidden"
+          className="border-t border-border bg-surface px-4 pb-6 pt-2 desktop:hidden"
         >
           <nav className="flex flex-col">
             {NAV_LINKS.map((link) => (
