@@ -62,8 +62,10 @@ export function HeroVisual() {
         <div aria-hidden className="absolute inset-0 bg-gradient-to-t from-ink/85 via-transparent to-transparent" />
       </div>
 
-      {/* Tanyopo Intelligence dashboard — pulled up over the photo's lower edge. */}
-      <div className="relative -mt-10 mx-3 rounded-[var(--radius-lg)] border border-white/10 bg-surface/97 p-3.5 shadow-[0_24px_48px_-12px_rgba(0,0,0,0.5)] backdrop-blur sm:-mt-12 sm:mx-6 sm:p-4">
+      {/* Tanyopo Intelligence dashboard — pulled up over the photo's lower
+          edge. Hidden at lg: since the desktop hero gets its own dedicated
+          third-column dashboard panel (HeroDashboardPanel) instead. */}
+      <div className="relative -mt-10 mx-3 rounded-[var(--radius-lg)] border border-white/10 bg-surface/97 p-3.5 shadow-[0_24px_48px_-12px_rgba(0,0,0,0.5)] backdrop-blur sm:-mt-12 sm:mx-6 sm:p-4 lg:hidden">
         <div className="mb-2.5 flex items-center gap-2">
           <span className="flex size-6 items-center justify-center rounded-full bg-gradient-to-br from-[#22d3ee] via-[#3b82f6] to-[#8b5cf6] text-white">
             <Brain className="size-3.5" aria-hidden />
