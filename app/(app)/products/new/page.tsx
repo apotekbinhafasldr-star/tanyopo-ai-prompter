@@ -4,7 +4,7 @@ import { ProductForm } from "@/features/products/product-form";
 import { createProductAction } from "@/features/products/actions";
 import { requireSessionContext } from "@/services/session";
 
-export const metadata: Metadata = { title: "Tambah Produk — Tanyopo AI Promoter" };
+export const metadata: Metadata = { title: "Tambah Produk — LINOE" };
 
 export default async function NewProductPage() {
   const session = await requireSessionContext();

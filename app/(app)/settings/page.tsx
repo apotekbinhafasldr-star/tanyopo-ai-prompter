@@ -18,7 +18,7 @@ import { DEFAULT_LOCALE } from "@/lib/i18n/config";
 import { getFeatureFlags } from "@/lib/feature-flags";
 import { listComplianceFlags } from "@/services/compliance";
 
-export const metadata: Metadata = { title: "Settings — Tanyopo AI Promoter" };
+export const metadata: Metadata = { title: "Settings — LINOE" };
 
 const ROLE_LABEL: Record<string, string> = {
   owner: "Owner",

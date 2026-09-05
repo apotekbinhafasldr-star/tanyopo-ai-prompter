@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { LoginForm } from "@/features/auth/login-form";
 
 export const metadata: Metadata = {
-  title: "Masuk — Tanyopo AI Promoter",
+  title: "Masuk — LINOE",
 };
 
 export default async function LoginPage({

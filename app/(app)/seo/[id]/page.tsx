@@ -9,7 +9,7 @@ import { createClient } from "@/lib/supabase/server";
 import { GenerateRecommendationsButton } from "@/features/seo/generate-recommendations-button";
 import { countryLabel } from "@/lib/i18n/countries";
 
-export const metadata: Metadata = { title: "Detail Project SEO — Tanyopo AI Promoter" };
+export const metadata: Metadata = { title: "Detail Project SEO — LINOE" };
 
 interface OnPageRecommendation {
   issue: string;

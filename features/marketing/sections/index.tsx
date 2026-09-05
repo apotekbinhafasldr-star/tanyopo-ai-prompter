@@ -1,0 +1,13 @@
+export { Hero } from "@/features/marketing/sections/hero";
+export { HowItWorks } from "@/features/marketing/sections/how-it-works";
+export { AiTeam } from "@/features/marketing/sections/ai-team";
+export { AdPersonaBridge } from "@/features/marketing/sections/adpersona-bridge";
+export { Omnichannel } from "@/features/marketing/sections/omnichannel";
+export { AnalyticsShowcase } from "@/features/marketing/sections/analytics-showcase";
+export { ProfitAware } from "@/features/marketing/sections/profit-aware";
+export { UmkmproIntegration } from "@/features/marketing/sections/umkmpro";
+export { GlobalEdition } from "@/features/marketing/sections/global-edition";
+export { Trust } from "@/features/marketing/sections/trust";
+export { Pricing } from "@/features/marketing/sections/pricing";
+export { Faq } from "@/features/marketing/sections/faq";
+export { FinalCta } from "@/features/marketing/sections/final-cta";

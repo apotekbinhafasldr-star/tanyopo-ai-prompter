@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { HelpCircle, LogOut, ChevronsUpDown } from "lucide-react";
 import { NAV_ITEMS } from "@/lib/constants/nav";
 import { Avatar } from "@/components/ui/avatar";
+import { LinoeLogo } from "@/components/brand/linoe-logo";
 import { cn } from "@/lib/utils/cn";
 import { logoutAction } from "@/features/auth/actions";
 
@@ -20,12 +21,7 @@ export function Sidebar({ businessName, userName, userRole }: SidebarProps) {
   return (
     <aside className="flex h-screen w-64 shrink-0 flex-col border-r border-border bg-surface">
       <div className="flex h-16 items-center gap-2 px-5">
-        <span className="flex size-7 items-center justify-center rounded-[var(--radius-md)] bg-brand text-sm font-bold text-brand-foreground">
-          T
-        </span>
-        <span className="text-sm font-semibold tracking-tight text-foreground">
-          Tanyopo AI Promoter
-        </span>
+        <LinoeLogo size="sm" href="/dashboard" />
       </div>
 
       <nav className="flex-1 overflow-y-auto px-3 py-2">

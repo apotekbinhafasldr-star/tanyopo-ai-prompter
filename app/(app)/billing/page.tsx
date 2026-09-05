@@ -24,7 +24,7 @@ const INVOICE_STATUS_VARIANT: Record<string, "success" | "warning" | "danger" | 
   UNCOLLECTIBLE: "danger",
 };
 
-export const metadata: Metadata = { title: "Billing — Tanyopo AI Promoter" };
+export const metadata: Metadata = { title: "Billing — LINOE" };
 
 const PLAN_LABEL: Record<string, string> = {
   FREE: "Free",

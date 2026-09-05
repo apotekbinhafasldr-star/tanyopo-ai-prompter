@@ -16,7 +16,7 @@ import { MediaUploader } from "@/features/products/media-uploader";
 import { GenerateBlueprintButton } from "@/features/products/generate-blueprint-button";
 import { deleteProductMediaAction, uploadProductMediaAction } from "@/features/products/actions";
 
-export const metadata: Metadata = { title: "Detail Produk — Tanyopo AI Promoter" };
+export const metadata: Metadata = { title: "Detail Produk — LINOE" };
 
 export default async function ProductDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

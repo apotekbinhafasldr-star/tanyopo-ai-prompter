@@ -9,7 +9,7 @@ import { createClient } from "@/lib/supabase/server";
 import { formatDate, formatCurrency } from "@/lib/utils/format";
 import { ApprovalDecideButtons } from "@/features/approvals/decide-buttons";
 
-export const metadata: Metadata = { title: "Approvals — Tanyopo AI Promoter" };
+export const metadata: Metadata = { title: "Approvals — LINOE" };
 
 const APPROVAL_TYPE_LABEL: Record<string, string> = {
   CAMPAIGN_LAUNCH: "Peluncuran Campaign",

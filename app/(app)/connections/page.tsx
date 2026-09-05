@@ -12,7 +12,7 @@ import { DisconnectButton } from "@/features/connections/disconnect-button";
 import { isFeatureEnabled } from "@/lib/feature-flags";
 import type { ConnectorPlatform } from "@/types/database";
 
-export const metadata: Metadata = { title: "Connections — Tanyopo AI Promoter" };
+export const metadata: Metadata = { title: "Connections — LINOE" };
 
 const ERROR_LABEL: Record<string, string> = {
   owner_required: "Hanya Owner yang dapat menghubungkan atau memutuskan akun.",

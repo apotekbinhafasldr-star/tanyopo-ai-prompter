@@ -32,7 +32,7 @@ export function RegisterForm() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Buat akun Tanyopo AI Promoter</CardTitle>
+        <CardTitle>Buat akun LINOE</CardTitle>
         <CardDescription>Mulai promosikan bisnis Anda dengan AI.</CardDescription>
       </CardHeader>
       <CardContent className="pt-6">

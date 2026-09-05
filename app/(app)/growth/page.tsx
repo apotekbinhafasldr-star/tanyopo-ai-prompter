@@ -11,7 +11,7 @@ import { GrowthGoalForm } from "@/features/growth/goal-form";
 import { FollowerSnapshotForm } from "@/features/growth/snapshot-form";
 import type { GrowthPlatform } from "@/types/database";
 
-export const metadata: Metadata = { title: "Growth — Tanyopo AI Promoter" };
+export const metadata: Metadata = { title: "Growth — LINOE" };
 
 export default async function GrowthPage() {
   const session = await requireSessionContext();
@@ -44,7 +44,7 @@ export default async function GrowthPage() {
         <h1 className="text-xl font-semibold tracking-tight text-foreground">Growth</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Target dan riwayat pertumbuhan follower Anda — dicatat manual, tanpa bot atau engagement palsu.
-          Tanyopo AI Promoter tidak (dan tidak akan pernah) membeli follower atau memalsukan interaksi.
+          LINOE tidak (dan tidak akan pernah) membeli follower atau memalsukan interaksi.
         </p>
       </div>
 

@@ -21,7 +21,7 @@ import { getConnector } from "@/lib/connectors/get-connector";
 import type { CampaignProposal } from "@/schemas/ai/campaign-proposal";
 import type { Channel, ConnectorPlatform, OptimizationActionType, RiskLevel } from "@/types/database";
 
-export const metadata: Metadata = { title: "Detail Campaign — Tanyopo AI Promoter" };
+export const metadata: Metadata = { title: "Detail Campaign — LINOE" };
 
 interface LaunchabilityResult {
   launchable: boolean;

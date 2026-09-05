@@ -6,7 +6,7 @@ import { updateProductAction } from "@/features/products/actions";
 import { requireSessionContext } from "@/services/session";
 import { createClient } from "@/lib/supabase/server";
 
-export const metadata: Metadata = { title: "Edit Produk — Tanyopo AI Promoter" };
+export const metadata: Metadata = { title: "Edit Produk — LINOE" };
 
 export default async function EditProductPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

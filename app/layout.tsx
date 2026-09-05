@@ -14,11 +14,25 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "Tanyopo AI Promoter",
+    default: "LINOE — AI Marketing & Growth Platform by Tanyopo",
     template: "%s",
   },
   description:
-    "Tim marketing AI untuk bisnis Anda — dari produk hingga campaign, konten, analisis, dan optimasi dalam satu platform.",
+    "LINOE membantu Anda menganalisis produk, menyusun strategi, membuat konten, menjalankan campaign, memantau hasil, dan mengoptimasi pertumbuhan — semua dengan AI dalam satu platform.",
+  openGraph: {
+    title: "LINOE — AI Marketing & Growth Platform by Tanyopo",
+    description:
+      "LINOE membantu Anda menganalisis produk, menyusun strategi, membuat konten, menjalankan campaign, memantau hasil, dan mengoptimasi pertumbuhan — semua dengan AI dalam satu platform.",
+    siteName: "LINOE",
+    locale: "id_ID",
+    type: "website",
+  },
+  twitter: {
+    card: "summary",
+    title: "LINOE — AI Marketing & Growth Platform by Tanyopo",
+    description:
+      "LINOE membantu Anda menganalisis produk, menyusun strategi, membuat konten, menjalankan campaign, memantau hasil, dan mengoptimasi pertumbuhan — semua dengan AI dalam satu platform.",
+  },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
