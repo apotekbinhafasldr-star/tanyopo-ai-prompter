@@ -1,9 +1,16 @@
+import Image from "next/image";
 import Link from "next/link";
 import { Sparkles, ArrowRight, PlayCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { HeroVisual } from "@/features/marketing/components/hero-visual";
-import { HeroDashboardPanel } from "@/features/marketing/components/hero-dashboard-panel";
 import { ProductVisual } from "@/features/marketing/components/product-visual";
+
+// Real CTA links kept for keyboard/screen-reader users on the desktop hero,
+// where the approved final asset already bakes the headline and CTAs into
+// its pixels — visually hidden by default (sr-only) so nothing duplicates
+// the artwork, revealed only when focused so the links stay operable.
+const DESKTOP_HERO_CTA_CLASS =
+  "sr-only focus-visible:not-sr-only focus-visible:absolute focus-visible:left-4 focus-visible:top-4 focus-visible:z-20 focus-visible:rounded-[var(--radius-md)] focus-visible:px-4 focus-visible:py-2 focus-visible:text-sm focus-visible:font-semibold focus-visible:text-white focus-visible:shadow-lg";
 
 export function Hero() {
   return (
@@ -31,8 +38,12 @@ export function Hero() {
           }}
         />
 
-        <div className="relative mx-auto grid max-w-6xl gap-8 px-4 pb-14 pt-24 sm:gap-10 sm:px-6 sm:pb-20 sm:pt-28 desktop:max-w-7xl desktop:grid-cols-[1fr_0.85fr_1.15fr] desktop:items-center desktop:gap-6 desktop:pb-28 desktop:pt-32">
-          <div className="flex flex-col items-center gap-4 text-center sm:gap-5 desktop:items-start desktop:text-left">
+        {/* Mobile/tablet composition (below the 900px `desktop:` breakpoint,
+            see app/globals.css) — the reconstructed hero (real headline,
+            CTA, and presenter photo as separate elements) stays exactly as
+            approved. Untouched by the desktop asset swap below. */}
+        <div className="relative mx-auto grid max-w-6xl gap-8 px-4 pb-14 pt-24 sm:gap-10 sm:px-6 sm:pb-20 sm:pt-28 desktop:hidden">
+          <div className="flex flex-col items-center gap-4 text-center sm:gap-5">
             <div className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/[0.06] px-3 py-1 text-xs font-medium text-white/80 backdrop-blur">
               <Sparkles className="size-3.5 text-[#67e8f9]" aria-hidden />
               AI Marketing & Growth Platform
@@ -41,7 +52,7 @@ export function Hero() {
             {/* text-3xl on the smallest screens (below the 640px `sm` step)
                 keeps the full slogan reliably clear of the viewport edge on
                 320-430px phones — text-4xl left too little margin there. */}
-            <h1 className="max-w-xl text-3xl font-semibold leading-[1.15] tracking-[-0.02em] text-white sm:text-5xl sm:leading-[1.05] desktop:text-6xl">
+            <h1 className="max-w-xl text-3xl font-semibold leading-[1.15] tracking-[-0.02em] text-white sm:text-5xl sm:leading-[1.05]">
               Marketing Lebih Cepat. Bisnis Melaju Lebih Jauh.{" "}
               <span className="bg-gradient-to-r from-[#22d3ee] via-[#3b82f6] to-[#8b5cf6] bg-clip-text text-transparent">
                 Bersama LINOE.
@@ -86,14 +97,34 @@ export function Hero() {
           {/* Human presenter + Tanyopo Intelligence overlay — directly beneath
               the CTA on mobile, inside this same dark composition. */}
           <HeroVisual />
+        </div>
 
-          {/* Desktop-only third column: the dashboard/product UI, replacing
-              the overlapping Tanyopo Intelligence card (hidden at desktop:)
-              so the hero reads as one horizontal 3-column composition at the
-              custom 900px `desktop:` breakpoint (see app/globals.css). */}
-          <div className="hidden desktop:block">
-            <HeroDashboardPanel />
-          </div>
+        {/* Desktop (>=900px, `desktop:` breakpoint) — the founder-approved
+            final hero asset, installed as-is (not reconstructed from
+            separate elements): it already bakes in the headline, CTAs,
+            presenter + tablet, and dashboard preview in one composition.
+            Real CTA links are kept for keyboard/screen-reader users (see
+            DESKTOP_HERO_CTA_CLASS above) without duplicating the artwork's
+            own visible text. */}
+        <div className="relative mx-auto hidden max-w-7xl px-4 pb-16 pt-24 sm:px-6 sm:pb-20 sm:pt-28 desktop:block desktop:pb-20 desktop:pt-32">
+          <Image
+            src="/brand/linoe/08-hero-desktop-final.jpg"
+            alt="LINOE — AI Marketing & Growth Platform. Marketing Lebih Cepat. Bisnis Melaju Lebih Jauh. Bersama LINOE. LINOE membantu Anda menganalisis produk, menyusun strategi, membuat konten, menjalankan campaign, memantau hasil, dan mengoptimasi pertumbuhan — semua dengan AI dalam satu platform. Presenter memegang tablet LINOE di samping pratinjau dashboard LINOE."
+            width={1536}
+            height={477}
+            priority
+            sizes="(min-width: 1536px) 1280px, 90vw"
+            className="h-auto w-full"
+          />
+          <Link
+            href="/register"
+            className={`${DESKTOP_HERO_CTA_CLASS} bg-gradient-to-r from-[#22d3ee] via-[#3b82f6] to-[#8b5cf6]`}
+          >
+            Mulai Promosikan
+          </Link>
+          <a href="#cara-kerja" className={`${DESKTOP_HERO_CTA_CLASS} border border-white/25 bg-ink`}>
+            Lihat Cara Kerja
+          </a>
         </div>
       </section>
 
