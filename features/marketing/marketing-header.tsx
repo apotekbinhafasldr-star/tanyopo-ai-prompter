@@ -55,6 +55,15 @@ export function MarketingHeader() {
         scrolled
           ? "border-b border-border bg-surface/80 shadow-[var(--shadow-sm)] backdrop-blur-lg"
           : "border-b border-transparent bg-transparent",
+        // The approved desktop (>=900px) hero already has its own nav row
+        // (logo, links, language selector, Masuk/Mulai Sekarang) baked into
+        // its artwork. This real header would otherwise render directly on
+        // top of it, showing two navigation bars at once. So on desktop,
+        // hide this header while the hero is in view (unscrolled) and only
+        // fade it back in once the user scrolls past the hero — mobile/
+        // tablet (below 900px) keep it visible always, since their hero
+        // has no baked-in nav to duplicate.
+        !scrolled && "desktop:pointer-events-none desktop:opacity-0",
       )}
     >
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
