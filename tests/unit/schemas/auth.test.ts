@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { loginSchema, registerSchema } from "@/schemas/auth";
+import { loginSchema, registerSchema, forgotPasswordSchema, resetPasswordSchema } from "@/schemas/auth";
 
 describe("loginSchema", () => {
   it("accepts a valid email/password pair", () => {
@@ -40,6 +40,46 @@ describe("registerSchema", () => {
 
   it("rejects a business name that is too short", () => {
     const result = registerSchema.safeParse({ ...valid, namaUsaha: "K" });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe("forgotPasswordSchema", () => {
+  it("accepts a valid email", () => {
+    expect(forgotPasswordSchema.safeParse({ email: "owner@usaha.com" }).success).toBe(true);
+  });
+
+  it("rejects an invalid email", () => {
+    expect(forgotPasswordSchema.safeParse({ email: "not-an-email" }).success).toBe(false);
+  });
+
+  it("rejects an empty email", () => {
+    expect(forgotPasswordSchema.safeParse({ email: "" }).success).toBe(false);
+  });
+});
+
+describe("resetPasswordSchema", () => {
+  it("accepts matching passwords of sufficient length", () => {
+    const result = resetPasswordSchema.safeParse({
+      password: "newsecret123",
+      confirmPassword: "newsecret123",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects a password shorter than 8 characters", () => {
+    const result = resetPasswordSchema.safeParse({
+      password: "short",
+      confirmPassword: "short",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects mismatched password/confirmPassword", () => {
+    const result = resetPasswordSchema.safeParse({
+      password: "newsecret123",
+      confirmPassword: "differentsecret123",
+    });
     expect(result.success).toBe(false);
   });
 });
