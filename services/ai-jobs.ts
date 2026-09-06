@@ -6,6 +6,7 @@ import { routeStructuredGeneration, AIRoutingNotConfiguredError } from "@/lib/ai
 import { AIProviderError } from "@/lib/ai/provider";
 import { TASK_CLASS_BY_JOB_TYPE } from "@/lib/ai/task-classes";
 import { getOrCreateSubscription, checkAiUsageEntitlement } from "@/services/billing";
+import { serverEnv } from "@/lib/env";
 import type { AiJobType, Database, Json } from "@/types/database";
 
 interface RunAiJobParams<T> {
@@ -95,12 +96,32 @@ export async function runAiJob<T>(params: RunAiJobParams<T>): Promise<RunAiJobRe
     };
   } catch (err) {
     if (err instanceof AIRoutingNotConfiguredError) {
-      // Nothing configured at all — this isn't a failed generation, it's
-      // a NOT_CONFIGURED state. No job row should exist for it; if the
-      // insert above raced ahead of this check, clean it up rather than
-      // leaving a misleading FAILED row for a feature nobody tried to use.
+      // TEMPORARY diagnostic pivot (approved, remove once root cause is
+      // confirmed): Netlify's dashboard reports OPENAI_API_KEY configured
+      // for production, and a fresh rebuild didn't change this error, but
+      // the founder has no access to Netlify's Function Logs to see the
+      // boolean-only diagnostic already logged in lib/ai/router.ts. This
+      // writes the same PRESENT/MISSING state into this job row instead —
+      // readable directly from Supabase — never the key itself, never any
+      // part of it. Previously this branch deleted the job row; it now
+      // marks it FAILED with that diagnostic so it can be queried instead.
       if (job) {
-        await supabase.from("prompter_ai_jobs").delete().eq("id", job.id);
+        await supabase
+          .from("prompter_ai_jobs")
+          .update({
+            status: "FAILED",
+            error_category: "CONFIG",
+            error: JSON.stringify({
+              diagnostic: "ai-not-configured-pivot",
+              openaiApiKey: serverEnv.ai.openaiApiKey ? "PRESENT" : "MISSING",
+              anthropicApiKey: serverEnv.ai.anthropicApiKey ? "PRESENT" : "MISSING",
+              openaiDefaultModel: serverEnv.ai.openaiDefaultModel ?? null,
+              netlifyContext: process.env.CONTEXT ?? null,
+              deployId: process.env.DEPLOY_ID ?? null,
+            }),
+            completed_at: new Date().toISOString(),
+          })
+          .eq("id", job.id);
       }
       return {
         ok: false,
