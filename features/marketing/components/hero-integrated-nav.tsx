@@ -65,7 +65,12 @@ export function HeroIntegratedNav() {
               href={item.href}
               aria-current={isActive ? "true" : undefined}
               className={cn(
-                "relative py-1 transition-colors hover:text-white focus-visible:text-white focus-visible:outline-none",
+                // The default focus outline was previously removed
+                // (focus-visible:outline-none) with no replacement, making
+                // keyboard focus invisible here while MarketingHeader's own
+                // links kept their default outline — a real inconsistency,
+                // not just cosmetic. A visible ring restores parity.
+                "relative rounded-[2px] py-1 transition-colors hover:text-white focus-visible:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70",
                 isActive ? "text-white" : "text-white/75",
               )}
             >
