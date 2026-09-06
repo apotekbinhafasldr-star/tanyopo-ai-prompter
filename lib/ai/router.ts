@@ -69,26 +69,7 @@ export async function routeStructuredGeneration<T>(
   schema: z.ZodType<T>,
   request: Omit<StructuredGenerationRequest, "model">,
 ): Promise<RoutedGenerationResult<T>> {
-  const routingConfig = buildRoutingConfig();
-
-  // TEMPORARY diagnostic — approved for one production round to prove
-  // whether OPENAI_API_KEY/ANTHROPIC_API_KEY actually reach this runtime,
-  // after Netlify's dashboard reported both configured/unconfigured
-  // respectively while the app still reported NOT_CONFIGURED. Logs
-  // configuration STATE only — never a key, never a substring of one.
-  // Remove once the root cause is confirmed.
-  console.log("[ai-router-diagnostic]", {
-    taskClass,
-    openaiApiKey: routingConfig.openaiConfigured ? "PRESENT" : "MISSING",
-    anthropicApiKey: routingConfig.anthropicConfigured ? "PRESENT" : "MISSING",
-    resolvedDefaultProvider: routingConfig.defaultProvider ?? null,
-    openaiDefaultModel: routingConfig.openaiDefaultModel ?? null,
-    // Netlify's own build/runtime metadata — not secrets, safe to log.
-    netlifyContext: process.env.CONTEXT ?? null,
-    deployId: process.env.DEPLOY_ID ?? null,
-  });
-
-  const route = resolveRoute(taskClass, routingConfig);
+  const route = resolveRoute(taskClass, buildRoutingConfig());
 
   const primary = instantiateProvider(route.provider);
   if (!primary) {

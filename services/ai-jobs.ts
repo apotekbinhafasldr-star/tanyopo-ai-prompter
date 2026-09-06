@@ -6,8 +6,6 @@ import { routeStructuredGeneration, AIRoutingNotConfiguredError } from "@/lib/ai
 import { AIProviderError } from "@/lib/ai/provider";
 import { TASK_CLASS_BY_JOB_TYPE } from "@/lib/ai/task-classes";
 import { getOrCreateSubscription, checkAiUsageEntitlement } from "@/services/billing";
-import { serverEnv } from "@/lib/env";
-import { createAdminClient } from "@/lib/supabase/admin";
 import type { AiJobType, Database, Json } from "@/types/database";
 
 interface RunAiJobParams<T> {
@@ -97,78 +95,16 @@ export async function runAiJob<T>(params: RunAiJobParams<T>): Promise<RunAiJobRe
     };
   } catch (err) {
     if (err instanceof AIRoutingNotConfiguredError) {
-      // TEMPORARY diagnostic (approved, remove once root cause is
-      // confirmed). The previous round of this diagnostic wrote the same
-      // PRESENT/MISSING state into this job row on UPDATE, but the row
-      // never existed at all — meaning the INSERT above silently failed
-      // and its error was discarded. This captures that actual write
-      // failure (a database error message, never a secret) so the real
-      // cause is visible from Supabase directly.
-      const diagnostic: Record<string, unknown> = {
-        diagnostic: "ai-not-configured-pivot",
-        openaiApiKey: serverEnv.ai.openaiApiKey ? "PRESENT" : "MISSING",
-        anthropicApiKey: serverEnv.ai.anthropicApiKey ? "PRESENT" : "MISSING",
-        openaiDefaultModel: serverEnv.ai.openaiDefaultModel ?? null,
-        netlifyContext: process.env.CONTEXT ?? null,
-        deployId: process.env.DEPLOY_ID ?? null,
-        insertErrorMessage: insertError?.message ?? null,
-        insertErrorCode: insertError?.code ?? null,
-        jobRowExisted: !!job,
-      };
-
+      // Nothing configured at all — this isn't a failed generation, it's
+      // a NOT_CONFIGURED state. No job row should exist for it; if the
+      // insert above raced ahead of this check, clean it up rather than
+      // leaving a misleading FAILED row for a feature nobody tried to use.
       if (job) {
-        const { error: updateError } = await supabase
-          .from("prompter_ai_jobs")
-          .update({
-            status: "FAILED",
-            error_category: "CONFIG",
-            error: JSON.stringify(diagnostic),
-            completed_at: new Date().toISOString(),
-          })
-          .eq("id", job.id);
-        if (updateError) {
-          diagnostic.insertErrorMessage = diagnostic.insertErrorMessage ?? `update failed: ${updateError.message}`;
-        }
-      } else {
-        // The original insert never produced a row — write the same
-        // diagnostic through the service-role admin client (bypasses RLS)
-        // so the actual insert failure is captured regardless of whether
-        // RLS, a constraint, or something else caused it. Never exposes a
-        // secret: this is the same server-role client already used
-        // elsewhere for trusted background writes (lib/supabase/admin.ts).
-        const admin = createAdminClient();
-        Object.assign(diagnostic, { adminClientAvailable: !!admin });
-        if (admin) {
-          const { error: adminInsertError } = await admin.from("prompter_ai_jobs").insert({
-            tenant_id: tenantId,
-            actor_user_id: actorUserId ?? null,
-            job_type: jobType,
-            status: "FAILED",
-            error_category: "CONFIG",
-            error: JSON.stringify(diagnostic),
-            input_reference: inputReference as Json,
-            completed_at: new Date().toISOString(),
-          });
-          // The admin write's own failure was previously discarded too —
-          // this closes that gap. Never a secret: a Postgres/PostgREST
-          // error message and code only.
-          if (adminInsertError) {
-            Object.assign(diagnostic, {
-              adminInsertErrorMessage: adminInsertError.message,
-              adminInsertErrorCode: adminInsertError.code ?? null,
-            });
-          }
-        }
+        await supabase.from("prompter_ai_jobs").delete().eq("id", job.id);
       }
-
-      // Two rounds of DB-only capture produced no readable row at all, so
-      // this temporary diagnostic is also appended directly to the
-      // returned error text this one time — the one channel proven to
-      // reach the founder every round so far. Reverts alongside the rest
-      // of this instrumentation once root cause is confirmed.
       return {
         ok: false,
-        error: `AI belum dikonfigurasi. Tambahkan OPENAI_API_KEY atau ANTHROPIC_API_KEY untuk mengaktifkan fitur ini. [diag: ${JSON.stringify(diagnostic)}]`,
+        error: "AI belum dikonfigurasi. Tambahkan OPENAI_API_KEY atau ANTHROPIC_API_KEY untuk mengaktifkan fitur ini.",
         jobId: null,
       };
     }
