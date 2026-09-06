@@ -104,7 +104,7 @@ export async function runAiJob<T>(params: RunAiJobParams<T>): Promise<RunAiJobRe
       // and its error was discarded. This captures that actual write
       // failure (a database error message, never a secret) so the real
       // cause is visible from Supabase directly.
-      const diagnostic = {
+      const diagnostic: Record<string, unknown> = {
         diagnostic: "ai-not-configured-pivot",
         openaiApiKey: serverEnv.ai.openaiApiKey ? "PRESENT" : "MISSING",
         anthropicApiKey: serverEnv.ai.anthropicApiKey ? "PRESENT" : "MISSING",
@@ -137,8 +137,9 @@ export async function runAiJob<T>(params: RunAiJobParams<T>): Promise<RunAiJobRe
         // secret: this is the same server-role client already used
         // elsewhere for trusted background writes (lib/supabase/admin.ts).
         const admin = createAdminClient();
+        Object.assign(diagnostic, { adminClientAvailable: !!admin });
         if (admin) {
-          await admin.from("prompter_ai_jobs").insert({
+          const { error: adminInsertError } = await admin.from("prompter_ai_jobs").insert({
             tenant_id: tenantId,
             actor_user_id: actorUserId ?? null,
             job_type: jobType,
@@ -148,12 +149,26 @@ export async function runAiJob<T>(params: RunAiJobParams<T>): Promise<RunAiJobRe
             input_reference: inputReference as Json,
             completed_at: new Date().toISOString(),
           });
+          // The admin write's own failure was previously discarded too —
+          // this closes that gap. Never a secret: a Postgres/PostgREST
+          // error message and code only.
+          if (adminInsertError) {
+            Object.assign(diagnostic, {
+              adminInsertErrorMessage: adminInsertError.message,
+              adminInsertErrorCode: adminInsertError.code ?? null,
+            });
+          }
         }
       }
 
+      // Two rounds of DB-only capture produced no readable row at all, so
+      // this temporary diagnostic is also appended directly to the
+      // returned error text this one time — the one channel proven to
+      // reach the founder every round so far. Reverts alongside the rest
+      // of this instrumentation once root cause is confirmed.
       return {
         ok: false,
-        error: "AI belum dikonfigurasi. Tambahkan OPENAI_API_KEY atau ANTHROPIC_API_KEY untuk mengaktifkan fitur ini.",
+        error: `AI belum dikonfigurasi. Tambahkan OPENAI_API_KEY atau ANTHROPIC_API_KEY untuk mengaktifkan fitur ini. [diag: ${JSON.stringify(diagnostic)}]`,
         jobId: null,
       };
     }
