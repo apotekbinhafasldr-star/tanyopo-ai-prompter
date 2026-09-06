@@ -79,16 +79,17 @@ export function Sidebar({ businessName, userName, userRole, onNavigate }: Sideba
             <p className="truncate text-sm font-medium text-foreground">{userName}</p>
             <p className="truncate text-xs text-muted-foreground capitalize">{userRole}</p>
           </div>
-          <form action={logoutAction}>
-            <button
-              type="submit"
-              aria-label="Keluar"
-              className="rounded-[var(--radius-sm)] p-1.5 text-muted-foreground hover:bg-surface-muted hover:text-danger"
-            >
-              <LogOut className="size-4" aria-hidden />
-            </button>
-          </form>
         </div>
+
+        <form action={logoutAction}>
+          <button
+            type="submit"
+            className="flex min-h-11 w-full items-center gap-2 rounded-[var(--radius-md)] px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-surface-muted hover:text-danger"
+          >
+            <LogOut className="size-4 shrink-0" aria-hidden />
+            Keluar
+          </button>
+        </form>
       </div>
     </aside>
   );
