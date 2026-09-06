@@ -13,13 +13,16 @@ interface SidebarProps {
   businessName: string;
   userName: string;
   userRole: string;
+  /** Called after a nav link is activated — used by AppShell to close the
+   * off-canvas drawer on mobile/tablet. No-op on the desktop docked sidebar. */
+  onNavigate?: () => void;
 }
 
-export function Sidebar({ businessName, userName, userRole }: SidebarProps) {
+export function Sidebar({ businessName, userName, userRole, onNavigate }: SidebarProps) {
   const pathname = usePathname();
 
   return (
-    <aside className="flex h-screen w-64 shrink-0 flex-col border-r border-border bg-surface">
+    <aside className="flex h-full w-64 shrink-0 flex-col border-r border-border bg-surface">
       <div className="flex h-16 items-center gap-2 px-5">
         <LinoeLogo size="sm" href="/dashboard" />
       </div>
@@ -34,6 +37,7 @@ export function Sidebar({ businessName, userName, userRole }: SidebarProps) {
               <li key={item.href}>
                 <Link
                   href={item.href}
+                  onClick={onNavigate}
                   className={cn(
                     "flex items-center gap-3 rounded-[var(--radius-md)] px-3 py-2 text-sm font-medium transition-colors",
                     active
@@ -62,6 +66,7 @@ export function Sidebar({ businessName, userName, userRole }: SidebarProps) {
 
         <Link
           href="/settings"
+          onClick={onNavigate}
           className="flex items-center gap-2 rounded-[var(--radius-md)] px-3 py-2 text-sm text-muted-foreground hover:bg-surface-muted hover:text-foreground"
         >
           <HelpCircle className="size-4" aria-hidden />

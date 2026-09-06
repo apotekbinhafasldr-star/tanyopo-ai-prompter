@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { Package, Radio, ArrowRight, ArrowLeft } from "lucide-react";
+import { Package, Radio, ArrowRight, ArrowLeft, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -36,23 +36,29 @@ function OptionGrid({
   onChange: (v: string) => void;
 }) {
   return (
-    <div className="grid grid-cols-2 gap-3">
-      {options.map((opt) => (
-        <button
-          key={opt.value}
-          type="button"
-          onClick={() => onChange(opt.value)}
-          aria-pressed={value === opt.value}
-          className={cn(
-            "rounded-[var(--radius-md)] border px-4 py-3 text-left text-sm font-medium transition-colors",
-            value === opt.value
-              ? "border-brand bg-brand-muted text-brand"
-              : "border-border-strong text-foreground hover:bg-surface-muted",
-          )}
-        >
-          {opt.label}
-        </button>
-      ))}
+    <div className="grid grid-cols-2 gap-3" role="group">
+      {options.map((opt) => {
+        const isSelected = value === opt.value;
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            onClick={() => onChange(opt.value)}
+            aria-pressed={isSelected}
+            className={cn(
+              "relative flex min-h-11 items-center justify-between gap-2 rounded-[var(--radius-md)] border-2 px-4 py-3 text-left text-sm font-medium transition-all",
+              isSelected
+                ? "border-brand bg-brand-muted text-brand ring-2 ring-brand/30"
+                : "border-border-strong text-foreground hover:border-brand/40 hover:bg-surface-muted",
+            )}
+          >
+            <span>{opt.label}</span>
+            {isSelected ? (
+              <Check className="size-4 shrink-0 text-brand" aria-hidden />
+            ) : null}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -81,6 +87,13 @@ export function OnboardingWizard() {
     6: true,
     7: true,
     8: true,
+  };
+
+  const incompleteHints: Record<number, string> = {
+    1: "Isi nama bisnis (minimal 2 karakter) untuk melanjutkan.",
+    3: "Pilih salah satu jenis bisnis untuk melanjutkan.",
+    4: "Ceritakan singkat apa yang Anda jual (minimal 3 karakter) untuk melanjutkan.",
+    5: "Pilih salah satu tujuan utama untuk melanjutkan.",
   };
 
   return (
@@ -304,6 +317,12 @@ export function OnboardingWizard() {
           {state.error ? (
             <p role="alert" className="text-sm text-danger">
               {state.error}
+            </p>
+          ) : null}
+
+          {!canAdvanceFrom[step] && incompleteHints[step] ? (
+            <p className="text-xs text-muted-foreground" role="status">
+              {incompleteHints[step]}
             </p>
           ) : null}
 

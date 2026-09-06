@@ -13,12 +13,17 @@ export const productSchema = z.object({
   price: z.coerce.number().min(0, "Harga tidak boleh negatif").optional(),
   currency: z.enum(SUPPORTED_CURRENCIES).optional(),
   stock: z.coerce.number().int().min(0, "Stok tidak boleh negatif").optional(),
+  // Free text ("pcs", "box", "kg", ...) — see lib/constants/stock-units.ts
+  // for suggestions, but a custom unit is always accepted. Only meaningful
+  // alongside `stock`; kept optional so services/apps with no stock concept
+  // can leave both blank.
+  stockUnit: z.string().trim().max(40).optional().or(z.literal("")),
   hpp: z.coerce.number().min(0, "HPP tidak boleh negatif").optional(),
   websiteUrl: z.string().trim().url("URL tidak valid").optional().or(z.literal("")),
-  // Comma-separated ISO 3166-1 alpha-2 codes from a plain text input —
-  // see product-form.tsx. Kept as free text rather than a multi-select
-  // component to stay within this pass's scope; still validated shape
-  // per code below.
+  // Comma-separated ISO 3166-1 alpha-2 codes — produced by the searchable
+  // multi-select picker in product-form.tsx (CountryMultiSelect), which
+  // writes a hidden comma-joined input under this same field name so this
+  // parsing/shape stays unchanged from the original free-text version.
   targetCountries: z.string().trim().max(500).optional().or(z.literal("")),
   language: z.enum(["id", "en"]).optional(),
 });

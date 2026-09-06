@@ -307,6 +307,7 @@ export interface Database {
           price: number | null;
           currency: string;
           stock: number | null;
+          stock_unit: string | null;
           hpp: number | null;
           website_url: string | null;
           status: ProductStatus;
@@ -327,6 +328,7 @@ export interface Database {
           price?: number | null;
           currency?: string;
           stock?: number | null;
+          stock_unit?: string | null;
           hpp?: number | null;
           website_url?: string | null;
           status?: ProductStatus;

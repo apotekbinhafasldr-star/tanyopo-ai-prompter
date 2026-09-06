@@ -14,12 +14,20 @@ import { publicStorageUrl } from "@/lib/utils/storage-url";
 import { computeProfitEstimate } from "@/lib/profit-estimate";
 import { MediaUploader } from "@/features/products/media-uploader";
 import { GenerateBlueprintButton } from "@/features/products/generate-blueprint-button";
+import { NextStepsGuidance } from "@/features/products/next-steps-guidance";
 import { deleteProductMediaAction, uploadProductMediaAction } from "@/features/products/actions";
 
 export const metadata: Metadata = { title: "Detail Produk — LINOE" };
 
-export default async function ProductDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function ProductDetailPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ created?: string }>;
+}) {
   const { id } = await params;
+  const { created } = await searchParams;
   const session = await requireSessionContext();
   const supabase = await createClient();
 
@@ -100,7 +108,10 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
             </div>
             <div>
               <dt className="text-xs text-muted-foreground">Stok</dt>
-              <dd className="text-sm font-medium text-foreground">{product.stock ?? "—"}</dd>
+              <dd className="text-sm font-medium text-foreground">
+                {product.stock ?? "—"}
+                {product.stock != null && product.stock_unit ? ` ${product.stock_unit}` : ""}
+              </dd>
             </div>
             {product.description ? (
               <div className="sm:col-span-2">
@@ -312,6 +323,14 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
           </Link>
         </Button>
       </div>
+
+      <NextStepsGuidance
+        justCreated={created === "1"}
+        hasMedia={!!media && media.length > 0}
+        hasBlueprint={!!blueprint}
+        hasContent={!!content && content.length > 0}
+        hasCampaigns={!!campaigns && campaigns.length > 0}
+      />
 
       <Tabs
         tabs={[

@@ -1,19 +1,22 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { businessCategories } from "@/schemas/onboarding";
 import { SUPPORTED_CURRENCIES } from "@/schemas/global-preferences";
+import { categorySuggestionsFor } from "@/lib/constants/product-categories";
+import { STOCK_UNIT_SUGGESTIONS } from "@/lib/constants/stock-units";
+import { CountryMultiSelect } from "@/features/products/country-multi-select";
 import type { ActionState } from "@/features/products/actions";
 import type { Database, Json } from "@/types/database";
 
 type Product = Database["public"]["Tables"]["prompter_products"]["Row"];
 
 const selectClass =
-  "h-10 rounded-[var(--radius-md)] border border-border-strong bg-surface px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40";
+  "h-11 rounded-[var(--radius-md)] border border-border-strong bg-surface px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40";
 
 function targetCountriesToText(value: Json | undefined): string {
   if (!Array.isArray(value)) return "";
@@ -36,6 +39,9 @@ export function ProductForm({
   defaultCurrency?: string;
 }) {
   const [state, formAction, pending] = useActionState(action, initialState);
+  const [productType, setProductType] = useState(product?.product_type ?? "");
+  const categoryOptions = categorySuggestionsFor(productType);
+  const needsStock = productType === "PHYSICAL_PRODUCT" || productType === "";
 
   return (
     <form action={formAction} className="flex flex-col gap-5">
@@ -61,9 +67,10 @@ export function ProductForm({
           <select
             id="productType"
             name="productType"
-            defaultValue={product?.product_type ?? ""}
+            value={productType}
+            onChange={(e) => setProductType(e.target.value)}
             required
-            className="h-10 rounded-[var(--radius-md)] border border-border-strong bg-surface px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+            className={selectClass}
           >
             <option value="" disabled>
               Pilih jenis
@@ -78,12 +85,35 @@ export function ProductForm({
 
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="category">Kategori</Label>
-          <Input id="category" name="category" defaultValue={product?.category ?? ""} placeholder="Contoh: Minuman" />
+          <Input
+            id="category"
+            name="category"
+            list="categoryOptions"
+            defaultValue={product?.category ?? ""}
+            placeholder="Cari atau ketik kategori"
+            autoComplete="off"
+          />
+          <datalist id="categoryOptions">
+            {categoryOptions.map((c) => (
+              <option key={c} value={c} />
+            ))}
+          </datalist>
+          <p className="text-xs text-muted-foreground">
+            Pilih dari daftar atau ketik kategori Anda sendiri.
+          </p>
         </div>
 
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="price">Harga</Label>
-          <Input id="price" name="price" type="number" min={0} step="0.01" defaultValue={product?.price ?? ""} />
+          <Input
+            id="price"
+            name="price"
+            type="number"
+            inputMode="decimal"
+            min={0}
+            step="0.01"
+            defaultValue={product?.price ?? ""}
+          />
         </div>
 
         <div className="flex flex-col gap-1.5">
@@ -98,13 +128,42 @@ export function ProductForm({
         </div>
 
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="stock">Stok (opsional)</Label>
-          <Input id="stock" name="stock" type="number" min={0} step={1} defaultValue={product?.stock ?? ""} />
+          <Label htmlFor="stock">{needsStock ? "Stok (opsional)" : "Stok (opsional, jika relevan)"}</Label>
+          <div className="flex gap-2">
+            <Input
+              id="stock"
+              name="stock"
+              type="number"
+              inputMode="numeric"
+              min={0}
+              step={1}
+              defaultValue={product?.stock ?? ""}
+              className="flex-1"
+              placeholder="0"
+            />
+            <Input
+              id="stockUnit"
+              name="stockUnit"
+              list="stockUnitOptions"
+              defaultValue={product?.stock_unit ?? ""}
+              placeholder="Satuan"
+              autoComplete="off"
+              className="w-28 shrink-0"
+            />
+            <datalist id="stockUnitOptions">
+              {STOCK_UNIT_SUGGESTIONS.map((u) => (
+                <option key={u} value={u} />
+              ))}
+            </datalist>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Contoh: 12 pcs, 5 box. Pilih dari daftar satuan atau ketik satuan sendiri.
+          </p>
         </div>
 
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="hpp">HPP / Modal (opsional)</Label>
-          <Input id="hpp" name="hpp" type="number" min={0} step="0.01" defaultValue={product?.hpp ?? ""} />
+          <Input id="hpp" name="hpp" type="number" inputMode="decimal" min={0} step="0.01" defaultValue={product?.hpp ?? ""} />
           <p className="text-xs text-muted-foreground">Dipakai untuk estimasi profit marketing.</p>
         </div>
 
@@ -129,16 +188,12 @@ export function ProductForm({
         </div>
 
         <div className="flex flex-col gap-1.5 sm:col-span-2">
-          <Label htmlFor="targetCountries">Target Negara Pemasaran (opsional)</Label>
-          <Input
-            id="targetCountries"
+          <Label htmlFor="targetCountriesSearch">Target Negara Pemasaran (opsional)</Label>
+          <CountryMultiSelect
             name="targetCountries"
+            inputId="targetCountriesSearch"
             defaultValue={targetCountriesToText(product?.target_countries)}
-            placeholder="Contoh: ID, MY, SG"
           />
-          <p className="text-xs text-muted-foreground">
-            Kode negara 2 huruf (ISO 3166-1), pisahkan dengan koma. Kosongkan jika belum ditentukan.
-          </p>
         </div>
       </div>
 

@@ -23,6 +23,7 @@ function parseProductForm(formData: FormData) {
     price: formData.get("price") || undefined,
     currency: formData.get("currency") || undefined,
     stock: formData.get("stock") || undefined,
+    stockUnit: formData.get("stockUnit"),
     hpp: formData.get("hpp") || undefined,
     websiteUrl: formData.get("websiteUrl"),
     targetCountries: formData.get("targetCountries"),
@@ -66,6 +67,7 @@ export async function createProductAction(
       price: parsed.data.price,
       currency: parsed.data.currency,
       stock: parsed.data.stock,
+      stock_unit: parsed.data.stockUnit || null,
       hpp: parsed.data.hpp,
       website_url: parsed.data.websiteUrl || null,
       target_countries: parseTargetCountries(parsed.data.targetCountries),
@@ -79,7 +81,7 @@ export async function createProductAction(
   }
 
   revalidatePath("/products");
-  redirect(`/products/${data.id}`);
+  redirect(`/products/${data.id}?created=1`);
 }
 
 export async function updateProductAction(
@@ -105,6 +107,7 @@ export async function updateProductAction(
       price: parsed.data.price,
       currency: parsed.data.currency,
       stock: parsed.data.stock,
+      stock_unit: parsed.data.stockUnit || null,
       hpp: parsed.data.hpp,
       website_url: parsed.data.websiteUrl || null,
       target_countries: parseTargetCountries(parsed.data.targetCountries),
