@@ -128,8 +128,15 @@ export async function forgotPasswordAction(
   }
 
   const supabase = await createClient();
+  // No query string here: Supabase's Redirect URLs allow list holds the
+  // exact `${appUrl}/auth/callback` entry with no wildcard, and requires an
+  // exact match on redirectTo — anything appended (e.g. `?next=...`) fails
+  // that match, so Supabase silently falls back to this shared project's
+  // Site URL (localhost, since the project is also used by UMKMpro AI).
+  // app/auth/callback/route.ts's default `next` covers the destination
+  // instead.
   await supabase.auth.resetPasswordForEmail(parsed.data.email, {
-    redirectTo: `${publicEnv.appUrl}/auth/callback?next=/reset-password`,
+    redirectTo: `${publicEnv.appUrl}/auth/callback`,
   });
 
   return {

@@ -7,11 +7,17 @@ import { createClient } from "@/lib/supabase/server";
  * it) for a session, then redirects on to `next`. An expired/invalid/reused
  * link fails the exchange — that's handled explicitly rather than letting a
  * broken code silently land the user on a page that assumes a session.
+ *
+ * `next` defaults to /reset-password because that's this route's only
+ * caller today (forgotPasswordAction) — the redirectTo it sends to Supabase
+ * can't carry its own `?next=...` query without breaking Supabase's
+ * exact-match check against the Redirect URLs allow list (see
+ * features/auth/actions.ts).
  */
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
-  const next = searchParams.get("next") ?? "/dashboard";
+  const next = searchParams.get("next") ?? "/reset-password";
 
   if (code) {
     const supabase = await createClient();
