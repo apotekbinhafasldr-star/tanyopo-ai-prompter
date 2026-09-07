@@ -1,5 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
-import { getTrialState, checkAiUsageEntitlement, changePlan, TRIAL_DURATION_DAYS } from "@/services/billing";
+import {
+  getTrialState,
+  checkAiUsageEntitlement,
+  checkTrialAiUsageCap,
+  changePlan,
+  TRIAL_DURATION_DAYS,
+  TRIAL_DAILY_AI_JOB_LIMIT,
+  TRIAL_MONTHLY_AI_JOB_LIMIT,
+} from "@/services/billing";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
 
@@ -11,6 +19,22 @@ function mockSupabase() {
   return { from, upsert } as unknown as SupabaseClient<Database> & {
     from: typeof from;
     upsert: typeof upsert;
+  };
+}
+
+/**
+ * checkTrialAiUsageCap() queries the daily count first, then the monthly
+ * count — `counts` supplies the `count` result for each successive
+ * `.gte()` call in that order.
+ */
+function mockSupabaseWithCounts(counts: number[]) {
+  let call = 0;
+  const gte = vi.fn(async () => ({ count: counts[call++] ?? 0 }));
+  const eq = vi.fn(() => ({ gte }));
+  const select = vi.fn(() => ({ eq }));
+  const from = vi.fn(() => ({ select }));
+  return { from, select, eq, gte } as unknown as SupabaseClient<Database> & {
+    from: typeof from;
   };
 }
 
@@ -113,6 +137,47 @@ describe("checkAiUsageEntitlement", () => {
       current_period_end: new Date("2026-01-15T00:00:00Z").toISOString(),
     });
     expect(checkAiUsageEntitlement(sub, now).allowed).toBe(true);
+  });
+});
+
+describe("checkTrialAiUsageCap", () => {
+  it("allows a TRIALING tenant well under both the daily and monthly limit", async () => {
+    const supabase = mockSupabaseWithCounts([2, 10]);
+    const sub = subscription({ status: "TRIALING" });
+
+    const result = await checkTrialAiUsageCap(supabase, sub);
+
+    expect(result.allowed).toBe(true);
+  });
+
+  it("blocks a TRIALING tenant once the daily limit is reached", async () => {
+    const supabase = mockSupabaseWithCounts([TRIAL_DAILY_AI_JOB_LIMIT, 5]);
+    const sub = subscription({ status: "TRIALING" });
+
+    const result = await checkTrialAiUsageCap(supabase, sub);
+
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toMatch(/hari/i);
+  });
+
+  it("blocks a TRIALING tenant once the monthly limit is reached (even under the daily limit)", async () => {
+    const supabase = mockSupabaseWithCounts([1, TRIAL_MONTHLY_AI_JOB_LIMIT]);
+    const sub = subscription({ status: "TRIALING" });
+
+    const result = await checkTrialAiUsageCap(supabase, sub);
+
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toMatch(/bulan/i);
+  });
+
+  it("never caps an ACTIVE subscription, and never even queries usage for one", async () => {
+    const supabase = mockSupabaseWithCounts([9999, 9999]);
+    const sub = subscription({ status: "ACTIVE" });
+
+    const result = await checkTrialAiUsageCap(supabase, sub);
+
+    expect(result.allowed).toBe(true);
+    expect(supabase.from).not.toHaveBeenCalled();
   });
 });
 

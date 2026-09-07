@@ -5,7 +5,7 @@ import type { z } from "zod";
 import { routeStructuredGeneration, AIRoutingNotConfiguredError } from "@/lib/ai/router";
 import { AIProviderError } from "@/lib/ai/provider";
 import { TASK_CLASS_BY_JOB_TYPE } from "@/lib/ai/task-classes";
-import { getOrCreateSubscription, checkAiUsageEntitlement } from "@/services/billing";
+import { getOrCreateSubscription, checkAiUsageEntitlement, checkTrialAiUsageCap } from "@/services/billing";
 import type { AiJobType, Database, Json } from "@/types/database";
 
 interface RunAiJobParams<T> {
@@ -52,6 +52,15 @@ export async function runAiJob<T>(params: RunAiJobParams<T>): Promise<RunAiJobRe
   const entitlement = checkAiUsageEntitlement(subscription);
   if (!entitlement.allowed) {
     return { ok: false, error: entitlement.reason ?? "Akses AI tidak diizinkan untuk paket Anda saat ini.", jobId: null };
+  }
+
+  // Second, separate cost gate: bounds a TRIALING tenant's real AI spend
+  // within an otherwise-valid trial (see services/billing.ts#checkTrialAiUsageCap).
+  // No-op for a non-TRIALING subscription, so ACTIVE tenants are never
+  // affected. Also creates no job row on block.
+  const usageCap = await checkTrialAiUsageCap(supabase, subscription);
+  if (!usageCap.allowed) {
+    return { ok: false, error: usageCap.reason ?? "Batas penggunaan AI trial tercapai.", jobId: null };
   }
 
   const { data: job, error: insertError } = await supabase

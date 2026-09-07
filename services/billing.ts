@@ -149,6 +149,75 @@ export async function getMonthlyAiJobCount(
 }
 
 /**
+ * Real AI usage today (server UTC day boundary — same convention as
+ * getMonthlyAiJobCount()'s UTC month boundary), from prompter_ai_jobs.
+ * Never a fabricated or estimated count.
+ */
+export async function getDailyAiJobCount(
+  supabase: SupabaseClient<Database>,
+  tenantId: string,
+  referenceDate: Date = new Date(),
+): Promise<number> {
+  const dayStart = new Date(referenceDate.getFullYear(), referenceDate.getMonth(), referenceDate.getDate())
+    .toISOString()
+    .slice(0, 10);
+
+  const { count } = await supabase
+    .from("prompter_ai_jobs")
+    .select("id", { count: "exact", head: true })
+    .eq("tenant_id", tenantId)
+    .gte("created_at", dayStart);
+
+  return count ?? 0;
+}
+
+/** A TRIALING tenant's server-side AI cost ceiling — bounds real
+ * OpenAI/Anthropic spend even within an otherwise-valid 14-day trial.
+ * Never applied once a subscription has moved off TRIALING (see
+ * checkTrialAiUsageCap()) — this is a trial-safety limit, not a
+ * plan-tier feature limit. */
+export const TRIAL_DAILY_AI_JOB_LIMIT = 20;
+export const TRIAL_MONTHLY_AI_JOB_LIMIT = 100;
+
+/**
+ * The second server-side AI-cost gate, alongside checkAiUsageEntitlement():
+ * that function stops AI use once a trial's 14 days have elapsed;
+ * this one bounds AI use *during* an otherwise-valid trial, so a single
+ * tenant can't run unlimited real AI calls in one day or one month while
+ * still inside their trial window. Only ever evaluated for `TRIALING` —
+ * an ACTIVE subscription (a legitimate pre-existing row, or once a real
+ * payment provider exists, a genuinely paid one) is never capped here;
+ * that would be a separate, future, plan-based limit, not this one.
+ */
+export async function checkTrialAiUsageCap(
+  supabase: SupabaseClient<Database>,
+  subscription: Subscription,
+  referenceDate: Date = new Date(),
+): Promise<EntitlementCheckResult> {
+  if (subscription.status !== "TRIALING") {
+    return { allowed: true, reason: null };
+  }
+
+  const dailyCount = await getDailyAiJobCount(supabase, subscription.tenant_id, referenceDate);
+  if (dailyCount >= TRIAL_DAILY_AI_JOB_LIMIT) {
+    return {
+      allowed: false,
+      reason: `Anda telah mencapai batas ${TRIAL_DAILY_AI_JOB_LIMIT} permintaan AI hari ini selama masa trial. Coba lagi besok, atau pilih paket di halaman Billing untuk melanjutkan tanpa batas.`,
+    };
+  }
+
+  const monthlyCount = await getMonthlyAiJobCount(supabase, subscription.tenant_id, referenceDate);
+  if (monthlyCount >= TRIAL_MONTHLY_AI_JOB_LIMIT) {
+    return {
+      allowed: false,
+      reason: `Anda telah mencapai batas ${TRIAL_MONTHLY_AI_JOB_LIMIT} permintaan AI bulan ini selama masa trial. Pilih paket di halaman Billing untuk melanjutkan tanpa batas.`,
+    };
+  }
+
+  return { allowed: true, reason: null };
+}
+
+/**
  * Sum of prompter_attributions.attributed_value where
  * attribution_model = 'UMKMPRO_VERIFIED' for the tenant this calendar
  * month — the only conversions the product spec allows a success fee to
