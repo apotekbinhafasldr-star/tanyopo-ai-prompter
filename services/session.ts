@@ -5,6 +5,25 @@ import { createClient } from "@/lib/supabase/server";
 import type { Locale, TenantRole } from "@/types/database";
 import { DEFAULT_LOCALE } from "@/lib/i18n/config";
 
+/**
+ * Prefers LINOE's own brand name (prompter_brand_profiles.brand_name) over
+ * the shared tenant's UMKMpro AI business name (tenants.nama_usaha). This
+ * Supabase project is shared between UMKMpro AI and LINOE: an existing
+ * UMKMpro AI identity registering on LINOE keeps the same auth.users row
+ * and the same tenant_id (Supabase never creates a duplicate account for
+ * an existing email), so `tenants.nama_usaha` can be a business name set
+ * long before that identity ever used LINOE. Falls back to it only for a
+ * tenant that hasn't completed LINOE's own onboarding yet (no brand_name
+ * saved there). Pure function so this fallback — the entire point of this
+ * fix — has direct test coverage.
+ */
+export function resolveBusinessName(
+  brandName: string | null | undefined,
+  tenantName: string | null | undefined,
+): string {
+  return brandName ?? tenantName ?? "Bisnis Anda";
+}
+
 export interface SessionContext {
   userId: string;
   email: string | null;
@@ -69,7 +88,7 @@ export async function requireSessionContext(
 
   const { data: brandProfile } = await supabase
     .from("prompter_brand_profiles")
-    .select("onboarding_completed, default_language, default_currency")
+    .select("brand_name, onboarding_completed, default_language, default_currency")
     .eq("tenant_id", profile.tenant_id)
     .maybeSingle();
 
@@ -85,7 +104,7 @@ export async function requireSessionContext(
     userName: profile.nama,
     role: profile.role,
     tenantId: profile.tenant_id,
-    businessName: tenant?.nama_usaha ?? "Bisnis Anda",
+    businessName: resolveBusinessName(brandProfile?.brand_name, tenant?.nama_usaha),
     onboardingCompleted,
     locale: brandProfile?.default_language ?? DEFAULT_LOCALE,
     defaultCurrency: brandProfile?.default_currency ?? "IDR",
