@@ -244,25 +244,26 @@ export async function recordInvoiceFromProvider(
 /**
  * Owner-only plan change. Only ever changes the *stored* plan tier —
  * there is no payment provider configured to actually charge a proration
- * or new price, so this is a governance/usage-gating change today, not a
- * billing event. A real checkout (lib/billing/payment-provider.ts) will
- * drive this via a webhook once a provider exists, same as everywhere
- * else in this app: the write path already exists, only the trigger
- * changes later.
+ * or new price, so this is a governance/preference change today, not a
+ * billing event.
  *
- * Also ends an in-progress trial: an Owner explicitly choosing a plan here
- * is a deliberate "I'm committing to this" action, so status moves to
- * ACTIVE regardless of how many trial days were left — there's no payment
- * step yet to gate that transition on.
+ * Deliberately never writes `status`. This used to unconditionally set
+ * `status: "ACTIVE"`, which — because checkAiUsageEntitlement() only
+ * blocks a TRIALING tenant whose period has elapsed — let anyone
+ * self-activate for free with no payment, permanently bypassing the
+ * 14-day trial cutoff simply by saving a plan on this page. Moving a
+ * subscription to ACTIVE is a real billing event and belongs to a real
+ * payment provider's webhook (lib/billing/payment-provider.ts) once one
+ * is integrated — not to this self-service action. Until then, a tenant's
+ * existing status (TRIALING, or a legitimate pre-existing ACTIVE row) is
+ * left exactly as it was.
  */
 export async function changePlan(
   supabase: SupabaseClient<Database>,
   tenantId: string,
   plan: SubscriptionPlan,
 ): Promise<{ error: string | null }> {
-  const { error } = await supabase
-    .from("prompter_subscriptions")
-    .upsert({ tenant_id: tenantId, plan, status: "ACTIVE" });
+  const { error } = await supabase.from("prompter_subscriptions").upsert({ tenant_id: tenantId, plan });
 
   if (error) {
     return { error: "Gagal mengubah paket." };

@@ -1,8 +1,18 @@
-import { describe, expect, it } from "vitest";
-import { getTrialState, checkAiUsageEntitlement, TRIAL_DURATION_DAYS } from "@/services/billing";
+import { describe, expect, it, vi } from "vitest";
+import { getTrialState, checkAiUsageEntitlement, changePlan, TRIAL_DURATION_DAYS } from "@/services/billing";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
 
 type Subscription = Database["public"]["Tables"]["prompter_subscriptions"]["Row"];
+
+function mockSupabase() {
+  const upsert = vi.fn(async () => ({ data: null, error: null }));
+  const from = vi.fn(() => ({ upsert }));
+  return { from, upsert } as unknown as SupabaseClient<Database> & {
+    from: typeof from;
+    upsert: typeof upsert;
+  };
+}
 
 function subscription(overrides: Partial<Subscription> = {}): Subscription {
   return {
@@ -103,6 +113,48 @@ describe("checkAiUsageEntitlement", () => {
       current_period_end: new Date("2026-01-15T00:00:00Z").toISOString(),
     });
     expect(checkAiUsageEntitlement(sub, now).allowed).toBe(true);
+  });
+});
+
+describe("changePlan", () => {
+  it("never writes status, so selecting a plan cannot self-activate a subscription without payment", async () => {
+    const supabase = mockSupabase();
+
+    await changePlan(supabase, "t1", "PRO");
+
+    expect(supabase.upsert).toHaveBeenCalledWith({ tenant_id: "t1", plan: "PRO" });
+    expect(supabase.upsert).not.toHaveBeenCalledWith(expect.objectContaining({ status: expect.anything() }));
+  });
+
+  it("saving any paid plan while a trial is expired does not grant AI entitlement (bypass closed)", async () => {
+    const now = new Date("2026-02-01T00:00:00Z");
+    const expiredTrial = subscription({
+      status: "TRIALING",
+      current_period_start: new Date("2026-01-01T00:00:00Z").toISOString(),
+      current_period_end: new Date("2026-01-15T00:00:00Z").toISOString(),
+    });
+    expect(checkAiUsageEntitlement(expiredTrial, now).allowed).toBe(false);
+
+    const supabase = mockSupabase();
+    for (const plan of ["PRO", "BUSINESS", "GROWTH", "AGENCY", "UMKMPRO_BUNDLE"] as const) {
+      await changePlan(supabase, "t1", plan);
+    }
+
+    // changePlan never touches `status` — the tenant's real subscription row
+    // (and therefore its entitlement) is untouched by any of these calls,
+    // so it is still exactly the expired-trial row checked above.
+    expect(checkAiUsageEntitlement(expiredTrial, now).allowed).toBe(false);
+  });
+
+  it("does not disturb an existing legitimate ACTIVE subscription's status", async () => {
+    const supabase = mockSupabase();
+
+    await changePlan(supabase, "t1", "GROWTH");
+
+    // Only tenant_id/plan are sent — Supabase upsert only updates the
+    // columns present in the payload, so an existing row's `status`
+    // (whatever it legitimately was) is left exactly as-is, not reset.
+    expect(supabase.upsert).toHaveBeenCalledWith({ tenant_id: "t1", plan: "GROWTH" });
   });
 });
 

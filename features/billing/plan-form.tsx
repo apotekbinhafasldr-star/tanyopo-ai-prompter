@@ -43,8 +43,9 @@ export function PlanForm({ currentPlan, readOnly }: { currentPlan: SubscriptionP
           ))}
         </select>
         <p className="text-xs text-muted-foreground">
-          Belum ada pemroses pembayaran yang terhubung, jadi perubahan ini hanya mengubah paket yang tercatat —
-          tidak ada tagihan atau proration yang diproses.
+          Belum ada pemroses pembayaran yang terhubung, jadi perubahan ini hanya mengubah paket yang tercatat
+          untuk referensi — tidak ada tagihan, proration, atau aktivasi akses yang diproses. Akses fitur AI
+          tetap mengikuti status trial/langganan Anda saat ini, bukan paket yang dipilih di sini.
         </p>
       </div>
 
