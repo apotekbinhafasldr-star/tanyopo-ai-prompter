@@ -54,3 +54,25 @@ export function checkRateLimit(
 export function __resetRateLimitStateForTests(): void {
   buckets.clear();
 }
+
+/**
+ * Best-effort client IP for rate-limiting a Server Action, which has no
+ * direct Request object to read a socket address from. Prefers Netlify's
+ * edge-set `x-nf-client-connection-ip` (set by Netlify's infrastructure
+ * from the real TCP connection, not editable by the client) over
+ * `x-forwarded-for` (whose first hop can be client-supplied depending on
+ * proxy configuration), and never throws — an unresolvable IP shares one
+ * "unknown" bucket rather than skipping the rate limit entirely.
+ */
+export function getClientIp(headersList: { get(name: string): string | null }): string {
+  const nfIp = headersList.get("x-nf-client-connection-ip");
+  if (nfIp) return nfIp.trim();
+
+  const forwardedFor = headersList.get("x-forwarded-for");
+  if (forwardedFor) {
+    const first = forwardedFor.split(",")[0]?.trim();
+    if (first) return first;
+  }
+
+  return "unknown";
+}

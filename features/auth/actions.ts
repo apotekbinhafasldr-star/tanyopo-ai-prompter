@@ -1,9 +1,22 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { loginSchema, registerSchema, forgotPasswordSchema, resetPasswordSchema } from "@/schemas/auth";
 import { publicEnv } from "@/lib/env";
+import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
+
+/**
+ * Best-effort brake on trial-farming (repeated signups to get fresh
+ * 14-day trials / AI usage allowances) — same in-memory, process-local
+ * rate limiter already proven for the UMKMpro integration routes
+ * (lib/umkmpro/route-helpers.ts), keyed per client IP instead of per
+ * route. Generous enough that a shared household/office IP with several
+ * real people registering in the same hour is very unlikely to hit it.
+ */
+const REGISTER_RATE_LIMIT = 5;
+const REGISTER_RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
 
 export interface AuthActionState {
   error: string | null;
@@ -64,6 +77,17 @@ export async function registerAction(
 
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Data tidak valid" };
+  }
+
+  // Runs only after validation succeeds, so a typo retry never counts
+  // against the limit — and before signUp(), so a blocked attempt never
+  // reaches Supabase Auth at all.
+  const clientIp = getClientIp(await headers());
+  const rateLimit = checkRateLimit(`register:${clientIp}`, REGISTER_RATE_LIMIT, REGISTER_RATE_LIMIT_WINDOW_MS);
+  if (!rateLimit.allowed) {
+    return {
+      error: "Terlalu banyak percobaan pendaftaran dari jaringan ini. Silakan coba lagi dalam beberapa saat.",
+    };
   }
 
   const supabase = await createClient();
