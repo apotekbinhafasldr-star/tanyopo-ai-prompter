@@ -22,7 +22,7 @@ export function SubmitForApprovalButton({ campaignId }: { campaignId: string }) 
         }}
       >
         <Send />
-        Ajukan untuk Persetujuan
+        Setujui &amp; Siapkan Campaign
       </Button>
       {error ? (
         <p role="alert" className="text-sm text-danger">

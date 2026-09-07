@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { requireSessionContext } from "@/services/session";
 import { createClient } from "@/lib/supabase/server";
 import { PromoteWizard } from "@/features/promote/promote-wizard";
+import { QuickPromoteWizard } from "@/features/promote/quick-promote-wizard";
 
 export const metadata: Metadata = { title: "Promote — LINOE" };
 
@@ -50,9 +52,10 @@ async function resolveHandoff(
 export default async function PromotePage({
   searchParams,
 }: {
-  searchParams: Promise<{ product?: string; handoff?: string }>;
+  searchParams: Promise<{ product?: string; handoff?: string; mode?: string }>;
 }) {
-  const { product, handoff } = await searchParams;
+  const { product, handoff, mode } = await searchParams;
+  const isAdvanced = mode === "advanced";
   const session = await requireSessionContext();
   const supabase = await createClient();
 
@@ -71,20 +74,35 @@ export default async function PromotePage({
     .eq("tenant_id", session.tenantId)
     .order("created_at", { ascending: false });
 
+  const preselectedProductId = product ?? handoffProductId ?? undefined;
+
   return (
-    <div className="flex flex-1 flex-col items-center gap-6 p-8">
+    <div className="flex flex-1 flex-col items-center gap-6 p-6 sm:p-8">
       <div className="w-full max-w-2xl">
-        <h1 className="text-xl font-semibold tracking-tight text-foreground">Promote dengan AI</h1>
+        <h1 className="text-xl font-semibold tracking-tight text-foreground">
+          {isAdvanced ? "Buat Campaign Manual" : "Promote dengan AI"}
+        </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Jawab beberapa pertanyaan singkat — AI akan menyusun strategi dan campaign untuk Anda.
+          {isAdvanced
+            ? "Atur setiap detail campaign sendiri — channel, audiens, dan budget."
+            : "Punya produk, mau jual — LINOE yang kerjakan pemasarannya. Cukup 3 langkah singkat."}
         </p>
         {handoffError ? (
           <p className="mt-3 rounded-[var(--radius-md)] bg-danger-muted p-3 text-sm text-danger">
             {handoffError}
           </p>
         ) : null}
+        {isAdvanced ? (
+          <Link href="/promote" className="mt-2 inline-block text-sm font-medium text-brand hover:underline">
+            ← Kembali ke Quick Promote
+          </Link>
+        ) : null}
       </div>
-      <PromoteWizard products={products ?? []} preselectedProductId={product ?? handoffProductId ?? undefined} />
+      {isAdvanced ? (
+        <PromoteWizard products={products ?? []} preselectedProductId={preselectedProductId} />
+      ) : (
+        <QuickPromoteWizard products={products ?? []} preselectedProductId={preselectedProductId} />
+      )}
     </div>
   );
 }

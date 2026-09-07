@@ -81,8 +81,16 @@ const STATUS_BANNER: Record<string, { tone: "info" | "warning" | "success"; text
   },
 };
 
-export default async function CampaignDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function CampaignDetailPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ from?: string }>;
+}) {
   const { id } = await params;
+  const { from } = await searchParams;
+  const isFromQuickPromote = from === "quick-promote";
   const session = await requireSessionContext();
   const supabase = await createClient();
 
@@ -162,7 +170,12 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
         : "bg-info-muted text-info";
 
   return (
-    <div className="flex flex-1 flex-col gap-6 p-8">
+    <div className="flex flex-1 flex-col gap-6 p-6 sm:p-8">
+      {isFromQuickPromote && isDraft ? (
+        <p className="text-xs font-medium text-muted-foreground">
+          Langkah 3 dari 3 — Review &amp; Setujui
+        </p>
+      ) : null}
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
