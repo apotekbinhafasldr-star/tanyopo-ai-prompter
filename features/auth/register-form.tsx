@@ -13,6 +13,25 @@ const initialState: AuthActionState = { error: null };
 export function RegisterForm() {
   const [state, formAction, pending] = useActionState(registerAction, initialState);
 
+  if (state.existingAccount) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Email sudah terdaftar</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4 pt-6">
+          <p className="text-sm text-foreground">{state.info}</p>
+          <Button asChild className="w-full">
+            <Link href="/login">Masuk ke akun Anda</Link>
+          </Button>
+          <Link href="/forgot-password" className="text-center text-sm font-medium text-brand hover:underline">
+            Lupa kata sandi?
+          </Link>
+        </CardContent>
+      </Card>
+    );
+  }
+
   if (state.info) {
     return (
       <Card>

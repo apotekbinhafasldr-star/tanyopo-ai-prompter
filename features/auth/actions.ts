@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { loginSchema, registerSchema, forgotPasswordSchema, resetPasswordSchema } from "@/schemas/auth";
 import { publicEnv } from "@/lib/env";
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
+import { isExistingAccountSignUp } from "@/lib/auth/existing-account";
 
 /**
  * Best-effort brake on trial-farming (repeated signups to get fresh
@@ -21,6 +22,11 @@ const REGISTER_RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
 export interface AuthActionState {
   error: string | null;
   info?: string | null;
+  /** True only when registerAction detected the email already belongs to
+   * an existing account in this shared Supabase project — lets the
+   * register form show a distinct "already registered" card (Masuk /
+   * Lupa kata sandi) instead of the generic "check your email" card. */
+  existingAccount?: boolean;
 }
 
 /**
@@ -109,13 +115,23 @@ export async function registerAction(
     },
   });
 
-  if (error) {
+  // Covers both signals Supabase can return for "this email already has an
+  // account" (this project is shared with UMKMpro AI, so that's a real,
+  // expected case, not just a theoretical one) — see
+  // lib/auth/existing-account.ts for why both are checked. Never proceeds
+  // as if a new account were created: nama/namaUsaha are never written
+  // anywhere for an existing account (signUp() itself already guarantees
+  // that), and the user is pointed at the existing sign-in paths instead.
+  if (isExistingAccountSignUp(error, data)) {
     return {
-      error:
-        error.status === 422 || error.code === "user_already_exists"
-          ? "Email ini sudah terdaftar. Silakan masuk."
-          : "Gagal membuat akun. Silakan coba lagi.",
+      error: null,
+      info: "Email ini sudah terdaftar. Silakan masuk menggunakan akun Anda.",
+      existingAccount: true,
     };
+  }
+
+  if (error) {
+    return { error: "Gagal membuat akun. Silakan coba lagi." };
   }
 
   // If the project requires email confirmation, signUp succeeds but no
