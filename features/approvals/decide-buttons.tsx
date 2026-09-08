@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -11,15 +12,25 @@ export function ApprovalDecideButtons({ approvalId }: { approvalId: string }) {
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const router = useRouter();
 
   function decide(decision: "APPROVED" | "REJECTED") {
     setError(null);
     startTransition(async () => {
-      const result = await decideApprovalAction(approvalId, decision, decision === "REJECTED" ? reason || null : null);
-      if (result.error) {
-        setError(result.error);
-      } else {
-        setRejecting(false);
+      try {
+        const result = await decideApprovalAction(approvalId, decision, decision === "REJECTED" ? reason || null : null);
+        if (result.error) {
+          setError(result.error);
+        } else {
+          setRejecting(false);
+          // Called directly (not via <form action>), so revalidatePath()
+          // inside the action invalidates the cache but never repaints an
+          // already-mounted page on its own — same gotcha already fixed on
+          // the campaign submit button (features/campaigns/submit-button.tsx).
+          router.refresh();
+        }
+      } catch {
+        setError("Gagal menyimpan keputusan. Silakan coba lagi.");
       }
     });
   }

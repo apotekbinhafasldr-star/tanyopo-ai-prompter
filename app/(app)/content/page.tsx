@@ -9,6 +9,7 @@ import { createClient } from "@/lib/supabase/server";
 import { formatDate, channelLabel } from "@/lib/utils/format";
 import { ContentGeneratorForm } from "@/features/content/content-generator-form";
 import { ScheduleForm } from "@/features/content/schedule-form";
+import { contentPlatforms } from "@/schemas/content";
 import type { ContentGeneration } from "@/schemas/ai/content-generation";
 import type { Database } from "@/types/database";
 
@@ -22,9 +23,9 @@ type ContentItem = Pick<
 export default async function ContentPage({
   searchParams,
 }: {
-  searchParams: Promise<{ product?: string }>;
+  searchParams: Promise<{ product?: string; campaign?: string }>;
 }) {
-  const { product } = await searchParams;
+  const { product, campaign: campaignId } = await searchParams;
   const session = await requireSessionContext();
   const supabase = await createClient();
   const canEdit = session.role === "owner" || session.role === "marketing";
@@ -34,6 +35,33 @@ export default async function ContentPage({
     .select("id, name")
     .eq("tenant_id", session.tenantId)
     .order("created_at", { ascending: false });
+
+  // Content Context Inheritance: opened from a campaign (Quick Promote's
+  // "Buat Konten" link), so the product/platform/objective LINOE already
+  // decided are pre-filled instead of asking the user to pick them again —
+  // the platform select stays a normal <select>, so it's still changeable,
+  // never locked.
+  let preselectedProductId = product;
+  let preselectedPlatform: string | undefined;
+  let preselectedGoal: string | undefined;
+  let contextNote: string | undefined;
+
+  if (campaignId) {
+    const { data: campaign } = await supabase
+      .from("prompter_master_campaigns")
+      .select("product_id, channels, objective")
+      .eq("id", campaignId)
+      .eq("tenant_id", session.tenantId)
+      .maybeSingle();
+
+    if (campaign) {
+      preselectedProductId = preselectedProductId ?? campaign.product_id ?? undefined;
+      const contentPlatformValues = new Set(contentPlatforms.map((p) => p.value as string));
+      preselectedPlatform = (campaign.channels as string[]).find((c) => contentPlatformValues.has(c));
+      preselectedGoal = campaign.objective;
+      contextNote = "Produk, platform, dan tujuan diisi otomatis dari campaign ini — ubah bila perlu.";
+    }
+  }
 
   const { data: contentItems } = await supabase
     .from("prompter_content_items")
@@ -125,7 +153,13 @@ export default async function ContentPage({
               description="Content Generator butuh produk untuk dijadikan konteks."
             />
           ) : (
-            <ContentGeneratorForm products={products} preselectedProductId={product} />
+            <ContentGeneratorForm
+              products={products}
+              preselectedProductId={preselectedProductId}
+              preselectedPlatform={preselectedPlatform}
+              preselectedGoal={preselectedGoal}
+              contextNote={contextNote}
+            />
           )}
         </CardContent>
       </Card>

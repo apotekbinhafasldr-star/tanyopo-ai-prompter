@@ -123,7 +123,7 @@ export default async function ProductDetailPage({
         </CardContent>
       </Card>
 
-      <Card>
+      <Card id="product-media">
         <CardHeader>
           <CardTitle>Media</CardTitle>
         </CardHeader>
@@ -325,6 +325,7 @@ export default async function ProductDetailPage({
       </div>
 
       <NextStepsGuidance
+        productId={id}
         justCreated={created === "1"}
         hasMedia={!!media && media.length > 0}
         hasBlueprint={!!blueprint}

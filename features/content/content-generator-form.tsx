@@ -22,14 +22,23 @@ const selectClass =
 export function ContentGeneratorForm({
   products,
   preselectedProductId,
+  preselectedPlatform,
+  preselectedGoal,
+  contextNote,
 }: {
   products: ProductOption[];
   preselectedProductId?: string;
+  preselectedPlatform?: string;
+  preselectedGoal?: string;
+  contextNote?: string;
 }) {
   const [state, formAction, pending] = useActionState(generateContentAction, initialState);
 
   return (
     <form action={formAction} className="flex flex-col gap-4">
+      {contextNote ? (
+        <p className="rounded-[var(--radius-md)] bg-brand-muted p-3 text-sm text-brand">{contextNote}</p>
+      ) : null}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="productId">Produk</Label>
@@ -47,7 +56,7 @@ export function ContentGeneratorForm({
 
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="platform">Platform</Label>
-          <select id="platform" name="platform" defaultValue="" required className={selectClass}>
+          <select id="platform" name="platform" defaultValue={preselectedPlatform ?? ""} required className={selectClass}>
             <option value="" disabled>
               Pilih platform
             </option>
@@ -75,7 +84,7 @@ export function ContentGeneratorForm({
 
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="goal">Tujuan (opsional)</Label>
-          <select id="goal" name="goal" defaultValue="" className={selectClass}>
+          <select id="goal" name="goal" defaultValue={preselectedGoal ?? ""} className={selectClass}>
             <option value="">Tidak ditentukan</option>
             {primaryGoals.map((g) => (
               <option key={g.value} value={g.value}>

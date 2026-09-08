@@ -11,6 +11,7 @@ import { formatCurrency, formatDate, channelLabel, campaignStatusLabel, campaign
 import { RegenerateProposalButton } from "@/features/campaigns/regenerate-button";
 import { CampaignCopyEditor } from "@/features/campaigns/copy-editor";
 import { SubmitForApprovalButton } from "@/features/campaigns/submit-button";
+import { ApprovalDecideButtons } from "@/features/approvals/decide-buttons";
 import { updateCampaignCopyAction, deleteCampaignAction, cancelSubmissionAction } from "@/features/campaigns/actions";
 import { LaunchChannelButton } from "@/features/campaigns/launch-button";
 import { SyncInsightsButton } from "@/features/campaigns/sync-insights-button";
@@ -111,6 +112,7 @@ export default async function CampaignDetailPage({
     { data: capabilities },
     { data: connectedAccounts },
     { data: optimizationRecommendation },
+    { data: pendingApproval },
   ] = await Promise.all([
     campaign.product_id
       ? supabase.from("prompter_products").select("id, name").eq("id", campaign.product_id).single()
@@ -133,6 +135,17 @@ export default async function CampaignDetailPage({
       .select("summary, recommendations, updated_at")
       .eq("master_campaign_id", id)
       .maybeSingle(),
+    campaign.status === "AWAITING_APPROVAL"
+      ? supabase
+          .from("prompter_approvals")
+          .select("id")
+          .eq("tenant_id", session.tenantId)
+          .eq("resource_type", "prompter_master_campaigns")
+          .eq("resource_id", id)
+          .eq("approval_type", "CAMPAIGN_LAUNCH")
+          .eq("status", "PENDING")
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
   ]);
 
   const createAdEnabledPlatforms = new Set(
@@ -211,6 +224,21 @@ export default async function CampaignDetailPage({
       </div>
 
       {banner ? <div className={`rounded-[var(--radius-md)] p-4 text-sm ${bannerClass}`}>{banner.text}</div> : null}
+
+      {isAwaitingApproval && session.role === "owner" && pendingApproval ? (
+        <Card className="border-brand/30 bg-brand-muted/40">
+          <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
+            <div>
+              <p className="text-sm font-medium text-foreground">Siap dipromosikan</p>
+              <p className="text-xs text-muted-foreground">
+                Anda mengajukan campaign ini sebagai Owner — setujui langsung di sini, atau tinjau lebih
+                lanjut di Approval Center.
+              </p>
+            </div>
+            <ApprovalDecideButtons approvalId={pendingApproval.id} />
+          </CardContent>
+        </Card>
+      ) : null}
 
       <Card>
         <CardHeader>
@@ -409,8 +437,11 @@ export default async function CampaignDetailPage({
           </Card>
 
           <Card>
-            <CardHeader>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0">
               <CardTitle>Konten Iklan</CardTitle>
+              <Button asChild variant="outline" size="sm">
+                <Link href={`/content?campaign=${id}`}>Buat Konten</Link>
+              </Button>
             </CardHeader>
             <CardContent className="pt-4">
               {isDraft ? (
