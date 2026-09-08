@@ -575,6 +575,16 @@ export default async function CampaignDetailPage({
             <CardContent className="pt-4">
               {isDraft ? (
                 <CampaignCopyEditor
+                  // Input/Textarea below are uncontrolled (defaultValue) — React
+                  // reuses the same DOM node across a router.refresh() re-render
+                  // since this is the same component instance, so a stale
+                  // defaultValue never got re-applied after "Gunakan Ini" changed
+                  // hook/headline/cta/primary_text server-side (the data itself
+                  // was already correct; only this form's displayed value lagged
+                  // behind it). Keying on updated_at forces a fresh mount — and
+                  // therefore fresh defaultValues — whenever the campaign's
+                  // stored copy actually changes, from any source.
+                  key={campaign.updated_at}
                   action={boundCopyAction}
                   hook={proposal.hook}
                   headline={proposal.headline}
