@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { MarketingBlueprintSchema } from "@/schemas/ai/marketing-blueprint";
-import { CampaignProposalSchema, withPrimaryCandidate } from "@/schemas/ai/campaign-proposal";
+import { CampaignProposalSchema, withPrimaryCandidate, selectCandidate } from "@/schemas/ai/campaign-proposal";
 import { ContentGenerationSchema } from "@/schemas/ai/content-generation";
 
 describe("MarketingBlueprintSchema", () => {
@@ -39,6 +39,7 @@ describe("CampaignProposalSchema", () => {
     hook: `Hook kandidat ${n} untuk kopi lokal`,
     headline: `Headline kandidat ${n}`,
     cta: "Belanja Sekarang",
+    primary_text: `Body copy kandidat ${n} yang konsisten dengan angle kandidat ini.`,
     rationale: "Cocok untuk audiens pekerja urban yang mencari kopi berkualitas.",
   });
 
@@ -103,6 +104,35 @@ describe("CampaignProposalSchema", () => {
     expect(synced.hook).toBe(parsed.candidates[0].hook);
     expect(synced.headline).toBe(parsed.candidates[0].headline);
     expect(synced.cta).toBe(parsed.candidates[0].cta);
+  });
+
+  describe("selectCandidate", () => {
+    const parsed = CampaignProposalSchema.parse(valid);
+
+    it("swaps the chosen candidate into the primary position and syncs hook/headline/cta/primary_text together", () => {
+      const originalAlternative = parsed.candidates[2];
+
+      const result = selectCandidate(parsed, 2);
+
+      expect(result.hook).toBe(originalAlternative.hook);
+      expect(result.headline).toBe(originalAlternative.headline);
+      expect(result.cta).toBe(originalAlternative.cta);
+      expect(result.primary_text).toBe(originalAlternative.primary_text);
+      expect(result.candidates[0]).toEqual(originalAlternative);
+    });
+
+    it("moves the previous primary into the vacated slot instead of dropping it", () => {
+      const originalPrimary = parsed.candidates[0];
+      const result = selectCandidate(parsed, 2);
+      expect(result.candidates[2]).toEqual(originalPrimary);
+      expect(result.candidates).toHaveLength(3);
+    });
+
+    it("is a no-op for index 0 (already primary) or an out-of-range index", () => {
+      expect(selectCandidate(parsed, 0)).toEqual(parsed);
+      expect(selectCandidate(parsed, 3)).toEqual(parsed);
+      expect(selectCandidate(parsed, -1)).toEqual(parsed);
+    });
   });
 });
 

@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { requireSessionContext } from "@/services/session";
-import { CampaignProposalSchema, withPrimaryCandidate } from "@/schemas/ai/campaign-proposal";
+import { CampaignProposalSchema, withPrimaryCandidate, selectCandidate, type CampaignProposal } from "@/schemas/ai/campaign-proposal";
 import { buildSystemPreamble, buildCampaignProposalPrompt } from "@/lib/ai/prompts";
 import { runAiJob } from "@/services/ai-jobs";
 import { syncChannelCampaigns, setChannelCampaignsStatus } from "@/services/channel-campaigns";
@@ -96,6 +96,57 @@ export async function regenerateCampaignProposalAction(campaignId: string): Prom
     campaign.channels,
     result.data.budget_allocation,
   );
+
+  revalidatePath(`/campaigns/${campaignId}`);
+  return { error: null };
+}
+
+/**
+ * "Gunakan Ini" (Batch B1 correction #1) — the Owner picks a different
+ * already-generated candidate as the active recommendation. Reuses the
+ * candidate data the same AI call already produced; never calls the AI
+ * again and never creates a second campaign. selectCandidate() swaps the
+ * chosen candidate into the primary position and moves hook/headline/cta/
+ * primary_text together, so the ad copy never ends up describing one
+ * angle while the headline promises another.
+ */
+export async function selectCampaignCandidateAction(
+  campaignId: string,
+  candidateIndex: number,
+): Promise<CampaignActionState> {
+  const session = await requireSessionContext();
+  const supabase = await createClient();
+
+  const { data: campaign, error: fetchError } = await supabase
+    .from("prompter_master_campaigns")
+    .select("ai_proposal, status")
+    .eq("id", campaignId)
+    .eq("tenant_id", session.tenantId)
+    .single();
+
+  if (fetchError || !campaign) {
+    return { error: "Campaign tidak ditemukan." };
+  }
+
+  if (campaign.status !== "DRAFT") {
+    return { error: "Campaign yang sudah diajukan tidak bisa diedit." };
+  }
+
+  const currentProposal = campaign.ai_proposal as CampaignProposal | null;
+  if (!currentProposal || !Array.isArray(currentProposal.candidates) || currentProposal.candidates.length < 2) {
+    return { error: "Belum ada kandidat alternatif untuk campaign ini." };
+  }
+
+  const updatedProposal = selectCandidate(currentProposal, candidateIndex);
+
+  const { error: updateError } = await supabase
+    .from("prompter_master_campaigns")
+    .update({ ai_proposal: updatedProposal as unknown as Json })
+    .eq("id", campaignId);
+
+  if (updateError) {
+    return { error: "Gagal menyimpan pilihan kandidat." };
+  }
 
   revalidatePath(`/campaigns/${campaignId}`);
   return { error: null };

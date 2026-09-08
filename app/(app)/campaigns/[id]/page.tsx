@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Trash2, Lightbulb, ArrowLeft, Star } from "lucide-react";
+import { Trash2, Lightbulb, ArrowLeft, Star, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -12,6 +12,7 @@ import { RegenerateProposalButton } from "@/features/campaigns/regenerate-button
 import { CampaignCopyEditor } from "@/features/campaigns/copy-editor";
 import { CampaignSubmitProvider, SubmitForApprovalButton } from "@/features/campaigns/submit-button";
 import { ApprovalDecideButtons } from "@/features/approvals/decide-buttons";
+import { SelectCandidateButton } from "@/features/campaigns/select-candidate-button";
 import { updateCampaignCopyAction, deleteCampaignAction, cancelSubmissionAction } from "@/features/campaigns/actions";
 import { LaunchChannelButton } from "@/features/campaigns/launch-button";
 import { SyncInsightsButton } from "@/features/campaigns/sync-insights-button";
@@ -491,10 +492,16 @@ export default async function CampaignDetailPage({
               </CardHeader>
               <CardContent className="flex flex-col gap-4 pt-4">
                 <div className="rounded-[var(--radius-md)] border border-brand/30 bg-brand-muted/40 p-4">
-                  <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-brand">
-                    <Star className="size-3.5 fill-current" aria-hidden />
-                    Pilihan Utama
-                  </p>
+                  <div className="mb-2 flex flex-wrap items-center gap-2 text-xs font-semibold text-brand">
+                    <span className="flex items-center gap-1.5">
+                      <Star className="size-3.5 fill-current" aria-hidden />
+                      Rekomendasi LINOE
+                    </span>
+                    <span className="flex items-center gap-1 rounded-full bg-brand/15 px-2 py-0.5">
+                      <Check className="size-3" aria-hidden />
+                      Dipilih LINOE
+                    </span>
+                  </div>
                   <div className="flex flex-col gap-2 text-sm">
                     <p>
                       <strong>Hook:</strong> {proposal.candidates[0].hook}
@@ -511,28 +518,46 @@ export default async function CampaignDetailPage({
                   ) : null}
                 </div>
 
+                {/* LINOE picks automatically — alternatives are optional and
+                    collapsed by default, never required reading. Picking one
+                    via "Gunakan Ini" reuses the already-generated candidate
+                    data (no second AI call, no second campaign) and swaps it
+                    into the primary slot above, moving hook/headline/cta/
+                    primary_text together so Konten Iklan never ends up
+                    describing a different angle than the headline promises. */}
                 {proposal.candidates.length > 1 ? (
                   <details>
                     <summary className="min-h-11 cursor-pointer text-sm font-medium text-brand">
                       Lihat Alternatif
                     </summary>
                     <div className="mt-3 flex flex-col gap-3">
-                      {proposal.candidates.slice(1).map((candidate, i) => (
-                        <div key={i} className="rounded-[var(--radius-md)] border border-border p-3 text-sm">
-                          <p>
-                            <strong>Hook:</strong> {candidate.hook}
-                          </p>
-                          <p>
-                            <strong>Headline:</strong> {candidate.headline}
-                          </p>
-                          <p>
-                            <strong>CTA:</strong> {candidate.cta}
-                          </p>
-                          {candidate.rationale ? (
-                            <p className="mt-1 text-xs text-muted-foreground">{candidate.rationale}</p>
-                          ) : null}
-                        </div>
-                      ))}
+                      {proposal.candidates.slice(1).map((candidate, i) => {
+                        const candidateIndex = i + 1;
+                        return (
+                          <div
+                            key={candidateIndex}
+                            className="flex flex-col gap-3 rounded-[var(--radius-md)] border border-border p-3 text-sm sm:flex-row sm:items-start sm:justify-between"
+                          >
+                            <div className="flex flex-col gap-1">
+                              <p>
+                                <strong>Hook:</strong> {candidate.hook}
+                              </p>
+                              <p>
+                                <strong>Headline:</strong> {candidate.headline}
+                              </p>
+                              <p>
+                                <strong>CTA:</strong> {candidate.cta}
+                              </p>
+                              {candidate.rationale ? (
+                                <p className="mt-1 text-xs text-muted-foreground">{candidate.rationale}</p>
+                              ) : null}
+                            </div>
+                            {isDraft ? (
+                              <SelectCandidateButton campaignId={id} candidateIndex={candidateIndex} />
+                            ) : null}
+                          </div>
+                        );
+                      })}
                     </div>
                   </details>
                 ) : null}

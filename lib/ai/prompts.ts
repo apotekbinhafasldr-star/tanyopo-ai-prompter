@@ -160,9 +160,10 @@ export function buildCampaignProposalPrompt(
       "2. desired_outcome — hasil yang diinginkan pelanggan, sebagai lawan dari pain tersebut.",
       "3. value_proposition — kenapa produk ini relevan menjawabnya, HANYA berdasarkan atribut produk yang benar-benar diberikan di atas. Jangan mengarang fitur/kapabilitas yang tidak disebutkan.",
       "4. marketing_angle — sudut pandang terkuat untuk tujuan campaign ini dibanding alternatif lain yang mungkin.",
-      "5. candidates — hasilkan TEPAT 3 kandidat hook+headline+cta yang berbeda arah satu sama lain (bukan variasi kata dari angle yang sama), diurutkan dari yang terkuat. Tiap kandidat butuh rationale singkat (maksimal 1 kalimat, bahasa sederhana, tanpa istilah teknis).",
-      "6. hook, headline, dan cta di level atas WAJIB sama persis dengan candidates[0].",
-      "7. primary_text — body copy yang mengembangkan angle kandidat terbaik, dengan alur: masalah → konsekuensi → solusi → manfaat utama → alasan bertindak sekarang.",
+      "5. candidates — hasilkan TEPAT 3 kandidat {hook, headline, cta, primary_text, rationale} yang berbeda ANGLE satu sama lain (bukan variasi kata dari angle yang sama) — misalnya satu angle bisa fokus ke efisiensi waktu, angle lain ke akurasi/kontrol, angle lain ke kemudahan pemakaian, sesuai apa yang paling relevan untuk produk ini. Setiap kandidat wajib punya primary_text SENDIRI yang konsisten dengan hook/headline kandidat itu — jangan menulis satu body copy generik lalu dipakai ulang untuk ketiganya.",
+      "6. Urutkan candidates dari yang TERKUAT ke yang terlemah, dinilai dari: relevansi terhadap customer_pain, kejelasan, kespesifikan, kekuatan benefit yang ditawarkan, kecocokan dengan objective dan jenis produk, kecocokan dengan tahap funnel, kealamian bahasa, seberapa actionable CTA-nya, dan kejujuran klaim. JANGAN memilih pemenang hanya karena bahasanya terdengar lebih agresif/menjual — persuasif harus tetap jujur dan jelas, bukan sekadar lebih 'berani'.",
+      "7. Tiap kandidat butuh rationale singkat (maksimal 1 kalimat, bahasa sederhana, tanpa istilah teknis) yang menjelaskan KENAPA kandidat itu mendapat peringkat tersebut berdasarkan kriteria di atas.",
+      "8. hook, headline, cta, dan primary_text di level atas WAJIB sama persis dengan candidates[0].",
     ].join("\n"),
     [
       "Kualitas hook wajib:",
@@ -172,8 +173,10 @@ export function buildCampaignProposalPrompt(
     ].join("\n"),
     [
       "Kualitas CTA wajib:",
-      "- Sesuai objective dan tahap funnel campaign ini — misalnya ajakan mencoba/membeli untuk tujuan penjualan, ajakan konsultasi/kontak untuk leads, ajakan mencoba/lihat cara kerja untuk aplikasi, ajakan mengenal lebih jauh untuk awareness. Jangan pakai satu CTA yang sama untuk semua produk/tujuan.",
+      "- Sesuai objective, tahap funnel, dan JENIS produk — misalnya ajakan mencoba/membeli untuk tujuan penjualan, ajakan konsultasi/kontak untuk leads, ajakan mengenal lebih jauh untuk awareness. Untuk produk aplikasi/software, pilih ajakan yang paling sesuai dengan tahap funnel campaign ini (bisa berupa ajakan mencoba, ajakan melihat cara kerja produk, atau ajakan lain yang relevan) — JANGAN selalu jatuh ke satu CTA default yang sama untuk semua produk/tujuan.",
+      "- JANGAN gunakan CTA yang mengklaim atau menyiratkan adanya kapabilitas/penawaran yang TIDAK disebutkan sebagai fakta di deskripsi produk di atas — misalnya CTA yang menyiratkan ada demo, uji coba gratis, atau diskon padahal itu tidak disebutkan sebagai fakta yang tersedia.",
       "- Jangan pernah membuat urgency/scarcity palsu (contoh yang DILARANG: 'stok tinggal 2', 'promo berakhir hari ini', 'ribuan orang sudah membeli') kecuali benar-benar didukung data yang diberikan sebagai konteks di atas — di sini tidak ada data seperti itu, jadi jangan gunakan.",
+      "- Jangan pernah mengarang jumlah pelanggan, testimoni, penghargaan, sertifikasi, hasil yang dijamin, atau kapabilitas produk yang tidak disebutkan di atas.",
     ].join("\n"),
     "Hasilkan juga recommended_channels (hanya dari channel yang dipilih) dan alokasi budget per channel (persentase, total 100).",
   ]
