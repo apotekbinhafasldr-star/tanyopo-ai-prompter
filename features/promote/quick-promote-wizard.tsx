@@ -262,23 +262,41 @@ export function QuickPromoteWizard({
             </p>
           ) : null}
 
-          <div className="flex items-center justify-between gap-3">
+          {/* flex-col-reverse: the primary CTA (last in DOM) renders on top on
+              mobile, full-width — "Kembali" stacks below it — since these
+              buttons' text can't wrap (Button uses whitespace-nowrap), a
+              side-by-side row here was wider than a 320-390px screen and
+              forced the whole page to scroll horizontally. sm:flex-row
+              restores the normal side-by-side layout once there's room. */}
+          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
             {step > 1 ? (
-              <Button type="button" variant="ghost" size="lg" onClick={() => setStep((s) => s - 1)}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="lg"
+                className="w-full sm:w-auto"
+                onClick={() => setStep((s) => s - 1)}
+              >
                 <ArrowLeft />
                 Kembali
               </Button>
             ) : (
-              <span />
+              <span className="hidden sm:block" />
             )}
 
             {step < 2 ? (
-              <Button type="button" size="lg" disabled={!canAdvance} onClick={() => setStep((s) => s + 1)}>
+              <Button
+                type="button"
+                size="lg"
+                className="w-full sm:w-auto"
+                disabled={!canAdvance}
+                onClick={() => setStep((s) => s + 1)}
+              >
                 Lanjut
                 <ArrowRight />
               </Button>
             ) : (
-              <Button type="submit" size="lg" disabled={!canAdvance} loading={pending}>
+              <Button type="submit" size="lg" className="w-full sm:w-auto" disabled={!canAdvance} loading={pending}>
                 <Sparkles />
                 {pending ? "AI sedang menyusun strategi..." : "Buat Strategi dengan AI"}
               </Button>

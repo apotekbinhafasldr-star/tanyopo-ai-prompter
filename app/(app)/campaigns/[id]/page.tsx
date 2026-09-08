@@ -203,7 +203,7 @@ export default async function CampaignDetailPage({
             </Link>
           ) : null}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {isDraft ? <SubmitForApprovalButton campaignId={id} /> : null}
           {isAwaitingApproval && session.role === "owner" ? (
             <form action={cancelSubmissionAction}>
