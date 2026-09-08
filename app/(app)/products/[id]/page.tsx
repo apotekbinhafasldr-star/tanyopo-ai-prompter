@@ -82,7 +82,7 @@ export default async function ProductDetailPage({
 
   const overviewTab = (
     <div className="flex flex-col gap-6">
-      <Card>
+      <Card id="product-info">
         <CardHeader className="flex flex-row items-center justify-between space-y-0">
           <CardTitle>Informasi Produk</CardTitle>
           <Button asChild variant="ghost" size="sm">
@@ -311,27 +311,12 @@ export default async function ProductDetailPage({
 
   return (
     <div className="flex flex-1 flex-col gap-6 p-8">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <p className="text-xs text-muted-foreground">{productTypeLabel(product.product_type)}</p>
-          <h1 className="text-xl font-semibold tracking-tight text-foreground">{product.name}</h1>
-        </div>
-        <Button asChild size="lg">
-          <Link href={`/promote?product=${id}`}>
-            <Sparkles />
-            Promote with AI
-          </Link>
-        </Button>
+      <div>
+        <p className="text-xs text-muted-foreground">{productTypeLabel(product.product_type)}</p>
+        <h1 className="text-xl font-semibold tracking-tight text-foreground">{product.name}</h1>
       </div>
 
-      <NextStepsGuidance
-        productId={id}
-        justCreated={created === "1"}
-        hasMedia={!!media && media.length > 0}
-        hasBlueprint={!!blueprint}
-        hasContent={!!content && content.length > 0}
-        hasCampaigns={!!campaigns && campaigns.length > 0}
-      />
+      <NextStepsGuidance productId={id} justCreated={created === "1"} />
 
       <Tabs
         tabs={[
