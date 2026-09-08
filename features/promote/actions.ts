@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { requireSessionContext } from "@/services/session";
 import { promoteWizardSchema, quickPromoteSchema, channelOptions } from "@/schemas/campaign";
-import { CampaignProposalSchema } from "@/schemas/ai/campaign-proposal";
+import { CampaignProposalSchema, withPrimaryCandidate } from "@/schemas/ai/campaign-proposal";
 import { buildSystemPreamble, buildCampaignProposalPrompt } from "@/lib/ai/prompts";
 import { runAiJob } from "@/services/ai-jobs";
 import { syncChannelCampaigns } from "@/services/channel-campaigns";
@@ -107,7 +107,7 @@ export async function generateCampaignDraftAction(
       currency: product.currency,
       duration_days: parsed.data.durationDays,
       start_date: parsed.data.startDate || null,
-      ai_proposal: result.data,
+      ai_proposal: withPrimaryCandidate(result.data),
       ai_job_id: result.jobId,
     })
     .select("id")
@@ -244,7 +244,7 @@ export async function generateQuickCampaignDraftAction(
       currency: product.currency,
       duration_days: parsed.data.durationDays,
       start_date: parsed.data.startDate || null,
-      ai_proposal: result.data,
+      ai_proposal: withPrimaryCandidate(result.data),
       ai_job_id: result.jobId,
     })
     .select("id")

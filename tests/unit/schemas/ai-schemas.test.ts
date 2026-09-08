@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { MarketingBlueprintSchema } from "@/schemas/ai/marketing-blueprint";
-import { CampaignProposalSchema } from "@/schemas/ai/campaign-proposal";
+import { CampaignProposalSchema, withPrimaryCandidate } from "@/schemas/ai/campaign-proposal";
 import { ContentGenerationSchema } from "@/schemas/ai/content-generation";
 
 describe("MarketingBlueprintSchema", () => {
@@ -35,10 +35,22 @@ describe("MarketingBlueprintSchema", () => {
 });
 
 describe("CampaignProposalSchema", () => {
+  const candidate = (n: number) => ({
+    hook: `Hook kandidat ${n} untuk kopi lokal`,
+    headline: `Headline kandidat ${n}`,
+    cta: "Belanja Sekarang",
+    rationale: "Cocok untuk audiens pekerja urban yang mencari kopi berkualitas.",
+  });
+
   const valid = {
+    customer_pain: "Sulit menemukan kopi lokal berkualitas dengan harga wajar",
+    desired_outcome: "Menikmati kopi enak setiap hari tanpa mahal",
+    value_proposition: "Kopi single origin langsung dari petani lokal dengan harga terjangkau",
     positioning: "Kopi lokal premium",
     audience_summary: "Pekerja urban 25-35 tahun",
     marketing_angle: "Dari petani ke cangkir Anda",
+    candidates: [candidate(1), candidate(2), candidate(3)],
+    hook: "Hook kandidat 1 untuk kopi lokal",
     headline: "Kopi Lokal, Rasa Dunia",
     primary_text: "Nikmati kopi single origin langsung dari petani lokal.",
     cta: "Belanja Sekarang",
@@ -62,6 +74,35 @@ describe("CampaignProposalSchema", () => {
       budget_allocation: [{ channel: "INSTAGRAM", percentage: 150 }],
     });
     expect(result.success).toBe(false);
+  });
+
+  it("rejects fewer than 3 candidates", () => {
+    const result = CampaignProposalSchema.safeParse({ ...valid, candidates: [candidate(1), candidate(2)] });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects more than 3 candidates", () => {
+    const result = CampaignProposalSchema.safeParse({
+      ...valid,
+      candidates: [candidate(1), candidate(2), candidate(3), candidate(4)],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("withPrimaryCandidate syncs top-level hook/headline/cta to candidates[0], even if the model's own top-level fields disagreed", () => {
+    const parsed = CampaignProposalSchema.parse({
+      ...valid,
+      // Deliberately mismatched top-level fields — the model failing to
+      // keep them in sync with candidates[0], which is exactly the case
+      // withPrimaryCandidate() must correct for deterministically.
+      hook: "Hook yang tidak sinkron",
+      headline: "Headline yang tidak sinkron",
+      cta: "CTA yang tidak sinkron",
+    });
+    const synced = withPrimaryCandidate(parsed);
+    expect(synced.hook).toBe(parsed.candidates[0].hook);
+    expect(synced.headline).toBe(parsed.candidates[0].headline);
+    expect(synced.cta).toBe(parsed.candidates[0].cta);
   });
 });
 

@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { requireSessionContext } from "@/services/session";
-import { CampaignProposalSchema } from "@/schemas/ai/campaign-proposal";
+import { CampaignProposalSchema, withPrimaryCandidate } from "@/schemas/ai/campaign-proposal";
 import { buildSystemPreamble, buildCampaignProposalPrompt } from "@/lib/ai/prompts";
 import { runAiJob } from "@/services/ai-jobs";
 import { syncChannelCampaigns, setChannelCampaignsStatus } from "@/services/channel-campaigns";
@@ -78,9 +78,11 @@ export async function regenerateCampaignProposalAction(campaignId: string): Prom
     return { error: result.error };
   }
 
+  const proposal = withPrimaryCandidate(result.data);
+
   const { error: updateError } = await supabase
     .from("prompter_master_campaigns")
-    .update({ ai_proposal: result.data, ai_job_id: result.jobId })
+    .update({ ai_proposal: proposal, ai_job_id: result.jobId })
     .eq("id", campaignId);
 
   if (updateError) {
@@ -110,6 +112,7 @@ export async function updateCampaignCopyAction(
   const headline = formData.get("headline");
   const primaryText = formData.get("primaryText");
   const cta = formData.get("cta");
+  const hook = formData.get("hook");
 
   const { data: campaign, error: fetchError } = await supabase
     .from("prompter_master_campaigns")
@@ -130,6 +133,7 @@ export async function updateCampaignCopyAction(
 
   const updatedProposal: Record<string, Json> = {
     ...currentProposal,
+    hook: typeof hook === "string" ? hook : currentProposal.hook,
     headline: typeof headline === "string" ? headline : currentProposal.headline,
     primary_text: typeof primaryText === "string" ? primaryText : currentProposal.primary_text,
     cta: typeof cta === "string" ? cta : currentProposal.cta,

@@ -143,7 +143,7 @@ export function buildCampaignProposalPrompt(
   inputs: CampaignProposalInputs,
 ): string {
   return [
-    "Buat proposal campaign untuk produk berikut.",
+    "Buat proposal campaign untuk produk berikut, dengan penalaran marketing yang terstruktur — bukan hanya mengisi kolom generik.",
     describeProduct(product),
     `Tujuan campaign: ${inputs.objective}`,
     `Channel yang dipilih: ${inputs.channels.join(", ")}`,
@@ -154,7 +154,28 @@ export function buildCampaignProposalPrompt(
     inputs.dailyBudget || inputs.totalBudget
       ? `Budget: ${inputs.dailyBudget ? `harian ${inputs.dailyBudget} ${inputs.currency}` : ""} ${inputs.totalBudget ? `total ${inputs.totalBudget} ${inputs.currency}` : ""}`.trim()
       : null,
-    "Hasilkan positioning, ringkasan audiens, marketing angle, headline, primary text, CTA, konsep kreatif, recommended channels (hanya dari channel yang dipilih), dan alokasi budget per channel (persentase, total 100).",
+    [
+      "Langkah penalaran (isi field yang sesuai — jangan tampilkan proses berpikir mentah, hanya hasilnya):",
+      "1. customer_pain — masalah/frustrasi nyata calon pelanggan, digali dari jenis produk/kategori/deskripsi di atas. Jangan generik.",
+      "2. desired_outcome — hasil yang diinginkan pelanggan, sebagai lawan dari pain tersebut.",
+      "3. value_proposition — kenapa produk ini relevan menjawabnya, HANYA berdasarkan atribut produk yang benar-benar diberikan di atas. Jangan mengarang fitur/kapabilitas yang tidak disebutkan.",
+      "4. marketing_angle — sudut pandang terkuat untuk tujuan campaign ini dibanding alternatif lain yang mungkin.",
+      "5. candidates — hasilkan TEPAT 3 kandidat hook+headline+cta yang berbeda arah satu sama lain (bukan variasi kata dari angle yang sama), diurutkan dari yang terkuat. Tiap kandidat butuh rationale singkat (maksimal 1 kalimat, bahasa sederhana, tanpa istilah teknis).",
+      "6. hook, headline, dan cta di level atas WAJIB sama persis dengan candidates[0].",
+      "7. primary_text — body copy yang mengembangkan angle kandidat terbaik, dengan alur: masalah → konsekuensi → solusi → manfaat utama → alasan bertindak sekarang.",
+    ].join("\n"),
+    [
+      "Kualitas hook wajib:",
+      "- Spesifik terhadap customer_pain/desired_outcome yang sudah diidentifikasi, bukan template generik seperti 'Solusi terbaik untuk bisnis Anda', 'Produk berkualitas untuk Anda', atau 'Tingkatkan bisnis sekarang' kecuali benar-benar berdasar dari konteks produk.",
+      "- Sesuai platform dan bahasa target — natural, bukan terjemahan kaku.",
+      "- Arahnya boleh berupa pertanyaan yang menyentuh pain nyata calon pelanggan, tapi buat versi sendiri sesuai produk ini — jangan menyalin contoh generik apa pun secara literal.",
+    ].join("\n"),
+    [
+      "Kualitas CTA wajib:",
+      "- Sesuai objective dan tahap funnel campaign ini — misalnya ajakan mencoba/membeli untuk tujuan penjualan, ajakan konsultasi/kontak untuk leads, ajakan mencoba/lihat cara kerja untuk aplikasi, ajakan mengenal lebih jauh untuk awareness. Jangan pakai satu CTA yang sama untuk semua produk/tujuan.",
+      "- Jangan pernah membuat urgency/scarcity palsu (contoh yang DILARANG: 'stok tinggal 2', 'promo berakhir hari ini', 'ribuan orang sudah membeli') kecuali benar-benar didukung data yang diberikan sebagai konteks di atas — di sini tidak ada data seperti itu, jadi jangan gunakan.",
+    ].join("\n"),
+    "Hasilkan juga recommended_channels (hanya dari channel yang dipilih) dan alokasi budget per channel (persentase, total 100).",
   ]
     .filter(Boolean)
     .join("\n\n");

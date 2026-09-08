@@ -11,11 +11,13 @@ const initialState: CampaignActionState = { error: null };
 
 export function CampaignCopyEditor({
   action,
+  hook,
   headline,
   primaryText,
   cta,
 }: {
   action: (prevState: CampaignActionState, formData: FormData) => Promise<CampaignActionState>;
+  hook?: string;
   headline: string;
   primaryText: string;
   cta: string;
@@ -24,6 +26,10 @@ export function CampaignCopyEditor({
 
   return (
     <form action={formAction} className="flex flex-col gap-4">
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="hook">Hook</Label>
+        <Input id="hook" name="hook" defaultValue={hook ?? ""} maxLength={200} />
+      </div>
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="headline">Headline</Label>
         <Input id="headline" name="headline" defaultValue={headline} maxLength={120} />

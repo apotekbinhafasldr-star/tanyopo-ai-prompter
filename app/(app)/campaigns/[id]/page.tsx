@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Trash2, Lightbulb, ArrowLeft } from "lucide-react";
+import { Trash2, Lightbulb, ArrowLeft, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -443,6 +443,28 @@ export default async function CampaignDetailPage({
               {isDraft ? <RegenerateProposalButton campaignId={id} /> : null}
             </CardHeader>
             <CardContent className="flex flex-col gap-4 pt-4">
+              {/* customer_pain/desired_outcome/value_proposition only exist on
+                  proposals generated after Batch B1 — guarded so a campaign
+                  generated under the old schema (e.g. an already-Terjadwal
+                  test campaign) still renders cleanly without these. */}
+              {proposal.customer_pain ? (
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground">Masalah Pelanggan</p>
+                  <p className="text-sm text-foreground">{proposal.customer_pain}</p>
+                </div>
+              ) : null}
+              {proposal.desired_outcome ? (
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground">Hasil yang Diinginkan</p>
+                  <p className="text-sm text-foreground">{proposal.desired_outcome}</p>
+                </div>
+              ) : null}
+              {proposal.value_proposition ? (
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground">Kenapa Produk Ini Relevan</p>
+                  <p className="text-sm text-foreground">{proposal.value_proposition}</p>
+                </div>
+              ) : null}
               <div>
                 <p className="text-xs font-medium text-muted-foreground">Positioning</p>
                 <p className="text-sm text-foreground">{proposal.positioning}</p>
@@ -462,6 +484,62 @@ export default async function CampaignDetailPage({
             </CardContent>
           </Card>
 
+          {Array.isArray(proposal.candidates) && proposal.candidates.length > 0 ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>Rekomendasi LINOE</CardTitle>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-4 pt-4">
+                <div className="rounded-[var(--radius-md)] border border-brand/30 bg-brand-muted/40 p-4">
+                  <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-brand">
+                    <Star className="size-3.5 fill-current" aria-hidden />
+                    Pilihan Utama
+                  </p>
+                  <div className="flex flex-col gap-2 text-sm">
+                    <p>
+                      <strong>Hook:</strong> {proposal.candidates[0].hook}
+                    </p>
+                    <p>
+                      <strong>Headline:</strong> {proposal.candidates[0].headline}
+                    </p>
+                    <p>
+                      <strong>CTA:</strong> {proposal.candidates[0].cta}
+                    </p>
+                  </div>
+                  {proposal.candidates[0].rationale ? (
+                    <p className="mt-2 text-xs text-muted-foreground">{proposal.candidates[0].rationale}</p>
+                  ) : null}
+                </div>
+
+                {proposal.candidates.length > 1 ? (
+                  <details>
+                    <summary className="min-h-11 cursor-pointer text-sm font-medium text-brand">
+                      Lihat Alternatif
+                    </summary>
+                    <div className="mt-3 flex flex-col gap-3">
+                      {proposal.candidates.slice(1).map((candidate, i) => (
+                        <div key={i} className="rounded-[var(--radius-md)] border border-border p-3 text-sm">
+                          <p>
+                            <strong>Hook:</strong> {candidate.hook}
+                          </p>
+                          <p>
+                            <strong>Headline:</strong> {candidate.headline}
+                          </p>
+                          <p>
+                            <strong>CTA:</strong> {candidate.cta}
+                          </p>
+                          {candidate.rationale ? (
+                            <p className="mt-1 text-xs text-muted-foreground">{candidate.rationale}</p>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                ) : null}
+              </CardContent>
+            </Card>
+          ) : null}
+
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0">
               <CardTitle>Konten Iklan</CardTitle>
@@ -473,12 +551,18 @@ export default async function CampaignDetailPage({
               {isDraft ? (
                 <CampaignCopyEditor
                   action={boundCopyAction}
+                  hook={proposal.hook}
                   headline={proposal.headline}
                   primaryText={proposal.primary_text}
                   cta={proposal.cta}
                 />
               ) : (
                 <div className="flex flex-col gap-3 text-sm">
+                  {proposal.hook ? (
+                    <p>
+                      <strong>Hook:</strong> {proposal.hook}
+                    </p>
+                  ) : null}
                   <p>
                     <strong>Headline:</strong> {proposal.headline}
                   </p>
