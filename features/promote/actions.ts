@@ -150,7 +150,13 @@ export async function generateQuickCampaignDraftAction(
     targetCity: formData.get("targetCity"),
     audienceNotes: formData.get("audienceNotes"),
     durationDays: formData.get("durationDays") || undefined,
-    startDate: formData.get("startDate"),
+    // Unlike the Advanced wizard, QuickPromoteWizard never renders a
+    // startDate field at all, so formData.get() returns null here, not
+    // undefined — z.optional() rejects null, which is exactly what was
+    // failing every Quick Promote submission with Zod's generic default
+    // message. `|| undefined` normalizes "not submitted" the same way
+    // every other optional field above already does.
+    startDate: formData.get("startDate") || undefined,
   });
 
   if (!parsed.success) {

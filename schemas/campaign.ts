@@ -44,16 +44,32 @@ export const quickPromoteSchema = z
     objective: z.enum(primaryGoals.map((g) => g.value) as [string, ...string[]], {
       message: "Pilih tujuan promosi",
     }),
-    dailyBudget: z.coerce.number().min(0).optional(),
-    totalBudget: z.coerce.number().min(0).optional(),
-    channels: z
-      .array(z.enum(channelOptions.map((c) => c.value) as [string, ...string[]]))
+    // Every remaining field below gets its own explicit Indonesian message
+    // (rather than relying on Zod's default text) so a real validation
+    // failure never surfaces a raw technical string like "Invalid input" —
+    // only genuinely-required fields above can still fail with a generic
+    // shape, and those already have clear messages too.
+    dailyBudget: z.coerce
+      .number({ message: "Budget harian harus berupa angka" })
+      .min(0, "Budget harian tidak boleh negatif")
       .optional(),
-    targetCountry: z.string().trim().max(100).optional().or(z.literal("")),
-    targetRegion: z.string().trim().max(100).optional().or(z.literal("")),
-    targetCity: z.string().trim().max(100).optional().or(z.literal("")),
-    audienceNotes: z.string().trim().max(1000).optional().or(z.literal("")),
-    durationDays: z.coerce.number().int().min(1).max(365).optional(),
+    totalBudget: z.coerce
+      .number({ message: "Budget total harus berupa angka" })
+      .min(0, "Budget total tidak boleh negatif")
+      .optional(),
+    channels: z
+      .array(z.enum(channelOptions.map((c) => c.value) as [string, ...string[]], { message: "Channel tidak dikenali" }))
+      .optional(),
+    targetCountry: z.string().trim().max(100, "Nama negara terlalu panjang").optional().or(z.literal("")),
+    targetRegion: z.string().trim().max(100, "Nama provinsi terlalu panjang").optional().or(z.literal("")),
+    targetCity: z.string().trim().max(100, "Nama kota terlalu panjang").optional().or(z.literal("")),
+    audienceNotes: z.string().trim().max(1000, "Catatan audiens maksimal 1000 karakter").optional().or(z.literal("")),
+    durationDays: z.coerce
+      .number({ message: "Durasi harus berupa angka" })
+      .int("Durasi harus bilangan bulat")
+      .min(1, "Durasi minimal 1 hari")
+      .max(365, "Durasi maksimal 365 hari")
+      .optional(),
     startDate: z.string().trim().optional().or(z.literal("")),
   })
   .refine((data) => (data.dailyBudget ?? 0) > 0 || (data.totalBudget ?? 0) > 0, {
