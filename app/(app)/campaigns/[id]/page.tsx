@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Trash2, Lightbulb } from "lucide-react";
+import { Trash2, Lightbulb, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -10,7 +10,7 @@ import { createClient } from "@/lib/supabase/server";
 import { formatCurrency, formatDate, channelLabel, campaignStatusLabel, campaignStatusVariant, goalLabel } from "@/lib/utils/format";
 import { RegenerateProposalButton } from "@/features/campaigns/regenerate-button";
 import { CampaignCopyEditor } from "@/features/campaigns/copy-editor";
-import { SubmitForApprovalButton } from "@/features/campaigns/submit-button";
+import { CampaignSubmitProvider, SubmitForApprovalButton } from "@/features/campaigns/submit-button";
 import { ApprovalDecideButtons } from "@/features/approvals/decide-buttons";
 import { updateCampaignCopyAction, deleteCampaignAction, cancelSubmissionAction } from "@/features/campaigns/actions";
 import { LaunchChannelButton } from "@/features/campaigns/launch-button";
@@ -183,6 +183,7 @@ export default async function CampaignDetailPage({
         : "bg-info-muted text-info";
 
   return (
+    <CampaignSubmitProvider campaignId={id}>
     <div className="flex flex-1 flex-col gap-6 p-6 sm:p-8">
       {isFromQuickPromote && isDraft ? (
         <p className="text-xs font-medium text-muted-foreground">
@@ -204,7 +205,7 @@ export default async function CampaignDetailPage({
           ) : null}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {isDraft ? <SubmitForApprovalButton campaignId={id} /> : null}
+          {isDraft ? <SubmitForApprovalButton /> : null}
           {isAwaitingApproval && session.role === "owner" ? (
             <form action={cancelSubmissionAction}>
               <input type="hidden" name="campaignId" value={id} />
@@ -240,7 +241,32 @@ export default async function CampaignDetailPage({
         </Card>
       ) : null}
 
-      <Card>
+      {campaign.status === "SCHEDULED" ? (
+        <Card className="border-success/30 bg-success-muted/40">
+          <CardContent className="flex flex-col gap-3 p-5">
+            <div className="flex flex-col gap-1">
+              <p className="text-base font-semibold text-success">Campaign siap dijalankan ✓</p>
+              <p className="text-sm text-muted-foreground">Status: {campaignStatusLabel(campaign.status)}</p>
+            </div>
+            {/* Honest status only — connectors aren't configured yet, so this
+                never claims ads are already live/running. */}
+            <p className="text-sm text-foreground">
+              Campaign Anda sudah disetujui. LINOE akan dapat menjalankan promosi melalui channel terkait
+              setelah koneksi channel tersedia.
+            </p>
+            <div className="flex flex-wrap items-center gap-3">
+              <Button asChild size="lg" className="w-full sm:w-auto">
+                <Link href="#ringkasan-target-budget">Lihat Ringkasan Campaign</Link>
+              </Button>
+              <Button asChild variant="outline" size="lg" className="w-full sm:w-auto">
+                <Link href={`/content?campaign=${id}`}>Buat Konten</Link>
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      <Card id="ringkasan-target-budget">
         <CardHeader>
           <CardTitle>Ringkasan Target &amp; Budget</CardTitle>
         </CardHeader>
@@ -482,6 +508,35 @@ export default async function CampaignDetailPage({
           </Card>
         </>
       )}
+
+      {isDraft ? (
+        <Card className="border-brand/30 bg-brand-muted/40">
+          <CardContent className="flex flex-col gap-4 p-5 sm:p-6">
+            <div className="flex flex-col gap-1">
+              <p className="text-base font-semibold text-brand">Semua sudah siap 🚀</p>
+              <p className="text-sm text-foreground">
+                Periksa hasil strategi LINOE di atas. Jika sudah sesuai, setujui untuk menyiapkan campaign
+                Anda.
+              </p>
+            </div>
+            {/* flex-col-reverse: primary CTA (last in DOM) renders on top,
+                full-width, on mobile — same pattern as Quick Promote's own
+                bottom action bar (features/promote/quick-promote-wizard.tsx)
+                — since Button text can't wrap, side-by-side on a narrow
+                screen would force the row wider than the viewport. */}
+            <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <Button asChild variant="ghost" size="lg" className="w-full sm:w-auto">
+                <Link href={product ? `/promote?product=${product.id}` : "/promote"}>
+                  <ArrowLeft />
+                  Kembali ke Tujuan &amp; Budget
+                </Link>
+              </Button>
+              <SubmitForApprovalButton fullWidth />
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
     </div>
+    </CampaignSubmitProvider>
   );
 }
