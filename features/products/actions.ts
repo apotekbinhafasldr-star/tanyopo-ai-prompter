@@ -4,7 +4,9 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { requireSessionContext } from "@/services/session";
-import { productSchema, ALLOWED_PRODUCT_MEDIA_TYPES, MAX_PRODUCT_MEDIA_BYTES } from "@/schemas/products";
+import { productSchema } from "@/schemas/products";
+import { isOwnProductMediaPath } from "@/lib/media/product-media-path";
+import type { MediaType } from "@/types/database";
 import { MarketingBlueprintSchema } from "@/schemas/ai/marketing-blueprint";
 import { buildSystemPreamble, buildMarketingBlueprintPrompt } from "@/lib/ai/prompts";
 import { runAiJob } from "@/services/ai-jobs";
@@ -125,25 +127,33 @@ export async function updateProductAction(
   redirect(`/products/${productId}`);
 }
 
-export async function uploadProductMediaAction(
+/**
+ * Batch B4 hotfix — root cause of the production crash this replaces:
+ * uploadProductMediaAction used to receive the raw file bytes as this
+ * Server Action's own FormData payload. Next.js caps a Server Action
+ * request body at 1MB by default (next.config.ts never overrode it),
+ * and any real product photo exceeds that — Next.js rejects the request
+ * before this action's code (and its own error handling) ever runs,
+ * which crashed the whole page instead of failing gracefully.
+ *
+ * The fix moves the actual upload to the browser
+ * (features/products/media-uploader.tsx uses the existing browser
+ * Supabase client, lib/supabase/client.ts, to upload straight to the
+ * `product-media` bucket — anon/publishable key only, gated by the same
+ * tenant-scoped storage.objects RLS policy every other write already
+ * relies on) and shrinks this action to recording the resulting path —
+ * a few bytes, never a file, so the body-size ceiling no longer matters.
+ */
+export async function recordProductMediaAction(
   productId: string,
-  formData: FormData,
+  storagePath: string,
+  mediaType: MediaType,
 ): Promise<ActionState> {
   const session = await requireSessionContext();
   const supabase = await createClient();
 
-  const files = formData.getAll("files").filter((f): f is File => f instanceof File && f.size > 0);
-  if (files.length === 0) {
-    return { error: "Pilih minimal satu file." };
-  }
-
-  for (const file of files) {
-    if (!ALLOWED_PRODUCT_MEDIA_TYPES.includes(file.type)) {
-      return { error: `Tipe file tidak didukung: ${file.type || file.name}` };
-    }
-    if (file.size > MAX_PRODUCT_MEDIA_BYTES) {
-      return { error: `File terlalu besar: ${file.name}` };
-    }
+  if (!isOwnProductMediaPath(storagePath, session.tenantId, productId)) {
+    return { error: "Media tidak valid untuk produk ini." };
   }
 
   const { data: existing } = await supabase
@@ -153,34 +163,18 @@ export async function uploadProductMediaAction(
     .order("position", { ascending: false })
     .limit(1);
 
-  let nextPosition = (existing?.[0]?.position ?? -1) + 1;
+  const nextPosition = (existing?.[0]?.position ?? -1) + 1;
 
-  for (const file of files) {
-    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-    const path = `${session.tenantId}/${productId}/${Date.now()}-${safeName}`;
+  const { error: insertError } = await supabase.from("prompter_product_media").insert({
+    tenant_id: session.tenantId,
+    product_id: productId,
+    storage_path: storagePath,
+    media_type: mediaType,
+    position: nextPosition,
+  });
 
-    const { error: uploadError } = await supabase.storage
-      .from("product-media")
-      .upload(path, file, { contentType: file.type, upsert: false });
-
-    if (uploadError) {
-      return { error: `Gagal mengunggah ${file.name}: ${uploadError.message}` };
-    }
-
-    const { error: insertError } = await supabase.from("prompter_product_media").insert({
-      tenant_id: session.tenantId,
-      product_id: productId,
-      storage_path: path,
-      media_type: file.type.startsWith("video") ? "VIDEO" : "IMAGE",
-      position: nextPosition,
-    });
-
-    if (insertError) {
-      await supabase.storage.from("product-media").remove([path]);
-      return { error: `Gagal menyimpan data media ${file.name}.` };
-    }
-
-    nextPosition += 1;
+  if (insertError) {
+    return { error: "Foto/video belum berhasil diunggah. Coba lagi." };
   }
 
   revalidatePath(`/products/${productId}`);
