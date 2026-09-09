@@ -128,6 +128,9 @@ export default async function ProductDetailPage({
           <CardTitle>Media</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4 pt-4">
+          <p className="text-sm text-muted-foreground">
+            Tambahkan foto atau video produk agar LINOE dapat menyiapkan materi promosi yang lebih relevan.
+          </p>
           <MediaUploader action={uploadProductMediaAction.bind(null, id)} />
 
           {media && media.length > 0 ? (
@@ -144,6 +147,9 @@ export default async function ProductDetailPage({
                   ) : (
                     <video src={publicStorageUrl("product-media", m.storage_path)} className="h-full w-full object-cover" />
                   )}
+                  <span className="absolute bottom-1 left-1 rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-medium text-white">
+                    {m.media_type === "IMAGE" ? "Foto" : "Video"}
+                  </span>
                   <form action={deleteProductMediaAction} className="absolute right-1 top-1">
                     <input type="hidden" name="mediaId" value={m.id} />
                     <input type="hidden" name="productId" value={id} />
@@ -151,9 +157,13 @@ export default async function ProductDetailPage({
                     <button
                       type="submit"
                       aria-label="Hapus media"
-                      className="flex size-6 items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition-opacity group-hover:opacity-100"
+                      // Visible by default (not hover-only) since hover has
+                      // no equivalent on a touchscreen — a mobile user would
+                      // otherwise have no way to reach this control at all.
+                      // Desktop keeps the calmer hover-to-reveal treatment.
+                      className="flex size-7 items-center justify-center rounded-full bg-black/60 text-white opacity-100 transition-opacity sm:size-6 sm:opacity-0 sm:group-hover:opacity-100"
                     >
-                      <XIcon className="size-3.5" aria-hidden />
+                      <XIcon className="size-4 sm:size-3.5" aria-hidden />
                     </button>
                   </form>
                 </div>

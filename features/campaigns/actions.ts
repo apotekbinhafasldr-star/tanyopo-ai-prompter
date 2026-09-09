@@ -167,6 +167,63 @@ export async function selectCampaignCandidateAction(
   return { error: null };
 }
 
+/**
+ * Batch B4 — Media Workflow. "Gunakan"/"Ganti" on the campaign's own
+ * Materi Promosi section (Review & Setujui step). Reuses
+ * prompter_product_media as-is — no campaign-media table, no new upload
+ * path — this only records which already-uploaded product media this
+ * campaign wants as its promotional creative. `mediaId` must belong to
+ * the same tenant AND the same product as the campaign, otherwise a user
+ * could point one campaign at another product's (or tenant's) media.
+ * Restricted to DRAFT, same rule every other campaign edit here follows.
+ */
+export async function selectCampaignMediaAction(
+  campaignId: string,
+  mediaId: string,
+): Promise<CampaignActionState> {
+  const session = await requireSessionContext();
+  const supabase = await createClient();
+
+  const { data: campaign, error: fetchError } = await supabase
+    .from("prompter_master_campaigns")
+    .select("status, product_id")
+    .eq("id", campaignId)
+    .eq("tenant_id", session.tenantId)
+    .single();
+
+  if (fetchError || !campaign) {
+    return { error: "Campaign tidak ditemukan." };
+  }
+
+  if (campaign.status !== "DRAFT") {
+    return { error: "Campaign yang sudah diajukan tidak bisa diedit." };
+  }
+
+  const { data: media, error: mediaError } = await supabase
+    .from("prompter_product_media")
+    .select("id")
+    .eq("id", mediaId)
+    .eq("tenant_id", session.tenantId)
+    .eq("product_id", campaign.product_id ?? "")
+    .maybeSingle();
+
+  if (mediaError || !media) {
+    return { error: "Media tidak ditemukan untuk produk ini." };
+  }
+
+  const { error: updateError } = await supabase
+    .from("prompter_master_campaigns")
+    .update({ selected_media_id: mediaId })
+    .eq("id", campaignId);
+
+  if (updateError) {
+    return { error: "Gagal menyimpan pilihan media." };
+  }
+
+  revalidatePath(`/campaigns/${campaignId}`);
+  return { error: null };
+}
+
 export async function updateCampaignCopyAction(
   campaignId: string,
   _prevState: CampaignActionState,

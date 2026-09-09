@@ -37,7 +37,7 @@ export function MediaUploader({
           accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime"
           className="min-w-0 flex-1 text-sm text-muted-foreground file:mr-3 file:rounded-[var(--radius-md)] file:border-0 file:bg-surface-muted file:px-3 file:py-2 file:text-sm file:font-medium file:text-foreground hover:file:bg-border disabled:opacity-60"
         />
-        <Button type="submit" size="sm" variant="secondary" loading={pending} className="shrink-0">
+        <Button type="submit" size="sm" variant="secondary" loading={pending} className="min-h-11 shrink-0">
           <Upload />
           {pending ? "Mengunggah..." : "Unggah"}
         </Button>

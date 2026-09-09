@@ -485,6 +485,7 @@ export interface Database {
           start_date: string | null;
           ai_proposal: Json | null;
           ai_job_id: string | null;
+          selected_media_id: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -504,6 +505,7 @@ export interface Database {
           audience_notes?: string | null;
           daily_budget?: number | null;
           total_budget?: number | null;
+          selected_media_id?: string | null;
           currency?: string;
           duration_days?: number | null;
           start_date?: string | null;

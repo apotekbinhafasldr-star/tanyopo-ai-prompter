@@ -1,12 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Trash2, Lightbulb, ArrowLeft, Star, Check } from "lucide-react";
+import { Trash2, Lightbulb, ArrowLeft, Star, Check, ImagePlus, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { requireSessionContext } from "@/services/session";
 import { createClient } from "@/lib/supabase/server";
+import { publicStorageUrl } from "@/lib/utils/storage-url";
 import {
   formatCurrency,
   formatDate,
@@ -21,6 +22,7 @@ import { CampaignCopyEditor } from "@/features/campaigns/copy-editor";
 import { CampaignSubmitProvider, SubmitForApprovalButton } from "@/features/campaigns/submit-button";
 import { ApprovalDecideButtons } from "@/features/approvals/decide-buttons";
 import { SelectCandidateButton } from "@/features/campaigns/select-candidate-button";
+import { SelectMediaButton } from "@/features/campaigns/select-media-button";
 import {
   updateCampaignCopyAction,
   deleteCampaignAction,
@@ -130,6 +132,7 @@ export default async function CampaignDetailPage({
     { data: optimizationRecommendation },
     { data: pendingApproval },
     { data: brandProfile },
+    { data: productMedia },
   ] = await Promise.all([
     campaign.product_id
       ? supabase.from("prompter_products").select("id, name").eq("id", campaign.product_id).single()
@@ -164,12 +167,27 @@ export default async function CampaignDetailPage({
           .maybeSingle()
       : Promise.resolve({ data: null }),
     supabase.from("prompter_brand_profiles").select("default_timezone").eq("tenant_id", session.tenantId).maybeSingle(),
+    // Batch B4 — Media Workflow: reuses the product's own media library
+    // (Phase 1) rather than a separate campaign-media upload path.
+    campaign.product_id
+      ? supabase
+          .from("prompter_product_media")
+          .select("id, storage_path, media_type")
+          .eq("product_id", campaign.product_id)
+          .order("position")
+      : Promise.resolve({ data: null }),
   ]);
 
   // Batch B3 — Smart Scheduling always reasons in the tenant's own
   // configured timezone, never a hardcoded one (falls back to Asia/Jakarta
   // only when a tenant hasn't set one yet, same default used in Content Studio).
   const timeZone = brandProfile?.default_timezone ?? "Asia/Jakarta";
+
+  // Batch B4 — an explicit selected_media_id wins; otherwise the product's
+  // first media is used automatically ("inherit otomatis" per the brief) —
+  // never forces the owner to pick one before they can continue.
+  const selectedMedia =
+    (productMedia ?? []).find((m) => m.id === campaign.selected_media_id) ?? productMedia?.[0] ?? null;
 
   const createAdEnabledPlatforms = new Set(
     (capabilities ?? []).filter((c) => c.enabled).map((c) => c.platform),
@@ -583,6 +601,117 @@ export default async function CampaignDetailPage({
                     </div>
                   </details>
                 ) : null}
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {/* Batch B4 — Media Workflow. Inherits the product's own media
+              library automatically (no re-upload inside Quick Promote);
+              stays fully optional — a product/campaign with zero media
+              still renders and can still be submitted. */}
+          {campaign.product_id ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>Materi Promosi</CardTitle>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-4 pt-4">
+                {selectedMedia ? (
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+                    <div className="aspect-square w-full max-w-[160px] shrink-0 overflow-hidden rounded-[var(--radius-md)] bg-surface-muted">
+                      {selectedMedia.media_type === "IMAGE" ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={publicStorageUrl("product-media", selectedMedia.storage_path)}
+                          alt=""
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <video
+                          src={publicStorageUrl("product-media", selectedMedia.storage_path)}
+                          className="h-full w-full object-cover"
+                        />
+                      )}
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      <p className="text-sm font-medium text-foreground">
+                        {selectedMedia.media_type === "IMAGE" ? "Foto produk Anda" : "Video produk Anda"}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Materi ini dipakai sebagai gambaran promosi campaign. Anda tetap bisa menggantinya
+                        kapan saja.
+                      </p>
+                      {isDraft ? (
+                        <Button asChild variant="ghost" size="sm" className="min-h-11 w-fit">
+                          <Link href={`/products/${campaign.product_id}#product-media`}>
+                            <ImagePlus className="size-3.5" aria-hidden />
+                            Tambah Media
+                          </Link>
+                        </Button>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    <p className="text-sm text-muted-foreground">
+                      Belum ada foto/video untuk produk ini. Campaign tetap bisa dilanjutkan tanpa media —
+                      Anda bisa menambahkannya kapan saja.
+                    </p>
+                    {isDraft ? (
+                      <Button asChild variant="outline" size="sm" className="min-h-11 w-fit">
+                        <Link href={`/products/${campaign.product_id}#product-media`}>
+                          <ImagePlus className="size-3.5" aria-hidden />
+                          Tambah Media
+                        </Link>
+                      </Button>
+                    ) : null}
+                  </div>
+                )}
+
+                {isDraft && productMedia && productMedia.length > 1 ? (
+                  <details>
+                    <summary className="min-h-11 cursor-pointer text-sm font-medium text-brand">
+                      Ganti Media
+                    </summary>
+                    <div className="mt-3 grid grid-cols-3 gap-3 sm:grid-cols-4">
+                      {productMedia
+                        .filter((m) => m.id !== selectedMedia?.id)
+                        .map((m) => (
+                          <div key={m.id} className="flex flex-col gap-1.5">
+                            <div className="aspect-square overflow-hidden rounded-[var(--radius-md)] bg-surface-muted">
+                              {m.media_type === "IMAGE" ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img
+                                  src={publicStorageUrl("product-media", m.storage_path)}
+                                  alt=""
+                                  className="h-full w-full object-cover"
+                                />
+                              ) : (
+                                <video
+                                  src={publicStorageUrl("product-media", m.storage_path)}
+                                  className="h-full w-full object-cover"
+                                />
+                              )}
+                            </div>
+                            <SelectMediaButton campaignId={id} mediaId={m.id} />
+                          </div>
+                        ))}
+                    </div>
+                  </details>
+                ) : null}
+
+                {/* Batch B4 Step 4 — same honest "Segera Hadir" treatment as
+                    the marketing landing page's AdPersonaBridge: no real
+                    AdPersona API exists in this codebase, so this stays
+                    inert rather than a fake working CTA. LINOE works fully
+                    standalone without it. */}
+                <div className="flex items-center gap-2 rounded-[var(--radius-md)] border border-dashed border-border p-3">
+                  <Sparkles className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                  <p className="text-xs text-muted-foreground">
+                    Butuh creative yang lebih advance (video AI, AI presenter)?{" "}
+                    <span className="font-medium text-foreground">Tanyopo AdPersona</span> — segera hadir.
+                    LINOE tetap berjalan penuh dengan materi yang Anda unggah sendiri.
+                  </p>
+                </div>
               </CardContent>
             </Card>
           ) : null}
