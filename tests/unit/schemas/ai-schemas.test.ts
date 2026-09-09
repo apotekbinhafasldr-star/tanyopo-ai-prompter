@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { MarketingBlueprintSchema } from "@/schemas/ai/marketing-blueprint";
+import { GrowthRecommendationSchema } from "@/schemas/ai/growth-recommendation";
 import {
   CampaignProposalSchema,
   withPrimaryCandidate,
@@ -213,6 +214,35 @@ describe("ContentGenerationSchema", () => {
     const withoutVideoScript: Partial<typeof valid> = { ...valid };
     delete withoutVideoScript.video_script;
     const result = ContentGenerationSchema.safeParse(withoutVideoScript);
+    expect(result.success).toBe(false);
+  });
+});
+
+describe("GrowthRecommendationSchema", () => {
+  const valid = {
+    summary: "Anda sudah punya 1 produk tapi belum ada campaign — mulai promosikan produk ini untuk menjangkau pelanggan baru.",
+    next_actions: ["Promosikan produk yang sudah ada", "Hubungkan akun Instagram untuk sinkronisasi data otomatis"],
+  };
+
+  it("accepts a well-formed recommendation", () => {
+    expect(GrowthRecommendationSchema.safeParse(valid).success).toBe(true);
+  });
+
+  it("rejects an empty next_actions list", () => {
+    const result = GrowthRecommendationSchema.safeParse({ ...valid, next_actions: [] });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects more than 4 next_actions", () => {
+    const result = GrowthRecommendationSchema.safeParse({
+      ...valid,
+      next_actions: ["a", "b", "c", "d", "e"],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects a summary over 400 characters", () => {
+    const result = GrowthRecommendationSchema.safeParse({ ...valid, summary: "A".repeat(401) });
     expect(result.success).toBe(false);
   });
 });

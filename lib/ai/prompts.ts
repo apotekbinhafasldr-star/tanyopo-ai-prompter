@@ -370,3 +370,51 @@ export function buildContentPrompt(product: Product, inputs: ContentGenerationIn
     .filter(Boolean)
     .join("\n\n");
 }
+
+export interface GrowthRecommendationInputs {
+  productCount: number;
+  productNames: string[];
+  campaignCount: number;
+  campaignStatuses: string[];
+  contentCount: number;
+  connectedPlatforms: string[];
+  unconnectedPlatforms: string[];
+  growthGoals: { platform: string; targetFollowers: number; targetDate: string | null }[];
+  followerSnapshots: { platform: string; followerCount: number; recordedAt: string }[];
+}
+
+/**
+ * Batch B6 — answers the owner's own question, "apa yang sebaiknya saya
+ * lakukan berikutnya?", from whatever real context this tenant actually
+ * has. The caller (features/growth/actions.ts) never invokes this at all
+ * when the tenant has literally no products/campaigns/content/growth data
+ * — this prompt's own "jangan mengarang" instruction is the second layer
+ * of protection for whenever there IS some context, just not much.
+ */
+export function buildGrowthRecommendationPrompt(inputs: GrowthRecommendationInputs): string {
+  return [
+    "Owner UMKM ini bertanya ke LINOE: 'Apa yang sebaiknya saya lakukan berikutnya untuk pertumbuhan bisnis saya?' Jawab langsung dan actionable.",
+    `Jumlah produk terdaftar: ${inputs.productCount}${inputs.productNames.length > 0 ? ` (${inputs.productNames.join(", ")})` : ""}`,
+    `Jumlah campaign: ${inputs.campaignCount}${inputs.campaignStatuses.length > 0 ? ` (status: ${inputs.campaignStatuses.join(", ")})` : ""}`,
+    `Jumlah konten yang sudah dibuat: ${inputs.contentCount}`,
+    inputs.connectedPlatforms.length > 0
+      ? `Channel yang sudah terhubung: ${inputs.connectedPlatforms.join(", ")}`
+      : "Belum ada channel yang terhubung.",
+    inputs.unconnectedPlatforms.length > 0 ? `Channel yang belum terhubung: ${inputs.unconnectedPlatforms.join(", ")}` : null,
+    inputs.growthGoals.length > 0
+      ? `Target follower yang sudah diatur:\n${inputs.growthGoals.map((g) => `- ${g.platform}: target ${g.targetFollowers}${g.targetDate ? ` pada ${g.targetDate}` : ""}`).join("\n")}`
+      : "Belum ada target follower yang diatur.",
+    inputs.followerSnapshots.length > 0
+      ? `Data follower terakhir tercatat:\n${inputs.followerSnapshots.map((s) => `- ${s.platform}: ${s.followerCount} follower (dicatat ${s.recordedAt})`).join("\n")}`
+      : "Belum ada data follower yang dicatat.",
+    [
+      "PENTING:",
+      "- HANYA gunakan data yang benar-benar tercantum di atas. Jangan mengarang angka follower/engagement/reach, channel, atau tren yang tidak ada di data ini.",
+      "- Jika konteks di atas sangat terbatas, akui itu secara jujur di summary dan tetap berikan next_actions yang benar-benar bisa dilakukan sekarang di aplikasi ini (misalnya menghubungkan channel yang belum terhubung, membuat produk/campaign/konten pertama, atau mengatur target follower) — jangan menyerah dengan jawaban kosong, tapi juga jangan berpura-pura tahu lebih dari yang diberikan.",
+      "- next_actions harus konkret dan bisa langsung dikerjakan di LINOE — contoh arah: konsistensi jadwal konten, perbaikan profil/bio, channel yang relevan untuk dicoba, penggunaan konten yang sudah ada, menghubungkan channel yang belum terhubung, langkah pertumbuhan berikutnya yang paling masuk akal berdasarkan data di atas.",
+      "- Jangan pernah mengklaim channel sudah terhubung/tersinkronisasi otomatis jika datanya menyebutkan belum terhubung.",
+    ].join("\n"),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
