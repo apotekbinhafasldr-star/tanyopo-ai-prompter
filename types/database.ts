@@ -740,6 +740,7 @@ export interface Database {
           budget_percentage: number | null;
           external_campaign_id: string | null;
           error: string | null;
+          scheduled_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -752,6 +753,7 @@ export interface Database {
           budget_percentage?: number | null;
           external_campaign_id?: string | null;
           error?: string | null;
+          scheduled_at?: string | null;
         };
         Update: Partial<
           Omit<

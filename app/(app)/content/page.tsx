@@ -9,6 +9,7 @@ import { createClient } from "@/lib/supabase/server";
 import { formatDate, formatScheduleLabel, channelLabel } from "@/lib/utils/format";
 import { ContentGeneratorForm } from "@/features/content/content-generator-form";
 import { ScheduleForm, type ScheduleRecommendation } from "@/features/content/schedule-form";
+import { scheduleContentAction } from "@/features/content/actions";
 import { recommendPublishTime, formatAsLocalDateTimeInput } from "@/lib/scheduling/recommend-time";
 import { contentPlatforms } from "@/schemas/content";
 import type { ContentGeneration } from "@/schemas/ai/content-generation";
@@ -250,7 +251,7 @@ function ContentItemCard({
         {canEdit ? (
           <div className="border-t border-border pt-3">
             <ScheduleForm
-              contentItemId={item.id}
+              action={scheduleContentAction.bind(null, item.id)}
               scheduledAt={item.scheduled_at}
               scheduledLabel={item.scheduled_at ? formatScheduleLabel(item.scheduled_at, timeZone) : null}
               recommendation={recommendation}

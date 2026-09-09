@@ -4,9 +4,12 @@ import { useActionState, useState } from "react";
 import { CalendarDays, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { scheduleContentAction, type ContentActionState } from "@/features/content/actions";
 
-const initialState: ContentActionState = { error: null };
+interface ScheduleActionState {
+  error: string | null;
+}
+
+const initialState: ScheduleActionState = { error: null };
 
 export interface ScheduleRecommendation {
   /** Already formatted for a datetime-local input's value, in the tenant's own timezone. */
@@ -21,22 +24,29 @@ export interface ScheduleRecommendation {
  * (computed server-side, tenant-timezone-aware) with a one-tap "Gunakan
  * Rekomendasi LINOE", and keeps manual date+time entry available behind
  * "Ubah Jadwal" — both inline in this same card, no separate menu/page.
- * `recommendation` is null for a platform with no meaningful "best time"
- * concept (e.g. WEBSITE content); the manual option still works then.
+ * `recommendation` is null for a platform/channel with no meaningful "best
+ * time" concept (e.g. WEBSITE content or the SEO channel); the manual
+ * option still works then.
+ *
+ * `action` is the already-bound server action (e.g.
+ * `scheduleContentAction.bind(null, contentItemId)` for a content item, or
+ * `scheduleChannelCampaignAction.bind(null, channelCampaignId)` for a
+ * campaign's channel) — this component itself has no opinion on what kind
+ * of row it's scheduling, so the same UI serves both Content Studio and
+ * the campaign Review & Setujui step.
  */
 export function ScheduleForm({
-  contentItemId,
+  action,
   scheduledAt,
   scheduledLabel,
   recommendation,
 }: {
-  contentItemId: string;
+  action: (state: ScheduleActionState, formData: FormData) => Promise<ScheduleActionState>;
   scheduledAt: string | null;
   scheduledLabel: string | null;
   recommendation: ScheduleRecommendation | null;
 }) {
-  const boundAction = scheduleContentAction.bind(null, contentItemId);
-  const [state, formAction, pending] = useActionState(boundAction, initialState);
+  const [state, formAction, pending] = useActionState(action, initialState);
   const [manualOpen, setManualOpen] = useState(false);
 
   return (

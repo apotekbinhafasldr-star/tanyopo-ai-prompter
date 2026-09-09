@@ -7,19 +7,34 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { requireSessionContext } from "@/services/session";
 import { createClient } from "@/lib/supabase/server";
-import { formatCurrency, formatDate, channelLabel, campaignStatusLabel, campaignStatusVariant, goalLabel } from "@/lib/utils/format";
+import {
+  formatCurrency,
+  formatDate,
+  formatScheduleLabel,
+  channelLabel,
+  campaignStatusLabel,
+  campaignStatusVariant,
+  goalLabel,
+} from "@/lib/utils/format";
 import { RegenerateProposalButton } from "@/features/campaigns/regenerate-button";
 import { CampaignCopyEditor } from "@/features/campaigns/copy-editor";
 import { CampaignSubmitProvider, SubmitForApprovalButton } from "@/features/campaigns/submit-button";
 import { ApprovalDecideButtons } from "@/features/approvals/decide-buttons";
 import { SelectCandidateButton } from "@/features/campaigns/select-candidate-button";
-import { updateCampaignCopyAction, deleteCampaignAction, cancelSubmissionAction } from "@/features/campaigns/actions";
+import {
+  updateCampaignCopyAction,
+  deleteCampaignAction,
+  cancelSubmissionAction,
+  scheduleChannelCampaignAction,
+} from "@/features/campaigns/actions";
 import { LaunchChannelButton } from "@/features/campaigns/launch-button";
 import { SyncInsightsButton } from "@/features/campaigns/sync-insights-button";
 import { GenerateOptimizationButton } from "@/features/campaigns/generate-optimization-button";
 import { SubmitRecommendationButton } from "@/features/campaigns/submit-recommendation-button";
 import { CHANNEL_TO_CONNECTOR } from "@/lib/connectors/channel-map";
 import { getConnector } from "@/lib/connectors/get-connector";
+import { recommendPublishTime } from "@/lib/scheduling/recommend-time";
+import { ScheduleForm, type ScheduleRecommendation } from "@/features/content/schedule-form";
 import type { CampaignProposal } from "@/schemas/ai/campaign-proposal";
 import type { Channel, ConnectorPlatform, OptimizationActionType, RiskLevel } from "@/types/database";
 
@@ -114,13 +129,14 @@ export default async function CampaignDetailPage({
     { data: connectedAccounts },
     { data: optimizationRecommendation },
     { data: pendingApproval },
+    { data: brandProfile },
   ] = await Promise.all([
     campaign.product_id
       ? supabase.from("prompter_products").select("id, name").eq("id", campaign.product_id).single()
       : Promise.resolve({ data: null }),
     supabase
       .from("prompter_channel_campaigns")
-      .select("id, channel, status, budget_percentage, external_campaign_id, error")
+      .select("id, channel, status, budget_percentage, external_campaign_id, error, scheduled_at")
       .eq("master_campaign_id", id)
       .order("channel"),
     supabase
@@ -147,7 +163,13 @@ export default async function CampaignDetailPage({
           .eq("status", "PENDING")
           .maybeSingle()
       : Promise.resolve({ data: null }),
+    supabase.from("prompter_brand_profiles").select("default_timezone").eq("tenant_id", session.tenantId).maybeSingle(),
   ]);
+
+  // Batch B3 — Smart Scheduling always reasons in the tenant's own
+  // configured timezone, never a hardcoded one (falls back to Asia/Jakarta
+  // only when a tenant hasn't set one yet, same default used in Content Studio).
+  const timeZone = brandProfile?.default_timezone ?? "Asia/Jakarta";
 
   const createAdEnabledPlatforms = new Set(
     (capabilities ?? []).filter((c) => c.enabled).map((c) => c.platform),
@@ -673,6 +695,78 @@ export default async function CampaignDetailPage({
               ) : null}
             </CardContent>
           </Card>
+
+          {/* Batch B3 — Smart Scheduling, inline in the same Review & Setujui
+              step (no separate menu). Reuses channelCampaigns — the same
+              per-channel rows Breakdown per Channel and B2's selection
+              already operate on — so a channel gets its own recommended
+              time, never one slot forced on every channel. Editable only
+              while DRAFT, same rule as Konten Iklan above; once submitted,
+              a read-only summary keeps whatever the Owner already reviewed
+              visible instead of disappearing. */}
+          {isDraft && channelCampaigns && channelCampaigns.length > 0 ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>Rekomendasi Jadwal LINOE</CardTitle>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-4 pt-4">
+                <p className="text-xs text-muted-foreground">
+                  Waktu ini direkomendasikan berdasarkan target audience, channel, tujuan campaign, dan
+                  timezone bisnis Anda ({timeZone}). Anda tetap bisa menerima atau mengubahnya.
+                </p>
+                <div className="flex flex-col divide-y divide-border rounded-[var(--radius-lg)] border border-border">
+                  {channelCampaigns.map((cc) => {
+                    const slot = recommendPublishTime(cc.channel, timeZone);
+                    const recommendation: ScheduleRecommendation | null = slot
+                      ? {
+                          localInputValue: slot.localInputValue,
+                          label: formatScheduleLabel(slot.utcIso, timeZone),
+                          reason: slot.reason,
+                        }
+                      : null;
+
+                    return (
+                      <div key={cc.id} className="flex flex-col gap-2 p-3">
+                        <span className="text-sm font-medium text-foreground">{channelLabel(cc.channel)}</span>
+                        {!recommendation ? (
+                          <p className="text-xs text-muted-foreground">
+                            Channel ini tidak punya pola jam publikasi khusus — jadwalkan kapan saja sesuai
+                            kebutuhan Anda.
+                          </p>
+                        ) : null}
+                        <ScheduleForm
+                          action={scheduleChannelCampaignAction.bind(null, cc.id)}
+                          scheduledAt={cc.scheduled_at}
+                          scheduledLabel={cc.scheduled_at ? formatScheduleLabel(cc.scheduled_at, timeZone) : null}
+                          recommendation={recommendation}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Campaign siap dijadwalkan. Peluncuran ke channel akan tersedia setelah koneksi channel
+                  aktif.
+                </p>
+              </CardContent>
+            </Card>
+          ) : channelCampaigns?.some((cc) => cc.scheduled_at) ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>Jadwal Channel</CardTitle>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-2 pt-4">
+                {channelCampaigns
+                  .filter((cc) => !!cc.scheduled_at)
+                  .map((cc) => (
+                    <p key={cc.id} className="text-sm text-foreground">
+                      <span className="font-medium">{channelLabel(cc.channel)}</span> —{" "}
+                      {formatScheduleLabel(cc.scheduled_at, timeZone)}
+                    </p>
+                  ))}
+              </CardContent>
+            </Card>
+          ) : null}
         </>
       )}
 

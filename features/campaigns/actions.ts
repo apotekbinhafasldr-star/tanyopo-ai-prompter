@@ -16,6 +16,7 @@ import { runAiJob } from "@/services/ai-jobs";
 import { syncChannelCampaigns, setChannelCampaignsStatus } from "@/services/channel-campaigns";
 import { getTenantChannelPerformance } from "@/services/channel-performance";
 import { getOrCreateBudgetPolicy, getMonthToDateSpend, checkBudgetGuard } from "@/services/budget-guard";
+import { parseLocalDateTimeInZone } from "@/lib/scheduling/recommend-time";
 import type { Json } from "@/types/database";
 
 export interface CampaignActionState {
@@ -214,6 +215,82 @@ export async function updateCampaignCopyAction(
   }
 
   revalidatePath(`/campaigns/${campaignId}`);
+  return { error: null };
+}
+
+/**
+ * Batch B3 — Smart Scheduling, on the Golden Path's own Review Campaign
+ * step (not a separate menu). Sets or clears a single channel's schedule
+ * on the same `prompter_channel_campaigns` row B2 already uses for
+ * per-channel selection/budget — no parallel table. Restricted to DRAFT
+ * campaigns, same as `updateCampaignCopyAction`: once submitted for
+ * approval, the reviewed schedule shouldn't shift under the Owner mid-review.
+ *
+ * `scheduledAt` is a naive `datetime-local` wall-clock string, interpreted
+ * as the tenant's own configured timezone
+ * (`prompter_brand_profiles.default_timezone`) before being converted to
+ * the real UTC instant stored — same rule `scheduleContentAction` follows
+ * for content items.
+ */
+export async function scheduleChannelCampaignAction(
+  channelCampaignId: string,
+  _prevState: CampaignActionState,
+  formData: FormData,
+): Promise<CampaignActionState> {
+  const scheduledAtRaw = formData.get("scheduledAt");
+  const localValue = typeof scheduledAtRaw === "string" ? scheduledAtRaw.trim() : "";
+
+  const session = await requireSessionContext();
+  const supabase = await createClient();
+
+  const { data: channelCampaign, error: fetchError } = await supabase
+    .from("prompter_channel_campaigns")
+    .select("id, master_campaign_id")
+    .eq("id", channelCampaignId)
+    .eq("tenant_id", session.tenantId)
+    .single();
+
+  if (fetchError || !channelCampaign) {
+    return { error: "Channel campaign tidak ditemukan." };
+  }
+
+  const { data: masterCampaign } = await supabase
+    .from("prompter_master_campaigns")
+    .select("status")
+    .eq("id", channelCampaign.master_campaign_id)
+    .eq("tenant_id", session.tenantId)
+    .single();
+
+  if (!masterCampaign || masterCampaign.status !== "DRAFT") {
+    return { error: "Campaign yang sudah diajukan tidak bisa diedit." };
+  }
+
+  let scheduledAt: string | null = null;
+  if (localValue) {
+    const { data: brandProfile } = await supabase
+      .from("prompter_brand_profiles")
+      .select("default_timezone")
+      .eq("tenant_id", session.tenantId)
+      .maybeSingle();
+    const timeZone = brandProfile?.default_timezone ?? "Asia/Jakarta";
+
+    const parsed = parseLocalDateTimeInZone(localValue, timeZone);
+    if (!parsed) {
+      return { error: "Format tanggal/jam tidak valid." };
+    }
+    scheduledAt = parsed.toISOString();
+  }
+
+  const { error: updateError } = await supabase
+    .from("prompter_channel_campaigns")
+    .update({ scheduled_at: scheduledAt })
+    .eq("id", channelCampaignId);
+
+  if (updateError) {
+    return { error: "Gagal menyimpan jadwal channel." };
+  }
+
+  revalidatePath(`/campaigns/${channelCampaign.master_campaign_id}`);
   return { error: null };
 }
 
