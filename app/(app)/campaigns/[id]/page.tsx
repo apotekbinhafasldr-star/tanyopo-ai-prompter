@@ -614,15 +614,63 @@ export default async function CampaignDetailPage({
 
           <Card>
             <CardHeader>
-              <CardTitle>Alokasi Budget</CardTitle>
+              <CardTitle>Rekomendasi Channel LINOE</CardTitle>
             </CardHeader>
-            <CardContent className="flex flex-col gap-2 pt-4">
-              {proposal.budget_allocation.map((b) => (
-                <div key={b.channel} className="flex items-center justify-between text-sm">
-                  <span className="text-foreground">{channelLabel(b.channel)}</span>
-                  <span className="font-medium text-foreground">{b.percentage}%</span>
+            <CardContent className="flex flex-col gap-3 pt-4">
+              <p className="text-xs text-muted-foreground">
+                LINOE memilih channel ini untuk campaign Anda berdasarkan produk, tujuan, audiens, dan
+                budget — bukan pembagian rata ke semua channel.
+              </p>
+              <div className="flex flex-col divide-y divide-border rounded-[var(--radius-lg)] border border-border">
+                {proposal.budget_allocation.map((b) => {
+                  const connectorPlatform = CHANNEL_TO_CONNECTOR[b.channel];
+                  const isConnected = connectorPlatform ? connectedPlatforms.has(connectorPlatform) : null;
+                  const basisAmount = campaign.daily_budget ?? campaign.total_budget;
+                  const basisLabel = campaign.daily_budget ? "/hari" : campaign.total_budget ? " total" : "";
+                  const estimate = basisAmount !== null ? (basisAmount * b.percentage) / 100 : null;
+
+                  return (
+                    <div key={b.channel} className="flex flex-col gap-1.5 p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium text-foreground">{channelLabel(b.channel)}</span>
+                          <Badge variant="brand">{b.percentage}%</Badge>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {estimate !== null ? (
+                            <span className="text-xs text-muted-foreground">
+                              ~{formatCurrency(estimate, campaign.currency)}
+                              {basisLabel}
+                            </span>
+                          ) : null}
+                          {/* Honest connector status — never implies a channel is
+                              ready to publish just because LINOE recommends it. */}
+                          {isConnected !== null ? (
+                            <Badge variant={isConnected ? "success" : "neutral"}>
+                              {isConnected ? "Terhubung" : "Belum terhubung"}
+                            </Badge>
+                          ) : null}
+                        </div>
+                      </div>
+                      {b.reason ? <p className="text-xs text-muted-foreground">{b.reason}</p> : null}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {proposal.excluded_channels && proposal.excluded_channels.length > 0 ? (
+                <div className="flex flex-col gap-1.5">
+                  <p className="text-xs font-medium text-muted-foreground">Tidak direkomendasikan untuk campaign ini</p>
+                  <div className="flex flex-col gap-1">
+                    {proposal.excluded_channels.map((ex) => (
+                      <p key={ex.channel} className="text-xs text-muted-foreground">
+                        <span className="font-medium text-foreground">{channelLabel(ex.channel)}</span>
+                        {ex.reason ? ` — ${ex.reason}` : ""}
+                      </p>
+                    ))}
+                  </div>
                 </div>
-              ))}
+              ) : null}
             </CardContent>
           </Card>
         </>

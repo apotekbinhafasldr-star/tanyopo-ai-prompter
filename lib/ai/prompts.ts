@@ -126,6 +126,14 @@ export function buildMarketingBlueprintPrompt(product: Product, homeMarket: stri
     .join("\n\n");
 }
 
+export interface ChannelPerformanceInput {
+  channel: string;
+  spend: number;
+  impressions: number;
+  clicks: number;
+  reach: number;
+}
+
 export interface CampaignProposalInputs {
   objective: string;
   channels: string[];
@@ -136,6 +144,8 @@ export interface CampaignProposalInputs {
   dailyBudget: number | null;
   totalBudget: number | null;
   currency: string;
+  /** Batch B2 — tenant's own historical channel performance, when any exists. Omitted/empty means no history yet. */
+  channelPerformanceHistory?: ChannelPerformanceInput[];
 }
 
 export function buildCampaignProposalPrompt(
@@ -154,6 +164,14 @@ export function buildCampaignProposalPrompt(
     inputs.dailyBudget || inputs.totalBudget
       ? `Budget: ${inputs.dailyBudget ? `harian ${inputs.dailyBudget} ${inputs.currency}` : ""} ${inputs.totalBudget ? `total ${inputs.totalBudget} ${inputs.currency}` : ""}`.trim()
       : null,
+    inputs.channelPerformanceHistory && inputs.channelPerformanceHistory.length > 0
+      ? [
+          "Data historis performa channel tenant ini (dari campaign-campaign sebelumnya — boleh dipakai sebagai sinyal TAMBAHAN, bukan satu-satunya faktor, dan jangan mengarang angka di luar yang tercantum ini):",
+          inputs.channelPerformanceHistory
+            .map((c) => `- ${c.channel}: spend ${c.spend}, impressions ${c.impressions}, klik ${c.clicks}, reach ${c.reach}`)
+            .join("\n"),
+        ].join("\n")
+      : "Belum ada data historis performa channel untuk tenant ini — dasarkan rekomendasi channel HANYA pada reasoning produk/tujuan/audiens/pasar/budget di bawah, jangan mengarang data performa yang tidak ada.",
     [
       "Langkah penalaran (isi field yang sesuai — jangan tampilkan proses berpikir mentah, hanya hasilnya):",
       "1. customer_pain — masalah/frustrasi nyata calon pelanggan, digali dari jenis produk/kategori/deskripsi di atas. Jangan generik.",
@@ -178,7 +196,15 @@ export function buildCampaignProposalPrompt(
       "- Jangan pernah membuat urgency/scarcity palsu (contoh yang DILARANG: 'stok tinggal 2', 'promo berakhir hari ini', 'ribuan orang sudah membeli') kecuali benar-benar didukung data yang diberikan sebagai konteks di atas — di sini tidak ada data seperti itu, jadi jangan gunakan.",
       "- Jangan pernah mengarang jumlah pelanggan, testimoni, penghargaan, sertifikasi, hasil yang dijamin, atau kapabilitas produk yang tidak disebutkan di atas.",
     ].join("\n"),
-    "Hasilkan juga recommended_channels (hanya dari channel yang dipilih) dan alokasi budget per channel (persentase, total 100).",
+    [
+      "Rekomendasi channel & alokasi budget (budget_allocation, excluded_channels) — WAJIB bernalar per channel, JANGAN membagi rata ke semua channel yang tersedia:",
+      "1. Untuk SETIAP channel di 'Channel yang dipilih' di atas, pertimbangkan: kesesuaian dengan jenis/kategori produk (fisik/digital/jasa/aplikasi), kecocokan dengan tujuan campaign, kecocokan dengan audiens (dari customer_pain/desired_outcome yang sudah diidentifikasi), kecocokan dengan target negara/pasar, kecocokan dengan marketing_angle yang dipilih, karakter konten channel tsb (visual/video pendek/teks/pencarian) dibanding produk ini, dan data historis performa channel di atas jika tersedia.",
+      "2. JANGAN memaksakan semua channel yang tersedia untuk mendapat alokasi budget. Channel yang relevansinya rendah untuk campaign spesifik ini masuk ke excluded_channels (dengan alasan singkat spesifik, bukan generik) — JANGAN dimasukkan ke budget_allocation dengan persentase kecil hanya supaya semua channel kebagian.",
+      "3. Jika budget (harian/total) yang diberikan kecil, JANGAN membaginya tipis ke banyak channel — fokuskan ke 2-3 channel yang paling kuat justifikasinya untuk campaign ini, bukan seluruh channel yang tersedia.",
+      "4. budget_allocation HANYA berisi channel yang benar-benar direkomendasikan (persentase > 0), masing-masing dengan reason singkat (maksimal 1 kalimat, bahasa sederhana, tanpa jargon) yang spesifik untuk campaign ini — bukan alasan generik yang bisa dipakai untuk produk apa saja. Total persentase budget_allocation harus tepat 100.",
+      "5. recommended_channels harus sama persis dengan daftar channel di budget_allocation.",
+      "6. Jangan pernah mengklaim atau menyiratkan bahwa channel yang direkomendasikan sudah terhubung/siap publikasi — ini murni rekomendasi strategi; status koneksi teknis ditangani terpisah oleh sistem dan ditampilkan apa adanya ke pengguna.",
+    ].join("\n"),
   ]
     .filter(Boolean)
     .join("\n\n");

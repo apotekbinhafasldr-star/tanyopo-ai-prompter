@@ -81,15 +81,37 @@ export const CampaignProposalSchema = z.object({
     .describe("Benefit-led body copy expanding on the top-ranked candidate: problem, consequence, solution, key benefit, reason to act"),
   cta: z.string().max(40).describe("Must equal candidates[0].cta"),
   creative_concept: z.string().describe("Brief description of the recommended visual/video concept"),
-  recommended_channels: z.array(channelEnum).min(1),
   budget_allocation: z
     .array(
       z.object({
         channel: channelEnum,
         percentage: z.number().min(0).max(100),
+        reason: z
+          .string()
+          .max(200)
+          .describe(
+            "One short, plain-language sentence on why this specific channel fits THIS campaign — grounded in product type/category, objective, audience, market, and marketing_angle. No jargon, never generic",
+          ),
       }),
     )
-    .min(1),
+    .min(1)
+    .describe(
+      "Only channels actually worth recommending (percentage > 0) — never every available channel just because it was offered. Percentages of the recommended channels must sum to exactly 100. When the budget is small, concentrate it on the 2-3 strongest-fit channels rather than spreading it thin across all of them",
+    ),
+  excluded_channels: z
+    .array(
+      z.object({
+        channel: channelEnum,
+        reason: z
+          .string()
+          .max(200)
+          .describe("One short, plain-language sentence on why this channel's contribution is judged lower for THIS campaign specifically — not generic"),
+      }),
+    )
+    .describe(
+      "Channels that were considered from the available list but not recommended (0% — do not also list them in budget_allocation). Empty array only if every available channel was genuinely worth recommending",
+    ),
+  recommended_channels: z.array(channelEnum).min(1).describe("Must equal the channels listed in budget_allocation"),
 });
 
 export type CampaignProposal = z.infer<typeof CampaignProposalSchema>;
@@ -134,4 +156,27 @@ export function selectCandidate(proposal: CampaignProposal, index: number): Camp
   const candidates = [...proposal.candidates];
   [candidates[0], candidates[index]] = [candidates[index], candidates[0]];
   return withPrimaryCandidate({ ...proposal, candidates });
+}
+
+/**
+ * Batch B2 — Smart Channel Selection. Deterministically drops any
+ * non-positive-percentage entry the model left in budget_allocation
+ * despite the prompt instruction to put those in excluded_channels
+ * instead, and derives recommended_channels from what's left — the same
+ * "never trust the model to keep two representations in sync on its own"
+ * pattern as withPrimaryCandidate(). Falls back to the proposal's own
+ * values when budget_allocation is empty after filtering (shouldn't
+ * happen given the schema's .min(1), but never leaves the campaign with
+ * zero channels).
+ */
+export function withRecommendedChannels(proposal: CampaignProposal): CampaignProposal {
+  const activeAllocation = proposal.budget_allocation.filter((b) => b.percentage > 0);
+  if (activeAllocation.length === 0) {
+    return proposal;
+  }
+  return {
+    ...proposal,
+    budget_allocation: activeAllocation,
+    recommended_channels: activeAllocation.map((b) => b.channel),
+  };
 }

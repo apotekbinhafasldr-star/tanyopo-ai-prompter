@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { MarketingBlueprintSchema } from "@/schemas/ai/marketing-blueprint";
-import { CampaignProposalSchema, withPrimaryCandidate, selectCandidate } from "@/schemas/ai/campaign-proposal";
+import {
+  CampaignProposalSchema,
+  withPrimaryCandidate,
+  selectCandidate,
+  withRecommendedChannels,
+} from "@/schemas/ai/campaign-proposal";
 import { ContentGenerationSchema } from "@/schemas/ai/content-generation";
 
 describe("MarketingBlueprintSchema", () => {
@@ -56,8 +61,11 @@ describe("CampaignProposalSchema", () => {
     primary_text: "Nikmati kopi single origin langsung dari petani lokal.",
     cta: "Belanja Sekarang",
     creative_concept: "Video proses roasting dengan nuansa hangat",
+    budget_allocation: [
+      { channel: "INSTAGRAM", percentage: 100, reason: "Cocok untuk konten visual kopi dan menjangkau audiens urban." },
+    ],
+    excluded_channels: [{ channel: "X", reason: "Kurang relevan untuk audiens pekerja urban yang dituju campaign ini." }],
     recommended_channels: ["INSTAGRAM"],
-    budget_allocation: [{ channel: "INSTAGRAM", percentage: 100 }],
   };
 
   it("accepts a well-formed proposal", () => {
@@ -132,6 +140,51 @@ describe("CampaignProposalSchema", () => {
       expect(selectCandidate(parsed, 0)).toEqual(parsed);
       expect(selectCandidate(parsed, 3)).toEqual(parsed);
       expect(selectCandidate(parsed, -1)).toEqual(parsed);
+    });
+  });
+
+  describe("Smart Channel Selection (Batch B2)", () => {
+    it("rejects a budget_allocation entry missing its reason", () => {
+      const result = CampaignProposalSchema.safeParse({
+        ...valid,
+        budget_allocation: [{ channel: "INSTAGRAM", percentage: 100 }],
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("withRecommendedChannels drops non-positive-percentage entries and derives recommended_channels from what's left", () => {
+      const parsed = CampaignProposalSchema.parse({
+        ...valid,
+        // The model left a 0% entry in budget_allocation instead of moving
+        // it to excluded_channels, and recommended_channels disagrees with
+        // budget_allocation — exactly the drift withRecommendedChannels()
+        // must correct for deterministically.
+        budget_allocation: [
+          { channel: "INSTAGRAM", percentage: 70, reason: "Cocok untuk audiens visual." },
+          { channel: "TIKTOK", percentage: 30, reason: "Cocok untuk video pendek." },
+          { channel: "X", percentage: 0, reason: "Seharusnya masuk excluded_channels, bukan di sini." },
+        ],
+        recommended_channels: ["FACEBOOK"],
+      });
+
+      const result = withRecommendedChannels(parsed);
+
+      expect(result.budget_allocation).toHaveLength(2);
+      expect(result.budget_allocation.map((b) => b.channel)).toEqual(["INSTAGRAM", "TIKTOK"]);
+      expect(result.recommended_channels).toEqual(["INSTAGRAM", "TIKTOK"]);
+    });
+
+    it("withRecommendedChannels falls back to the proposal unchanged if every entry is non-positive (never leaves zero channels)", () => {
+      const parsed = CampaignProposalSchema.parse({
+        ...valid,
+        budget_allocation: [{ channel: "INSTAGRAM", percentage: 0, reason: "Edge case." }],
+      });
+      expect(withRecommendedChannels(parsed)).toEqual(parsed);
+    });
+
+    it("accepts an empty excluded_channels array (every available channel was worth recommending)", () => {
+      const result = CampaignProposalSchema.safeParse({ ...valid, excluded_channels: [] });
+      expect(result.success).toBe(true);
     });
   });
 });

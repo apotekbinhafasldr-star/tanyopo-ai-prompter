@@ -4,10 +4,11 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { requireSessionContext } from "@/services/session";
 import { promoteWizardSchema, quickPromoteSchema, channelOptions } from "@/schemas/campaign";
-import { CampaignProposalSchema, withPrimaryCandidate } from "@/schemas/ai/campaign-proposal";
+import { CampaignProposalSchema, withPrimaryCandidate, withRecommendedChannels } from "@/schemas/ai/campaign-proposal";
 import { buildSystemPreamble, buildCampaignProposalPrompt } from "@/lib/ai/prompts";
 import { runAiJob } from "@/services/ai-jobs";
 import { syncChannelCampaigns } from "@/services/channel-campaigns";
+import { getTenantChannelPerformance } from "@/services/channel-performance";
 import type { Channel, PrimaryGoal } from "@/types/database";
 
 export interface PromoteActionState {
@@ -56,6 +57,8 @@ export async function generateCampaignDraftAction(
     .eq("tenant_id", session.tenantId)
     .maybeSingle();
 
+  const channelPerformanceHistory = await getTenantChannelPerformance(supabase, session.tenantId);
+
   const inputs = {
     objective: parsed.data.objective,
     channels: parsed.data.channels,
@@ -66,6 +69,7 @@ export async function generateCampaignDraftAction(
     dailyBudget: parsed.data.dailyBudget ?? null,
     totalBudget: parsed.data.totalBudget ?? null,
     currency: product.currency,
+    channelPerformanceHistory,
   };
 
   const result = await runAiJob({
@@ -82,6 +86,8 @@ export async function generateCampaignDraftAction(
   if (!result.ok) {
     return { error: result.error };
   }
+
+  const proposal = withRecommendedChannels(withPrimaryCandidate(result.data));
 
   const { data: campaign, error: campaignError } = await supabase
     .from("prompter_master_campaigns")
@@ -107,7 +113,7 @@ export async function generateCampaignDraftAction(
       currency: product.currency,
       duration_days: parsed.data.durationDays,
       start_date: parsed.data.startDate || null,
-      ai_proposal: withPrimaryCandidate(result.data),
+      ai_proposal: proposal,
       ai_job_id: result.jobId,
     })
     .select("id")
@@ -117,12 +123,18 @@ export async function generateCampaignDraftAction(
     return { error: "AI berhasil membuat proposal tapi gagal menyimpan campaign. Silakan coba lagi." };
   }
 
+  // Advanced Wizard: the campaign always runs on the channels the user
+  // explicitly picked (parsed.data.channels) — Smart Channel Selection
+  // here only affects how the AI splits budget/reasoning within that
+  // fixed set, never which channels the campaign targets. Quick Promote
+  // is where the AI's own channel choice actually determines the
+  // campaign's channel set (see generateQuickCampaignDraftAction below).
   await syncChannelCampaigns(
     supabase,
     session.tenantId,
     campaign.id,
     parsed.data.channels as Channel[],
-    result.data.budget_allocation,
+    proposal.budget_allocation,
   );
 
   redirect(`/campaigns/${campaign.id}`);
@@ -196,6 +208,8 @@ export async function generateQuickCampaignDraftAction(
       ? parsed.data.channels
       : channelOptions.map((c) => c.value);
 
+  const channelPerformanceHistory = await getTenantChannelPerformance(supabase, session.tenantId);
+
   const inputs = {
     objective: parsed.data.objective,
     channels: promptChannels,
@@ -206,6 +220,7 @@ export async function generateQuickCampaignDraftAction(
     dailyBudget: parsed.data.dailyBudget ?? null,
     totalBudget: parsed.data.totalBudget ?? null,
     currency: product.currency,
+    channelPerformanceHistory,
   };
 
   const result = await runAiJob({
@@ -223,7 +238,16 @@ export async function generateQuickCampaignDraftAction(
     return { error: result.error };
   }
 
-  const recommendedChannels = result.data.recommended_channels as Channel[];
+  // Smart Channel Selection (Batch B2): recommended_channels is derived
+  // deterministically from budget_allocation's own positive-percentage
+  // entries (withRecommendedChannels), not trusted as a separately
+  // model-authored array — the same "never let two representations of
+  // the same thing drift apart" pattern as withPrimaryCandidate(). Quick
+  // Promote is the one flow where this choice actually becomes the
+  // campaign's channel set (the Advanced Wizard always keeps the user's
+  // own picks — see generateCampaignDraftAction above).
+  const proposal = withRecommendedChannels(withPrimaryCandidate(result.data));
+  const recommendedChannels = proposal.recommended_channels as Channel[];
 
   const { data: campaign, error: campaignError } = await supabase
     .from("prompter_master_campaigns")
@@ -244,7 +268,7 @@ export async function generateQuickCampaignDraftAction(
       currency: product.currency,
       duration_days: parsed.data.durationDays,
       start_date: parsed.data.startDate || null,
-      ai_proposal: withPrimaryCandidate(result.data),
+      ai_proposal: proposal,
       ai_job_id: result.jobId,
     })
     .select("id")
@@ -254,7 +278,7 @@ export async function generateQuickCampaignDraftAction(
     return { error: "AI berhasil membuat proposal tapi gagal menyimpan campaign. Silakan coba lagi." };
   }
 
-  await syncChannelCampaigns(supabase, session.tenantId, campaign.id, recommendedChannels, result.data.budget_allocation);
+  await syncChannelCampaigns(supabase, session.tenantId, campaign.id, recommendedChannels, proposal.budget_allocation);
 
   redirect(`/campaigns/${campaign.id}?from=quick-promote`);
 }

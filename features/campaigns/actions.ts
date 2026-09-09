@@ -4,10 +4,17 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { requireSessionContext } from "@/services/session";
-import { CampaignProposalSchema, withPrimaryCandidate, selectCandidate, type CampaignProposal } from "@/schemas/ai/campaign-proposal";
+import {
+  CampaignProposalSchema,
+  withPrimaryCandidate,
+  withRecommendedChannels,
+  selectCandidate,
+  type CampaignProposal,
+} from "@/schemas/ai/campaign-proposal";
 import { buildSystemPreamble, buildCampaignProposalPrompt } from "@/lib/ai/prompts";
 import { runAiJob } from "@/services/ai-jobs";
 import { syncChannelCampaigns, setChannelCampaignsStatus } from "@/services/channel-campaigns";
+import { getTenantChannelPerformance } from "@/services/channel-performance";
 import { getOrCreateBudgetPolicy, getMonthToDateSpend, checkBudgetGuard } from "@/services/budget-guard";
 import type { Json } from "@/types/database";
 
@@ -51,6 +58,8 @@ export async function regenerateCampaignProposalAction(campaignId: string): Prom
     .eq("tenant_id", session.tenantId)
     .maybeSingle();
 
+  const channelPerformanceHistory = await getTenantChannelPerformance(supabase, session.tenantId);
+
   const inputs = {
     objective: campaign.objective,
     channels: campaign.channels,
@@ -61,6 +70,7 @@ export async function regenerateCampaignProposalAction(campaignId: string): Prom
     dailyBudget: campaign.daily_budget,
     totalBudget: campaign.total_budget,
     currency: campaign.currency,
+    channelPerformanceHistory,
   };
 
   const result = await runAiJob({
@@ -78,7 +88,7 @@ export async function regenerateCampaignProposalAction(campaignId: string): Prom
     return { error: result.error };
   }
 
-  const proposal = withPrimaryCandidate(result.data);
+  const proposal = withRecommendedChannels(withPrimaryCandidate(result.data));
 
   const { error: updateError } = await supabase
     .from("prompter_master_campaigns")
@@ -89,12 +99,16 @@ export async function regenerateCampaignProposalAction(campaignId: string): Prom
     return { error: "AI berhasil membuat proposal baru tapi gagal menyimpannya." };
   }
 
+  // Regenerate keeps the campaign's existing channel set (campaign.channels)
+  // — it refreshes copy/reasoning/budget-split within that set, same as
+  // before Batch B2. Only Quick Promote's own generation lets the AI's
+  // channel choice determine the campaign's channels.
   await syncChannelCampaigns(
     supabase,
     session.tenantId,
     campaignId,
     campaign.channels,
-    result.data.budget_allocation,
+    proposal.budget_allocation,
   );
 
   revalidatePath(`/campaigns/${campaignId}`);
