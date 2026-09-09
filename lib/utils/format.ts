@@ -33,6 +33,34 @@ export function formatDate(
   }).format(new Date(value));
 }
 
+/** Like formatDate, but includes time-of-day + zone abbreviation (Batch B3
+ * — Smart Scheduling needs to show WHEN, not just which day). `timeZone`
+ * should be the tenant's own configured zone (prompter_brand_profiles.
+ * default_timezone), never assumed. */
+export function formatScheduleLabel(
+  value: string | null | undefined,
+  timeZone: string,
+  locale: Locale = "id",
+) {
+  if (!value) return "—";
+  const date = new Date(value);
+  const intlLocale = toIntlLocale(locale);
+  const datePart = new Intl.DateTimeFormat(intlLocale, {
+    weekday: "long",
+    day: "numeric",
+    month: "short",
+    timeZone,
+  }).format(date);
+  const timePart = new Intl.DateTimeFormat(intlLocale, {
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+    timeZone,
+    timeZoneName: "short",
+  }).format(date);
+  return `${datePart} • ${timePart}`;
+}
+
 const PRODUCT_TYPE_LABEL: Record<string, string> = {
   PHYSICAL_PRODUCT: "Produk Fisik",
   SERVICE: "Jasa",

@@ -7,6 +7,7 @@ import { contentGeneratorSchema } from "@/schemas/content";
 import { ContentGenerationSchema } from "@/schemas/ai/content-generation";
 import { buildSystemPreamble, buildContentPrompt } from "@/lib/ai/prompts";
 import { runAiJob } from "@/services/ai-jobs";
+import { parseLocalDateTimeInZone } from "@/lib/scheduling/recommend-time";
 import type { ContentPlatform, ContentType, PrimaryGoal } from "@/types/database";
 
 export interface ContentActionState {
@@ -95,12 +96,20 @@ export async function generateContentAction(
 }
 
 /**
- * Sets or clears a content item's calendar date (Phase 5 content calendar).
- * A DRAFT item moving to a scheduled date becomes SCHEDULED; clearing the
- * date on a SCHEDULED item reverts it to DRAFT rather than leaving a
- * "scheduled with no date" state. APPROVED/PUBLISHED/FAILED items keep
- * their status as-is — scheduling is metadata about *when*, not a
- * re-approval.
+ * Sets or clears a content item's schedule (Phase 5 content calendar;
+ * upgraded for Batch B3 — Smart Scheduling to carry a real time-of-day,
+ * not just a date). A DRAFT item moving to a scheduled time becomes
+ * SCHEDULED; clearing it on a SCHEDULED item reverts to DRAFT rather than
+ * leaving a "scheduled with no date" state. APPROVED/PUBLISHED/FAILED
+ * items keep their status as-is — scheduling is metadata about *when*,
+ * not a re-approval.
+ *
+ * `scheduledAt` arrives as a naive `datetime-local` wall-clock string
+ * ("YYYY-MM-DDTHH:mm") — the browser has no idea what timezone that's
+ * meant to represent, so it's interpreted as the TENANT's own configured
+ * timezone (prompter_brand_profiles.default_timezone), never the
+ * server's or a hardcoded one, before being converted to the real UTC
+ * instant actually stored.
  */
 export async function scheduleContentAction(
   contentItemId: string,
@@ -108,7 +117,7 @@ export async function scheduleContentAction(
   formData: FormData,
 ): Promise<ContentActionState> {
   const scheduledAtRaw = formData.get("scheduledAt");
-  const scheduledAt = typeof scheduledAtRaw === "string" && scheduledAtRaw.trim() ? scheduledAtRaw : null;
+  const localValue = typeof scheduledAtRaw === "string" ? scheduledAtRaw.trim() : "";
 
   const session = await requireSessionContext();
   const supabase = await createClient();
@@ -122,6 +131,22 @@ export async function scheduleContentAction(
 
   if (itemError || !item) {
     return { error: "Konten tidak ditemukan." };
+  }
+
+  let scheduledAt: string | null = null;
+  if (localValue) {
+    const { data: brandProfile } = await supabase
+      .from("prompter_brand_profiles")
+      .select("default_timezone")
+      .eq("tenant_id", session.tenantId)
+      .maybeSingle();
+    const timeZone = brandProfile?.default_timezone ?? "Asia/Jakarta";
+
+    const parsed = parseLocalDateTimeInZone(localValue, timeZone);
+    if (!parsed) {
+      return { error: "Format tanggal/jam tidak valid." };
+    }
+    scheduledAt = parsed.toISOString();
   }
 
   let nextStatus = item.status;

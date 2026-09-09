@@ -6,9 +6,10 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Tabs } from "@/components/shared/tabs";
 import { requireSessionContext } from "@/services/session";
 import { createClient } from "@/lib/supabase/server";
-import { formatDate, channelLabel } from "@/lib/utils/format";
+import { formatDate, formatScheduleLabel, channelLabel } from "@/lib/utils/format";
 import { ContentGeneratorForm } from "@/features/content/content-generator-form";
-import { ScheduleForm } from "@/features/content/schedule-form";
+import { ScheduleForm, type ScheduleRecommendation } from "@/features/content/schedule-form";
+import { recommendPublishTime, formatAsLocalDateTimeInput } from "@/lib/scheduling/recommend-time";
 import { contentPlatforms } from "@/schemas/content";
 import type { ContentGeneration } from "@/schemas/ai/content-generation";
 import type { Database } from "@/types/database";
@@ -30,11 +31,18 @@ export default async function ContentPage({
   const supabase = await createClient();
   const canEdit = session.role === "owner" || session.role === "marketing";
 
-  const { data: products } = await supabase
-    .from("prompter_products")
-    .select("id, name")
-    .eq("tenant_id", session.tenantId)
-    .order("created_at", { ascending: false });
+  const [{ data: products }, { data: brandProfile }] = await Promise.all([
+    supabase
+      .from("prompter_products")
+      .select("id, name")
+      .eq("tenant_id", session.tenantId)
+      .order("created_at", { ascending: false }),
+    supabase.from("prompter_brand_profiles").select("default_timezone").eq("tenant_id", session.tenantId).maybeSingle(),
+  ]);
+  // Batch B3 — Smart Scheduling always reasons in the tenant's own
+  // configured timezone, never a hardcoded one (falls back to Asia/Jakarta
+  // only when a tenant hasn't set one yet, same default used elsewhere).
+  const timeZone = brandProfile?.default_timezone ?? "Asia/Jakarta";
 
   // Content Context Inheritance: opened from a campaign (Quick Promote's
   // "Buat Konten" link), so the product/platform/objective LINOE already
@@ -83,6 +91,7 @@ export default async function ContentPage({
             item={item}
             productName={item.product_id ? productNameById.get(item.product_id) : undefined}
             canEdit={canEdit}
+            timeZone={timeZone}
           />
         ))
       )}
@@ -95,7 +104,10 @@ export default async function ContentPage({
 
   const itemsByDate = new Map<string, ContentItem[]>();
   for (const item of scheduledItems) {
-    const dateKey = item.scheduled_at.slice(0, 10);
+    // Group by the tenant's own calendar day, not the raw UTC date — a
+    // late-evening slot (e.g. 23:30 WIB) can fall on the next UTC day,
+    // which would otherwise show it under the wrong date here.
+    const dateKey = formatAsLocalDateTimeInput(new Date(item.scheduled_at), timeZone).slice(0, 10);
     const list = itemsByDate.get(dateKey) ?? [];
     list.push(item);
     itemsByDate.set(dateKey, list);
@@ -121,6 +133,7 @@ export default async function ContentPage({
                       {item.content_type} — {channelLabel(item.platform)}
                       {item.product_id ? ` · ${productNameById.get(item.product_id) ?? ""}` : ""}
                     </p>
+                    <p className="text-xs text-muted-foreground">{formatScheduleLabel(item.scheduled_at, timeZone)}</p>
                   </div>
                   <Badge variant="brand">{item.status}</Badge>
                 </div>
@@ -178,12 +191,23 @@ function ContentItemCard({
   item,
   productName,
   canEdit,
+  timeZone,
 }: {
   item: ContentItem;
   productName?: string;
   canEdit: boolean;
+  timeZone: string;
 }) {
   const body = item.body as unknown as ContentGeneration;
+
+  const publishSlot = recommendPublishTime(item.platform, timeZone);
+  const recommendation: ScheduleRecommendation | null = publishSlot
+    ? {
+        localInputValue: publishSlot.localInputValue,
+        label: formatScheduleLabel(publishSlot.utcIso, timeZone),
+        reason: publishSlot.reason,
+      }
+    : null;
 
   return (
     <details className="rounded-[var(--radius-lg)] border border-border bg-surface">
@@ -195,7 +219,7 @@ function ContentItemCard({
           </p>
           <p className="text-xs text-muted-foreground">
             {formatDate(item.created_at)}
-            {item.scheduled_at ? ` · Terjadwal ${formatDate(item.scheduled_at)}` : ""}
+            {item.scheduled_at ? ` · Terjadwal ${formatScheduleLabel(item.scheduled_at, timeZone)}` : ""}
           </p>
         </div>
         <Badge variant="neutral">{item.status}</Badge>
@@ -225,7 +249,12 @@ function ContentItemCard({
         ) : null}
         {canEdit ? (
           <div className="border-t border-border pt-3">
-            <ScheduleForm contentItemId={item.id} scheduledAt={item.scheduled_at} />
+            <ScheduleForm
+              contentItemId={item.id}
+              scheduledAt={item.scheduled_at}
+              scheduledLabel={item.scheduled_at ? formatScheduleLabel(item.scheduled_at, timeZone) : null}
+              recommendation={recommendation}
+            />
           </div>
         ) : null}
       </div>
