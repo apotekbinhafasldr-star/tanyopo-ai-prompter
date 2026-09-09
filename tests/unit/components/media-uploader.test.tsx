@@ -132,4 +132,40 @@ describe("MediaUploader", () => {
 
     expect(uploadMock).not.toHaveBeenCalled();
   });
+
+  it("rejects an unsupported file type client-side before ever calling Storage", async () => {
+    render(<MediaUploader productId="product-1" tenantId="tenant-1" />);
+
+    const input = screen.getByTestId("product-media-file-input") as HTMLInputElement;
+    selectFiles(input, [makeFile("dokumen.pdf", "application/pdf")]);
+    fireEvent.click(screen.getByRole("button", { name: /unggah/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent("Tipe file tidak didukung");
+    });
+
+    expect(uploadMock).not.toHaveBeenCalled();
+    expect(recordProductMediaActionMock).not.toHaveBeenCalled();
+  });
+
+  it("uploads each selected file to its own unique storage path, so retrying/multiple files never collide or silently overwrite", async () => {
+    uploadMock.mockResolvedValue({ error: null });
+    recordProductMediaActionMock.mockResolvedValue({ error: null });
+
+    render(<MediaUploader productId="product-1" tenantId="tenant-1" />);
+
+    const input = screen.getByTestId("product-media-file-input") as HTMLInputElement;
+    selectFiles(input, [makeFile("a.jpg", "image/jpeg"), makeFile("b.jpg", "image/jpeg")]);
+    fireEvent.click(screen.getByRole("button", { name: /unggah/i }));
+
+    await waitFor(() => {
+      expect(recordProductMediaActionMock).toHaveBeenCalledTimes(2);
+    });
+
+    const pathsUsed = recordProductMediaActionMock.mock.calls.map((call) => call[1]);
+    expect(new Set(pathsUsed).size).toBe(2);
+    for (const path of pathsUsed) {
+      expect(path).toMatch(/^tenant-1\/product-1\//);
+    }
+  });
 });
