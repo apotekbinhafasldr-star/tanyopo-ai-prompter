@@ -33,7 +33,10 @@ export const DiscoveryRecommendationsSchema = z.object({
     )
     .min(1)
     .max(8),
-  hashtags: z.array(z.string()).max(15).optional(),
+  hashtags: z
+    .array(z.string())
+    .max(15)
+    .describe("Hashtag relevan bila sesuai — array kosong jika tidak relevan untuk bisnis ini"),
   cta_recommendation: z
     .string()
     .describe("Saran CTA yang mengarahkan ke WhatsApp/kontak/link produk — bukan janji hasil penjualan"),

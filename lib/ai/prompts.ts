@@ -275,7 +275,7 @@ export function buildDiscoveryRecommendationsPrompt(inputs: DiscoveryRecommendat
     inputs.whatsappNumber
       ? `Kontak WhatsApp bisnis tersedia (${inputs.whatsappNumber}) — gunakan sebagai tujuan CTA, bukan sebagai target SEO/website.`
       : "Belum ada kontak WhatsApp yang diketahui — buat CTA generik ke \"kontak/pesan langsung\" tanpa mengarang nomor.",
-    "Hasilkan: kata kunci utama, kata kunci pendukung, saran optimasi nama/username profil, saran bio/deskripsi singkat, ide konten/caption (dengan alasan singkat kenapa relevan dicari target pelanggan), hashtag relevan bila sesuai, CTA menuju WhatsApp/kontak/link produk (bukan janji hasil), dan rekomendasi platform discovery (Instagram/Facebook/TikTok/marketplace — jangan sertakan WhatsApp di sini, WhatsApp adalah tujuan CTA bukan platform untuk ditemukan) beserta alasan sederhana berdasarkan jenis bisnis dan target audiens.",
+    "Hasilkan: kata kunci utama, kata kunci pendukung, saran optimasi nama/username profil, saran bio/deskripsi singkat, ide konten/caption (dengan alasan singkat kenapa relevan dicari target pelanggan), hashtag relevan bila sesuai (array kosong jika memang tidak relevan — jangan dilewatkan), CTA menuju WhatsApp/kontak/link produk (bukan janji hasil), dan rekomendasi platform discovery (Instagram/Facebook/TikTok/marketplace — jangan sertakan WhatsApp di sini, WhatsApp adalah tujuan CTA bukan platform untuk ditemukan) beserta alasan sederhana berdasarkan jenis bisnis dan target audiens.",
     "PENTING — jangan pernah menjanjikan ranking pencarian tertentu, jumlah follower tertentu, jumlah views tertentu, atau penjualan tertentu. Gunakan bahasa sederhana yang mudah dipahami pemilik UMKM, hindari istilah teknis SEO berlebihan.",
   ]
     .filter(Boolean)
