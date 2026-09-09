@@ -124,6 +124,7 @@ export type WebhookEventStatus = "RECEIVED" | "PROCESSED" | "FAILED" | "IGNORED"
 export type GrowthPlatform = "FACEBOOK" | "INSTAGRAM" | "TIKTOK" | "X";
 export type FollowerSnapshotSource = "manual";
 export type SeoProjectStatus = "ACTIVE" | "PAUSED";
+export type DiscoveryMode = "WEBSITE" | "NO_WEBSITE";
 
 /** A single suggested action inside an optimization recommendation — never executed on its own, only ever proposed. */
 export type OptimizationActionType = "INCREASE_BUDGET" | "DECREASE_BUDGET" | "PAUSE_CHANNEL" | "NO_ACTION";
@@ -205,6 +206,7 @@ export interface Database {
           billing_country: string | null;
           logo_url: string | null;
           website_url: string | null;
+          whatsapp_number: string | null;
           onboarding_completed: boolean;
           onboarding_step: number;
           created_at: string;
@@ -229,6 +231,7 @@ export interface Database {
           billing_country?: string | null;
           logo_url?: string | null;
           website_url?: string | null;
+          whatsapp_number?: string | null;
           onboarding_completed?: boolean;
           onboarding_step?: number;
         };
@@ -1139,22 +1142,26 @@ export interface Database {
         Row: {
           id: string;
           tenant_id: string;
-          website_url: string;
+          website_url: string | null;
           target_keywords: Json;
           status: SeoProjectStatus;
           country_code: string | null;
           language: string | null;
+          discovery_mode: DiscoveryMode;
+          product_id: string | null;
           created_at: string;
           updated_at: string;
         };
         Insert: {
           id?: string;
           tenant_id: string;
-          website_url: string;
+          website_url?: string | null;
           target_keywords?: Json;
           status?: SeoProjectStatus;
           country_code?: string | null;
           language?: string | null;
+          discovery_mode?: DiscoveryMode;
+          product_id?: string | null;
         };
         Update: Partial<
           Omit<Database["public"]["Tables"]["prompter_seo_projects"]["Insert"], "tenant_id">
@@ -1170,6 +1177,7 @@ export interface Database {
           target_keywords: Json;
           on_page_recommendations: Json;
           content_plan: Json;
+          discovery_recommendations: Json | null;
           ai_job_id: string | null;
           model: string | null;
           created_at: string;
@@ -1183,6 +1191,7 @@ export interface Database {
           target_keywords?: Json;
           on_page_recommendations?: Json;
           content_plan?: Json;
+          discovery_recommendations?: Json | null;
           ai_job_id?: string | null;
           model?: string | null;
         };

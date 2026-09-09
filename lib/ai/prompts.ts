@@ -234,6 +234,54 @@ export function buildSeoRecommendationsPrompt(inputs: SeoRecommendationsInputs):
     .join("\n\n");
 }
 
+/**
+ * Batch B5 — SEO & Discovery, NO_WEBSITE mode. For a tenant with no
+ * website (Instagram/Facebook/TikTok/WhatsApp/marketplace only), reasoned
+ * from business/product context rather than a URL. Context Inheritance:
+ * every field here is optional because whichever of product/campaign/
+ * brand-profile context the caller already has is passed straight
+ * through — nothing is asked twice.
+ */
+export interface DiscoveryRecommendationsInputs {
+  businessName?: string | null;
+  productName?: string | null;
+  productDescription?: string | null;
+  productCategory?: string | null;
+  targetCountries?: string[];
+  language?: string | null;
+  audienceNotes?: string | null;
+  campaignObjective?: string | null;
+  /** Channels a campaign (Batch B2) already recommended/selected, if opened from one — reused as a hint, never re-asked. */
+  existingChannels?: string[];
+  whatsappNumber?: string | null;
+}
+
+export function buildDiscoveryRecommendationsPrompt(inputs: DiscoveryRecommendationsInputs): string {
+  return [
+    "Bisnis ini TIDAK memiliki website — jangan menyarankan atau berasumsi ada website. Fokus membantu bisnis ini lebih mudah ditemukan lewat profil media sosial dan/atau marketplace.",
+    inputs.businessName ? `Nama bisnis: ${inputs.businessName}` : null,
+    inputs.productName
+      ? `Produk/layanan yang dipromosikan: ${inputs.productName}${inputs.productDescription ? ` — ${inputs.productDescription}` : ""}`
+      : null,
+    inputs.productCategory ? `Kategori: ${inputs.productCategory}` : null,
+    inputs.targetCountries && inputs.targetCountries.length > 0
+      ? `Target pasar geografis: ${inputs.targetCountries.join(", ")}${inputs.language ? ` (bahasa: ${inputs.language})` : ""}. Jangan berasumsi pasar Indonesia kecuali memang termasuk di sini.`
+      : "Target pasar geografis belum ditentukan — jangan berasumsi pasar Indonesia; dasarkan pada konteks yang tersedia saja.",
+    inputs.audienceNotes ? `Catatan target audiens: ${inputs.audienceNotes}` : null,
+    inputs.campaignObjective ? `Tujuan campaign terkait: ${inputs.campaignObjective}` : null,
+    inputs.existingChannels && inputs.existingChannels.length > 0
+      ? `Channel yang sudah dipilih/direkomendasikan untuk campaign ini sebelumnya: ${inputs.existingChannels.join(", ")} — boleh jadi pertimbangan, tapi tetap evaluasi ulang channel discovery yang paling relevan untuk bisnis ini.`
+      : null,
+    inputs.whatsappNumber
+      ? `Kontak WhatsApp bisnis tersedia (${inputs.whatsappNumber}) — gunakan sebagai tujuan CTA, bukan sebagai target SEO/website.`
+      : "Belum ada kontak WhatsApp yang diketahui — buat CTA generik ke \"kontak/pesan langsung\" tanpa mengarang nomor.",
+    "Hasilkan: kata kunci utama, kata kunci pendukung, saran optimasi nama/username profil, saran bio/deskripsi singkat, ide konten/caption (dengan alasan singkat kenapa relevan dicari target pelanggan), hashtag relevan bila sesuai, CTA menuju WhatsApp/kontak/link produk (bukan janji hasil), dan rekomendasi platform discovery (Instagram/Facebook/TikTok/marketplace — jangan sertakan WhatsApp di sini, WhatsApp adalah tujuan CTA bukan platform untuk ditemukan) beserta alasan sederhana berdasarkan jenis bisnis dan target audiens.",
+    "PENTING — jangan pernah menjanjikan ranking pencarian tertentu, jumlah follower tertentu, jumlah views tertentu, atau penjualan tertentu. Gunakan bahasa sederhana yang mudah dipahami pemilik UMKM, hindari istilah teknis SEO berlebihan.",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
 export interface AnalyticsInsightInputs {
   channelMetrics: { channel: string; spend: number; impressions: number; clicks: number; reach: number }[];
   conversions: { eventType: string; currency: string; value: number; count: number }[];

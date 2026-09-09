@@ -24,6 +24,7 @@ function makeBrandProfile(overrides: Partial<BrandProfile> = {}): BrandProfile {
     billing_country: null,
     logo_url: null,
     website_url: null,
+    whatsapp_number: null,
     onboarding_completed: true,
     onboarding_step: 8,
     created_at: new Date(0).toISOString(),

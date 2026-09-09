@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Sparkles, ImagePlus } from "lucide-react";
+import { Sparkles, ImagePlus, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 /**
@@ -48,6 +48,12 @@ export function NextStepsGuidance({
           <Link href="#product-media">
             <ImagePlus />
             Tambah Foto/Video
+          </Link>
+        </Button>
+        <Button asChild variant="outline" size="sm" className="min-h-11">
+          <Link href={`/seo?product=${productId}`}>
+            <Search />
+            SEO & Discovery
           </Link>
         </Button>
         <Link
