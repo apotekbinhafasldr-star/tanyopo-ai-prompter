@@ -166,6 +166,54 @@ body {
   animation: marketing-line-flow 3s linear infinite;
 }
 
+/* Tanyopo Intelligence V4 — animated network diagram. All additive: a
+   scale-in for the AI core on entry, an SVG dash-offset "data flow"
+   travelling-light effect on the connector paths, a slow sheen sweep on
+   each dark card's top edge, and a very slow ambient background drift.
+   Every animation here is transform/opacity/background-position only
+   (no layout thrash), and every one is disabled below under
+   prefers-reduced-motion, same as the rules above. */
+@keyframes marketing-core-in {
+  from { opacity: 0; transform: scale(0.86); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.tanyopo-core-reveal.is-visible {
+  animation: marketing-core-in 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes marketing-dash-flow {
+  to { stroke-dashoffset: -200; }
+}
+
+.tanyopo-connector-path {
+  stroke-dasharray: 6 10;
+  animation: marketing-dash-flow 3.5s linear infinite;
+}
+
+@keyframes marketing-card-sheen {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+
+.tanyopo-card-sheen {
+  background-size: 220% 100%;
+  animation: marketing-card-sheen 9s linear infinite;
+}
+
+@keyframes marketing-ambient-drift {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(2%, -3%) scale(1.04); }
+}
+
+.tanyopo-ambient-drift {
+  animation: marketing-ambient-drift 22s ease-in-out infinite;
+}
+
+.tanyopo-ambient-drift-reverse {
+  animation: marketing-ambient-drift 26s ease-in-out infinite reverse;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .marketing-float {
     animation: none;
@@ -178,6 +226,21 @@ body {
   }
   .marketing-glow-pulse,
   .marketing-line-flow {
+    animation: none;
+  }
+  .tanyopo-core-reveal.is-visible {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+  .tanyopo-connector-path {
+    animation: none;
+  }
+  .tanyopo-card-sheen {
+    animation: none;
+  }
+  .tanyopo-ambient-drift,
+  .tanyopo-ambient-drift-reverse {
     animation: none;
   }
 }
