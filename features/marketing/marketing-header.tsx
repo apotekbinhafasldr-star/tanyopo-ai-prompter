@@ -100,7 +100,10 @@ export function MarketingHeader() {
     >
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
         <span onClick={() => setMenuOpen(false)}>
-          <LinoeLogo size="md" />
+          {/* Batch B10: Landing is frozen — explicitly pin the pre-B10
+              asset so this header's rendered logo doesn't change when the
+              shared component's default asset was updated for app UI. */}
+          <LinoeLogo size="md" variant="legacy" />
         </span>
 
         <nav

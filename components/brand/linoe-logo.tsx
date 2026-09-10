@@ -3,11 +3,23 @@ import Link from "next/link";
 import { cn } from "@/lib/utils/cn";
 import { brand } from "@/lib/brand";
 
-// Intrinsic dimensions of the founder-approved asset — used to keep Next/Image's
-// aspect ratio locked at every render size.
-const LOGO_SRC = "/brand/linoe/linoe-logo-vertical.png";
-const LOGO_WIDTH = 1024;
-const LOGO_HEIGHT = 1536;
+/**
+ * Batch B10 — official final logo installation. `official` (the new
+ * default) is the founder's final-approved asset
+ * (public/brand/linoe/linoe-logo-official.png — a byte-identical copy of
+ * the uploaded LINOE_LOGO_FINAL_APPROVED-1.png, not redrawn or
+ * reinterpreted). `legacy` is the prior approved asset
+ * (public/brand/linoe/linoe-logo-vertical.png), kept only so the frozen
+ * Landing page (features/marketing/marketing-header.tsx,
+ * app/(marketing)/layout.tsx footer) can keep rendering pixel-identical
+ * output — this batch is explicitly scoped to application UI only, not
+ * Hero/Landing. Each variant has its own real intrinsic dimensions so
+ * Next/Image's aspect ratio is never stretched to fit the other's shape.
+ */
+const LOGO_ASSETS = {
+  official: { src: "/brand/linoe/linoe-logo-official.png", width: 1269, height: 1536 },
+  legacy: { src: "/brand/linoe/linoe-logo-vertical.png", width: 1024, height: 1536 },
+} as const;
 
 const HEIGHT = { sm: 40, md: 48, lg: 72 } as const;
 
@@ -16,31 +28,21 @@ export interface LinoeLogoProps {
   /** Pass `null` to render a non-interactive mark (e.g. inside a page that's already a link, or a static footer/auth screen). */
   href?: string | null;
   className?: string;
+  /** `legacy` keeps the pre-B10 asset — only for the frozen Landing page. */
+  variant?: keyof typeof LOGO_ASSETS;
 }
 
-/**
- * LINOE brand mark — the founder's final, locked asset
- * (public/brand/linoe/linoe-logo-vertical.png): the flowing ribbon L,
- * left-side motion streaks, "LINOE" wordmark, and "by Tanyopo" byline are
- * all baked into one vertical composition on its own dark card. This is
- * the actual supplied PNG, not a redrawn or approximated recreation — it
- * must not be swapped for an SVG interpretation. For compact spots (e.g.
- * the header) it's scaled down by height only, aspect ratio locked, per
- * the founder's explicit instruction to scale the same asset rather than
- * redesign the mark for small spaces. Because the asset is a self-
- * contained dark card, it reads correctly on both light and dark page
- * backgrounds with no separate light/dark variant needed.
- */
-export function LinoeLogo({ size = "md", href = "/", className }: LinoeLogoProps) {
+export function LinoeLogo({ size = "md", href = "/", className, variant = "official" }: LinoeLogoProps) {
+  const asset = LOGO_ASSETS[variant];
   const height = HEIGHT[size];
-  const width = Math.round((LOGO_WIDTH / LOGO_HEIGHT) * height);
+  const width = Math.round((asset.width / asset.height) * height);
 
   const img = (
     <Image
-      src={LOGO_SRC}
+      src={asset.src}
       alt={`${brand.name} — ${brand.lockup}`}
-      width={LOGO_WIDTH}
-      height={LOGO_HEIGHT}
+      width={asset.width}
+      height={asset.height}
       style={{ height, width }}
       className={cn("shrink-0 rounded-[var(--radius-md)]", className)}
       priority
