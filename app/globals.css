@@ -144,6 +144,28 @@ body {
   animation: marketing-fade-up 0.6s ease-out forwards;
 }
 
+/* Tanyopo Intelligence section — a soft glow pulse behind the central "AI
+   brain" node, and a slow gradient drift on its connecting lines. Purely
+   decorative opacity/background-position changes (no layout thrash). */
+@keyframes marketing-glow-pulse {
+  0%, 100% { opacity: 0.55; transform: scale(1); }
+  50% { opacity: 0.85; transform: scale(1.06); }
+}
+
+@keyframes marketing-line-flow {
+  0% { background-position: 0% 0%; }
+  100% { background-position: 0% 200%; }
+}
+
+.marketing-glow-pulse {
+  animation: marketing-glow-pulse 4s ease-in-out infinite;
+}
+
+.marketing-line-flow {
+  background-size: 100% 200%;
+  animation: marketing-line-flow 3s linear infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .marketing-float {
     animation: none;
@@ -153,6 +175,10 @@ body {
     animation: none;
     opacity: 1;
     transform: none;
+  }
+  .marketing-glow-pulse,
+  .marketing-line-flow {
+    animation: none;
   }
 }
 

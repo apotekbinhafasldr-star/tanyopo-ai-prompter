@@ -4,7 +4,6 @@ import { Sparkles, ArrowRight, PlayCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { HeroVisual } from "@/features/marketing/components/hero-visual";
 import { HeroIntegratedNav } from "@/features/marketing/components/hero-integrated-nav";
-import { ProductVisual } from "@/features/marketing/components/product-visual";
 
 // Real CTA links kept for keyboard/screen-reader users on the desktop hero,
 // where the approved final asset already bakes the headline and CTAs into
@@ -52,12 +51,18 @@ const HERO_HOTSPOT_CLASS =
 
 export function Hero() {
   return (
-    <>
-      {/* The premium dark hero: headline, human presenter, and the
-          Tanyopo Intelligence dashboard overlay all live inside this one
-          navy/blue/violet composition — never a light page with a photo
-          bolted on. */}
-      <section id="produk" className="relative overflow-hidden bg-ink">
+    // The premium dark hero: headline, human presenter, and the
+    // Tanyopo Intelligence dashboard overlay all live inside this one
+    // navy/blue/violet composition — never a light page with a photo
+    // bolted on. The trailing "Bagaimana LINOE Bekerja" / Tanyopo
+    // Intelligence diagram that used to render directly after this
+    // section now lives in its own file,
+    // features/marketing/sections/tanyopo-intelligence.tsx, composed
+    // right after <Hero /> in app/(marketing)/page.tsx — same visual
+    // position as before, just following this codebase's normal
+    // one-section-per-file convention. This section itself is
+    // untouched.
+    <section id="produk" className="relative overflow-hidden bg-ink">
         <div
           aria-hidden
           className="pointer-events-none absolute inset-0"
@@ -212,15 +217,5 @@ export function Hero() {
           </a>
         </div>
       </section>
-
-      <div className="bg-background">
-        <div className="mx-auto max-w-6xl px-4 pb-16 pt-14 sm:px-6 sm:pb-24 sm:pt-16">
-          <p className="mb-6 text-center text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Bagaimana LINOE Bekerja
-          </p>
-          <ProductVisual />
-        </div>
-      </div>
-    </>
   );
 }
