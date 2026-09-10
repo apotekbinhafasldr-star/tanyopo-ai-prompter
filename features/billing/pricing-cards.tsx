@@ -35,6 +35,10 @@ interface TierVisual {
   subtext: string;
   price: string;
   actionBar: string;
+  /** Section divider inside the expanded "Lihat Detail" content — needs a
+   * separate light/dark value since Growth's card is a dark gradient
+   * while every other card is a light tint. */
+  divider: string;
   badge?: string;
 }
 
@@ -47,6 +51,7 @@ const TIER_VISUALS: Record<PlanTierId, TierVisual> = {
     subtext: "text-muted-foreground",
     price: "text-foreground",
     actionBar: "bg-sky-100 text-sky-700",
+    divider: "border-black/10",
   },
   STARTER: {
     icon: Store,
@@ -56,6 +61,7 @@ const TIER_VISUALS: Record<PlanTierId, TierVisual> = {
     subtext: "text-muted-foreground",
     price: "text-foreground",
     actionBar: "bg-blue-100 text-blue-700",
+    divider: "border-black/10",
   },
   GROWTH: {
     icon: TrendingUp,
@@ -66,6 +72,7 @@ const TIER_VISUALS: Record<PlanTierId, TierVisual> = {
     price: "text-white",
     actionBar: "bg-white/15 text-white",
     badge: "bg-amber-400 text-amber-950",
+    divider: "border-white/20",
   },
   PRO: {
     icon: Crown,
@@ -75,6 +82,7 @@ const TIER_VISUALS: Record<PlanTierId, TierVisual> = {
     subtext: "text-muted-foreground",
     price: "text-foreground",
     actionBar: "bg-orange-100 text-orange-700",
+    divider: "border-black/10",
   },
   BUSINESS: {
     icon: Building2,
@@ -84,6 +92,7 @@ const TIER_VISUALS: Record<PlanTierId, TierVisual> = {
     subtext: "text-muted-foreground",
     price: "text-foreground",
     actionBar: "bg-emerald-100 text-emerald-700",
+    divider: "border-black/10",
   },
   AGENCY: {
     icon: Users,
@@ -94,6 +103,7 @@ const TIER_VISUALS: Record<PlanTierId, TierVisual> = {
     price: "text-foreground",
     actionBar: "bg-violet-100 text-violet-700",
     badge: "bg-violet-600 text-white",
+    divider: "border-black/10",
   },
 };
 
@@ -165,31 +175,33 @@ function PricingCard({ tier, isCurrent, readOnly }: { tier: PlanTierConfig; isCu
               <span>{isComingSoon ? "Info Lebih Lanjut" : "Lihat Detail"}</span>
               <ChevronRight className="size-4 shrink-0 transition-transform group-open:rotate-90" aria-hidden />
             </summary>
-            <div className="pt-3">
-              <ul className={cn("flex flex-col gap-1.5 text-xs", visual.heading)}>
-                {tier.coreFeatures.map((feature) => (
-                  <li key={feature}>• {feature}</li>
-                ))}
-              </ul>
+            <div className="flex flex-col gap-3 pt-3">
+              <div>
+                <p className={cn("text-xs font-semibold uppercase tracking-wide", visual.subtext)}>Fitur Utama</p>
+                <ul className={cn("mt-1.5 flex flex-col gap-1.5 text-xs", visual.heading)}>
+                  {tier.coreFeatures.map((feature) => (
+                    <li key={feature}>• {feature}</li>
+                  ))}
+                </ul>
+              </div>
+
               {isComingSoon ? (
-                <p className={cn("mt-2 text-xs", visual.subtext)}>
+                <p className={cn("text-xs", visual.subtext)}>
                   Belum dapat dibeli — harga di atas adalah target, bukan tarif aktif.
                 </p>
               ) : (
-                <>
-                  <p className={cn("mt-2 text-xs", visual.subtext)}>Pembayaran online segera tersedia.</p>
-                  <div className="mt-3">
-                    <PlanSelectConfirm
-                      planId={tier.id}
-                      planName={tier.name}
-                      priceIDR={tier.priceIDR}
-                      pricePeriodLabel={tier.pricePeriodLabel}
-                      actionBarClassName={visual.actionBar}
-                      mutedTextClassName={visual.subtext}
-                      readOnly={readOnly}
-                    />
-                  </div>
-                </>
+                <div className={cn("flex flex-col gap-3 border-t pt-3", visual.divider)}>
+                  <p className={cn("text-xs", visual.subtext)}>Pembayaran online segera tersedia.</p>
+                  <PlanSelectConfirm
+                    planId={tier.id}
+                    planName={tier.name}
+                    priceIDR={tier.priceIDR}
+                    pricePeriodLabel={tier.pricePeriodLabel}
+                    actionBarClassName={visual.actionBar}
+                    mutedTextClassName={visual.subtext}
+                    readOnly={readOnly}
+                  />
+                </div>
               )}
             </div>
           </details>

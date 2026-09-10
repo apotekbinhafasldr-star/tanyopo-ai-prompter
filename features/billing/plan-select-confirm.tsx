@@ -62,12 +62,13 @@ export function PlanSelectConfirm({
   return (
     <div className="flex flex-col gap-2 rounded-[var(--radius-md)] bg-black/5 p-3">
       <p className={cn("text-sm font-semibold", mutedTextClassName)}>Anda memilih Paket {planName}</p>
-      <p className={cn("text-sm font-semibold", mutedTextClassName)}>
-        {formatCurrency(priceIDR)}
-        {pricePeriodLabel}
+      <p className={cn("flex flex-wrap items-baseline gap-x-1 text-sm font-semibold", mutedTextClassName)}>
+        <span>{formatCurrency(priceIDR)}</span>
+        <span>{pricePeriodLabel}</span>
       </p>
       <p className={cn("text-xs", mutedTextClassName)}>
-        Pembayaran online sedang dipersiapkan. Paket Anda belum berubah sampai proses berlangganan tersedia.
+        Pembayaran online sedang dipersiapkan. Paket aktif Anda belum berubah sampai pembayaran tersedia dan
+        berhasil diverifikasi.
       </p>
       <form action={formAction} className="flex flex-col gap-2">
         <input type="hidden" name="plan" value={planId} />
@@ -92,7 +93,7 @@ export function PlanSelectConfirm({
             onClick={() => setConfirming(false)}
             className={cn("min-h-11 px-2 text-xs font-medium underline-offset-2 hover:underline", mutedTextClassName)}
           >
-            Batal
+            Kembali
           </button>
         </div>
       </form>
