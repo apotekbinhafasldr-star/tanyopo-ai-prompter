@@ -128,6 +128,28 @@ describe("checkAiUsageEntitlement", () => {
     expect(result.reason).toMatch(/trial/i);
   });
 
+  it("never tells the user to 'pilih paket' to continue — changePlan() cannot actually restore access without a real payment processor (Batch B7)", () => {
+    const now = new Date("2026-02-01T00:00:00Z");
+    const sub = subscription({
+      status: "TRIALING",
+      current_period_start: new Date("2026-01-01T00:00:00Z").toISOString(),
+      current_period_end: new Date("2026-01-15T00:00:00Z").toISOString(),
+    });
+    const result = checkAiUsageEntitlement(sub, now);
+    expect(result.reason).not.toMatch(/pilih paket/i);
+  });
+
+  it("references TRIAL_DURATION_DAYS dynamically in the expired-trial message rather than a hardcoded literal (Batch B7)", () => {
+    const now = new Date("2026-02-01T00:00:00Z");
+    const sub = subscription({
+      status: "TRIALING",
+      current_period_start: new Date("2026-01-01T00:00:00Z").toISOString(),
+      current_period_end: new Date("2026-01-15T00:00:00Z").toISOString(),
+    });
+    const result = checkAiUsageEntitlement(sub, now);
+    expect(result.reason).toContain(String(TRIAL_DURATION_DAYS));
+  });
+
   it("allows AI usage once the tenant has moved to a real plan (changePlan sets status ACTIVE)", () => {
     const now = new Date("2026-02-01T00:00:00Z");
     const sub = subscription({
@@ -168,6 +190,20 @@ describe("checkTrialAiUsageCap", () => {
 
     expect(result.allowed).toBe(false);
     expect(result.reason).toMatch(/bulan/i);
+  });
+
+  it("never tells the user to 'pilih paket' to lift the daily/monthly cap — selecting a plan has no effect on entitlement (Batch B7)", async () => {
+    const dailyCapped = await checkTrialAiUsageCap(
+      mockSupabaseWithCounts([TRIAL_DAILY_AI_JOB_LIMIT, 5]),
+      subscription({ status: "TRIALING" }),
+    );
+    expect(dailyCapped.reason).not.toMatch(/pilih paket/i);
+
+    const monthlyCapped = await checkTrialAiUsageCap(
+      mockSupabaseWithCounts([1, TRIAL_MONTHLY_AI_JOB_LIMIT]),
+      subscription({ status: "TRIALING" }),
+    );
+    expect(monthlyCapped.reason).not.toMatch(/pilih paket/i);
   });
 
   it("never caps an ACTIVE subscription, and never even queries usage for one", async () => {

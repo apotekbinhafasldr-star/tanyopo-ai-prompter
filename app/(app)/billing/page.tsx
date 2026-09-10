@@ -11,6 +11,7 @@ import {
   getMonthlyAiJobCount,
   getVerifiedAttributedValueThisMonth,
   listInvoices,
+  TRIAL_DURATION_DAYS,
 } from "@/services/billing";
 import { getPaymentProvider } from "@/lib/billing/get-payment-provider";
 import { calculateSuccessFee } from "@/lib/billing/success-fee";
@@ -25,7 +26,17 @@ const INVOICE_STATUS_VARIANT: Record<string, "success" | "warning" | "danger" | 
   UNCOLLECTIBLE: "danger",
 };
 
-export const metadata: Metadata = { title: "Billing — LINOE" };
+// Batch B7 — customer-facing labels only. Never rename the underlying
+// DRAFT/OPEN/PAID/VOID/UNCOLLECTIBLE enum in the database for this.
+const INVOICE_STATUS_LABEL: Record<string, string> = {
+  DRAFT: "Draft",
+  OPEN: "Menunggu Pembayaran",
+  PAID: "Lunas",
+  VOID: "Dibatalkan",
+  UNCOLLECTIBLE: "Tidak Tertagih",
+};
+
+export const metadata: Metadata = { title: "Paket & Langganan — LINOE" };
 
 const PLAN_LABEL: Record<string, string> = {
   FREE: "Free",
@@ -41,6 +52,16 @@ const STATUS_VARIANT: Record<string, "success" | "warning" | "danger" | "neutral
   TRIALING: "brand",
   PAST_DUE: "warning",
   CANCELED: "danger",
+};
+
+// Batch B7 — customer-facing labels only (B7.8). The underlying
+// ACTIVE/TRIALING/PAST_DUE/CANCELED enum in prompter_subscriptions.status
+// is never renamed for this — this is presentation-layer only.
+const STATUS_LABEL: Record<string, string> = {
+  ACTIVE: "Aktif",
+  TRIALING: "Masa Coba Aktif",
+  PAST_DUE: "Pembayaran Perlu Diperbarui",
+  CANCELED: "Berakhir",
 };
 
 export default async function BillingPage() {
@@ -67,42 +88,81 @@ export default async function BillingPage() {
   return (
     <div className="flex flex-1 flex-col gap-6 p-8">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight text-foreground">Billing</h1>
+        <h1 className="text-xl font-semibold tracking-tight text-foreground">Paket & Langganan</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Paket langganan, penggunaan AI, dan dasar perhitungan success fee — semua angka di sini nyata,
-          tidak ada yang dikarang.
+          Lihat paket, masa coba, dan penggunaan LINOE Anda.
         </p>
       </div>
 
       <Card>
         <CardHeader className="flex flex-row items-center gap-2 space-y-0">
           <CreditCard className="size-4 text-muted-foreground" aria-hidden />
-          <CardTitle>Paket Anda</CardTitle>
+          <CardTitle>Paket Saat Ini</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-3 pt-4">
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <Badge variant="brand">{PLAN_LABEL[subscription.plan] ?? subscription.plan}</Badge>
-            <Badge variant={STATUS_VARIANT[subscription.status] ?? "neutral"}>{subscription.status}</Badge>
+            {trial.isTrialing && trial.expired ? (
+              // B7.2 — never show an expired trial "as if active": the
+              // underlying status enum is still TRIALING (no real payment
+              // event has ever moved it), but the badge itself must reflect
+              // the real expired state, not the raw enum.
+              <Badge variant="danger">Masa Coba Berakhir</Badge>
+            ) : (
+              <Badge variant={STATUS_VARIANT[subscription.status] ?? "neutral"}>
+                {STATUS_LABEL[subscription.status] ?? subscription.status}
+              </Badge>
+            )}
           </div>
           {trial.isTrialing ? (
-            <p
+            <div
               className={
                 trial.expired
-                  ? "rounded-[var(--radius-md)] border border-danger/30 bg-danger/5 p-3 text-sm text-danger"
-                  : "rounded-[var(--radius-md)] border border-brand/30 bg-brand/5 p-3 text-sm text-foreground"
+                  ? "flex flex-col gap-1 rounded-[var(--radius-md)] border border-danger/30 bg-danger/5 p-3 text-sm text-danger"
+                  : "flex flex-col gap-1 rounded-[var(--radius-md)] border border-brand/30 bg-brand/5 p-3 text-sm text-foreground"
               }
             >
-              {trial.expired
-                ? "Masa trial 14 hari Anda telah berakhir. Pilih paket di bawah untuk melanjutkan menggunakan fitur AI."
-                : `Sisa masa trial: ${trial.daysRemaining} hari lagi. Pilih paket kapan pun untuk melanjutkan tanpa jeda.`}
-            </p>
+              {trial.expired ? (
+                <p>
+                  Masa trial {TRIAL_DURATION_DAYS} hari Anda telah berakhir. Pembayaran online belum tersedia,
+                  jadi fitur AI dijeda sementara.
+                </p>
+              ) : (
+                <>
+                  <p>Sisa masa coba: {trial.daysRemaining} hari</p>
+                  {subscription.current_period_end ? (
+                    <p className="text-xs text-muted-foreground">
+                      Berakhir pada {formatDate(subscription.current_period_end)}
+                    </p>
+                  ) : null}
+                  <p className="text-xs text-muted-foreground">
+                    Anda masih dapat menggunakan LINOE selama masa coba.
+                  </p>
+                </>
+              )}
+            </div>
           ) : null}
           <p className="text-xs text-muted-foreground">
             {subscription.billing_provider
               ? `Pemroses pembayaran: ${subscription.billing_provider}.`
-              : `Belum ada pemroses pembayaran yang terhubung (${paymentProvider.name === "none" ? "NOT_CONFIGURED" : paymentProvider.name}) — upgrade paket berbayar dan penagihan otomatis belum tersedia. Harga resmi setiap paket akan diumumkan sebelum fitur ini aktif.`}
+              : "Pembayaran online belum tersedia. Untuk saat ini Anda tetap dapat menggunakan masa coba yang aktif. Pilihan berlangganan akan tersedia setelah pembayaran online diaktifkan."}
           </p>
-          <PlanForm currentPlan={subscription.plan} readOnly={!isOwner} />
+          {paymentProvider.name === "none" ? (
+            <details className="rounded-[var(--radius-md)] border border-border">
+              <summary className="cursor-pointer p-3 text-xs font-medium text-muted-foreground">
+                Pilih paket referensi (opsional)
+              </summary>
+              <div className="border-t border-border p-3">
+                <p className="mb-3 text-xs text-muted-foreground">
+                  Pilihan paket berbayar akan tersedia setelah sistem pembayaran aktif. Memilih di sini hanya
+                  menyimpan preferensi paket untuk referensi — tidak ada tagihan atau perubahan akses.
+                </p>
+                <PlanForm currentPlan={subscription.plan} readOnly={!isOwner} />
+              </div>
+            </details>
+          ) : (
+            <PlanForm currentPlan={subscription.plan} readOnly={!isOwner} />
+          )}
         </CardContent>
       </Card>
 
@@ -137,7 +197,7 @@ export default async function BillingPage() {
           </p>
           {successFee.status === "NOT_CONFIGURED" ? (
             <p className="text-xs text-muted-foreground">
-              Tarif success fee belum dikonfigurasi — tidak ada biaya yang dihitung atau ditagih (NOT_CONFIGURED).
+              Success fee belum berlaku untuk akun Anda saat ini — tidak ada biaya yang dihitung atau ditagih.
             </p>
           ) : (
             <p className="text-sm text-foreground">
@@ -150,19 +210,19 @@ export default async function BillingPage() {
       <Card>
         <CardHeader className="flex flex-row items-center gap-2 space-y-0">
           <Receipt className="size-4 text-muted-foreground" aria-hidden />
-          <CardTitle>Invoice</CardTitle>
+          <CardTitle>Tagihan</CardTitle>
         </CardHeader>
         <CardContent className="pt-4">
           {invoices.length === 0 ? (
             <EmptyState
               icon={Receipt}
-              title="Belum ada invoice"
-              description="Invoice akan muncul di sini setelah pemroses pembayaran terhubung dan mulai menerbitkan tagihan nyata."
+              title="Belum ada tagihan."
+              description="Riwayat tagihan akan muncul di sini setelah pembayaran online tersedia dan transaksi berhasil dilakukan."
             />
           ) : (
             <ul className="flex flex-col divide-y divide-border">
               {invoices.map((invoice) => (
-                <li key={invoice.id} className="flex items-center justify-between gap-3 py-3">
+                <li key={invoice.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
                   <div>
                     <p className="text-sm text-foreground">{invoice.description ?? invoice.provider ?? "Invoice"}</p>
                     <p className="text-xs text-muted-foreground">
@@ -171,7 +231,9 @@ export default async function BillingPage() {
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="text-sm text-foreground">{formatCurrency(invoice.amount, invoice.currency)}</span>
-                    <Badge variant={INVOICE_STATUS_VARIANT[invoice.status] ?? "neutral"}>{invoice.status}</Badge>
+                    <Badge variant={INVOICE_STATUS_VARIANT[invoice.status] ?? "neutral"}>
+                      {INVOICE_STATUS_LABEL[invoice.status] ?? invoice.status}
+                    </Badge>
                   </div>
                 </li>
               ))}

@@ -117,8 +117,11 @@ export function checkAiUsageEntitlement(subscription: Subscription, referenceDat
   if (trial.isTrialing && trial.expired) {
     return {
       allowed: false,
-      reason:
-        "Masa trial 14 hari Anda telah berakhir. Pilih paket di halaman Billing untuk melanjutkan menggunakan fitur AI.",
+      // Never tells the user to "pilih paket" to continue — changePlan()
+      // never touches status/entitlement (see its own docstring), so that
+      // would be a false instruction. Honest until a real payment
+      // processor exists: the feature is simply paused.
+      reason: `Masa trial ${TRIAL_DURATION_DAYS} hari Anda telah berakhir. Pembayaran online belum tersedia, jadi fitur AI dijeda sementara.`,
     };
   }
 
@@ -202,7 +205,9 @@ export async function checkTrialAiUsageCap(
   if (dailyCount >= TRIAL_DAILY_AI_JOB_LIMIT) {
     return {
       allowed: false,
-      reason: `Anda telah mencapai batas ${TRIAL_DAILY_AI_JOB_LIMIT} permintaan AI hari ini selama masa trial. Coba lagi besok, atau pilih paket di halaman Billing untuk melanjutkan tanpa batas.`,
+      // Same honesty rule as checkAiUsageEntitlement() above — selecting a
+      // plan does not lift this limit, so never imply it does.
+      reason: `Anda telah mencapai batas ${TRIAL_DAILY_AI_JOB_LIMIT} permintaan AI hari ini selama masa trial. Coba lagi besok.`,
     };
   }
 
@@ -210,7 +215,7 @@ export async function checkTrialAiUsageCap(
   if (monthlyCount >= TRIAL_MONTHLY_AI_JOB_LIMIT) {
     return {
       allowed: false,
-      reason: `Anda telah mencapai batas ${TRIAL_MONTHLY_AI_JOB_LIMIT} permintaan AI bulan ini selama masa trial. Pilih paket di halaman Billing untuk melanjutkan tanpa batas.`,
+      reason: `Anda telah mencapai batas ${TRIAL_MONTHLY_AI_JOB_LIMIT} permintaan AI bulan ini selama masa trial. Batas ini akan direset di awal bulan berikutnya.`,
     };
   }
 
