@@ -181,7 +181,7 @@ export default async function BillingPage() {
           <PricingCards currentPlan={subscription.plan} />
           <details className="rounded-[var(--radius-md)] border border-border">
             <summary className="cursor-pointer p-3 text-xs font-medium text-muted-foreground">
-              Lihat semua fitur
+              Bandingkan Fitur
             </summary>
             <div className="border-t border-border p-3">
               <FeatureComparison />

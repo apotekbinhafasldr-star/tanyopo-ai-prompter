@@ -1,97 +1,172 @@
-import { Check } from "lucide-react";
+import { ChevronRight, Send, Store, TrendingUp, Crown, Building2, Users, type LucideIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils/cn";
 import { formatCurrency } from "@/lib/utils/format";
-import { PLAN_TIERS, type PlanTierConfig } from "@/lib/billing/plans";
+import { PLAN_TIERS, type PlanTierConfig, type PlanTierId } from "@/lib/billing/plans";
 import type { SubscriptionPlan } from "@/types/database";
 
 /**
- * Batch B8 — pricing cards. No "Bayar"/"Checkout"/"Langganan Sekarang"
- * button anywhere: a payment processor isn't configured yet (see
- * services/billing.ts / lib/billing/get-payment-provider.ts), so every
- * paid card's action area is informational only ("Pembayaran online
- * segera tersedia"). The one real, working action on this page — picking
- * a reference-only plan via PlanForm — lives in the existing collapsed
- * disclosure on app/(app)/billing/page.tsx (Batch B7), reused as-is.
+ * Batch B8 visual hotfix — founder-directed layout: one full-width card
+ * per plan, stacked in a single vertical column (Free Trial -> Starter ->
+ * Growth -> Pro -> Business -> Agency), never a grid/carousel. Visual only
+ * — reads PLAN_TIERS (lib/billing/plans.ts) exactly as B8 built it, no
+ * price/limit/entitlement value lives in this file. No "Bayar"/
+ * "Checkout"/"Upgrade Sekarang" button anywhere: a payment processor
+ * isn't configured (see services/billing.ts), so every non-current card's
+ * action is a native <details> "Lihat Detail" disclosure, never a
+ * payment CTA. The one real, working plan-change action stays the
+ * existing collapsed "Pilih paket referensi (opsional)" disclosure on
+ * app/(app)/billing/page.tsx (Batch B7), untouched by this hotfix.
  */
+interface TierVisual {
+  icon: LucideIcon;
+  card: string;
+  icon_bg: string;
+  heading: string;
+  subtext: string;
+  price: string;
+  actionBar: string;
+  badge?: string;
+}
+
+const TIER_VISUALS: Record<PlanTierId, TierVisual> = {
+  FREE: {
+    icon: Send,
+    card: "border-sky-200 bg-sky-50",
+    icon_bg: "bg-sky-500",
+    heading: "text-foreground",
+    subtext: "text-muted-foreground",
+    price: "text-foreground",
+    actionBar: "bg-sky-100 text-sky-700",
+  },
+  STARTER: {
+    icon: Store,
+    card: "border-blue-200 bg-blue-50",
+    icon_bg: "bg-blue-500",
+    heading: "text-foreground",
+    subtext: "text-muted-foreground",
+    price: "text-foreground",
+    actionBar: "bg-blue-100 text-blue-700",
+  },
+  GROWTH: {
+    icon: TrendingUp,
+    card: "border-0 bg-gradient-to-br from-blue-600 to-fuchsia-600 shadow-lg shadow-fuchsia-500/25",
+    icon_bg: "bg-white/20",
+    heading: "text-white",
+    subtext: "text-white/80",
+    price: "text-white",
+    actionBar: "bg-white/15 text-white",
+    badge: "bg-amber-400 text-amber-950",
+  },
+  PRO: {
+    icon: Crown,
+    card: "border-orange-200 bg-orange-50",
+    icon_bg: "bg-orange-500",
+    heading: "text-foreground",
+    subtext: "text-muted-foreground",
+    price: "text-foreground",
+    actionBar: "bg-orange-100 text-orange-700",
+  },
+  BUSINESS: {
+    icon: Building2,
+    card: "border-emerald-200 bg-emerald-50",
+    icon_bg: "bg-emerald-500",
+    heading: "text-foreground",
+    subtext: "text-muted-foreground",
+    price: "text-foreground",
+    actionBar: "bg-emerald-100 text-emerald-700",
+  },
+  AGENCY: {
+    icon: Users,
+    card: "border-violet-200 bg-violet-50",
+    icon_bg: "bg-violet-500",
+    heading: "text-foreground",
+    subtext: "text-muted-foreground",
+    price: "text-foreground",
+    actionBar: "bg-violet-100 text-violet-700",
+    badge: "bg-violet-600 text-white",
+  },
+};
+
 export function PricingCards({ currentPlan }: { currentPlan: SubscriptionPlan }) {
-  const activeTiers = PLAN_TIERS.filter((t) => t.availability === "ACTIVE");
-  const comingSoonTiers = PLAN_TIERS.filter((t) => t.availability === "COMING_SOON");
-
   return (
-    <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {activeTiers.map((tier) => (
-          <PricingCard key={tier.id} tier={tier} isCurrent={tier.id === currentPlan} />
-        ))}
-      </div>
-
-      {comingSoonTiers.length > 0 ? (
-        <div className="flex flex-col gap-2">
-          {comingSoonTiers.map((tier) => (
-            <Card key={tier.id} className="border-dashed">
-              <CardContent className="flex flex-wrap items-center justify-between gap-3 p-5">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <p className="text-sm font-semibold text-foreground">{tier.name}</p>
-                    <Badge variant="outline">Segera Hadir</Badge>
-                  </div>
-                  <p className="mt-1 text-xs text-muted-foreground">{tier.targetDescription}</p>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Target harga {formatCurrency(tier.priceIDR)}
-                  {tier.pricePeriodLabel} — belum dapat dibeli.
-                </p>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      ) : null}
+    <div className="flex flex-col gap-3">
+      {PLAN_TIERS.map((tier) => (
+        <PricingCard key={tier.id} tier={tier} isCurrent={tier.id === currentPlan} />
+      ))}
     </div>
   );
 }
 
 function PricingCard({ tier, isCurrent }: { tier: PlanTierConfig; isCurrent: boolean }) {
+  const visual = TIER_VISUALS[tier.id];
+  const Icon = visual.icon;
+  const isComingSoon = tier.availability === "COMING_SOON";
+
   return (
-    <Card className={cn("flex flex-col", tier.badge ? "border-brand" : undefined)}>
-      <CardHeader className="flex flex-col gap-2 space-y-0">
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-sm font-semibold text-foreground">{tier.name}</p>
-          {tier.badge ? <Badge variant="brand">{tier.badge}</Badge> : null}
+    <Card className={cn("overflow-hidden p-0", visual.card)}>
+      <CardContent className="flex flex-col gap-3 p-4">
+        <div className="flex items-start gap-3">
+          <div className={cn("flex size-11 shrink-0 items-center justify-center rounded-xl", visual.icon_bg)}>
+            <Icon className="size-5 text-white" aria-hidden />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className={cn("text-base font-semibold", visual.heading)}>{tier.name}</p>
+              {tier.badge ? <Badge className={cn("shrink-0", visual.badge)}>{tier.badge}</Badge> : null}
+              {isComingSoon ? <Badge className={cn("shrink-0", visual.badge)}>Segera Hadir</Badge> : null}
+            </div>
+            <p className={cn("text-xs", visual.subtext)}>{tier.targetDescription}</p>
+          </div>
         </div>
-        <div>
-          <span className="text-2xl font-semibold text-foreground">
-            {tier.priceIDR === 0 ? "Gratis" : formatCurrency(tier.priceIDR)}
+
+        <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
+          <span className={cn("text-2xl font-bold", visual.price)}>{formatCurrency(tier.priceIDR)}</span>
+          <span className={cn("text-xs", visual.subtext)}>
+            {tier.pricePeriodLabel}
+            {tier.isPriceTarget ? " (target)" : ""}
           </span>
-          <span className="text-xs text-muted-foreground">{tier.priceIDR === 0 ? "" : tier.pricePeriodLabel}</span>
         </div>
-        <p className="text-xs text-muted-foreground">{tier.targetDescription}</p>
-      </CardHeader>
-      <CardContent className="flex flex-1 flex-col gap-3 pt-4">
-        <ul className="flex flex-1 flex-col gap-1.5">
-          {tier.coreFeatures.map((feature) => (
-            <li key={feature} className="flex items-start gap-2 text-xs text-foreground">
-              <Check className="mt-0.5 size-3.5 shrink-0 text-brand" aria-hidden />
-              <span>{feature}</span>
-            </li>
-          ))}
-        </ul>
-        <ul className="flex flex-col gap-0.5 border-t border-border pt-3 text-xs text-muted-foreground">
+
+        <ul className={cn("flex flex-col gap-1 text-xs", visual.heading)}>
           <li>{tier.limits.aiUsageAllowance.toLocaleString("id-ID")} penggunaan AI</li>
           <li>Maks. {tier.limits.maxActiveProducts ?? "—"} produk aktif</li>
           <li>Maks. {tier.limits.maxActiveCampaigns ?? "—"} campaign aktif</li>
           <li>{tier.limits.maxUsers ?? "—"} user</li>
         </ul>
-        <div className="mt-auto pt-2">
-          {isCurrent ? (
-            <Badge variant="success">Paket Anda Saat Ini</Badge>
-          ) : tier.priceIDR === 0 ? (
-            <p className="text-xs text-muted-foreground">Aktif otomatis untuk tenant baru.</p>
-          ) : (
-            <p className="text-xs text-muted-foreground">Pembayaran online segera tersedia.</p>
-          )}
-        </div>
+
+        {isCurrent ? (
+          <div className={cn("rounded-full px-4 py-2.5 text-center text-sm font-medium", visual.actionBar)}>
+            Paket Anda Saat Ini
+          </div>
+        ) : (
+          <details className="group">
+            <summary
+              className={cn(
+                "flex min-h-11 cursor-pointer list-none items-center justify-between rounded-full px-4 py-2.5 text-sm font-medium [&::-webkit-details-marker]:hidden",
+                visual.actionBar,
+              )}
+            >
+              <span>{isComingSoon ? "Info Lebih Lanjut" : "Lihat Detail"}</span>
+              <ChevronRight className="size-4 shrink-0 transition-transform group-open:rotate-90" aria-hidden />
+            </summary>
+            <div className="pt-3">
+              <ul className={cn("flex flex-col gap-1.5 text-xs", visual.heading)}>
+                {tier.coreFeatures.map((feature) => (
+                  <li key={feature}>• {feature}</li>
+                ))}
+              </ul>
+              {isComingSoon ? (
+                <p className={cn("mt-2 text-xs", visual.subtext)}>
+                  Belum dapat dibeli — harga di atas adalah target, bukan tarif aktif.
+                </p>
+              ) : (
+                <p className={cn("mt-2 text-xs", visual.subtext)}>Pembayaran online segera tersedia.</p>
+              )}
+            </div>
+          </details>
+        )}
       </CardContent>
     </Card>
   );
