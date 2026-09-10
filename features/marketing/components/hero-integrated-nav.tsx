@@ -7,13 +7,15 @@ import { Button } from "@/components/ui/button";
 import { useActiveSection } from "@/features/marketing/hooks/use-active-section";
 import { cn } from "@/lib/utils/cn";
 
-// The approved vertical LINOE logo — the exact same asset/component used in
-// the site's real header (public/brand/linoe/linoe-logo-vertical.png), just
-// rendered directly here (rather than via <LinoeLogo>) so its height can be
-// small enough to fit this compact strip without cutting into the presenter
-// photo just below it. Not redrawn, not recreated with CSS — same file.
-const LOGO_SRC = "/brand/linoe/linoe-logo-vertical.png";
-const LOGO_WIDTH = 1024;
+// Hero top-left logo hotfix — the official final LINOE asset
+// (public/brand/linoe/linoe-logo-official.png, already installed app-wide
+// in batch B10), rendered directly here (rather than via <LinoeLogo>) so
+// its height can be small enough to fit this compact strip without
+// cutting into the presenter photo just below it. Not redrawn, not
+// recreated with CSS — same file, real dimensions (1269x1536, not the
+// old asset's 1024x1536) so the render width below isn't stretched.
+const LOGO_SRC = "/brand/linoe/linoe-logo-official.png";
+const LOGO_WIDTH = 1269;
 const LOGO_HEIGHT = 1536;
 const LOGO_RENDER_HEIGHT = 30;
 const LOGO_RENDER_WIDTH = Math.round((LOGO_WIDTH / LOGO_HEIGHT) * LOGO_RENDER_HEIGHT);
