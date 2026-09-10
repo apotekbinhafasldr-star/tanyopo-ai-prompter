@@ -26,6 +26,16 @@ import type { SubscriptionPlan } from "@/types/database";
  * never gets this control — its disclosure stays informational only, per
  * the hard rule that it can't be selected until multi-client workspace
  * actually exists.
+ *
+ * Batch B8 CTA-clarity hotfix — founder retest found "Pilih Paket Ini"
+ * too subtle (buried inside the "Lihat Detail" expansion, same tint as
+ * everything else). For every purchasable, non-current plan, "Pilih
+ * Paket Ini" (features/billing/plan-select-confirm.tsx) is now always
+ * visible at the bottom of the card as a solid, high-contrast primary
+ * CTA, separate from and below the "Lihat Detail" disclosure (which
+ * stays a lighter-weight secondary action). No new selection mechanism —
+ * same PlanSelectConfirm/changePlanAction as before, just surfaced
+ * without requiring an extra tap to expand detail first.
  */
 interface TierVisual {
   icon: LucideIcon;
@@ -35,6 +45,13 @@ interface TierVisual {
   subtext: string;
   price: string;
   actionBar: string;
+  /** Solid, high-contrast primary CTA ("Pilih Paket Ini" / "Simpan
+   * Pilihan Paket") — deliberately distinct from `actionBar` (used for
+   * the lighter-weight "Lihat Detail"/"Info Lebih Lanjut" secondary
+   * action and the "Paket Anda Saat Ini" status pill) so the CTA
+   * hierarchy reads clearly on every card color, including Growth's
+   * gradient where it must be light/white for contrast. */
+  primaryCta: string;
   /** Section divider inside the expanded "Lihat Detail" content — needs a
    * separate light/dark value since Growth's card is a dark gradient
    * while every other card is a light tint. */
@@ -51,6 +68,7 @@ const TIER_VISUALS: Record<PlanTierId, TierVisual> = {
     subtext: "text-muted-foreground",
     price: "text-foreground",
     actionBar: "bg-sky-100 text-sky-700",
+    primaryCta: "bg-sky-600 text-white hover:bg-sky-700",
     divider: "border-black/10",
   },
   STARTER: {
@@ -61,6 +79,7 @@ const TIER_VISUALS: Record<PlanTierId, TierVisual> = {
     subtext: "text-muted-foreground",
     price: "text-foreground",
     actionBar: "bg-blue-100 text-blue-700",
+    primaryCta: "bg-blue-600 text-white hover:bg-blue-700",
     divider: "border-black/10",
   },
   GROWTH: {
@@ -71,6 +90,7 @@ const TIER_VISUALS: Record<PlanTierId, TierVisual> = {
     subtext: "text-white/80",
     price: "text-white",
     actionBar: "bg-white/15 text-white",
+    primaryCta: "bg-white text-fuchsia-700 shadow-md hover:bg-white/90",
     badge: "bg-amber-400 text-amber-950",
     divider: "border-white/20",
   },
@@ -82,6 +102,7 @@ const TIER_VISUALS: Record<PlanTierId, TierVisual> = {
     subtext: "text-muted-foreground",
     price: "text-foreground",
     actionBar: "bg-orange-100 text-orange-700",
+    primaryCta: "bg-orange-600 text-white hover:bg-orange-700",
     divider: "border-black/10",
   },
   BUSINESS: {
@@ -92,6 +113,7 @@ const TIER_VISUALS: Record<PlanTierId, TierVisual> = {
     subtext: "text-muted-foreground",
     price: "text-foreground",
     actionBar: "bg-emerald-100 text-emerald-700",
+    primaryCta: "bg-emerald-600 text-white hover:bg-emerald-700",
     divider: "border-black/10",
   },
   AGENCY: {
@@ -102,6 +124,7 @@ const TIER_VISUALS: Record<PlanTierId, TierVisual> = {
     subtext: "text-muted-foreground",
     price: "text-foreground",
     actionBar: "bg-violet-100 text-violet-700",
+    primaryCta: "bg-violet-600 text-white hover:bg-violet-700",
     badge: "bg-violet-600 text-white",
     divider: "border-black/10",
   },
@@ -165,46 +188,52 @@ function PricingCard({ tier, isCurrent, readOnly }: { tier: PlanTierConfig; isCu
             Paket Anda Saat Ini
           </div>
         ) : (
-          <details className="group">
-            <summary
-              className={cn(
-                "flex min-h-11 cursor-pointer list-none items-center justify-between rounded-full px-4 py-2.5 text-sm font-medium [&::-webkit-details-marker]:hidden",
-                visual.actionBar,
-              )}
-            >
-              <span>{isComingSoon ? "Info Lebih Lanjut" : "Lihat Detail"}</span>
-              <ChevronRight className="size-4 shrink-0 transition-transform group-open:rotate-90" aria-hidden />
-            </summary>
-            <div className="flex flex-col gap-3 pt-3">
-              <div>
-                <p className={cn("text-xs font-semibold uppercase tracking-wide", visual.subtext)}>Fitur Utama</p>
-                <ul className={cn("mt-1.5 flex flex-col gap-1.5 text-xs", visual.heading)}>
-                  {tier.coreFeatures.map((feature) => (
-                    <li key={feature}>• {feature}</li>
-                  ))}
-                </ul>
-              </div>
-
-              {isComingSoon ? (
-                <p className={cn("text-xs", visual.subtext)}>
-                  Belum dapat dibeli — harga di atas adalah target, bukan tarif aktif.
-                </p>
-              ) : (
-                <div className={cn("flex flex-col gap-3 border-t pt-3", visual.divider)}>
-                  <p className={cn("text-xs", visual.subtext)}>Pembayaran online segera tersedia.</p>
-                  <PlanSelectConfirm
-                    planId={tier.id}
-                    planName={tier.name}
-                    priceIDR={tier.priceIDR}
-                    pricePeriodLabel={tier.pricePeriodLabel}
-                    actionBarClassName={visual.actionBar}
-                    mutedTextClassName={visual.subtext}
-                    readOnly={readOnly}
-                  />
+          <div className="flex flex-col gap-2">
+            <details className="group">
+              <summary
+                className={cn(
+                  "flex min-h-11 cursor-pointer list-none items-center justify-between rounded-full px-4 py-2.5 text-sm font-medium [&::-webkit-details-marker]:hidden",
+                  visual.actionBar,
+                )}
+              >
+                <span>{isComingSoon ? "Info Lebih Lanjut" : "Lihat Detail"}</span>
+                <ChevronRight className="size-4 shrink-0 transition-transform group-open:rotate-90" aria-hidden />
+              </summary>
+              <div className="flex flex-col gap-3 pt-3">
+                <div>
+                  <p className={cn("text-xs font-semibold uppercase tracking-wide", visual.subtext)}>Fitur Utama</p>
+                  <ul className={cn("mt-1.5 flex flex-col gap-1.5 text-xs", visual.heading)}>
+                    {tier.coreFeatures.map((feature) => (
+                      <li key={feature}>• {feature}</li>
+                    ))}
+                  </ul>
                 </div>
-              )}
-            </div>
-          </details>
+
+                {isComingSoon ? (
+                  <p className={cn("text-xs", visual.subtext)}>
+                    Belum dapat dibeli — harga di atas adalah target, bukan tarif aktif.
+                  </p>
+                ) : (
+                  <p className={cn("text-xs", visual.subtext)}>Pembayaran online segera tersedia.</p>
+                )}
+              </div>
+            </details>
+
+            {/* Primary CTA — always visible, not nested inside "Lihat Detail",
+                so selecting a plan never requires an extra tap to discover it. */}
+            {isComingSoon ? null : (
+              <PlanSelectConfirm
+                planId={tier.id}
+                planName={tier.name}
+                priceIDR={tier.priceIDR}
+                pricePeriodLabel={tier.pricePeriodLabel}
+                primaryCtaClassName={visual.primaryCta}
+                mutedTextClassName={visual.subtext}
+                dividerClassName={visual.divider}
+                readOnly={readOnly}
+              />
+            )}
+          </div>
         )}
       </CardContent>
     </Card>

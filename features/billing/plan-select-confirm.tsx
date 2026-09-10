@@ -19,22 +19,31 @@ const initialState: BillingActionState = { error: null };
  * the "Paket Anda Saat Ini" card (unmounting this component) or, on
  * failure, stays in the confirmation step so the error is visible and the
  * user can retry.
+ *
+ * Batch B8 CTA-clarity hotfix — this is now rendered directly on the card
+ * (below "Lihat Detail", not inside it) as the card's one high-contrast
+ * primary CTA. `primaryCtaClassName` is a solid, saturated color per plan
+ * (not the lighter `actionBar` tint used for "Lihat Detail"), so the
+ * button reads unmistakably as the primary action against every card
+ * background, including Growth's gradient.
  */
 export function PlanSelectConfirm({
   planId,
   planName,
   priceIDR,
   pricePeriodLabel,
-  actionBarClassName,
+  primaryCtaClassName,
   mutedTextClassName,
+  dividerClassName,
   readOnly,
 }: {
   planId: SubscriptionPlan;
   planName: string;
   priceIDR: number;
   pricePeriodLabel: string;
-  actionBarClassName: string;
+  primaryCtaClassName: string;
   mutedTextClassName: string;
+  dividerClassName: string;
   readOnly: boolean;
 }) {
   const [confirming, setConfirming] = useState(false);
@@ -50,8 +59,8 @@ export function PlanSelectConfirm({
         type="button"
         onClick={() => setConfirming(true)}
         className={cn(
-          "flex min-h-11 w-full cursor-pointer items-center justify-center rounded-full px-4 py-2.5 text-sm font-medium",
-          actionBarClassName,
+          "flex min-h-11 w-full cursor-pointer items-center justify-center rounded-full px-4 py-2.5 text-center text-sm font-semibold shadow-sm",
+          primaryCtaClassName,
         )}
       >
         Pilih Paket Ini
@@ -60,7 +69,7 @@ export function PlanSelectConfirm({
   }
 
   return (
-    <div className="flex flex-col gap-2 rounded-[var(--radius-md)] bg-black/5 p-3">
+    <div className={cn("flex flex-col gap-2 rounded-[var(--radius-md)] border-t bg-black/5 p-3", dividerClassName)}>
       <p className={cn("text-sm font-semibold", mutedTextClassName)}>Anda memilih Paket {planName}</p>
       <p className={cn("flex flex-wrap items-baseline gap-x-1 text-sm font-semibold", mutedTextClassName)}>
         <span>{formatCurrency(priceIDR)}</span>
@@ -82,8 +91,8 @@ export function PlanSelectConfirm({
             type="submit"
             disabled={pending}
             className={cn(
-              "flex min-h-11 flex-1 cursor-pointer items-center justify-center rounded-full px-4 py-2.5 text-sm font-medium disabled:opacity-60",
-              actionBarClassName,
+              "flex min-h-11 flex-1 cursor-pointer items-center justify-center rounded-full px-4 py-2.5 text-center text-sm font-semibold shadow-sm disabled:opacity-60",
+              primaryCtaClassName,
             )}
           >
             {pending ? "Menyimpan..." : "Simpan Pilihan Paket"}
