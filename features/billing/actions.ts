@@ -10,7 +10,7 @@ export interface BillingActionState {
   error: string | null;
 }
 
-const PLANS: SubscriptionPlan[] = ["FREE", "PRO", "BUSINESS", "GROWTH", "AGENCY", "UMKMPRO_BUNDLE"];
+const PLANS: SubscriptionPlan[] = ["FREE", "STARTER", "PRO", "BUSINESS", "GROWTH", "AGENCY", "UMKMPRO_BUNDLE"];
 
 /**
  * Owner-only plan change (financial governance, same level as Budget

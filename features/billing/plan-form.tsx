@@ -10,9 +10,10 @@ const initialState: BillingActionState = { error: null };
 
 const PLAN_OPTIONS: { value: SubscriptionPlan; label: string }[] = [
   { value: "FREE", label: "Free" },
+  { value: "STARTER", label: "Starter" },
+  { value: "GROWTH", label: "Growth" },
   { value: "PRO", label: "Pro" },
   { value: "BUSINESS", label: "Business" },
-  { value: "GROWTH", label: "Growth" },
   { value: "AGENCY", label: "Agency" },
   { value: "UMKMPRO_BUNDLE", label: "UMKMpro Bundle" },
 ];

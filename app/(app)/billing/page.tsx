@@ -17,6 +17,8 @@ import { getPaymentProvider } from "@/lib/billing/get-payment-provider";
 import { calculateSuccessFee } from "@/lib/billing/success-fee";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
 import { PlanForm } from "@/features/billing/plan-form";
+import { PricingCards } from "@/features/billing/pricing-cards";
+import { FeatureComparison } from "@/features/billing/feature-comparison";
 
 const INVOICE_STATUS_VARIANT: Record<string, "success" | "warning" | "danger" | "neutral"> = {
   DRAFT: "neutral",
@@ -40,6 +42,7 @@ export const metadata: Metadata = { title: "Paket & Langganan — LINOE" };
 
 const PLAN_LABEL: Record<string, string> = {
   FREE: "Free",
+  STARTER: "Starter",
   PRO: "Pro",
   BUSINESS: "Business",
   GROWTH: "Growth",
@@ -163,6 +166,27 @@ export default async function BillingPage() {
           ) : (
             <PlanForm currentPlan={subscription.plan} readOnly={!isOwner} />
           )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-col gap-1 space-y-0">
+          <CardTitle>Bandingkan Paket</CardTitle>
+          <CardDescription>
+            Harga dan fitur LINOE — pembayaran online segera tersedia, jadi memilih di sini tidak memproses
+            pembayaran apa pun.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4 pt-4">
+          <PricingCards currentPlan={subscription.plan} />
+          <details className="rounded-[var(--radius-md)] border border-border">
+            <summary className="cursor-pointer p-3 text-xs font-medium text-muted-foreground">
+              Lihat semua fitur
+            </summary>
+            <div className="border-t border-border p-3">
+              <FeatureComparison />
+            </div>
+          </details>
         </CardContent>
       </Card>
 

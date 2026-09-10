@@ -86,7 +86,7 @@ export type ConversionEventType =
   | "PURCHASE"
   | "SUBSCRIPTION";
 export type AttributionModel = "LAST_CLICK" | "FIRST_CLICK" | "MANUAL" | "UMKMPRO_VERIFIED";
-export type SubscriptionPlan = "FREE" | "PRO" | "BUSINESS" | "GROWTH" | "AGENCY" | "UMKMPRO_BUNDLE";
+export type SubscriptionPlan = "FREE" | "STARTER" | "PRO" | "BUSINESS" | "GROWTH" | "AGENCY" | "UMKMPRO_BUNDLE";
 export type SubscriptionStatus = "ACTIVE" | "TRIALING" | "PAST_DUE" | "CANCELED";
 export type InvoiceStatus = "DRAFT" | "OPEN" | "PAID" | "VOID" | "UNCOLLECTIBLE";
 export type JobType =
