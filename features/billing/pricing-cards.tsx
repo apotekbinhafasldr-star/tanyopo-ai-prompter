@@ -4,6 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils/cn";
 import { formatCurrency } from "@/lib/utils/format";
 import { PLAN_TIERS, type PlanTierConfig, type PlanTierId } from "@/lib/billing/plans";
+import { PlanSelectConfirm } from "@/features/billing/plan-select-confirm";
 import type { SubscriptionPlan } from "@/types/database";
 
 /**
@@ -13,11 +14,18 @@ import type { SubscriptionPlan } from "@/types/database";
  * — reads PLAN_TIERS (lib/billing/plans.ts) exactly as B8 built it, no
  * price/limit/entitlement value lives in this file. No "Bayar"/
  * "Checkout"/"Upgrade Sekarang" button anywhere: a payment processor
- * isn't configured (see services/billing.ts), so every non-current card's
- * action is a native <details> "Lihat Detail" disclosure, never a
- * payment CTA. The one real, working plan-change action stays the
- * existing collapsed "Pilih paket referensi (opsional)" disclosure on
- * app/(app)/billing/page.tsx (Batch B7), untouched by this hotfix.
+ * isn't configured (see services/billing.ts).
+ *
+ * Batch B8 final hotfix — each non-current, purchasable card's "Lihat
+ * Detail" now also surfaces "Pilih Paket Ini" (features/billing/
+ * plan-select-confirm.tsx), which requires an explicit second
+ * confirmation step before calling the existing changePlanAction/
+ * changePlan() — the exact same reference-only mechanism B7's separate
+ * "Pilih paket referensi (opsional)" disclosure already used (still
+ * present on app/(app)/billing/page.tsx, untouched). Agency (COMING_SOON)
+ * never gets this control — its disclosure stays informational only, per
+ * the hard rule that it can't be selected until multi-client workspace
+ * actually exists.
  */
 interface TierVisual {
   icon: LucideIcon;
@@ -89,17 +97,23 @@ const TIER_VISUALS: Record<PlanTierId, TierVisual> = {
   },
 };
 
-export function PricingCards({ currentPlan }: { currentPlan: SubscriptionPlan }) {
+export function PricingCards({
+  currentPlan,
+  readOnly,
+}: {
+  currentPlan: SubscriptionPlan;
+  readOnly: boolean;
+}) {
   return (
     <div className="flex flex-col gap-3">
       {PLAN_TIERS.map((tier) => (
-        <PricingCard key={tier.id} tier={tier} isCurrent={tier.id === currentPlan} />
+        <PricingCard key={tier.id} tier={tier} isCurrent={tier.id === currentPlan} readOnly={readOnly} />
       ))}
     </div>
   );
 }
 
-function PricingCard({ tier, isCurrent }: { tier: PlanTierConfig; isCurrent: boolean }) {
+function PricingCard({ tier, isCurrent, readOnly }: { tier: PlanTierConfig; isCurrent: boolean; readOnly: boolean }) {
   const visual = TIER_VISUALS[tier.id];
   const Icon = visual.icon;
   const isComingSoon = tier.availability === "COMING_SOON";
@@ -162,7 +176,20 @@ function PricingCard({ tier, isCurrent }: { tier: PlanTierConfig; isCurrent: boo
                   Belum dapat dibeli — harga di atas adalah target, bukan tarif aktif.
                 </p>
               ) : (
-                <p className={cn("mt-2 text-xs", visual.subtext)}>Pembayaran online segera tersedia.</p>
+                <>
+                  <p className={cn("mt-2 text-xs", visual.subtext)}>Pembayaran online segera tersedia.</p>
+                  <div className="mt-3">
+                    <PlanSelectConfirm
+                      planId={tier.id}
+                      planName={tier.name}
+                      priceIDR={tier.priceIDR}
+                      pricePeriodLabel={tier.pricePeriodLabel}
+                      actionBarClassName={visual.actionBar}
+                      mutedTextClassName={visual.subtext}
+                      readOnly={readOnly}
+                    />
+                  </div>
+                </>
               )}
             </div>
           </details>
