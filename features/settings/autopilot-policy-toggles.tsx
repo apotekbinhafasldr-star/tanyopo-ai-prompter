@@ -18,7 +18,7 @@ const POLICY_LABELS: Record<AutopilotPolicyType, { title: string; description: s
   AUTO_PROPOSE_BUDGET_REALLOCATION: {
     title: "Ajukan otomatis: realokasi budget antar channel",
     description:
-      "Saat Optimization Agent merekomendasikan kenaikan/penurunan budget, langsung ajukan ke Approval Center tanpa menunggu klik manual. Tetap diperiksa Budget Guard sebelum diajukan.",
+      "Saat Optimization Agent merekomendasikan kenaikan/penurunan budget, langsung ajukan ke Approval Center tanpa menunggu klik manual. Tetap diperiksa terhadap Batas Pengeluaran Promosi sebelum diajukan.",
   },
 };
 
@@ -38,7 +38,8 @@ export function AutopilotPolicyToggles({
     <div className="flex flex-col gap-3">
       {!isAutopilotMode ? (
         <p className="text-xs text-muted-foreground">
-          Kebijakan di bawah hanya berlaku saat Mode Automation diatur ke <strong>Autopilot</strong>.
+          Kebijakan di bawah hanya berlaku saat Otomatisasi LINOE diatur ke{" "}
+          <strong>&quot;Otomatis, Tetap Anda yang Menyetujui&quot;</strong>.
         </p>
       ) : null}
       {(Object.keys(POLICY_LABELS) as AutopilotPolicyType[]).map((policyType) => (

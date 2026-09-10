@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { User, Building2, ShieldCheck, Bot, Globe, ShieldAlert } from "lucide-react";
+import { User, ShieldCheck, Bot, Globe, ShieldAlert, Power, ChevronRight, SlidersHorizontal } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { requireSessionContext } from "@/services/session";
@@ -18,7 +18,7 @@ import { DEFAULT_LOCALE } from "@/lib/i18n/config";
 import { getFeatureFlags } from "@/lib/feature-flags";
 import { listComplianceFlags } from "@/services/compliance";
 
-export const metadata: Metadata = { title: "Settings — LINOE" };
+export const metadata: Metadata = { title: "Pengaturan — LINOE" };
 
 const ROLE_LABEL: Record<string, string> = {
   owner: "Owner",
@@ -29,6 +29,16 @@ const ROLE_LABEL: Record<string, string> = {
   hr: "HR",
 };
 
+/**
+ * Batch B9 — Settings UX simplification. This page reuses every existing
+ * service/action/schema/component from B0-B8 as-is (no new persistence,
+ * no new server actions, no schema change) and only reorganizes
+ * presentation: plain-Indonesian section titles, essential settings
+ * visible by default, and the more technical/rarely-touched controls
+ * (Autopilot policy toggles, Compliance Readiness, Global Edition feature
+ * flags) tucked into a collapsed "Pengaturan Lanjutan" disclosure so a
+ * first-time UMKM owner isn't shown a technical dashboard up front.
+ */
 export default async function SettingsPage() {
   const session = await requireSessionContext({ allowIncompleteOnboarding: true });
   const supabase = await createClient();
@@ -63,16 +73,18 @@ export default async function SettingsPage() {
   return (
     <div className="flex flex-1 flex-col gap-6 p-8">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight text-foreground">Settings</h1>
+        <h1 className="text-xl font-semibold tracking-tight text-foreground">Pengaturan</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Profil, organisasi, dan preferensi akun Anda.
+          Profil, bisnis, dan cara LINOE membantu pemasaran Anda.
         </p>
       </div>
 
+      {/* 1. Profil & Bisnis — merged Profil + Organisasi. No internal
+          ID/tenant ID is shown to the end user; only human-facing fields. */}
       <Card>
         <CardHeader className="flex flex-row items-center gap-2 space-y-0">
           <User className="size-4 text-muted-foreground" aria-hidden />
-          <CardTitle>Profil</CardTitle>
+          <CardTitle>Profil &amp; Bisnis</CardTitle>
         </CardHeader>
         <CardContent className="pt-4">
           <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -90,20 +102,10 @@ export default async function SettingsPage() {
                 <Badge variant="brand">{ROLE_LABEL[session.role] ?? session.role}</Badge>
               </dd>
             </div>
-          </dl>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader className="flex flex-row items-center gap-2 space-y-0">
-          <Building2 className="size-4 text-muted-foreground" aria-hidden />
-          <CardTitle>Organisasi</CardTitle>
-          <CardDescription className="sr-only">Data bisnis Anda</CardDescription>
-        </CardHeader>
-        <CardContent className="pt-4">
-          <dl>
-            <dt className="text-xs text-muted-foreground">Nama Bisnis</dt>
-            <dd className="text-sm font-medium text-foreground">{session.businessName}</dd>
+            <div>
+              <dt className="text-xs text-muted-foreground">Nama Bisnis</dt>
+              <dd className="text-sm font-medium text-foreground">{session.businessName}</dd>
+            </div>
           </dl>
           <p className="mt-4 text-xs text-muted-foreground">
             Pengaturan brand, tim, dan API akan tersedia pada fase pengembangan berikutnya.
@@ -111,10 +113,11 @@ export default async function SettingsPage() {
         </CardContent>
       </Card>
 
+      {/* 2. Pasar & Lokasi — existing GlobalPreferencesForm/action, untouched. */}
       <Card>
         <CardHeader className="flex flex-row items-center gap-2 space-y-0">
           <Globe className="size-4 text-muted-foreground" aria-hidden />
-          <CardTitle>{dictionary.onboarding.globalStepTitle}</CardTitle>
+          <CardTitle>Pasar &amp; Lokasi</CardTitle>
           <CardDescription className="sr-only">Negara, bahasa, zona waktu, dan mata uang bisnis</CardDescription>
         </CardHeader>
         <CardContent className="pt-4">
@@ -129,12 +132,17 @@ export default async function SettingsPage() {
         </CardContent>
       </Card>
 
+      {/* 3. Batas Pengeluaran Promosi (was "Budget Guard") + 4. Persetujuan
+          Pengeluaran (was "Approval Threshold") — both fields live in the
+          same prompter_budget_policies row and the same
+          updateBudgetPolicyAction, so BudgetPolicyForm keeps them as one
+          form/one save, presented as two clearly labeled groups. */}
       <Card>
         <CardHeader className="flex flex-row items-center gap-2 space-y-0">
           <ShieldCheck className="size-4 text-muted-foreground" aria-hidden />
-          <CardTitle>Budget Guard</CardTitle>
+          <CardTitle>Batas Pengeluaran Promosi</CardTitle>
           <CardDescription className="sr-only">
-            Batas budget yang diperiksa sebelum campaign diajukan
+            Batas budget yang diperiksa sebelum campaign diajukan, dan kapan LINOE meminta persetujuan Anda
           </CardDescription>
         </CardHeader>
         <CardContent className="pt-4">
@@ -142,68 +150,95 @@ export default async function SettingsPage() {
         </CardContent>
       </Card>
 
+      {/* 5. Otomatisasi LINOE — Automation Mode only. Same
+          updateAutomationModeAction/enum, plain-language labels only. */}
       <Card>
-        <CardHeader className="flex flex-row items-center gap-2 space-y-0">
-          <Bot className="size-4 text-muted-foreground" aria-hidden />
-          <CardTitle>Automation &amp; Autopilot</CardTitle>
-          <CardDescription className="sr-only">
-            Mode automation, kebijakan autopilot, dan Emergency Stop
+        <CardHeader className="flex flex-col gap-1 space-y-0">
+          <div className="flex flex-row items-center gap-2">
+            <Bot className="size-4 text-muted-foreground" aria-hidden />
+            <CardTitle>Otomatisasi LINOE</CardTitle>
+          </div>
+          <CardDescription>
+            Atur seberapa jauh LINOE boleh membantu menjalankan dan mengoptimalkan pemasaran Anda.
           </CardDescription>
         </CardHeader>
-        <CardContent className="flex flex-col gap-6 pt-4">
+        <CardContent className="pt-4">
+          <AutomationModeForm currentMode={automationSettings.automation_mode} readOnly={!isOwner} />
+        </CardContent>
+      </Card>
+
+      {/* 6. Emergency Stop — kept as its own visible section (never hidden
+          in Advanced), same toggleEmergencyStopAction/logic. */}
+      <Card>
+        <CardHeader className="flex flex-col gap-1 space-y-0">
+          <div className="flex flex-row items-center gap-2">
+            <Power className="size-4 text-muted-foreground" aria-hidden />
+            <CardTitle>Hentikan Semua Otomatisasi</CardTitle>
+          </div>
+          <CardDescription>
+            Gunakan ini jika Anda ingin menghentikan sementara tindakan otomatis LINOE.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="pt-4">
           <EmergencyStopButton
             active={automationSettings.emergency_stop_active}
             activatedAt={automationSettings.emergency_stop_activated_at}
             reason={automationSettings.emergency_stop_reason}
           />
+        </CardContent>
+      </Card>
 
-          <div className="border-t border-border pt-4">
-            <AutomationModeForm currentMode={automationSettings.automation_mode} readOnly={!isOwner} />
-          </div>
+      {/* Pengaturan Lanjutan — technical/rarely-touched controls, same
+          components/actions as before, just tucked away by default so a
+          first-time UMKM owner isn't shown a technical dashboard. Nothing
+          here is removed — only collapsed. */}
+      <details className="group rounded-[var(--radius-lg)] border border-border bg-surface shadow-[var(--shadow-sm)]">
+        <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 p-6 text-sm font-semibold text-foreground [&::-webkit-details-marker]:hidden">
+          <span className="flex items-center gap-2">
+            <SlidersHorizontal className="size-4 text-muted-foreground" aria-hidden />
+            Pengaturan Lanjutan
+          </span>
+          <ChevronRight className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-90" aria-hidden />
+        </summary>
 
-          <div className="border-t border-border pt-4">
-            <p className="mb-3 text-sm font-medium text-foreground">Kebijakan Autopilot</p>
+        <div className="flex flex-col gap-6 border-t border-border p-6 pt-6">
+          <div>
+            <p className="mb-1 text-sm font-medium text-foreground">Kebijakan Autopilot</p>
+            <p className="mb-3 text-xs text-muted-foreground">
+              Pengaturan lanjutan untuk Mode Otomatis — hanya berlaku saat Otomatisasi LINOE diatur ke mode paling
+              otomatis.
+            </p>
             <AutopilotPolicyToggles
               policies={autopilotPolicies ?? []}
               automationMode={automationSettings.automation_mode}
               readOnly={!isOwner}
             />
           </div>
-        </CardContent>
-      </Card>
 
-      <Card>
-        <CardHeader className="flex flex-row items-center gap-2 space-y-0">
-          <ShieldAlert className="size-4 text-muted-foreground" aria-hidden />
-          <CardTitle>Compliance Readiness</CardTitle>
-          <CardDescription className="sr-only">
-            Status kesiapan compliance per area — bukan jaminan kepatuhan penuh
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="pt-4">
-          <p className="mb-3 text-xs text-muted-foreground">
-            Status ini adalah metadata kesiapan yang Anda tetapkan sendiri — bukan penilaian hukum otomatis dari
-            AI atau sistem. &quot;Belum Dikonfigurasi&quot; secara default untuk setiap area.
-          </p>
-          <ComplianceFlagsForm flags={complianceFlags} readOnly={!isOwner} />
-        </CardContent>
-      </Card>
+          <div className="border-t border-border pt-6">
+            <div className="mb-1 flex items-center gap-2">
+              <ShieldAlert className="size-4 text-muted-foreground" aria-hidden />
+              <p className="text-sm font-medium text-foreground">Kesiapan Kepatuhan (Compliance)</p>
+            </div>
+            <p className="mb-3 text-xs text-muted-foreground">
+              Status ini adalah catatan kesiapan yang Anda tetapkan sendiri — bukan penilaian hukum otomatis dari
+              AI atau sistem. &quot;Belum Dikonfigurasi&quot; secara default untuk setiap area.
+            </p>
+            <ComplianceFlagsForm flags={complianceFlags} readOnly={!isOwner} />
+          </div>
 
-      <Card>
-        <CardHeader className="flex flex-row items-center gap-2 space-y-0">
-          <Globe className="size-4 text-muted-foreground" aria-hidden />
-          <CardTitle>Global Edition Feature Flags</CardTitle>
-          <CardDescription className="sr-only">
-            Kontrol opt-in per fitur Global Edition untuk tenant ini
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="pt-4">
-          <p className="mb-3 text-xs text-muted-foreground">
-            Tidak aktif secara default — mengaktifkan salah satu tidak memengaruhi tenant lain.
-          </p>
-          <FeatureFlagToggles flags={featureFlags} readOnly={!isOwner} />
-        </CardContent>
-      </Card>
+          <div className="border-t border-border pt-6">
+            <div className="mb-1 flex items-center gap-2">
+              <Globe className="size-4 text-muted-foreground" aria-hidden />
+              <p className="text-sm font-medium text-foreground">Fitur Global Edition</p>
+            </div>
+            <p className="mb-3 text-xs text-muted-foreground">
+              Tidak aktif secara default — mengaktifkan salah satu tidak memengaruhi bisnis lain di LINOE.
+            </p>
+            <FeatureFlagToggles flags={featureFlags} readOnly={!isOwner} />
+          </div>
+        </div>
+      </details>
     </div>
   );
 }
