@@ -206,24 +206,30 @@ function AiCore() {
   );
 }
 
-/** Desktop-only animated SVG overlay — ONE continuous chain of 8 curved
- * segments (Produk -> Core -> Strategi -> Konten -> Campaign -> SEO ->
- * Analitik -> Optimasi -> Growth), each carrying a bright traveling
- * highlight staggered so the light appears to move down the whole chain
- * in reading order, then loop. Positioned with a percentage-based viewBox
- * (preserveAspectRatio="none") so it stretches to the diagram's own box —
- * purely decorative, so minor stretch at unusual widths is acceptable. */
+/** Desktop-only animated "AI energy flow" overlay — ONE continuous chain of
+ * 8 curved segments (Produk -> Core -> Strategi -> Konten -> Campaign ->
+ * SEO -> Analitik -> Optimasi -> Growth). Each segment layers three things:
+ * a thick glowing gradient wire with a subtle electric flicker
+ * (tanyopo-connector-glow), a bright traveling dash highlight
+ * (tanyopo-connector-path, existing), and a small glowing particle that
+ * physically travels along the path (native SVG animateMotion/mpath — no
+ * JS animation loop, GPU-friendly). Positioned with a percentage-based
+ * viewBox (preserveAspectRatio="none") so it stretches to the diagram's
+ * own box — purely decorative, so minor stretch at unusual widths is
+ * acceptable. */
 function ConnectorOverlay() {
-  // Chain segments in flow order. The 6 middle segments connect capability
-  // card i to card i+1 (centers at x=100/300/500/700/900/1100, matching the
-  // grid-cols-6 column midpoints), dipping in a gentle wave between them.
-  const chainSegments = [
-    "M600,330 C420,410 220,470 100,520",
-    "M100,520 C160,565 240,565 300,520",
-    "M300,520 C360,565 440,565 500,520",
-    "M500,520 C560,565 640,565 700,520",
-    "M700,520 C760,565 840,565 900,520",
-    "M900,520 C960,565 1040,565 1100,520",
+  // Flow order. The 6 middle segments connect capability card i to card
+  // i+1 (centers at x=100/300/500/700/900/1100, matching the grid-cols-6
+  // column midpoints), dipping in a gentle wave between them.
+  const segments = [
+    { d: "M260,175 C340,175 380,220 465,255", arrow: true },
+    { d: "M600,330 C420,410 220,470 100,520", arrow: false },
+    { d: "M100,520 C160,565 240,565 300,520", arrow: false },
+    { d: "M300,520 C360,565 440,565 500,520", arrow: false },
+    { d: "M500,520 C560,565 640,565 700,520", arrow: false },
+    { d: "M700,520 C760,565 840,565 900,520", arrow: false },
+    { d: "M900,520 C960,565 1040,565 1100,520", arrow: false },
+    { d: "M1100,520 C1170,460 1140,300 940,175", arrow: true },
   ];
 
   return (
@@ -236,18 +242,31 @@ function ConnectorOverlay() {
     >
       <defs>
         <linearGradient id="tanyopo-flow-h" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stopColor="#22d3ee" />
-          <stop offset="100%" stopColor="#8b5cf6" />
+          <stop offset="0%" stopColor="#06b6d4" />
+          <stop offset="50%" stopColor="#3b82f6" />
+          <stop offset="100%" stopColor="#7c3aed" />
         </linearGradient>
         <linearGradient id="tanyopo-flow-fan" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#67e8f9" />
-          <stop offset="100%" stopColor="#8b5cf6" />
+          <stop offset="0%" stopColor="#06b6d4" />
+          <stop offset="50%" stopColor="#3b82f6" />
+          <stop offset="100%" stopColor="#7c3aed" />
         </linearGradient>
+        <radialGradient id="tanyopo-particle-fill" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor="#ffffff" />
+          <stop offset="60%" stopColor="#ffffff" />
+          <stop offset="100%" stopColor="#a5f3fc" stopOpacity="0" />
+        </radialGradient>
         <marker id="tanyopo-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
           <path d="M0,0 L10,5 L0,10 z" fill="#ffffff" />
         </marker>
-        <filter id="tanyopo-glow" x="-60%" y="-60%" width="220%" height="220%">
-          <feGaussianBlur stdDeviation="4" result="blur" />
+        {/* Wide, soft bloom — sits behind the solid core so the wire looks
+            like it's radiating light, without blurring the wire itself. */}
+        <filter id="tanyopo-halo" x="-120%" y="-120%" width="340%" height="340%">
+          <feGaussianBlur stdDeviation="7" />
+        </filter>
+        {/* Tight blur used only on the traveling particle's own glow. */}
+        <filter id="tanyopo-glow" x="-100%" y="-100%" width="300%" height="300%">
+          <feGaussianBlur stdDeviation="3.5" result="blur" />
           <feMerge>
             <feMergeNode in="blur" />
             <feMergeNode in="SourceGraphic" />
@@ -255,48 +274,48 @@ function ConnectorOverlay() {
         </filter>
       </defs>
 
-      {/* Segment 0: Produk -> Core */}
-      <path d="M260,175 C340,175 380,220 465,255" stroke="url(#tanyopo-flow-h)" strokeWidth="3.5" strokeLinecap="round" filter="url(#tanyopo-glow)" opacity="0.9" />
-      <path
-        d="M260,175 C340,175 380,220 465,255"
-        stroke="#ffffff"
-        strokeWidth="4"
-        strokeLinecap="round"
-        markerEnd="url(#tanyopo-arrow)"
-        className="tanyopo-connector-path"
-        opacity="0.9"
-        style={{ animationDelay: `${stopDelay(0)}ms` }}
-      />
-
-      {/* Segments 1-6: Core -> Strategi -> Konten -> Campaign -> SEO -> Analitik -> Optimasi */}
-      {chainSegments.map((d) => (
-        <path key={`${d}-base`} d={d} stroke="url(#tanyopo-flow-fan)" strokeWidth="2.5" strokeLinecap="round" filter="url(#tanyopo-glow)" opacity="0.8" />
-      ))}
-      {chainSegments.map((d, i) => (
-        <path
-          key={d}
-          d={d}
-          stroke="#e0f2fe"
-          strokeWidth="2.25"
-          strokeLinecap="round"
-          className="tanyopo-connector-path"
-          opacity="0.9"
-          style={{ animationDelay: `${stopDelay(i + 1)}ms` }}
-        />
-      ))}
-
-      {/* Segment 7: Optimasi -> Growth */}
-      <path d="M1100,520 C1170,460 1140,300 940,175" stroke="url(#tanyopo-flow-h)" strokeWidth="3.5" strokeLinecap="round" filter="url(#tanyopo-glow)" opacity="0.9" />
-      <path
-        d="M1100,520 C1170,460 1140,300 940,175"
-        stroke="#ffffff"
-        strokeWidth="4"
-        strokeLinecap="round"
-        markerEnd="url(#tanyopo-arrow)"
-        className="tanyopo-connector-path"
-        opacity="0.9"
-        style={{ animationDelay: `${stopDelay(7)}ms` }}
-      />
+      {segments.map((seg, i) => {
+        const id = `tanyopo-seg-${i}`;
+        const gradient = seg.arrow ? "url(#tanyopo-flow-h)" : "url(#tanyopo-flow-fan)";
+        const haloWidth = seg.arrow ? 20 : 17;
+        const coreWidth = seg.arrow ? 6.5 : 5.5;
+        const dashWidth = seg.arrow ? 3.5 : 3;
+        const particleR = seg.arrow ? 8 : 7;
+        return (
+          <g key={id}>
+            {/* Soft bloom halo — solid color, wide, blurred, always on. */}
+            <path d={seg.d} stroke={gradient} strokeWidth={haloWidth} strokeLinecap="round" filter="url(#tanyopo-halo)" opacity="0.7" />
+            {/* Solid saturated core — the wire itself, crisp, never faint. */}
+            <path
+              d={seg.d}
+              stroke={gradient}
+              strokeWidth={coreWidth}
+              strokeLinecap="round"
+              opacity="1"
+              className="tanyopo-connector-glow"
+              style={{ animationDelay: `${i * 220}ms` }}
+            />
+            {/* Bright dashed highlight traveling along the core. */}
+            <path
+              id={id}
+              d={seg.d}
+              stroke="#ffffff"
+              strokeWidth={dashWidth}
+              strokeLinecap="round"
+              markerEnd={seg.arrow ? "url(#tanyopo-arrow)" : undefined}
+              className="tanyopo-connector-path"
+              opacity="0.95"
+              style={{ animationDelay: `${stopDelay(i)}ms` }}
+            />
+            {/* Traveling energy particle — the clearest "it's moving" cue. */}
+            <circle r={particleR} className="tanyopo-energy-particle" fill="url(#tanyopo-particle-fill)" filter="url(#tanyopo-glow)">
+              <animateMotion dur="1.6s" repeatCount="indefinite" begin={`${i * 0.2}s`}>
+                <mpath href={`#${id}`} />
+              </animateMotion>
+            </circle>
+          </g>
+        );
+      })}
     </svg>
   );
 }
@@ -336,7 +355,10 @@ export function TanyopoIntelligenceDiagram() {
           through a large central core with short single-line process rows,
           instead of eight tall stacked cards. */}
       <div className="relative flex flex-col items-center gap-3 lg:hidden">
-        <div aria-hidden className="tanyopo-spine pointer-events-none absolute left-1/2 top-6 bottom-6 w-1 -translate-x-1/2 rounded-full" />
+        <div aria-hidden className="pointer-events-none absolute left-1/2 top-6 bottom-6 w-8 -translate-x-1/2">
+          <div className="tanyopo-spine absolute inset-x-0 top-0 bottom-0 mx-auto w-3 rounded-full" />
+          <div className="tanyopo-spine-particle absolute left-1/2 size-4 -translate-x-1/2 rounded-full" />
+        </div>
         <Reveal className="relative z-10 w-full max-w-sm">
           <EndpointCard number={1} icon={Package} label="Produk Anda" description="Masukkan produk atau jasa Anda. LINOE memahami bisnis Anda secara mendalam." accent="start" delayMs={stopDelay(0)} />
         </Reveal>
