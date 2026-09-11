@@ -214,6 +214,40 @@ body {
   animation: marketing-ambient-drift 26s ease-in-out infinite reverse;
 }
 
+/* Tanyopo Intelligence V5 — sequential "energy" chain. A brief glow travels
+   through each stop (Produk -> Core -> 6 capabilities -> Growth) in turn,
+   staggered via animation-delay to roughly track the connector lines'
+   traveling highlight (marketing-dash-flow), plus concentric sonar-style
+   rings on the AI core so it reads as continuously "thinking" rather than
+   a static hub. Both are box-shadow/transform/opacity only. */
+@keyframes marketing-node-pulse {
+  0% { box-shadow: 0 12px 32px -12px rgba(15,23,60,0.6); }
+  6% { box-shadow: 0 0 0 2px rgba(103,232,249,0.85), 0 0 26px 6px rgba(59,99,251,0.65), 0 12px 32px -12px rgba(15,23,60,0.6); }
+  18% { box-shadow: 0 12px 32px -12px rgba(15,23,60,0.6); }
+  100% { box-shadow: 0 12px 32px -12px rgba(15,23,60,0.6); }
+}
+
+.tanyopo-node-pulse {
+  animation: marketing-node-pulse 3.5s ease-in-out infinite;
+}
+
+@keyframes marketing-core-ring {
+  0% { transform: scale(0.92); opacity: 0.55; border-color: rgba(103,232,249,0.55); }
+  100% { transform: scale(1.55); opacity: 0; border-color: rgba(139,92,246,0.12); }
+}
+
+.tanyopo-core-ring {
+  border: 1.5px solid rgba(103,232,249,0.5);
+  animation: marketing-core-ring 3s ease-out infinite;
+}
+
+.tanyopo-spine {
+  background: linear-gradient(180deg, #22d3ee 0%, #3b82f6 35%, #8b5cf6 70%, #22c55e 100%);
+  background-size: 100% 220%;
+  animation: marketing-line-flow 3s linear infinite;
+  box-shadow: 0 0 14px -2px rgba(139,92,246,0.55);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .marketing-float {
     animation: none;
@@ -241,6 +275,17 @@ body {
   }
   .tanyopo-ambient-drift,
   .tanyopo-ambient-drift-reverse {
+    animation: none;
+  }
+  .tanyopo-node-pulse {
+    animation: none;
+    box-shadow: 0 12px 32px -12px rgba(15,23,60,0.6);
+  }
+  .tanyopo-core-ring {
+    animation: none;
+    opacity: 0;
+  }
+  .tanyopo-spine {
     animation: none;
   }
 }

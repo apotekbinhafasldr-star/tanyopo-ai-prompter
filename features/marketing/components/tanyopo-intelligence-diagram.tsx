@@ -2,27 +2,27 @@ import { Package, Brain, Target, FileText, Megaphone, Search, BarChart3, Setting
 import { Reveal } from "@/features/marketing/components/reveal";
 
 /**
- * Tanyopo Intelligence — Animated V4. Rebuilt to strictly match the
- * founder-supplied reference
- * (LINOE_TANYOPO_INTELLIGENCE_VISUAL_REFERENCE_FINAL.png, root of the
- * repo): dark "island" cards (Produk Anda, six capability cards,
- * Pertumbuhan Bisnis) floating on a lighter ambient section background,
- * a large glowing AI core with its title/subtitle set inside the orb,
- * numbered badges walking the whole flow 1-8, and curved neon connector
- * lines fanning from the core. Capability-based, not numbers — no
- * illustrative metric/result ever belongs here, since this diagram
- * explains how the system works, not a customer's results (product spec
- * §3/§7). Every capability listed is something LINOE already does
- * today — nothing invented. Every animation is CSS transform/opacity/
- * background-position/SVG stroke-dashoffset only (see the
+ * Tanyopo Intelligence — Animated V5. Reworked per founder feedback that V4
+ * read as a hub with independent parallel cards rather than "a living AI
+ * machine." V5 keeps V4's wide composition (Produk left / AI Core center /
+ * Growth right / reference PNG as source of truth for hierarchy) but wires
+ * every stop into ONE sequential chain — Produk -> Core -> Strategi ->
+ * Konten -> Campaign -> SEO -> Analitik -> Optimasi -> Growth — with a
+ * single traveling light animated through all 8 connector segments in
+ * order, each node briefly glowing in turn as the "energy" reaches it
+ * (marketing-node-pulse), and a more dominant, visibly "alive" core
+ * (concentric sonar-style rings, marketing-core-ring). Mobile drops the
+ * old stack-of-8-big-cards layout for a compact connected timeline: a
+ * single glowing spine running through a large central core with short
+ * one-line process rows (FlowStep) attached to it, so the phone view still
+ * reads as one diagram, not a long list.
+ *
+ * Every capability listed is something LINOE already does today — nothing
+ * invented (product spec §3/§7). Every animation is CSS transform/opacity/
+ * background-position/box-shadow/SVG stroke-dashoffset only (see the
  * `tanyopo-*`/`marketing-*` utility classes in app/globals.css), no
  * canvas/WebGL/animation library, and all disabled under
  * prefers-reduced-motion.
- *
- * The reference image numbers its 6 capability cards 2,3,4,5,6,6 and
- * its Growth card 7 — an evident off-by-one slip in the source asset
- * (7 numbered stops for what is actually an 8-stop journey: Produk +
- * 6 capabilities + Growth). Corrected here to a consistent 1-8 sequence.
  */
 const CAPABILITIES: { icon: LucideIcon; title: string; description: string }[] = [
   { icon: Target, title: "Strategi Marketing", description: "AI menyusun strategi sesuai target pasar dan tujuan bisnis Anda." },
@@ -35,6 +35,11 @@ const CAPABILITIES: { icon: LucideIcon; title: string; description: string }[] =
 
 const CARD_BG = "linear-gradient(160deg, #16224d 0%, #0c1631 100%)";
 const ICON_BADGE_BG = "linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%)";
+
+// Single shared cycle (ms) for the connector "energy" and the per-node glow
+// it triggers, so both stay roughly in step across all 8 stops.
+const FLOW_CYCLE_MS = 3500;
+const stopDelay = (index: number) => Math.round((index / 8) * FLOW_CYCLE_MS);
 
 function NumberBadge({ n }: { n: number }) {
   return (
@@ -49,18 +54,28 @@ function EndpointCard({
   icon: Icon,
   label,
   description,
+  accent,
+  delayMs,
 }: {
   number: number;
   icon: LucideIcon;
   label: string;
   description: string;
+  accent: "start" | "end";
+  delayMs: number;
 }) {
+  const accentRing =
+    accent === "end"
+      ? "0 0 0 1px rgba(74,222,128,0.4), 0 0 28px -6px rgba(34,197,94,0.5), "
+      : "0 0 0 1px rgba(103,232,249,0.4), ";
   return (
     <div
-      className="tanyopo-card-sheen relative flex w-full max-w-xs items-start gap-3 overflow-hidden rounded-2xl border border-white/10 p-4 shadow-[0_12px_32px_-12px_rgba(15,23,60,0.6)] sm:p-5 lg:max-w-[15rem]"
+      className="tanyopo-node-pulse tanyopo-card-sheen relative flex w-full max-w-xs items-start gap-3 overflow-hidden rounded-2xl border border-white/10 p-4 sm:p-5 lg:max-w-[15rem]"
       style={{
         background: `${CARD_BG}, linear-gradient(90deg, transparent 0%, rgba(103,232,249,0.35) 50%, transparent 100%)`,
         backgroundBlendMode: "normal, overlay",
+        boxShadow: `${accentRing}0 12px 32px -12px rgba(15,23,60,0.6)`,
+        animationDelay: `${delayMs}ms`,
       }}
     >
       <span className="flex size-12 shrink-0 items-center justify-center rounded-xl text-white sm:size-14" style={{ background: ICON_BADGE_BG }}>
@@ -72,31 +87,38 @@ function EndpointCard({
           <p className="text-sm font-bold text-white sm:text-base">{label}</p>
         </div>
         <p className="mt-1.5 text-xs leading-relaxed text-white/65 sm:text-sm">{description}</p>
+        {accent === "end" ? <p className="mt-1.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-300/90">Hasil akhir</p> : null}
       </div>
     </div>
   );
 }
 
+/** Desktop capability card — icon-top layout matching the reference PNG's
+ * capability row. Sequential glow (tanyopo-node-pulse) ties it into the
+ * same chain timing as every other stop. */
 function CapabilityCard({
   number,
   icon: Icon,
   title,
   description,
-  delayMs,
+  revealDelayMs,
+  pulseDelayMs,
 }: {
   number: number;
   icon: LucideIcon;
   title: string;
   description: string;
-  delayMs: number;
+  revealDelayMs: number;
+  pulseDelayMs: number;
 }) {
   return (
-    <Reveal delayMs={delayMs}>
+    <Reveal delayMs={revealDelayMs}>
       <div
-        className="tanyopo-card-sheen relative flex h-full flex-col gap-1.5 overflow-hidden rounded-xl border border-white/10 p-2.5 shadow-[0_12px_32px_-12px_rgba(15,23,60,0.6)] transition-transform duration-300 hover:-translate-y-1 active:scale-[0.98] lg:gap-2 lg:rounded-2xl lg:p-3 xl:p-3.5"
+        className="tanyopo-node-pulse tanyopo-card-sheen relative flex h-full flex-col gap-1.5 overflow-hidden rounded-xl border border-white/10 p-2.5 transition-transform duration-300 hover:-translate-y-1 active:scale-[0.98] lg:gap-2 lg:rounded-2xl lg:p-3 xl:p-3.5"
         style={{
           background: `${CARD_BG}, linear-gradient(90deg, transparent 0%, rgba(103,232,249,0.3) 50%, transparent 100%)`,
           backgroundBlendMode: "normal, overlay",
+          animationDelay: `${pulseDelayMs}ms`,
         }}
       >
         <span className="flex size-7 items-center justify-center rounded-full text-white lg:size-8" style={{ background: ICON_BADGE_BG }}>
@@ -112,22 +134,64 @@ function CapabilityCard({
   );
 }
 
+/** Compact mobile process row — one line, attached to the vertical spine,
+ * replacing V4's tall icon-top cards so the phone view reads as a short
+ * connected timeline instead of a stack of eight big cards. */
+function FlowStep({
+  number,
+  icon: Icon,
+  title,
+  description,
+  revealDelayMs,
+  pulseDelayMs,
+}: {
+  number: number;
+  icon: LucideIcon;
+  title: string;
+  description: string;
+  revealDelayMs: number;
+  pulseDelayMs: number;
+}) {
+  return (
+    <Reveal delayMs={revealDelayMs} className="relative z-10">
+      <div
+        className="tanyopo-node-pulse flex items-center gap-3 rounded-2xl border border-white/10 px-3.5 py-2.5"
+        style={{ background: CARD_BG, animationDelay: `${pulseDelayMs}ms` }}
+      >
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-full text-white" style={{ background: ICON_BADGE_BG }}>
+          <Icon className="size-4" aria-hidden />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <NumberBadge n={number} />
+            <p className="text-[13px] font-bold text-white">{title}</p>
+          </div>
+          <p className="mt-0.5 text-[11px] leading-snug text-white/60">{description}</p>
+        </div>
+      </div>
+    </Reveal>
+  );
+}
+
 function AiCore() {
   return (
-    <Reveal className="tanyopo-core-reveal relative mx-auto flex shrink-0">
+    <Reveal className="tanyopo-core-reveal relative z-10 mx-auto flex shrink-0">
       <div
         aria-hidden
         className="marketing-glow-pulse pointer-events-none absolute inset-[-2.5rem] -z-10 rounded-full blur-2xl"
         style={{ background: "radial-gradient(circle, rgba(59,99,251,0.55) 0%, rgba(139,92,246,0.4) 55%, transparent 75%)" }}
       />
       <div
-        className="flex size-56 flex-col items-center justify-center gap-2 rounded-full px-6 text-center sm:size-64 lg:size-72"
+        className="relative flex size-60 flex-col items-center justify-center gap-2 rounded-full px-6 text-center sm:size-72 lg:size-80"
         style={{
           background: "radial-gradient(circle at 50% 35%, #4c56d6 0%, #2c2f8f 45%, #181a54 75%, #10112f 100%)",
           boxShadow:
             "0 0 0 3px rgba(255,255,255,0.9), 0 0 0 8px rgba(103,232,249,0.25), 0 0 60px 10px rgba(59,99,251,0.65), 0 0 130px 36px rgba(139,92,246,0.35)",
         }}
       >
+        <span aria-hidden className="tanyopo-core-ring pointer-events-none absolute inset-[-10px] rounded-full" style={{ animationDelay: "0ms" }} />
+        <span aria-hidden className="tanyopo-core-ring pointer-events-none absolute inset-[-10px] rounded-full" style={{ animationDelay: "1000ms" }} />
+        <span aria-hidden className="tanyopo-core-ring pointer-events-none absolute inset-[-10px] rounded-full" style={{ animationDelay: "2000ms" }} />
         <Brain className="size-9 text-violet-200 sm:size-10 lg:size-11" strokeWidth={1.5} aria-hidden />
         <p className="text-lg font-bold leading-tight text-white sm:text-xl lg:text-2xl">
           Tanyopo
@@ -142,22 +206,24 @@ function AiCore() {
   );
 }
 
-/** Desktop-only animated SVG overlay: curved neon connectors from Produk
- * to the core, the core to Growth, and the core fanning down to each of
- * the six capability cards. Positioned with a percentage-based viewBox
- * (preserveAspectRatio="none") so it stretches to the diagram's own box
- * — purely decorative, so minor stretch at unusual widths is acceptable. */
+/** Desktop-only animated SVG overlay — ONE continuous chain of 8 curved
+ * segments (Produk -> Core -> Strategi -> Konten -> Campaign -> SEO ->
+ * Analitik -> Optimasi -> Growth), each carrying a bright traveling
+ * highlight staggered so the light appears to move down the whole chain
+ * in reading order, then loop. Positioned with a percentage-based viewBox
+ * (preserveAspectRatio="none") so it stretches to the diagram's own box —
+ * purely decorative, so minor stretch at unusual widths is acceptable. */
 function ConnectorOverlay() {
-  // Six evenly-spaced endpoints matching the capability grid's actual
-  // column centers (grid-cols-6, no horizontal padding, viewBox width
-  // 1200 -> centers at 1/12, 3/12, 5/12, 7/12, 9/12, 11/12 of the width).
-  const fanPaths = [
+  // Chain segments in flow order. The 6 middle segments connect capability
+  // card i to card i+1 (centers at x=100/300/500/700/900/1100, matching the
+  // grid-cols-6 column midpoints), dipping in a gentle wave between them.
+  const chainSegments = [
     "M600,330 C420,410 220,470 100,520",
-    "M600,330 C480,420 380,480 300,520",
-    "M600,330 C550,430 530,485 500,520",
-    "M600,330 C650,430 670,485 700,520",
-    "M600,330 C720,420 820,480 900,520",
-    "M600,330 C780,410 980,470 1100,520",
+    "M100,520 C160,565 240,565 300,520",
+    "M300,520 C360,565 440,565 500,520",
+    "M500,520 C560,565 640,565 700,520",
+    "M700,520 C760,565 840,565 900,520",
+    "M900,520 C960,565 1040,565 1100,520",
   ];
 
   return (
@@ -189,9 +255,7 @@ function ConnectorOverlay() {
         </filter>
       </defs>
 
-      {/* Solid glowing base underneath each dashed path — keeps the line
-          fully, brightly visible at all times, like a lit neon tube; the
-          dashed layer on top supplies the moving "data flow" highlight. */}
+      {/* Segment 0: Produk -> Core */}
       <path d="M260,175 C340,175 380,220 465,255" stroke="url(#tanyopo-flow-h)" strokeWidth="3.5" strokeLinecap="round" filter="url(#tanyopo-glow)" opacity="0.9" />
       <path
         d="M260,175 C340,175 380,220 465,255"
@@ -201,82 +265,98 @@ function ConnectorOverlay() {
         markerEnd="url(#tanyopo-arrow)"
         className="tanyopo-connector-path"
         opacity="0.9"
+        style={{ animationDelay: `${stopDelay(0)}ms` }}
       />
-      <path d="M735,255 C820,220 860,175 940,175" stroke="url(#tanyopo-flow-h)" strokeWidth="3.5" strokeLinecap="round" filter="url(#tanyopo-glow)" opacity="0.9" />
+
+      {/* Segments 1-6: Core -> Strategi -> Konten -> Campaign -> SEO -> Analitik -> Optimasi */}
+      {chainSegments.map((d) => (
+        <path key={`${d}-base`} d={d} stroke="url(#tanyopo-flow-fan)" strokeWidth="2.5" strokeLinecap="round" filter="url(#tanyopo-glow)" opacity="0.8" />
+      ))}
+      {chainSegments.map((d, i) => (
+        <path
+          key={d}
+          d={d}
+          stroke="#e0f2fe"
+          strokeWidth="2.25"
+          strokeLinecap="round"
+          className="tanyopo-connector-path"
+          opacity="0.9"
+          style={{ animationDelay: `${stopDelay(i + 1)}ms` }}
+        />
+      ))}
+
+      {/* Segment 7: Optimasi -> Growth */}
+      <path d="M1100,520 C1170,460 1140,300 940,175" stroke="url(#tanyopo-flow-h)" strokeWidth="3.5" strokeLinecap="round" filter="url(#tanyopo-glow)" opacity="0.9" />
       <path
-        d="M735,255 C820,220 860,175 940,175"
+        d="M1100,520 C1170,460 1140,300 940,175"
         stroke="#ffffff"
         strokeWidth="4"
         strokeLinecap="round"
         markerEnd="url(#tanyopo-arrow)"
         className="tanyopo-connector-path"
         opacity="0.9"
+        style={{ animationDelay: `${stopDelay(7)}ms` }}
       />
-
-      {fanPaths.map((d) => (
-        <path key={`${d}-base`} d={d} stroke="url(#tanyopo-flow-fan)" strokeWidth="2.25" strokeLinecap="round" filter="url(#tanyopo-glow)" opacity="0.75" />
-      ))}
-      {fanPaths.map((d, i) => (
-        <path
-          key={d}
-          d={d}
-          stroke="#e0f2fe"
-          strokeWidth="2"
-          strokeLinecap="round"
-          className="tanyopo-connector-path"
-          opacity="0.85"
-          style={{ animationDelay: `${i * 180}ms` }}
-        />
-      ))}
     </svg>
-  );
-}
-
-function MobileConnector({ toGreen }: { toGreen?: boolean }) {
-  return (
-    <div
-      aria-hidden
-      className="marketing-line-flow h-8 w-1 shrink-0 rounded-full shadow-[0_0_14px_-2px_rgba(139,92,246,0.55)] sm:h-10"
-      style={{
-        background: toGreen
-          ? "linear-gradient(180deg, #8b5cf6 0%, #22c55e 100%)"
-          : "linear-gradient(180deg, #22d3ee 0%, #3b82f6 45%, #8b5cf6 100%)",
-      }}
-    />
   );
 }
 
 export function TanyopoIntelligenceDiagram() {
   return (
     <div className="relative mx-auto max-w-6xl">
-      {/* Desktop — Produk (left) -> AI Core (center) -> Growth (right), fan-out to capability grid below */}
+      {/* Desktop — Produk (left) -> AI Core (center, dominant) -> Growth (right),
+          one continuous chained path running through the 6-card row below the core. */}
       <div className="relative hidden lg:block">
         <ConnectorOverlay />
         <div className="relative z-10 flex items-center justify-between gap-6 px-4 xl:px-10">
-          <Reveal><EndpointCard number={1} icon={Package} label="Produk Anda" description="Masukkan produk atau jasa Anda. LINOE memahami bisnis Anda secara mendalam." /></Reveal>
+          <Reveal>
+            <EndpointCard number={1} icon={Package} label="Produk Anda" description="Masukkan produk atau jasa Anda. LINOE memahami bisnis Anda secara mendalam." accent="start" delayMs={stopDelay(0)} />
+          </Reveal>
           <AiCore />
-          <Reveal><EndpointCard number={8} icon={TrendingUp} label="Pertumbuhan Bisnis" description="Lebih banyak pelanggan, penjualan meningkat, bisnis melaju lebih jauh." /></Reveal>
+          <Reveal>
+            <EndpointCard number={8} icon={TrendingUp} label="Pertumbuhan Bisnis" description="Lebih banyak pelanggan, penjualan meningkat, bisnis melaju lebih jauh." accent="end" delayMs={stopDelay(7)} />
+          </Reveal>
         </div>
         <div className="relative z-10 mt-14 grid grid-cols-6 gap-3 xl:gap-4">
           {CAPABILITIES.map((item, i) => (
-            <CapabilityCard key={item.title} number={i + 2} icon={item.icon} title={item.title} description={item.description} delayMs={i * 90} />
+            <CapabilityCard
+              key={item.title}
+              number={i + 2}
+              icon={item.icon}
+              title={item.title}
+              description={item.description}
+              revealDelayMs={i * 90}
+              pulseDelayMs={stopDelay(i + 1)}
+            />
           ))}
         </div>
       </div>
 
-      {/* Mobile / tablet — vertical flow: Produk -> Core -> capability cards -> Growth */}
-      <div className="flex flex-col items-center gap-4 lg:hidden">
-        <Reveal className="w-full max-w-sm"><EndpointCard number={1} icon={Package} label="Produk Anda" description="Masukkan produk atau jasa Anda. LINOE memahami bisnis Anda secara mendalam." /></Reveal>
-        <MobileConnector />
+      {/* Mobile / tablet — compact connected timeline: one glowing spine running
+          through a large central core with short single-line process rows,
+          instead of eight tall stacked cards. */}
+      <div className="relative flex flex-col items-center gap-3 lg:hidden">
+        <div aria-hidden className="tanyopo-spine pointer-events-none absolute left-1/2 top-6 bottom-6 w-1 -translate-x-1/2 rounded-full" />
+        <Reveal className="relative z-10 w-full max-w-sm">
+          <EndpointCard number={1} icon={Package} label="Produk Anda" description="Masukkan produk atau jasa Anda. LINOE memahami bisnis Anda secara mendalam." accent="start" delayMs={stopDelay(0)} />
+        </Reveal>
         <AiCore />
-        <MobileConnector />
-        <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="relative z-10 flex w-full max-w-sm flex-col gap-2.5">
           {CAPABILITIES.map((item, i) => (
-            <CapabilityCard key={item.title} number={i + 2} icon={item.icon} title={item.title} description={item.description} delayMs={i * 90} />
+            <FlowStep
+              key={item.title}
+              number={i + 2}
+              icon={item.icon}
+              title={item.title}
+              description={item.description}
+              revealDelayMs={i * 90}
+              pulseDelayMs={stopDelay(i + 1)}
+            />
           ))}
         </div>
-        <MobileConnector toGreen />
-        <Reveal className="w-full max-w-sm"><EndpointCard number={8} icon={TrendingUp} label="Pertumbuhan Bisnis" description="Lebih banyak pelanggan, penjualan meningkat, bisnis melaju lebih jauh." /></Reveal>
+        <Reveal className="relative z-10 w-full max-w-sm">
+          <EndpointCard number={8} icon={TrendingUp} label="Pertumbuhan Bisnis" description="Lebih banyak pelanggan, penjualan meningkat, bisnis melaju lebih jauh." accent="end" delayMs={stopDelay(7)} />
+        </Reveal>
       </div>
     </div>
   );
