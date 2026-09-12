@@ -1300,6 +1300,29 @@ export interface Database {
         Args: { p_job_types: JobType[] | null };
         Returns: Database["public"]["Tables"]["prompter_jobs"]["Row"] | null;
       };
+      // Batch B9 — see supabase/migrations/20260912090000_prompter_b9_entitlement_enforcement.sql.
+      fn_create_ai_job_if_entitled: {
+        Args: { p_job_type: string; p_input_reference?: Json };
+        Returns: {
+          job_id: string | null;
+          allowed: boolean;
+          reason: string | null;
+          used_count: number;
+          allowance: number;
+        }[];
+      };
+      fn_activate_product: {
+        Args: { p_product_id: string };
+        Returns: { allowed: boolean; reason: string | null }[];
+      };
+      fn_archive_product: {
+        Args: { p_product_id: string };
+        Returns: { allowed: boolean; reason: string | null }[];
+      };
+      fn_reserve_active_campaign_slot: {
+        Args: { p_campaign_id: string };
+        Returns: { allowed: boolean; reason: string | null }[];
+      };
     };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;

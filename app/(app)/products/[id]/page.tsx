@@ -16,6 +16,7 @@ import { MediaUploader } from "@/features/products/media-uploader";
 import { GenerateBlueprintButton } from "@/features/products/generate-blueprint-button";
 import { NextStepsGuidance } from "@/features/products/next-steps-guidance";
 import { deleteProductMediaAction } from "@/features/products/actions";
+import { ProductLifecycleButton } from "@/features/products/product-lifecycle-button";
 
 export const metadata: Metadata = { title: "Detail Produk — LINOE" };
 
@@ -84,13 +85,21 @@ export default async function ProductDetailPage({
     <div className="flex flex-col gap-6">
       <Card id="product-info">
         <CardHeader className="flex flex-row items-center justify-between space-y-0">
-          <CardTitle>Informasi Produk</CardTitle>
-          <Button asChild variant="ghost" size="sm">
-            <Link href={`/products/${id}/edit`}>
-              <Pencil />
-              Edit
-            </Link>
-          </Button>
+          <div className="flex items-center gap-2">
+            <CardTitle>Informasi Produk</CardTitle>
+            <Badge variant={product.status === "ACTIVE" ? "success" : "neutral"}>
+              {product.status === "ACTIVE" ? "Aktif" : product.status === "ARCHIVED" ? "Diarsipkan" : product.status}
+            </Badge>
+          </div>
+          <div className="flex items-center gap-1">
+            <ProductLifecycleButton productId={id} status={product.status} />
+            <Button asChild variant="ghost" size="sm">
+              <Link href={`/products/${id}/edit`}>
+                <Pencil />
+                Edit
+              </Link>
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="pt-4">
           <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">

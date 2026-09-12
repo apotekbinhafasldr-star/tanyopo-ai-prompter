@@ -2,6 +2,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, InvoiceStatus, SubscriptionPlan } from "@/types/database";
+import { findPlanTier } from "@/lib/billing/plans";
 
 type Subscription = Database["public"]["Tables"]["prompter_subscriptions"]["Row"];
 type Invoice = Database["public"]["Tables"]["prompter_invoices"]["Row"];
@@ -97,41 +98,15 @@ export function getTrialState(subscription: Subscription, referenceDate: Date = 
   return { isTrialing: true, daysRemaining, expired: msRemaining <= 0 };
 }
 
-export interface EntitlementCheckResult {
-  allowed: boolean;
-  reason: string | null;
-}
-
-/**
- * The one server-side gate a trial needs to actually mean something:
- * called from services/ai-jobs.ts#runAiJob() before every AI generation, so
- * an expired trial can't keep generating AI output regardless of what the
- * client sends. A tenant that was ever moved to a real plan/status (via
- * changePlan(), or a pre-existing ACTIVE row from before this trial system
- * existed) is never blocked here — this only ever stops a TRIALING tenant
- * whose period has actually elapsed.
- */
-export function checkAiUsageEntitlement(subscription: Subscription, referenceDate: Date = new Date()): EntitlementCheckResult {
-  const trial = getTrialState(subscription, referenceDate);
-
-  if (trial.isTrialing && trial.expired) {
-    return {
-      allowed: false,
-      // Never tells the user to "pilih paket" to continue — changePlan()
-      // never touches status/entitlement (see its own docstring), so that
-      // would be a false instruction. Honest until a real payment
-      // processor exists: the feature is simply paused.
-      reason: `Masa trial ${TRIAL_DURATION_DAYS} hari Anda telah berakhir. Pembayaran online belum tersedia, jadi fitur AI dijeda sementara.`,
-    };
-  }
-
-  return { allowed: true, reason: null };
-}
-
 /**
  * Real AI usage this calendar month, from prompter_ai_jobs (already
  * written by every AI generation via services/ai-jobs.ts#runAiJob()) —
- * never a fabricated or estimated count.
+ * never a fabricated or estimated count. Display-only (Billing page's
+ * "Penggunaan AI Bulan Ini" card) — actual enforcement of both the trial
+ * allowance and every paid plan's aiUsageAllowance now happens atomically
+ * in the database via fn_create_ai_job_if_entitled() (Batch B9), which
+ * services/ai-jobs.ts#runAiJob() calls directly instead of doing a
+ * separate check-then-insert here.
  */
 export async function getMonthlyAiJobCount(
   supabase: SupabaseClient<Database>,
@@ -149,77 +124,6 @@ export async function getMonthlyAiJobCount(
     .gte("created_at", monthStart);
 
   return count ?? 0;
-}
-
-/**
- * Real AI usage today (server UTC day boundary — same convention as
- * getMonthlyAiJobCount()'s UTC month boundary), from prompter_ai_jobs.
- * Never a fabricated or estimated count.
- */
-export async function getDailyAiJobCount(
-  supabase: SupabaseClient<Database>,
-  tenantId: string,
-  referenceDate: Date = new Date(),
-): Promise<number> {
-  const dayStart = new Date(referenceDate.getFullYear(), referenceDate.getMonth(), referenceDate.getDate())
-    .toISOString()
-    .slice(0, 10);
-
-  const { count } = await supabase
-    .from("prompter_ai_jobs")
-    .select("id", { count: "exact", head: true })
-    .eq("tenant_id", tenantId)
-    .gte("created_at", dayStart);
-
-  return count ?? 0;
-}
-
-/** A TRIALING tenant's server-side AI cost ceiling — bounds real
- * OpenAI/Anthropic spend even within an otherwise-valid 14-day trial.
- * Never applied once a subscription has moved off TRIALING (see
- * checkTrialAiUsageCap()) — this is a trial-safety limit, not a
- * plan-tier feature limit. */
-export const TRIAL_DAILY_AI_JOB_LIMIT = 20;
-export const TRIAL_MONTHLY_AI_JOB_LIMIT = 100;
-
-/**
- * The second server-side AI-cost gate, alongside checkAiUsageEntitlement():
- * that function stops AI use once a trial's 14 days have elapsed;
- * this one bounds AI use *during* an otherwise-valid trial, so a single
- * tenant can't run unlimited real AI calls in one day or one month while
- * still inside their trial window. Only ever evaluated for `TRIALING` —
- * an ACTIVE subscription (a legitimate pre-existing row, or once a real
- * payment provider exists, a genuinely paid one) is never capped here;
- * that would be a separate, future, plan-based limit, not this one.
- */
-export async function checkTrialAiUsageCap(
-  supabase: SupabaseClient<Database>,
-  subscription: Subscription,
-  referenceDate: Date = new Date(),
-): Promise<EntitlementCheckResult> {
-  if (subscription.status !== "TRIALING") {
-    return { allowed: true, reason: null };
-  }
-
-  const dailyCount = await getDailyAiJobCount(supabase, subscription.tenant_id, referenceDate);
-  if (dailyCount >= TRIAL_DAILY_AI_JOB_LIMIT) {
-    return {
-      allowed: false,
-      // Same honesty rule as checkAiUsageEntitlement() above — selecting a
-      // plan does not lift this limit, so never imply it does.
-      reason: `Anda telah mencapai batas ${TRIAL_DAILY_AI_JOB_LIMIT} permintaan AI hari ini selama masa trial. Coba lagi besok.`,
-    };
-  }
-
-  const monthlyCount = await getMonthlyAiJobCount(supabase, subscription.tenant_id, referenceDate);
-  if (monthlyCount >= TRIAL_MONTHLY_AI_JOB_LIMIT) {
-    return {
-      allowed: false,
-      reason: `Anda telah mencapai batas ${TRIAL_MONTHLY_AI_JOB_LIMIT} permintaan AI bulan ini selama masa trial. Batas ini akan direset di awal bulan berikutnya.`,
-    };
-  }
-
-  return { allowed: true, reason: null };
 }
 
 /**
@@ -322,21 +226,36 @@ export async function recordInvoiceFromProvider(
  * billing event.
  *
  * Deliberately never writes `status`. This used to unconditionally set
- * `status: "ACTIVE"`, which — because checkAiUsageEntitlement() only
- * blocks a TRIALING tenant whose period has elapsed — let anyone
- * self-activate for free with no payment, permanently bypassing the
- * 14-day trial cutoff simply by saving a plan on this page. Moving a
- * subscription to ACTIVE is a real billing event and belongs to a real
- * payment provider's webhook (lib/billing/payment-provider.ts) once one
- * is integrated — not to this self-service action. Until then, a tenant's
- * existing status (TRIALING, or a legitimate pre-existing ACTIVE row) is
- * left exactly as it was.
+ * `status: "ACTIVE"`, which let anyone self-activate for free with no
+ * payment, permanently bypassing the 14-day trial cutoff simply by saving
+ * a plan on this page. Moving a subscription to ACTIVE is a real billing
+ * event and belongs to a real payment provider's webhook
+ * (lib/billing/payment-provider.ts) once one is integrated — not to this
+ * self-service action. Until then, a tenant's existing status (TRIALING,
+ * or a legitimate pre-existing ACTIVE row) is left exactly as it was.
+ *
+ * Batch B9 P1-1: rejects any plan whose lib/billing/plans.ts availability
+ * is not "ACTIVE" (e.g. Agency, still COMING_SOON) before ever reaching
+ * the database — backstopped by the DB-level
+ * fn_guard_subscription_plan_availability trigger on
+ * prompter_subscriptions, so the rule holds even for a write that bypasses
+ * this function entirely.
  */
 export async function changePlan(
   supabase: SupabaseClient<Database>,
   tenantId: string,
   plan: SubscriptionPlan,
 ): Promise<{ error: string | null }> {
+  // findPlanTier() deliberately excludes UMKMPRO_BUNDLE (a separate
+  // cross-sell bundle belonging to the sibling UMKMpro AI product, out of
+  // B8/B9's pricing scope) — `undefined` here means "not one of the six
+  // public tiers," not "unknown/invalid," so only reject a plan this
+  // config actually tracks as not yet ready (Agency).
+  const tier = findPlanTier(plan);
+  if (tier && tier.availability !== "ACTIVE") {
+    return { error: "Paket ini belum dapat dipilih (segera hadir)." };
+  }
+
   const { error } = await supabase.from("prompter_subscriptions").upsert({ tenant_id: tenantId, plan });
 
   if (error) {
