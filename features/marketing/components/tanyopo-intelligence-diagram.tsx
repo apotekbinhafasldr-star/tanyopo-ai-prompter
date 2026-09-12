@@ -70,7 +70,7 @@ function EndpointCard({
       : "0 0 0 1px rgba(103,232,249,0.4), ";
   return (
     <div
-      className="tanyopo-node-pulse tanyopo-card-sheen relative flex w-full max-w-xs items-start gap-3 overflow-hidden rounded-2xl border border-white/10 p-4 sm:p-5 lg:max-w-[15rem]"
+      className="tanyopo-node-pulse tanyopo-card-sheen relative flex w-full max-w-xs items-start gap-3 overflow-hidden rounded-2xl border border-white/10 p-4 sm:p-5 desktop:max-w-[15rem]"
       style={{
         background: `${CARD_BG}, linear-gradient(90deg, transparent 0%, rgba(103,232,249,0.35) 50%, transparent 100%)`,
         backgroundBlendMode: "normal, overlay",
@@ -114,21 +114,21 @@ function CapabilityCard({
   return (
     <Reveal delayMs={revealDelayMs}>
       <div
-        className="tanyopo-node-pulse tanyopo-card-sheen relative flex h-full flex-col gap-1.5 overflow-hidden rounded-xl border border-white/10 p-2.5 transition-transform duration-300 hover:-translate-y-1 active:scale-[0.98] lg:gap-2 lg:rounded-2xl lg:p-3 xl:p-3.5"
+        className="tanyopo-node-pulse tanyopo-card-sheen relative flex h-full flex-col gap-1.5 overflow-hidden rounded-xl border border-white/10 p-2.5 transition-transform duration-300 hover:-translate-y-1 active:scale-[0.98] desktop:gap-2 desktop:rounded-2xl desktop:p-3 xl:p-3.5"
         style={{
           background: `${CARD_BG}, linear-gradient(90deg, transparent 0%, rgba(103,232,249,0.3) 50%, transparent 100%)`,
           backgroundBlendMode: "normal, overlay",
           animationDelay: `${pulseDelayMs}ms`,
         }}
       >
-        <span className="flex size-7 items-center justify-center rounded-full text-white lg:size-8" style={{ background: ICON_BADGE_BG }}>
-          <Icon className="size-3.5 lg:size-4" aria-hidden />
+        <span className="flex size-7 items-center justify-center rounded-full text-white desktop:size-8" style={{ background: ICON_BADGE_BG }}>
+          <Icon className="size-3.5 desktop:size-4" aria-hidden />
         </span>
-        <div className="flex items-center gap-1.5 lg:gap-2">
+        <div className="flex items-center gap-1.5 desktop:gap-2">
           <NumberBadge n={number} />
-          <p className="text-xs font-bold text-white lg:text-sm">{title}</p>
+          <p className="text-xs font-bold text-white desktop:text-sm">{title}</p>
         </div>
-        <p className="text-[11px] leading-snug text-white/65 lg:text-xs lg:leading-relaxed">{description}</p>
+        <p className="text-[11px] leading-snug text-white/65 desktop:text-xs desktop:leading-relaxed">{description}</p>
       </div>
     </Reveal>
   );
@@ -182,7 +182,7 @@ function AiCore() {
         style={{ background: "radial-gradient(circle, rgba(59,99,251,0.55) 0%, rgba(139,92,246,0.4) 55%, transparent 75%)" }}
       />
       <div
-        className="relative flex size-60 flex-col items-center justify-center gap-2 rounded-full px-6 text-center sm:size-72 lg:size-80"
+        className="relative flex size-60 flex-col items-center justify-center gap-2 rounded-full px-6 text-center sm:size-72 desktop:size-80"
         style={{
           background: "radial-gradient(circle at 50% 35%, #4c56d6 0%, #2c2f8f 45%, #181a54 75%, #10112f 100%)",
           boxShadow:
@@ -192,8 +192,8 @@ function AiCore() {
         <span aria-hidden className="tanyopo-core-ring pointer-events-none absolute inset-[-10px] rounded-full" style={{ animationDelay: "0ms" }} />
         <span aria-hidden className="tanyopo-core-ring pointer-events-none absolute inset-[-10px] rounded-full" style={{ animationDelay: "1000ms" }} />
         <span aria-hidden className="tanyopo-core-ring pointer-events-none absolute inset-[-10px] rounded-full" style={{ animationDelay: "2000ms" }} />
-        <Brain className="size-9 text-violet-200 sm:size-10 lg:size-11" strokeWidth={1.5} aria-hidden />
-        <p className="text-lg font-bold leading-tight text-white sm:text-xl lg:text-2xl">
+        <Brain className="size-9 text-violet-200 sm:size-10 desktop:size-11" strokeWidth={1.5} aria-hidden />
+        <p className="text-lg font-bold leading-tight text-white sm:text-xl desktop:text-2xl">
           Tanyopo
           <br />
           Intelligence
@@ -235,7 +235,7 @@ function ConnectorOverlay() {
   return (
     <svg
       aria-hidden
-      className="pointer-events-none absolute inset-0 hidden size-full lg:block"
+      className="pointer-events-none absolute inset-0 hidden size-full desktop:block"
       viewBox="0 0 1200 700"
       preserveAspectRatio="none"
       fill="none"
@@ -325,7 +325,7 @@ export function TanyopoIntelligenceDiagram() {
     <div className="relative mx-auto max-w-6xl">
       {/* Desktop — Produk (left) -> AI Core (center, dominant) -> Growth (right),
           one continuous chained path running through the 6-card row below the core. */}
-      <div className="relative hidden lg:block">
+      <div className="relative hidden desktop:block">
         <ConnectorOverlay />
         <div className="relative z-10 flex items-center justify-between gap-6 px-4 xl:px-10">
           <Reveal>
@@ -354,7 +354,7 @@ export function TanyopoIntelligenceDiagram() {
       {/* Mobile / tablet — compact connected timeline: one glowing spine running
           through a large central core with short single-line process rows,
           instead of eight tall stacked cards. */}
-      <div className="relative flex flex-col items-center gap-3 lg:hidden">
+      <div className="relative flex flex-col items-center gap-3 desktop:hidden">
         <div aria-hidden className="pointer-events-none absolute left-1/2 top-6 bottom-6 w-8 -translate-x-1/2">
           <div className="tanyopo-spine absolute inset-x-0 top-0 bottom-0 mx-auto w-3 rounded-full" />
           <div className="tanyopo-spine-particle absolute left-1/2 size-4 -translate-x-1/2 rounded-full" />
