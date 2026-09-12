@@ -369,6 +369,22 @@ export async function deleteCampaignAction(formData: FormData): Promise<void> {
   redirect("/campaigns");
 }
 
+/** Reason codes fn_reserve_active_campaign_slot() (Batch B9) can return,
+ * mapped to Indonesian copy. */
+function describeCampaignReservationBlock(reason: string | null): string {
+  switch (reason) {
+    case "CAMPAIGN_LIMIT_REACHED":
+      return "Campaign tidak dapat diajukan karena sudah mencapai batas jumlah campaign aktif paket Anda. Selesaikan atau hentikan campaign lain, atau upgrade paket.";
+    case "INVALID_STATE":
+      return "Campaign ini sudah diajukan sebelumnya.";
+    case "NOT_FOUND":
+    case "NO_TENANT":
+      return "Campaign tidak ditemukan.";
+    default:
+      return "Gagal mengajukan campaign untuk persetujuan.";
+  }
+}
+
 /**
  * Budget Guard gate + Approval Center handoff (product spec §15 step 9,
  * §38-39). A campaign whose budget exceeds the tenant's policy is rejected
@@ -376,6 +392,14 @@ export async function deleteCampaignAction(formData: FormData): Promise<void> {
  * approval request is created and the campaign moves to
  * AWAITING_APPROVAL. Nothing here ever sets status to ACTIVE — that only
  * happens once a real connector (Phase 3+) confirms the campaign is live.
+ *
+ * Batch B9 P0-1/P2-2: DRAFT -> AWAITING_APPROVAL is the only transition in
+ * the app that starts consuming a plan's maxActiveCampaigns slot (Audit 4's
+ * canonical "active campaign" set: ACTIVE/SCHEDULED/AWAITING_APPROVAL/
+ * PAUSED), so fn_reserve_active_campaign_slot() atomically re-checks the
+ * campaign is still DRAFT, counts the tenant's current consuming
+ * campaigns, and performs the status update in one DB transaction —
+ * closing the same check-then-act race class as the AI usage cap.
  */
 export async function submitForApprovalAction(campaignId: string): Promise<CampaignActionState> {
   const session = await requireSessionContext();
@@ -422,10 +446,28 @@ export async function submitForApprovalAction(campaignId: string): Promise<Campa
     return { error: "Gagal mengajukan campaign untuk persetujuan." };
   }
 
-  await supabase
-    .from("prompter_master_campaigns")
-    .update({ status: "AWAITING_APPROVAL" })
-    .eq("id", campaignId);
+  const { data: reservationRows, error: reservationError } = await supabase.rpc(
+    "fn_reserve_active_campaign_slot",
+    { p_campaign_id: campaignId },
+  );
+  const reservationRow = (Array.isArray(reservationRows) ? reservationRows[0] : reservationRows) as
+    | { allowed: boolean; reason: string | null }
+    | undefined;
+
+  if (reservationError || !reservationRow?.allowed) {
+    // The cap check failed after the approval row was already created —
+    // remove it so no PENDING approval is left pointing at a campaign that
+    // never actually left DRAFT.
+    await supabase
+      .from("prompter_approvals")
+      .delete()
+      .eq("tenant_id", session.tenantId)
+      .eq("resource_type", "prompter_master_campaigns")
+      .eq("resource_id", campaignId)
+      .eq("status", "PENDING");
+    return { error: describeCampaignReservationBlock(reservationRow?.reason ?? null) };
+  }
+
   await setChannelCampaignsStatus(supabase, campaignId, "AWAITING_APPROVAL");
 
   await supabase.from("prompter_audit_logs").insert({

@@ -17,6 +17,13 @@ const PLANS: SubscriptionPlan[] = ["FREE", "STARTER", "PRO", "BUSINESS", "GROWTH
  * Guard settings). Only ever changes the stored plan tier — see
  * services/billing.ts#changePlan() for why this isn't a billing event
  * without a configured payment provider.
+ *
+ * `PLANS` below only checks that the submitted string is a real
+ * SubscriptionPlan identifier at all. Batch B9 P1-1: whether that plan is
+ * currently *sellable* (e.g. Agency is still COMING_SOON) is
+ * changePlan()'s own job, backstopped by a DB trigger on
+ * prompter_subscriptions — this action never re-implements that check
+ * itself, to avoid a second, driftable copy of the same rule.
  */
 export async function changePlanAction(
   _prevState: BillingActionState,

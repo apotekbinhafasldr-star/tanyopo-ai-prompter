@@ -46,6 +46,22 @@ function parseTargetCountries(input: string | undefined): string[] {
   );
 }
 
+/** Reason codes fn_activate_product() (Batch B9) can return, mapped to
+ * Indonesian copy. Never suggests picking a plan actually lifts the cap
+ * immediately — no self-service action changes real entitlement without a
+ * payment processor (same honesty rule as services/billing.ts#changePlan). */
+function describeActivationBlock(reason: string | null): string {
+  switch (reason) {
+    case "PRODUCT_LIMIT_REACHED":
+      return "Produk berhasil disimpan sebagai draft, tapi tidak dapat diaktifkan karena sudah mencapai batas jumlah produk aktif paket Anda. Arsipkan produk lain yang tidak terpakai, atau upgrade paket.";
+    case "NOT_FOUND":
+    case "NO_TENANT":
+      return "Produk berhasil disimpan tapi gagal diaktifkan. Silakan coba aktifkan kembali dari halaman produk.";
+    default:
+      return "Produk berhasil disimpan tapi gagal diaktifkan. Silakan coba lagi.";
+  }
+}
+
 export async function createProductAction(
   _prevState: ActionState,
   formData: FormData,
@@ -58,10 +74,16 @@ export async function createProductAction(
   const session = await requireSessionContext();
   const supabase = await createClient();
 
+  // Batch B9 P0-1/P2-3 — every new product is inserted as DRAFT (never
+  // consumes a maxActiveProducts slot by itself), then fn_activate_product()
+  // atomically checks the tenant's plan cap and flips it to ACTIVE in the
+  // same DB transaction. A rejected activation still leaves the product
+  // saved (no data loss) — just not yet counted as an active slot.
   const { data, error } = await supabase
     .from("prompter_products")
     .insert({
       tenant_id: session.tenantId,
+      status: "DRAFT",
       name: parsed.data.name,
       description: parsed.data.description || null,
       product_type: parsed.data.productType as BusinessCategory,
@@ -82,8 +104,60 @@ export async function createProductAction(
     return { error: "Gagal menyimpan produk. Silakan coba lagi." };
   }
 
+  const { data: activationRows, error: activationError } = await supabase.rpc("fn_activate_product", {
+    p_product_id: data.id,
+  });
+  const activationRow = (Array.isArray(activationRows) ? activationRows[0] : activationRows) as
+    | { allowed: boolean; reason: string | null }
+    | undefined;
+
   revalidatePath("/products");
+
+  if (activationError || !activationRow?.allowed) {
+    return { error: describeActivationBlock(activationRow?.reason ?? null) };
+  }
+
   redirect(`/products/${data.id}?created=1`);
+}
+
+/** Moves a product to ARCHIVED, freeing its maxActiveProducts slot.
+ * Never hard-deletes — the product and its history stay intact. */
+export async function archiveProductAction(productId: string): Promise<ActionState> {
+  await requireSessionContext();
+  const supabase = await createClient();
+
+  const { error } = await supabase.rpc("fn_archive_product", { p_product_id: productId });
+
+  revalidatePath("/products");
+  revalidatePath(`/products/${productId}`);
+
+  if (error) {
+    return { error: "Gagal mengarsipkan produk. Silakan coba lagi." };
+  }
+  return { error: null };
+}
+
+/**
+ * Batch B9 P0-1/P2-3 — reactivation re-runs the same maxActiveProducts
+ * entitlement check as a fresh activation (fn_activate_product is shared
+ * between create and reactivate), so a tenant already at its cap cannot
+ * free-then-immediately-refill a slot past the limit via reactivation.
+ */
+export async function reactivateProductAction(productId: string): Promise<ActionState> {
+  await requireSessionContext();
+  const supabase = await createClient();
+
+  const { data: rows, error } = await supabase.rpc("fn_activate_product", { p_product_id: productId });
+  const row = (Array.isArray(rows) ? rows[0] : rows) as { allowed: boolean; reason: string | null } | undefined;
+
+  revalidatePath("/products");
+  revalidatePath(`/products/${productId}`);
+
+  if (error || !row?.allowed) {
+    return { error: describeActivationBlock(row?.reason ?? null) };
+  }
+
+  return { error: null };
 }
 
 export async function updateProductAction(

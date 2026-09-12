@@ -2,22 +2,19 @@ import type { SubscriptionPlan } from "@/types/database";
 
 /**
  * Batch B8 — LINOE Pricing v1.0, the single source of truth for plan
- * pricing/limits/positioning. Presentation-layer only: nothing here
- * enforces a limit or activates a plan. Audited before writing this file
- * (grepped the whole app for `plan ===`/`.plan ==` — zero results) that no
- * feature is actually gated by plan tier today, so the feature-comparison
- * list below reflects that real state rather than inventing per-plan
- * differentiation that doesn't exist in code yet.
- *
- * The numeric `limits` below are the *product policy* baseline for
- * Pricing v1.0 — not a live, enforced cap. The only real, enforced AI-
- * usage caps today are TRIAL_DAILY_AI_JOB_LIMIT/TRIAL_MONTHLY_AI_JOB_LIMIT
- * in services/billing.ts, which this file deliberately leaves untouched
- * (changing an already-founder-tested trial's real enforcement mid-batch
- * is exactly the "sudden lockout" B8's brief forbids). Once a real
- * payment processor and a weighted AI-credit meter exist, that
- * enforcement can read these same numbers — this file is the readiness
- * layer for that, not the meter itself.
+ * pricing/limits/positioning. This file is still the *presentation*
+ * source of truth (pricing cards, feature comparison) — the numeric
+ * `limits` below are the same numbers Batch B9 mirrored, verbatim, into
+ * the DB-level `prompter_plan_entitlements` table
+ * (supabase/migrations/20260912090000_prompter_b9_entitlement_enforcement.sql),
+ * which is what the server-side enforcement functions
+ * (`fn_create_ai_job_if_entitled`, `fn_activate_product`,
+ * `fn_reserve_active_campaign_slot`) actually read at request time.
+ * `tests/unit/lib/billing-plans.test.ts` and this audit note exist so the
+ * two never drift apart — if a number here changes, the migration's seed
+ * values (and a follow-up migration, since the DB is the live copy) must
+ * change with it. `FEATURE_CATEGORIES` below remains presentation-only:
+ * no feature *category* is plan-gated in code, only the numeric limits.
  */
 
 export type PlanTierId = Exclude<SubscriptionPlan, "UMKMPRO_BUNDLE">;
