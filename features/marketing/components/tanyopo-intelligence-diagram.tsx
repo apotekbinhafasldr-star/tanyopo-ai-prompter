@@ -2,20 +2,21 @@ import { Package, Brain, Target, FileText, Megaphone, Search, BarChart3, Setting
 import { Reveal } from "@/features/marketing/components/reveal";
 
 /**
- * Tanyopo Intelligence — Animated V5. Reworked per founder feedback that V4
- * read as a hub with independent parallel cards rather than "a living AI
- * machine." V5 keeps V4's wide composition (Produk left / AI Core center /
- * Growth right / reference PNG as source of truth for hierarchy) but wires
- * every stop into ONE sequential chain — Produk -> Core -> Strategi ->
- * Konten -> Campaign -> SEO -> Analitik -> Optimasi -> Growth — with a
- * single traveling light animated through all 8 connector segments in
- * order, each node briefly glowing in turn as the "energy" reaches it
- * (marketing-node-pulse), and a more dominant, visibly "alive" core
- * (concentric sonar-style rings, marketing-core-ring). Mobile drops the
- * old stack-of-8-big-cards layout for a compact connected timeline: a
- * single glowing spine running through a large central core with short
- * one-line process rows (FlowStep) attached to it, so the phone view still
- * reads as one diagram, not a long list.
+ * Tanyopo Intelligence — Animated V6 (final correction). Desktop: Produk
+ * left / AI Core center / Growth right, with a continuous chained "energy
+ * flow" path running Produk -> Core -> Strategi -> Konten -> Campaign ->
+ * SEO -> Analitik -> Optimasi -> Growth (ConnectorOverlay). Mobile is a
+ * compact energy NETWORK, not a flowchart list: Produk and Growth stay
+ * simple full-width stops connected to the core by a short glowing
+ * connector, but the core itself stays the visual hub of the whole
+ * section, with six individually glowing branch lines fanning out to a
+ * single open row of small icon nodes (MobileBranchOverlay) — a row, not a
+ * multi-row grid, so no node ever sits behind another and hides its own
+ * branch line — instead of the functions reading as a plain stacked list.
+ * Every connector layers a blurred bloom
+ * halo, a solid saturated core stroke with a subtle electric flicker, a
+ * bright traveling dash, and a small particle that physically travels the
+ * path via native SVG animateMotion/mpath.
  *
  * Every capability listed is something LINOE already does today — nothing
  * invented (product spec §3/§7). Every animation is CSS transform/opacity/
@@ -24,13 +25,13 @@ import { Reveal } from "@/features/marketing/components/reveal";
  * canvas/WebGL/animation library, and all disabled under
  * prefers-reduced-motion.
  */
-const CAPABILITIES: { icon: LucideIcon; title: string; description: string }[] = [
-  { icon: Target, title: "Strategi Marketing", description: "AI menyusun strategi sesuai target pasar dan tujuan bisnis Anda." },
-  { icon: FileText, title: "Konten & Copywriting", description: "Membuat ide, headline, caption, dan creative yang menarik." },
-  { icon: Megaphone, title: "Campaign", description: "Menentukan channel, audiens, budget, dan eksekusi kampanye." },
-  { icon: Search, title: "SEO & Discovery", description: "Meningkatkan visibilitas di Google dan platform lainnya." },
-  { icon: BarChart3, title: "Analitik", description: "Memantau hasil dan performa secara real-time." },
-  { icon: Settings, title: "Optimasi", description: "Memberikan rekomendasi otomatis untuk hasil lebih baik." },
+const CAPABILITIES: { icon: LucideIcon; title: string; shortLabel: string; description: string }[] = [
+  { icon: Target, title: "Strategi Marketing", shortLabel: "Strategi", description: "AI menyusun strategi sesuai target pasar dan tujuan bisnis Anda." },
+  { icon: FileText, title: "Konten & Copywriting", shortLabel: "Konten", description: "Membuat ide, headline, caption, dan creative yang menarik." },
+  { icon: Megaphone, title: "Campaign", shortLabel: "Campaign", description: "Menentukan channel, audiens, budget, dan eksekusi kampanye." },
+  { icon: Search, title: "SEO & Discovery", shortLabel: "SEO", description: "Meningkatkan visibilitas di Google dan platform lainnya." },
+  { icon: BarChart3, title: "Analitik", shortLabel: "Analitik", description: "Memantau hasil dan performa secara real-time." },
+  { icon: Settings, title: "Optimasi", shortLabel: "Optimasi", description: "Memberikan rekomendasi otomatis untuk hasil lebih baik." },
 ];
 
 const CARD_BG = "linear-gradient(160deg, #16224d 0%, #0c1631 100%)";
@@ -134,42 +135,131 @@ function CapabilityCard({
   );
 }
 
-/** Compact mobile process row — one line, attached to the vertical spine,
- * replacing V4's tall icon-top cards so the phone view reads as a short
- * connected timeline instead of a stack of eight big cards. */
-function FlowStep({
+/** Compact mobile function node — a small icon node in a SINGLE open row
+ * below the core (not a multi-row grid), so every one of the six branch
+ * lines from the core stays in open space, fully visible, rather than
+ * disappearing behind an opaque card in a lower row. */
+function MobileFunctionNode({
   number,
   icon: Icon,
-  title,
-  description,
+  label,
   revealDelayMs,
   pulseDelayMs,
 }: {
   number: number;
   icon: LucideIcon;
-  title: string;
-  description: string;
+  label: string;
   revealDelayMs: number;
   pulseDelayMs: number;
 }) {
   return (
-    <Reveal delayMs={revealDelayMs} className="relative z-10">
-      <div
-        className="tanyopo-node-pulse flex items-center gap-3 rounded-2xl border border-white/10 px-3.5 py-2.5"
-        style={{ background: CARD_BG, animationDelay: `${pulseDelayMs}ms` }}
+    <Reveal delayMs={revealDelayMs} className="flex flex-col items-center gap-1">
+      <span
+        className="tanyopo-node-pulse relative flex size-11 items-center justify-center rounded-full text-white"
+        style={{ background: ICON_BADGE_BG, animationDelay: `${pulseDelayMs}ms` }}
       >
-        <span className="flex size-9 shrink-0 items-center justify-center rounded-full text-white" style={{ background: ICON_BADGE_BG }}>
-          <Icon className="size-4" aria-hidden />
+        <Icon className="size-5" aria-hidden />
+        <span className="absolute -right-1 -top-1 flex size-4 items-center justify-center rounded-full border border-cyan-300/60 bg-[#0c1631] text-[8px] font-bold text-cyan-300">
+          {number}
         </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <NumberBadge n={number} />
-            <p className="text-[13px] font-bold text-white">{title}</p>
-          </div>
-          <p className="mt-0.5 text-[11px] leading-snug text-white/60">{description}</p>
-        </div>
-      </div>
+      </span>
+      <p className="max-w-14 text-center text-[10px] font-semibold leading-tight text-white/85">{label}</p>
     </Reveal>
+  );
+}
+
+/** Short glowing connector between two stacked mobile stops (Produk->Core,
+ * cluster->Growth) — a thicker, brighter, particle-carrying replacement for
+ * a plain line, reusing the same tanyopo-spine/-particle treatment. */
+function EnergyConnector() {
+  return (
+    <div aria-hidden className="relative h-8 w-3 shrink-0">
+      <div className="tanyopo-spine absolute inset-0 rounded-full" />
+      <div className="tanyopo-spine-particle absolute left-1/2 size-3 -translate-x-1/2 rounded-full" />
+    </div>
+  );
+}
+
+/** Mobile-only branch overlay — six curved branches fanning from the AI
+ * core down into a SINGLE open row of six icon nodes, so every branch stays
+ * in open space (nothing else occludes it) and the core reads as the hub of
+ * a radiating energy network rather than a plain vertical list. Same
+ * three-layer technique as the desktop ConnectorOverlay (blurred halo
+ * behind a solid core stroke, bright traveling dash, and a
+ * physically-moving particle via animateMotion), with its own
+ * uniquely-prefixed def ids since both overlays exist in the DOM at once
+ * (one hidden via CSS, not unmounted) and duplicate SVG ids would let
+ * `url(#id)` references resolve to the wrong tree. viewBox is tuned to the
+ * core's base size (size-60) plus the icon row below it — purely
+ * decorative, so modest stretch at other widths is fine. */
+function MobileBranchOverlay() {
+  const branches = [
+    "M180,210 C120,240 60,270 30,290",
+    "M180,210 C140,240 110,270 90,290",
+    "M180,210 C165,240 155,270 150,290",
+    "M180,210 C195,240 205,270 210,290",
+    "M180,210 C220,240 250,270 270,290",
+    "M180,210 C240,240 300,270 330,290",
+  ];
+
+  return (
+    <svg aria-hidden className="pointer-events-none absolute inset-0 size-full" viewBox="0 0 360 330" preserveAspectRatio="none" fill="none">
+      <defs>
+        <linearGradient id="tanyopo-m-flow" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#06b6d4" />
+          <stop offset="50%" stopColor="#3b82f6" />
+          <stop offset="100%" stopColor="#7c3aed" />
+        </linearGradient>
+        <radialGradient id="tanyopo-m-particle-fill" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor="#ffffff" />
+          <stop offset="60%" stopColor="#ffffff" />
+          <stop offset="100%" stopColor="#a5f3fc" stopOpacity="0" />
+        </radialGradient>
+        <filter id="tanyopo-m-halo" x="-120%" y="-120%" width="340%" height="340%">
+          <feGaussianBlur stdDeviation="6" />
+        </filter>
+        <filter id="tanyopo-m-glow" x="-100%" y="-100%" width="300%" height="300%">
+          <feGaussianBlur stdDeviation="3" result="blur" />
+          <feMerge>
+            <feMergeNode in="blur" />
+            <feMergeNode in="SourceGraphic" />
+          </feMerge>
+        </filter>
+      </defs>
+
+      {branches.map((d, i) => {
+        const id = `tanyopo-m-branch-${i}`;
+        return (
+          <g key={id}>
+            <path d={d} stroke="url(#tanyopo-m-flow)" strokeWidth="9" strokeLinecap="round" filter="url(#tanyopo-m-halo)" opacity="0.7" />
+            <path
+              d={d}
+              stroke="url(#tanyopo-m-flow)"
+              strokeWidth="3.5"
+              strokeLinecap="round"
+              opacity="1"
+              className="tanyopo-connector-glow"
+              style={{ animationDelay: `${i * 220}ms` }}
+            />
+            <path
+              id={id}
+              d={d}
+              stroke="#ffffff"
+              strokeWidth="2"
+              strokeLinecap="round"
+              className="tanyopo-connector-path"
+              opacity="0.95"
+              style={{ animationDelay: `${stopDelay(i + 1)}ms` }}
+            />
+            <circle r="5" className="tanyopo-energy-particle" fill="url(#tanyopo-m-particle-fill)" filter="url(#tanyopo-m-glow)">
+              <animateMotion dur="1.6s" repeatCount="indefinite" begin={`${i * 0.2}s`}>
+                <mpath href={`#${id}`} />
+              </animateMotion>
+            </circle>
+          </g>
+        );
+      })}
+    </svg>
   );
 }
 
@@ -351,31 +441,34 @@ export function TanyopoIntelligenceDiagram() {
         </div>
       </div>
 
-      {/* Mobile / tablet — compact connected timeline: one glowing spine running
-          through a large central core with short single-line process rows,
-          instead of eight tall stacked cards. */}
-      <div className="relative flex flex-col items-center gap-3 desktop:hidden">
-        <div aria-hidden className="pointer-events-none absolute left-1/2 top-6 bottom-6 w-8 -translate-x-1/2">
-          <div className="tanyopo-spine absolute inset-x-0 top-0 bottom-0 mx-auto w-3 rounded-full" />
-          <div className="tanyopo-spine-particle absolute left-1/2 size-4 -translate-x-1/2 rounded-full" />
-        </div>
+      {/* Mobile / tablet — a compact energy NETWORK, not a flowchart list:
+          Produk and Growth stay simple full-width stops, but the core stays
+          the visual hub with six individual glowing branches fanning out to
+          a single open row of small icon nodes (MobileBranchOverlay), so the
+          "core drives every function" reading survives on a phone instead of
+          collapsing into a straight top-to-bottom stack. */}
+      <div className="relative flex flex-col items-center gap-1 desktop:hidden">
         <Reveal className="relative z-10 w-full max-w-sm">
           <EndpointCard number={1} icon={Package} label="Produk Anda" description="Masukkan produk atau jasa Anda. LINOE memahami bisnis Anda secara mendalam." accent="start" delayMs={stopDelay(0)} />
         </Reveal>
-        <AiCore />
-        <div className="relative z-10 flex w-full max-w-sm flex-col gap-2.5">
-          {CAPABILITIES.map((item, i) => (
-            <FlowStep
-              key={item.title}
-              number={i + 2}
-              icon={item.icon}
-              title={item.title}
-              description={item.description}
-              revealDelayMs={i * 90}
-              pulseDelayMs={stopDelay(i + 1)}
-            />
-          ))}
+        <EnergyConnector />
+        <div className="relative w-full max-w-sm">
+          <MobileBranchOverlay />
+          <AiCore />
+          <div className="relative z-10 mt-5 flex items-start justify-between px-1">
+            {CAPABILITIES.map((item, i) => (
+              <MobileFunctionNode
+                key={item.title}
+                number={i + 2}
+                icon={item.icon}
+                label={item.shortLabel}
+                revealDelayMs={i * 90}
+                pulseDelayMs={stopDelay(i + 1)}
+              />
+            ))}
+          </div>
         </div>
+        <EnergyConnector />
         <Reveal className="relative z-10 w-full max-w-sm">
           <EndpointCard number={8} icon={TrendingUp} label="Pertumbuhan Bisnis" description="Lebih banyak pelanggan, penjualan meningkat, bisnis melaju lebih jauh." accent="end" delayMs={stopDelay(7)} />
         </Reveal>
