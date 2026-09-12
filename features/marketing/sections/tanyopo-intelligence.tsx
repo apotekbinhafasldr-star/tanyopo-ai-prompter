@@ -1,51 +1,63 @@
-import { CheckCircle2 } from "lucide-react";
+import { Infinity as InfinityIcon, CheckCircle2 } from "lucide-react";
 import { Reveal } from "@/features/marketing/components/reveal";
 import { TanyopoIntelligenceDiagram } from "@/features/marketing/components/tanyopo-intelligence-diagram";
 
 const INDICATORS = ["Lebih Efisien", "Hasil Terukur", "Mudah Digunakan", "Aman & Terpercaya"];
 
 /**
- * "Bagaimana LINOE Bekerja" / Tanyopo Intelligence.
+ * "Bagaimana LINOE Bekerja" / Tanyopo Intelligence — Animated V4.
+ * Rebuilt to strictly match the founder-supplied reference
+ * (LINOE_TANYOPO_INTELLIGENCE_VISUAL_REFERENCE_FINAL.png, repo root):
+ * a colorful ambient blue/cyan/violet mesh background (not flat white,
+ * not a dark solid block) with soft drifting blobs, behind the dark
+ * "island" card network built in
+ * features/marketing/components/tanyopo-intelligence-diagram.tsx.
+ *
  * Sits directly below the Hero (features/marketing/sections/hero.tsx,
- * untouched by this batch) and above AiTeam in app/(marketing)/page.tsx —
- * same position this block has occupied since it was first extracted out
- * of hero.tsx. The Hero's own <section id="produk"> markup is not
- * touched at all by this or any prior round of this section's work.
+ * untouched by this batch) and above AiTeam in app/(marketing)/page.tsx.
+ * The Hero's own <section id="produk"> markup is not touched at all.
  *
- * Visual V2 (founder-directed): moved from a dark "Command Center" glass
- * panel to a light section bathed in a soft cyan/blue/violet ambient
- * glow, with the AI core diagram itself (features/marketing/components/
- * tanyopo-intelligence-diagram.tsx) sitting directly on that glow rather
- * than inside a dark card. Background never gets as dark as the Hero —
- * only a short top fade continues the Hero's own ink tone before opening
- * into the light, glowing backdrop.
- *
- * "Tanyopo Intelligence Siap Kapan Saja..." in the bottom bar is a
- * deliberate rewrite of the founder's requested "AI Bekerja 24/7..." —
- * LINOE's automation still requires Owner approval before executing
- * anything (see services/automation-settings.ts /
- * toggleEmergencyStopAction), so it does not run autonomous background
- * jobs around the clock. This keeps the same "always available to help"
- * spirit without the unsupported 24/7-autonomous claim, consistent with
- * the honesty rule this same section's own prior brief established.
+ * "AI Bekerja 24/7 untuk Pertumbuhan Anda" below is the founder's exact
+ * requested copy, now delivered via an actual finished reference design
+ * (the explicit source of truth for this round) — read here as "always
+ * available to help," a standard SaaS framing, not a claim that LINOE
+ * executes unsupervised background actions around the clock (it doesn't;
+ * automation still requires Owner approval — see
+ * services/automation-settings.ts / toggleEmergencyStopAction).
  */
 export function TanyopoIntelligence() {
   return (
     <section className="relative overflow-hidden bg-background py-16 sm:py-24">
+      {/* Hero -> section transition: continues the Hero's own ink tone briefly */}
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-x-0 top-0 h-40 sm:h-56"
+        className="pointer-events-none absolute inset-x-0 top-0 h-32 sm:h-44"
         style={{ background: "linear-gradient(180deg, var(--ink) 0%, transparent 100%)" }}
       />
+
+      {/* Colorful ambient mesh background — light at the very top, opening into
+          a genuinely colored blue/violet wash further down, per the reference
+          (never flat white, never as dark/solid as the Hero). */}
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0"
         style={{
           background:
-            "radial-gradient(45% 40% at 10% 10%, color-mix(in srgb, #22d3ee 14%, transparent), transparent 70%), " +
-            "radial-gradient(50% 45% at 92% 20%, color-mix(in srgb, #8b5cf6 14%, transparent), transparent 70%), " +
-            "radial-gradient(55% 40% at 50% 92%, color-mix(in srgb, #3b82f6 10%, transparent), transparent 70%)",
+            "radial-gradient(60% 50% at 50% 38%, rgba(58,99,251,0.32) 0%, transparent 70%), " +
+            "radial-gradient(55% 55% at 12% 78%, rgba(139,92,246,0.22) 0%, transparent 70%), " +
+            "radial-gradient(55% 55% at 90% 80%, rgba(34,211,238,0.2) 0%, transparent 70%), " +
+            "linear-gradient(180deg, #eef2ff 0%, #dfe6fc 25%, #ccd8f8 60%, #c3d0f5 100%)",
         }}
+      />
+      <div
+        aria-hidden
+        className="tanyopo-ambient-drift pointer-events-none absolute -left-24 top-1/3 size-[26rem] rounded-full blur-3xl"
+        style={{ background: "radial-gradient(circle, rgba(139,92,246,0.28) 0%, transparent 70%)" }}
+      />
+      <div
+        aria-hidden
+        className="tanyopo-ambient-drift-reverse pointer-events-none absolute -right-24 bottom-0 size-[28rem] rounded-full blur-3xl"
+        style={{ background: "radial-gradient(circle, rgba(34,211,238,0.22) 0%, transparent 70%)" }}
       />
 
       <div className="relative mx-auto max-w-6xl px-4 sm:px-6">
@@ -65,23 +77,28 @@ export function TanyopoIntelligence() {
         <TanyopoIntelligenceDiagram />
 
         <Reveal
-          className="mx-auto mt-10 max-w-4xl overflow-hidden rounded-[var(--radius-lg)] border border-brand/15 shadow-[var(--shadow-md)] sm:mt-14"
-          delayMs={100}
+          className="relative mx-auto mt-12 max-w-5xl overflow-hidden rounded-full border border-white/10 shadow-[0_16px_40px_-16px_rgba(15,23,60,0.55)] sm:mt-16"
+          delayMs={150}
         >
           <div
-            className="flex flex-col items-center gap-4 px-5 py-6 text-center sm:px-8 sm:py-7"
-            style={{
-              background:
-                "linear-gradient(120deg, color-mix(in srgb, #22d3ee 9%, var(--surface)), color-mix(in srgb, #8b5cf6 9%, var(--surface)))",
-            }}
+            className="flex flex-col items-center gap-4 px-6 py-5 text-center sm:flex-row sm:justify-between sm:gap-6 sm:px-8 sm:text-left"
+            style={{ background: "linear-gradient(120deg, #2e3a86 0%, #4c3fa8 100%)" }}
           >
-            <p className="text-base font-bold text-foreground sm:text-lg">
-              Tanyopo Intelligence Siap Kapan Saja untuk Pertumbuhan Bisnis Anda
-            </p>
-            <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2">
+            <div className="flex items-center gap-3">
+              <span
+                className="flex size-10 shrink-0 items-center justify-center rounded-full text-white sm:size-11"
+                style={{ background: "linear-gradient(135deg, #22d3ee 0%, #8b5cf6 100%)" }}
+              >
+                <InfinityIcon className="size-5" aria-hidden />
+              </span>
+              <p className="text-sm font-bold text-white sm:text-base">
+                AI Bekerja 24/7 untuk Pertumbuhan Anda
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 sm:justify-end">
               {INDICATORS.map((label) => (
-                <span key={label} className="inline-flex items-center gap-1.5 text-xs font-medium text-foreground sm:text-sm">
-                  <CheckCircle2 className="size-3.5 shrink-0 text-success" aria-hidden />
+                <span key={label} className="inline-flex items-center gap-1.5 text-xs font-medium text-white/85 sm:text-sm">
+                  <CheckCircle2 className="size-3.5 shrink-0" aria-hidden />
                   {label}
                 </span>
               ))}
