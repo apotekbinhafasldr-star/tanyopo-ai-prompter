@@ -94,9 +94,17 @@ const STATUS_BANNER: Record<string, { tone: "info" | "warning" | "success"; text
     tone: "warning",
     text: "Menunggu persetujuan Owner di Approval Center sebelum dijadwalkan.",
   },
+  // Track A (campaign scheduling/publishing gap audit): tone changed from
+  // "success" to "warning" and copy reworded — this status is reached by
+  // Owner approval alone, with no job/queue/timer behind it. Publishing is
+  // never automatic: each channel below still needs its own manual
+  // "Luncurkan" click, which itself only succeeds once a real connector is
+  // configured and connected. Never claim "will publish automatically" or
+  // restore a success/checkmark tone here without first wiring a real
+  // scheduler.
   SCHEDULED: {
-    tone: "success",
-    text: "Sudah disetujui dan terjadwal. Peluncuran nyata ke channel akan aktif setelah Connection Center tersedia (Phase 3).",
+    tone: "warning",
+    text: "Sudah disetujui. Campaign belum berjalan otomatis — setiap channel di bawah perlu diluncurkan secara manual satu per satu.",
   },
 };
 
@@ -282,18 +290,25 @@ export default async function CampaignDetailPage({
         </Card>
       ) : null}
 
+      {/* Track A: this card previously had a success/checkmark tone
+          ("Campaign siap dijalankan ✓") that read as "done" even though no
+          channel has actually been launched yet. Reworded to a neutral
+          tone that's explicit about the manual step still required per
+          channel — see the campaign scheduling/publishing gap audit. Never
+          restore a checkmark/success tone here without a real launch
+          having actually happened (that's what campaign.status === "ACTIVE"
+          on a per-channel basis already tracks). */}
       {campaign.status === "SCHEDULED" ? (
-        <Card className="border-success/30 bg-success-muted/40">
+        <Card className="border-warning/30 bg-warning-muted/40">
           <CardContent className="flex flex-col gap-3 p-5">
             <div className="flex flex-col gap-1">
-              <p className="text-base font-semibold text-success">Campaign siap dijalankan ✓</p>
+              <p className="text-base font-semibold text-warning">Menunggu Peluncuran Manual</p>
               <p className="text-sm text-muted-foreground">Status: {campaignStatusLabel(campaign.status)}</p>
             </div>
-            {/* Honest status only — connectors aren't configured yet, so this
-                never claims ads are already live/running. */}
             <p className="text-sm text-foreground">
-              Campaign Anda sudah disetujui. LINOE akan dapat menjalankan promosi melalui channel terkait
-              setelah koneksi channel tersedia.
+              Campaign Anda sudah disetujui, tapi belum berjalan di channel manapun. Buka bagian Breakdown
+              per Channel di bawah dan klik &quot;Luncurkan&quot; pada setiap channel yang ingin Anda
+              jalankan — tidak ada yang terkirim secara otomatis.
             </p>
             <div className="flex flex-wrap items-center gap-3">
               <Button asChild size="lg" className="w-full sm:w-auto">
