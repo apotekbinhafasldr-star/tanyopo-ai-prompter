@@ -19,6 +19,7 @@ import { formatCurrency, formatDate } from "@/lib/utils/format";
 import { PlanForm } from "@/features/billing/plan-form";
 import { PricingCards } from "@/features/billing/pricing-cards";
 import { FeatureComparison } from "@/features/billing/feature-comparison";
+import { CancellationToggle } from "@/features/billing/cancellation-toggle";
 
 const INVOICE_STATUS_VARIANT: Record<string, "success" | "warning" | "danger" | "neutral"> = {
   DRAFT: "neutral",
@@ -150,6 +151,13 @@ export default async function BillingPage() {
               ? `Pemroses pembayaran: ${subscription.billing_provider}.`
               : "Pembayaran online belum tersedia. Untuk saat ini Anda tetap dapat menggunakan masa coba yang aktif. Pilihan berlangganan akan tersedia setelah pembayaran online diaktifkan."}
           </p>
+          {subscription.status === "ACTIVE" ? (
+            <CancellationToggle
+              cancelAtPeriodEnd={subscription.cancel_at_period_end}
+              currentPeriodEndLabel={subscription.current_period_end ? formatDate(subscription.current_period_end) : null}
+              readOnly={!isOwner}
+            />
+          ) : null}
           {paymentProvider.name === "none" ? (
             <details className="rounded-[var(--radius-md)] border border-border">
               <summary className="cursor-pointer p-3 text-xs font-medium text-muted-foreground">
@@ -158,7 +166,8 @@ export default async function BillingPage() {
               <div className="border-t border-border p-3">
                 <p className="mb-3 text-xs text-muted-foreground">
                   Pilihan paket berbayar akan tersedia setelah sistem pembayaran aktif. Memilih di sini hanya
-                  menyimpan preferensi paket untuk referensi — tidak ada tagihan atau perubahan akses.
+                  menyimpan preferensi paket untuk referensi — tidak ada tagihan atau perubahan akses. Opsi ini
+                  hanya berlaku selama masa coba; setelah berlangganan nyata aktif, ubah paket lewat Upgrade/Downgrade.
                 </p>
                 <PlanForm currentPlan={subscription.plan} readOnly={!isOwner} />
               </div>
