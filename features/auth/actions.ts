@@ -112,6 +112,16 @@ export async function registerAction(
         // /onboarding and stored in prompter_brand_profiles.
         jenis_usaha: "lainnya",
       },
+      // B12: without this, a "Confirm your email" click falls back to
+      // Supabase's project-wide Site URL (not this app's own callback),
+      // and — even when it does land here — app/auth/callback/route.ts's
+      // own default `next` is /reset-password, meant for the *other*
+      // caller of this same route (forgotPasswordAction). Explicitly
+      // routing signup confirmation through /auth/callback?next=/onboarding
+      // reuses that route's existing next-param handling instead of
+      // silently taking a freshly-confirmed signup to a "set new
+      // password" screen.
+      emailRedirectTo: `${publicEnv.appUrl}/auth/callback?next=/onboarding`,
     },
   });
 

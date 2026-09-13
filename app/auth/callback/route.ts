@@ -2,17 +2,21 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
 /**
- * Exchanges a Supabase PKCE `code` (from a password-recovery email link
- * today; general-purpose so a future signup-confirmation redirect can reuse
- * it) for a session, then redirects on to `next`. An expired/invalid/reused
- * link fails the exchange — that's handled explicitly rather than letting a
- * broken code silently land the user on a page that assumes a session.
+ * Exchanges a Supabase PKCE `code` for a session, then redirects on to
+ * `next`. An expired/invalid/reused link fails the exchange — that's
+ * handled explicitly rather than letting a broken code silently land the
+ * user on a page that assumes a session.
  *
- * `next` defaults to /reset-password because that's this route's only
- * caller today (forgotPasswordAction) — the redirectTo it sends to Supabase
- * can't carry its own `?next=...` query without breaking Supabase's
- * exact-match check against the Redirect URLs allow list (see
- * features/auth/actions.ts).
+ * Two callers, both in features/auth/actions.ts:
+ * - forgotPasswordAction never passes `next` (its own `redirectTo` must be
+ *   the bare allow-listed URL with no query, or it fails Supabase's
+ *   exact-match check against the Redirect URLs allow list) — this route's
+ *   default of /reset-password covers that case.
+ * - registerAction explicitly sends `?next=/onboarding`, so a freshly
+ *   confirmed signup lands in onboarding rather than a password-recovery
+ *   screen meant for the other caller. (Requires the Supabase project's
+ *   Redirect URLs entry for this route to allow a trailing `**` wildcard,
+ *   e.g. `.../auth/callback**`, so the query string still matches.)
  */
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url);
