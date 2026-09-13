@@ -5,15 +5,19 @@ import { publicEnv } from "@/lib/env";
 const PUBLIC_PATHS = ["/", "/login", "/register", "/forgot-password"];
 const AUTH_ONLY_PATHS = ["/login", "/register"];
 
-function isPublicAsset(pathname: string) {
+export function isPublicAsset(pathname: string) {
   return (
     pathname.startsWith("/_next") ||
     pathname.startsWith("/api/v1/integrations") || // signed service auth, not cookie auth
     pathname === "/favicon.ico" ||
-    // Handles its own auth (exchanges a Supabase recovery/PKCE code for a
-    // session) — the request arrives with no session cookie yet, so cookie
-    // gating below would otherwise bounce it to /login before it can run.
+    // Both handle their own auth (exchange a Supabase recovery/PKCE code,
+    // or verify a token_hash) for a session — the request arrives with no
+    // session cookie yet, so cookie gating below would otherwise bounce it
+    // to /login before it can run. (B12 hotfix: /auth/confirm was added in
+    // PR #7 but missed here, so a real signup-confirmation click was being
+    // redirected to /login before app/auth/confirm/route.ts ever ran.)
     pathname === "/auth/callback" ||
+    pathname === "/auth/confirm" ||
     /\.(svg|png|jpg|jpeg|gif|webp|ico|css|js|map)$/.test(pathname)
   );
 }
