@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatCurrency, formatDate } from "@/lib/utils/format";
+import { formatCurrency, formatDate, campaignStatusLabel, campaignStatusVariant } from "@/lib/utils/format";
 
 describe("formatCurrency", () => {
   it("defaults to id-ID/IDR, unchanged from pre-Global-Edition behavior", () => {
@@ -44,5 +44,31 @@ describe("formatDate", () => {
   it("returns an em dash for a null/empty value", () => {
     expect(formatDate(null)).toBe("—");
     expect(formatDate("")).toBe("—");
+  });
+});
+
+describe("campaignStatusLabel/campaignStatusVariant — Track A campaign scheduling/publishing gap fix", () => {
+  it("SCHEDULED no longer reads as 'Terjadwal' (implied automatic execution) — no job/queue/timer exists behind this status", () => {
+    expect(campaignStatusLabel("SCHEDULED")).not.toBe("Terjadwal");
+    expect(campaignStatusLabel("SCHEDULED")).toMatch(/Perlu Diluncurkan|Manual/i);
+  });
+
+  it("SCHEDULED no longer uses the 'brand' (success-adjacent) badge color", () => {
+    expect(campaignStatusVariant("SCHEDULED")).not.toBe("brand");
+    expect(campaignStatusVariant("SCHEDULED")).toBe("warning");
+  });
+
+  it("ACTIVE — a genuinely launched channel — still reads as a real success state (regression guard)", () => {
+    expect(campaignStatusLabel("ACTIVE")).toBe("Aktif");
+    expect(campaignStatusVariant("ACTIVE")).toBe("success");
+  });
+
+  it("other statuses are unaffected by the SCHEDULED wording/color fix", () => {
+    expect(campaignStatusLabel("DRAFT")).toBe("Draft");
+    expect(campaignStatusVariant("DRAFT")).toBe("neutral");
+    expect(campaignStatusLabel("AWAITING_APPROVAL")).toBe("Menunggu Persetujuan");
+    expect(campaignStatusVariant("AWAITING_APPROVAL")).toBe("warning");
+    expect(campaignStatusLabel("FAILED")).toBe("Gagal");
+    expect(campaignStatusVariant("FAILED")).toBe("danger");
   });
 });

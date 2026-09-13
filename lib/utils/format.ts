@@ -102,7 +102,13 @@ export function channelLabel(channel: string) {
 const CAMPAIGN_STATUS_LABEL: Record<string, string> = {
   DRAFT: "Draft",
   AWAITING_APPROVAL: "Menunggu Persetujuan",
-  SCHEDULED: "Terjadwal",
+  // Track A (campaign scheduling/publishing gap audit): was "Terjadwal" —
+  // reaching this status only means an Owner approved it; nothing about it
+  // is time-driven or automatic (no job/queue/timer is ever created here).
+  // The old label read as "will run itself," which isn't true — each
+  // channel still needs a manual "Luncurkan" click. Never revert to
+  // "Terjadwal" without also wiring a real scheduler behind this status.
+  SCHEDULED: "Disetujui — Perlu Diluncurkan",
   ACTIVE: "Aktif",
   PAUSED: "Dijeda",
   COMPLETED: "Selesai",
@@ -119,7 +125,10 @@ const CAMPAIGN_STATUS_VARIANT: Record<
 > = {
   DRAFT: "neutral",
   AWAITING_APPROVAL: "warning",
-  SCHEDULED: "brand",
+  // Track A: was "brand" (blue, success-adjacent) — switched to "warning"
+  // so it doesn't visually read as a completed/running state. See the
+  // label comment above for why.
+  SCHEDULED: "warning",
   ACTIVE: "success",
   PAUSED: "warning",
   COMPLETED: "success",
