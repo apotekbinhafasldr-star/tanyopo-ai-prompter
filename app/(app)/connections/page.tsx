@@ -9,6 +9,7 @@ import { getConnector } from "@/lib/connectors/get-connector";
 import { getCapabilities, type CapabilityRow } from "@/lib/connectors/capability-registry";
 import { formatDate } from "@/lib/utils/format";
 import { DisconnectButton } from "@/features/connections/disconnect-button";
+import { MetaPagePicker } from "@/features/connections/meta-page-picker";
 import { isFeatureEnabled } from "@/lib/feature-flags";
 import type { ConnectorPlatform } from "@/types/database";
 
@@ -66,6 +67,9 @@ interface ConnectedAccountRow {
   status: string;
   expires_at: string | null;
   last_refreshed_at: string | null;
+  // Track B — only ever populated for platform === "META"; null for
+  // TIKTOK/X rows and for any META row that hasn't picked a Page yet.
+  selected_page_name: string | null;
 }
 
 function computeStatus(platform: ConnectorPlatform, account: ConnectedAccountRow | undefined): ConnectionStatus {
@@ -89,7 +93,7 @@ export default async function ConnectionsPage({
   const [{ data: connectedAccounts }, { data: brandProfile }, showRegionalCapabilities] = await Promise.all([
     supabase
       .from("prompter_connected_accounts")
-      .select("platform, external_account_name, status, expires_at, last_refreshed_at")
+      .select("platform, external_account_name, status, expires_at, last_refreshed_at, selected_page_name")
       .eq("tenant_id", session.tenantId),
     supabase.from("prompter_brand_profiles").select("country_code").eq("tenant_id", session.tenantId).maybeSingle(),
     isFeatureEnabled(supabase, session.tenantId, "regional_capabilities"),
@@ -212,6 +216,10 @@ function ConnectorCard({
             <a href={info.authorizePath}>Hubungkan</a>
           </Button>
         )}
+
+        {platform === "META" && isOwner && (status === "CONNECTED" || status === "EXPIRED" || status === "ACTION_REQUIRED") ? (
+          <MetaPagePicker selectedPageName={account?.selected_page_name ?? null} />
+        ) : null}
 
         {capabilities && capabilities.length > 0 ? (
           <div className="border-t border-border pt-3">

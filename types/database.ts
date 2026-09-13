@@ -1002,6 +1002,11 @@ export interface Database {
           refreshable: boolean;
           last_refreshed_at: string | null;
           connected_by: string | null;
+          // Track B — Meta Page Picker. NULL means no Page selected yet
+          // (existing rows, and every non-META platform, always have both
+          // null). See the migration header for why these live here.
+          selected_page_id: string | null;
+          selected_page_name: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -1017,6 +1022,8 @@ export interface Database {
           refreshable?: boolean;
           last_refreshed_at?: string | null;
           connected_by?: string | null;
+          selected_page_id?: string | null;
+          selected_page_name?: string | null;
         };
         Update: Partial<
           Omit<Database["public"]["Tables"]["prompter_connected_accounts"]["Insert"], "tenant_id">
