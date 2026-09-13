@@ -59,14 +59,14 @@ describe("registerAction — B12 signup confirmation redirect", () => {
     signUpMock.mockReset();
   });
 
-  it("sends emailRedirectTo pointing at this app's own /auth/callback with ?next=/onboarding, never a bare Supabase default", async () => {
+  it("never sends a query-string-carrying emailRedirectTo — the production Redirect URLs entry is a single exact-match /auth/callback with no wildcard, so anything appended would silently fail to match and fall back to the Site URL instead of taking effect", async () => {
     signUpMock.mockResolvedValue({ data: { user: { identities: [{}] }, session: null }, error: null });
 
     await registerAction({ error: null }, registerFormData());
 
     expect(signUpMock).toHaveBeenCalledTimes(1);
     const callArgs = signUpMock.mock.calls[0][0];
-    expect(callArgs.options.emailRedirectTo).toBe("http://localhost:3000/auth/callback?next=/onboarding");
+    expect(callArgs.options.emailRedirectTo).toBeUndefined();
   });
 
   it("still reports the existing-account case without ever exposing the redirect/session details to the caller", async () => {

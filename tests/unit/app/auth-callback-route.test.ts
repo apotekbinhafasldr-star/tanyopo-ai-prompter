@@ -16,12 +16,12 @@ function requestFor(url: string) {
   return new Request(url) as unknown as Parameters<typeof GET>[0];
 }
 
-describe("GET /auth/callback — B12 dual-purpose (password recovery + signup confirmation)", () => {
+describe("GET /auth/callback — B12 regression: password recovery (this route's only caller)", () => {
   beforeEach(() => {
     exchangeCodeForSessionMock.mockReset();
   });
 
-  it("password recovery: no explicit next defaults to /reset-password (forgotPasswordAction's caller)", async () => {
+  it("no explicit next defaults to /reset-password", async () => {
     exchangeCodeForSessionMock.mockResolvedValue({ error: null });
 
     const res = await GET(requestFor("https://tanyopo-ai-prompter.netlify.app/auth/callback?code=recovery-code"));
@@ -30,20 +30,10 @@ describe("GET /auth/callback — B12 dual-purpose (password recovery + signup co
     expect(res.headers.get("location")).toBe("https://tanyopo-ai-prompter.netlify.app/reset-password");
   });
 
-  it("signup confirmation: an explicit ?next=/onboarding (registerAction's caller) is honored instead of the recovery default", async () => {
-    exchangeCodeForSessionMock.mockResolvedValue({ error: null });
-
-    const res = await GET(
-      requestFor("https://tanyopo-ai-prompter.netlify.app/auth/callback?code=signup-code&next=/onboarding"),
-    );
-
-    expect(res.headers.get("location")).toBe("https://tanyopo-ai-prompter.netlify.app/onboarding");
-  });
-
   it("an expired/invalid/reused code fails the exchange and never lands on a page that assumes a session", async () => {
     exchangeCodeForSessionMock.mockResolvedValue({ error: { message: "invalid or expired code" } });
 
-    const res = await GET(requestFor("https://tanyopo-ai-prompter.netlify.app/auth/callback?code=expired&next=/onboarding"));
+    const res = await GET(requestFor("https://tanyopo-ai-prompter.netlify.app/auth/callback?code=expired"));
 
     expect(res.headers.get("location")).toBe("https://tanyopo-ai-prompter.netlify.app/forgot-password?error=expired");
   });
