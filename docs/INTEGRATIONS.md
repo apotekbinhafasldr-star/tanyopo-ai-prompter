@@ -88,9 +88,10 @@ interface PaymentProvider {
   readonly name: string;
   isConfigured(): boolean;
   createCheckoutSession(input): Promise<CheckoutSessionResult>;
-  getSubscriptionStatus(externalSubscriptionId): Promise<RemoteSubscriptionStatus>;
+  getPaymentStatus(externalPaymentId): Promise<RemotePaymentStatus>;
   cancelSubscription(externalSubscriptionId): Promise<void>;
   verifyWebhookSignature(rawBody, signatureHeader): boolean;
+  parseWebhookEvent(rawBody): ParsedWebhookEvent;
 }
 ```
 

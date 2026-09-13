@@ -23,6 +23,8 @@ const DEFAULT_SUBSCRIPTION: Omit<Subscription, "tenant_id"> = {
   invoice_currency: null,
   payment_provider_customer_reference: null,
   tax_metadata: {},
+  cancel_at_period_end: false,
+  provider_subscription_id: null,
   created_at: new Date(0).toISOString(),
   updated_at: new Date(0).toISOString(),
 };
@@ -220,19 +222,18 @@ export async function recordInvoiceFromProvider(
 }
 
 /**
- * Owner-only plan change. Only ever changes the *stored* plan tier —
- * there is no payment provider configured to actually charge a proration
- * or new price, so this is a governance/preference change today, not a
- * billing event.
+ * Owner-only plan PREFERENCE change — only for a tenant that has never
+ * had a real, paid subscription (still TRIALING). Only ever changes the
+ * stored `plan` column, never `status`.
  *
  * Deliberately never writes `status`. This used to unconditionally set
  * `status: "ACTIVE"`, which let anyone self-activate for free with no
  * payment, permanently bypassing the 14-day trial cutoff simply by saving
  * a plan on this page. Moving a subscription to ACTIVE is a real billing
- * event and belongs to a real payment provider's webhook
- * (lib/billing/payment-provider.ts) once one is integrated — not to this
- * self-service action. Until then, a tenant's existing status (TRIALING,
- * or a legitimate pre-existing ACTIVE row) is left exactly as it was.
+ * event and belongs exclusively to fn_apply_verified_payment() (Batch
+ * B10, supabase/migrations/20260913090000_prompter_b10_payment_billing_core.sql),
+ * called only from the payment webhook route after a verified payment —
+ * never to this self-service action.
  *
  * Batch B9 P1-1: rejects any plan whose lib/billing/plans.ts availability
  * is not "ACTIVE" (e.g. Agency, still COMING_SOON) before ever reaching
@@ -240,6 +241,16 @@ export async function recordInvoiceFromProvider(
  * fn_guard_subscription_plan_availability trigger on
  * prompter_subscriptions, so the rule holds even for a write that bypasses
  * this function entirely.
+ *
+ * Batch B10 A.2: rejects the change entirely once the tenant has a real
+ * paid subscription (status ACTIVE or PAST_DUE). Without this, a tenant
+ * already paying for Starter could call this to set `plan: "BUSINESS"`
+ * and instantly receive Business's entitlement (per B9's
+ * prompter_plan_entitlements lookup) with no new payment ever verified —
+ * this function only ever changes a *preference* while nothing has been
+ * paid for yet (TRIALING); a paying tenant's plan can only change via a
+ * verified checkout (upgrade) or fn_schedule_cancellation() (downgrade at
+ * period end).
  */
 export async function changePlan(
   supabase: SupabaseClient<Database>,
@@ -256,7 +267,19 @@ export async function changePlan(
     return { error: "Paket ini belum dapat dipilih (segera hadir)." };
   }
 
-  const { error } = await supabase.from("prompter_subscriptions").upsert({ tenant_id: tenantId, plan });
+  const { data: existing } = await supabase
+    .from("prompter_subscriptions")
+    .select("status")
+    .eq("tenant_id", tenantId)
+    .maybeSingle();
+
+  if (existing && existing.status !== "TRIALING") {
+    return {
+      error: "Paket Anda sudah aktif berdasarkan pembayaran. Gunakan Upgrade atau Downgrade untuk mengubah paket.",
+    };
+  }
+
+  const { error } = await supabase.from("prompter_subscriptions").update({ plan }).eq("tenant_id", tenantId);
 
   if (error) {
     return { error: "Gagal mengubah paket." };

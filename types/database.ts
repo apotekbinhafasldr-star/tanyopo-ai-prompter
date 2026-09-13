@@ -89,6 +89,10 @@ export type AttributionModel = "LAST_CLICK" | "FIRST_CLICK" | "MANUAL" | "UMKMPR
 export type SubscriptionPlan = "FREE" | "STARTER" | "PRO" | "BUSINESS" | "GROWTH" | "AGENCY" | "UMKMPRO_BUNDLE";
 export type SubscriptionStatus = "ACTIVE" | "TRIALING" | "PAST_DUE" | "CANCELED";
 export type InvoiceStatus = "DRAFT" | "OPEN" | "PAID" | "VOID" | "UNCOLLECTIBLE";
+/** Batch B10 -- deliberately spelled "CANCELLED" (two Ls), unlike
+ * SubscriptionStatus's "CANCELED" -- see the B10 migration's header
+ * comment for why these two enums are not spelled the same way. */
+export type PaymentTransactionStatus = "PENDING" | "PAID" | "FAILED" | "EXPIRED" | "CANCELLED";
 export type JobType =
   | "AI_GENERATION"
   | "CONTENT_GENERATION"
@@ -595,6 +599,14 @@ export interface Database {
           invoice_currency: string | null;
           payment_provider_customer_reference: string | null;
           tax_metadata: Json;
+          /** Batch B10 -- true once the owner requests cancellation; access
+           * stays ACTIVE until current_period_end. Only ever writable by
+           * fn_schedule_cancellation()/service_role, never a direct client
+           * update (see the B10 migration's column-privilege grants). */
+          cancel_at_period_end: boolean;
+          /** Batch B10 -- the payment processor's own subscription object
+           * id, once a real processor is integrated. Null today. */
+          provider_subscription_id: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -610,6 +622,8 @@ export interface Database {
           invoice_currency?: string | null;
           payment_provider_customer_reference?: string | null;
           tax_metadata?: Json;
+          cancel_at_period_end?: boolean;
+          provider_subscription_id?: string | null;
         };
         Update: Partial<
           Omit<Database["public"]["Tables"]["prompter_subscriptions"]["Insert"], "tenant_id">
@@ -650,6 +664,44 @@ export interface Database {
           paid_at?: string | null;
         };
         Update: Partial<Omit<Database["public"]["Tables"]["prompter_invoices"]["Insert"], "tenant_id">>;
+        Relationships: [];
+      };
+      prompter_payment_transactions: {
+        Row: {
+          id: string;
+          tenant_id: string;
+          user_id: string | null;
+          provider: string;
+          provider_payment_id: string | null;
+          provider_event_id: string | null;
+          plan: SubscriptionPlan;
+          amount: number;
+          currency: string;
+          status: PaymentTransactionStatus;
+          failure_reason: string | null;
+          metadata: Json;
+          created_at: string;
+          updated_at: string;
+          paid_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          tenant_id: string;
+          user_id?: string | null;
+          provider: string;
+          provider_payment_id?: string | null;
+          provider_event_id?: string | null;
+          plan: SubscriptionPlan;
+          amount: number;
+          currency?: string;
+          status?: PaymentTransactionStatus;
+          failure_reason?: string | null;
+          metadata?: Json;
+        };
+        // Only service_role (no RLS UPDATE policy for anon/authenticated
+        // at all) ever transitions a transaction's status -- see the B10
+        // migration. Not writable via the typed client from app code.
+        Update: never;
         Relationships: [];
       };
       prompter_compliance_flags: {
@@ -1321,6 +1373,21 @@ export interface Database {
       };
       fn_reserve_active_campaign_slot: {
         Args: { p_campaign_id: string };
+        Returns: { allowed: boolean; reason: string | null }[];
+      };
+      // Batch B10 -- see supabase/migrations/20260913090000_prompter_b10_payment_billing_core.sql.
+      fn_apply_verified_payment: {
+        Args: {
+          p_transaction_id: string;
+          p_provider_payment_id: string;
+          p_provider_event_id: string;
+          p_verified_amount: number;
+          p_verified_currency: string;
+        };
+        Returns: { allowed: boolean; reason: string | null }[];
+      };
+      fn_schedule_cancellation: {
+        Args: { p_cancel: boolean };
         Returns: { allowed: boolean; reason: string | null }[];
       };
     };

@@ -5,12 +5,24 @@ import type { Database } from "@/types/database";
 
 type Subscription = Database["public"]["Tables"]["prompter_subscriptions"]["Row"];
 
-function mockSupabase() {
-  const upsert = vi.fn(async () => ({ data: null, error: null }));
-  const from = vi.fn(() => ({ upsert }));
-  return { from, upsert } as unknown as SupabaseClient<Database> & {
+/** Mocks changePlan()'s two-step flow: `.select("status")...maybeSingle()`
+ * to read the tenant's current status, then `.update({ plan })...eq(...)`
+ * to write the new preference — never a single upsert anymore (Batch B10
+ * A.2), since changePlan() must first check the tenant isn't already a
+ * paying (non-TRIALING) subscriber. */
+function mockSupabaseForChangePlan(existingStatus: Database["public"]["Tables"]["prompter_subscriptions"]["Row"]["status"] | null) {
+  const maybeSingle = vi.fn(async () => ({ data: existingStatus ? { status: existingStatus } : null, error: null }));
+  const selectEq = vi.fn(() => ({ maybeSingle }));
+  const select = vi.fn(() => ({ eq: selectEq }));
+
+  const updateEq = vi.fn(async () => ({ data: null, error: null }));
+  const update = vi.fn(() => ({ eq: updateEq }));
+
+  const from = vi.fn(() => ({ select, update }));
+  return { from, select, selectEq, maybeSingle, update, updateEq } as unknown as SupabaseClient<Database> & {
     from: typeof from;
-    upsert: typeof upsert;
+    update: typeof update;
+    updateEq: typeof updateEq;
   };
 }
 
@@ -27,6 +39,8 @@ function subscription(overrides: Partial<Subscription> = {}): Subscription {
     invoice_currency: null,
     payment_provider_customer_reference: null,
     tax_metadata: {},
+    cancel_at_period_end: false,
+    provider_subscription_id: null,
     created_at: new Date(0).toISOString(),
     updated_at: new Date(0).toISOString(),
     ...overrides,
@@ -78,27 +92,44 @@ describe("getTrialState", () => {
 
 describe("changePlan", () => {
   it("never writes status, so selecting a plan cannot self-activate a subscription without payment", async () => {
-    const supabase = mockSupabase();
+    const supabase = mockSupabaseForChangePlan("TRIALING");
 
     await changePlan(supabase, "t1", "PRO");
 
-    expect(supabase.upsert).toHaveBeenCalledWith({ tenant_id: "t1", plan: "PRO" });
-    expect(supabase.upsert).not.toHaveBeenCalledWith(expect.objectContaining({ status: expect.anything() }));
+    expect(supabase.update).toHaveBeenCalledWith({ plan: "PRO" });
+    expect(supabase.update).not.toHaveBeenCalledWith(expect.objectContaining({ status: expect.anything() }));
   });
 
-  it("does not disturb an existing legitimate ACTIVE subscription's status", async () => {
-    const supabase = mockSupabase();
+  it("allows a TRIALING tenant (never paid) to set a plan preference", async () => {
+    const supabase = mockSupabaseForChangePlan("TRIALING");
 
-    await changePlan(supabase, "t1", "GROWTH");
+    const result = await changePlan(supabase, "t1", "GROWTH");
 
-    // Only tenant_id/plan are sent — Supabase upsert only updates the
-    // columns present in the payload, so an existing row's `status`
-    // (whatever it legitimately was) is left exactly as-is, not reset.
-    expect(supabase.upsert).toHaveBeenCalledWith({ tenant_id: "t1", plan: "GROWTH" });
+    expect(result.error).toBeNull();
+    expect(supabase.update).toHaveBeenCalledWith({ plan: "GROWTH" });
+    expect(supabase.updateEq).toHaveBeenCalledWith("tenant_id", "t1");
+  });
+
+  it("Batch B10 A.2 — rejects the change entirely once the tenant has a real paid (ACTIVE) subscription, so a paying Starter tenant cannot self-upgrade to Business for free", async () => {
+    const supabase = mockSupabaseForChangePlan("ACTIVE");
+
+    const result = await changePlan(supabase, "t1", "BUSINESS");
+
+    expect(result.error).not.toBeNull();
+    expect(supabase.update).not.toHaveBeenCalled();
+  });
+
+  it("Batch B10 A.2 — also rejects for a PAST_DUE tenant (still a real paid subscription, just behind on payment)", async () => {
+    const supabase = mockSupabaseForChangePlan("PAST_DUE");
+
+    const result = await changePlan(supabase, "t1", "GROWTH");
+
+    expect(result.error).not.toBeNull();
+    expect(supabase.update).not.toHaveBeenCalled();
   });
 
   it("Batch B9 P1-1 — rejects Agency (COMING_SOON) without ever reaching the database", async () => {
-    const supabase = mockSupabase();
+    const supabase = mockSupabaseForChangePlan("TRIALING");
 
     const result = await changePlan(supabase, "t1", "AGENCY");
 
@@ -106,16 +137,16 @@ describe("changePlan", () => {
     expect(supabase.from).not.toHaveBeenCalled();
   });
 
-  it("still allows every other public tier (Free/Starter/Growth/Pro/Business)", async () => {
+  it("still allows every other public tier (Free/Starter/Growth/Pro/Business) for a TRIALING tenant", async () => {
     for (const plan of ["FREE", "STARTER", "GROWTH", "PRO", "BUSINESS"] as const) {
-      const supabase = mockSupabase();
+      const supabase = mockSupabaseForChangePlan("TRIALING");
       const result = await changePlan(supabase, "t1", plan);
       expect(result.error).toBeNull();
     }
   });
 
   it("still allows UMKMPRO_BUNDLE — a separate cross-sell bundle outside B8/B9's pricing scope, not tracked as COMING_SOON", async () => {
-    const supabase = mockSupabase();
+    const supabase = mockSupabaseForChangePlan("TRIALING");
     const result = await changePlan(supabase, "t1", "UMKMPRO_BUNDLE");
     expect(result.error).toBeNull();
   });
