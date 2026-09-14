@@ -166,6 +166,120 @@ body {
   animation: marketing-line-flow 3s linear infinite;
 }
 
+/* Tanyopo Intelligence V4 — animated network diagram. All additive: a
+   scale-in for the AI core on entry, an SVG dash-offset "data flow"
+   travelling-light effect on the connector paths, a slow sheen sweep on
+   each dark card's top edge, and a very slow ambient background drift.
+   Every animation here is transform/opacity/background-position only
+   (no layout thrash), and every one is disabled below under
+   prefers-reduced-motion, same as the rules above. */
+@keyframes marketing-core-in {
+  from { opacity: 0; transform: scale(0.86); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.tanyopo-core-reveal.is-visible {
+  animation: marketing-core-in 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes marketing-dash-flow {
+  to { stroke-dashoffset: -200; }
+}
+
+.tanyopo-connector-path {
+  stroke-dasharray: 6 10;
+  animation: marketing-dash-flow 3.5s linear infinite;
+}
+
+@keyframes marketing-card-sheen {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+
+.tanyopo-card-sheen {
+  background-size: 220% 100%;
+  animation: marketing-card-sheen 9s linear infinite;
+}
+
+@keyframes marketing-ambient-drift {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(2%, -3%) scale(1.04); }
+}
+
+.tanyopo-ambient-drift {
+  animation: marketing-ambient-drift 22s ease-in-out infinite;
+}
+
+.tanyopo-ambient-drift-reverse {
+  animation: marketing-ambient-drift 26s ease-in-out infinite reverse;
+}
+
+/* Tanyopo Intelligence V5 — sequential "energy" chain. A brief glow travels
+   through each stop (Produk -> Core -> 6 capabilities -> Growth) in turn,
+   staggered via animation-delay to roughly track the connector lines'
+   traveling highlight (marketing-dash-flow), plus concentric sonar-style
+   rings on the AI core so it reads as continuously "thinking" rather than
+   a static hub. Both are box-shadow/transform/opacity only. */
+@keyframes marketing-node-pulse {
+  0% { box-shadow: 0 12px 32px -12px rgba(15,23,60,0.6); }
+  6% { box-shadow: 0 0 0 2px rgba(103,232,249,0.85), 0 0 26px 6px rgba(59,99,251,0.65), 0 12px 32px -12px rgba(15,23,60,0.6); }
+  18% { box-shadow: 0 12px 32px -12px rgba(15,23,60,0.6); }
+  100% { box-shadow: 0 12px 32px -12px rgba(15,23,60,0.6); }
+}
+
+.tanyopo-node-pulse {
+  animation: marketing-node-pulse 3.5s ease-in-out infinite;
+}
+
+@keyframes marketing-core-ring {
+  0% { transform: scale(0.92); opacity: 0.55; border-color: rgba(103,232,249,0.55); }
+  100% { transform: scale(1.55); opacity: 0; border-color: rgba(139,92,246,0.12); }
+}
+
+.tanyopo-core-ring {
+  border: 1.5px solid rgba(103,232,249,0.5);
+  animation: marketing-core-ring 3s ease-out infinite;
+}
+
+.tanyopo-spine {
+  background: linear-gradient(180deg, #06b6d4 0%, #3b82f6 35%, #7c3aed 70%, #22c55e 100%);
+  background-size: 100% 220%;
+  animation: marketing-line-flow 2.4s linear infinite;
+  box-shadow: 0 0 26px 4px rgba(59,130,246,0.65), 0 0 46px 10px rgba(124,58,237,0.4);
+}
+
+/* Tanyopo Intelligence V6 — "AI energy flow." A brief electric flicker on
+   each connector's glow layer, plus a small glowing particle physically
+   travels each connector (desktop: SVG animateMotion/mpath; mobile: a CSS
+   top-position keyframe along the vertical spine), so the flow reads as
+   moving light rather than a static tinted line. All transform/opacity/
+   box-shadow only — no canvas/WebGL/JS animation loop. */
+@keyframes marketing-connector-flicker {
+  0%, 100% { opacity: 0.85; }
+  8% { opacity: 1; }
+  14% { opacity: 0.7; }
+  22% { opacity: 1; }
+  55% { opacity: 0.9; }
+  70% { opacity: 0.78; }
+}
+
+.tanyopo-connector-glow {
+  animation: marketing-connector-flicker 2.6s ease-in-out infinite;
+}
+
+@keyframes marketing-spine-particle {
+  0% { top: 0%; opacity: 0; }
+  6% { opacity: 1; }
+  94% { opacity: 1; }
+  100% { top: 100%; opacity: 0; }
+}
+
+.tanyopo-spine-particle {
+  animation: marketing-spine-particle 2.6s linear infinite;
+  background: radial-gradient(circle, #ffffff 0%, #a5f3fc 55%, transparent 80%);
+  box-shadow: 0 0 16px 4px rgba(165,243,252,0.85);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .marketing-float {
     animation: none;
@@ -179,6 +293,42 @@ body {
   .marketing-glow-pulse,
   .marketing-line-flow {
     animation: none;
+  }
+  .tanyopo-core-reveal.is-visible {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+  .tanyopo-connector-path {
+    animation: none;
+  }
+  .tanyopo-card-sheen {
+    animation: none;
+  }
+  .tanyopo-ambient-drift,
+  .tanyopo-ambient-drift-reverse {
+    animation: none;
+  }
+  .tanyopo-node-pulse {
+    animation: none;
+    box-shadow: 0 12px 32px -12px rgba(15,23,60,0.6);
+  }
+  .tanyopo-core-ring {
+    animation: none;
+    opacity: 0;
+  }
+  .tanyopo-spine {
+    animation: none;
+  }
+  .tanyopo-connector-glow {
+    animation: none;
+    opacity: 0.85;
+  }
+  .tanyopo-energy-particle,
+  .tanyopo-spine-particle {
+    animation: none;
+    opacity: 0;
+    display: none;
   }
 }
 
