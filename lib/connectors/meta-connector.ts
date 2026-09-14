@@ -140,6 +140,24 @@ export class MetaConnector implements PlatformConnector {
     return result.data.map((a) => ({ id: a.id, name: a.name }));
   }
 
+  /**
+   * Track B — Facebook Pages this token has admin access to
+   * (`/me/accounts`, distinct from `/me/adaccounts` above — a Page is not
+   * an ad account). Not part of the shared `PlatformConnector` interface:
+   * TikTok/X have no equivalent concept, and forcing one onto them would
+   * mean either a fake implementation or an interface every other
+   * connector has to explicitly opt out of for no reason. Callers that
+   * need this import `MetaConnector` directly rather than going through
+   * `getConnector()`'s platform-agnostic return type.
+   */
+  async getPages(accessToken: string): Promise<ConnectorAccount[]> {
+    this.requireConfig();
+    const result = await graphFetch<{ data: { id: string; name: string }[] }>(
+      `/me/accounts?${new URLSearchParams({ fields: "id,name", access_token: accessToken })}`,
+    );
+    return result.data.map((p) => ({ id: p.id, name: p.name }));
+  }
+
   async createCampaign(
     accessToken: string,
     adAccountId: string,

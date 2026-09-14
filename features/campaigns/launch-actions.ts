@@ -70,7 +70,11 @@ const DEFAULT_OBJECTIVE: Record<ConnectorPlatform, string> = {
  * throws `ConnectorConfigError` at its own stopping point rather than
  * faking success past it, and this action stores that as the channel
  * campaign's `error` exactly like any other failure:
- * - **Meta**: `createCreative` requires a connected Facebook Page, no picker UI yet.
+ * - **Meta**: `createCreative` requires a connected Facebook Page (Track B —
+ *   the Owner selects one via the Connections page, features/connections/
+ *   meta-page-picker.tsx; `connectedAccount.selected_page_id` is threaded
+ *   into the creative call below). A Meta account that hasn't picked a
+ *   Page yet still throws the same existing error as before Track B.
  * - **TikTok/X**: `createAdSet` requires each platform's own numeric location id
  *   (not an ISO country code) — no verified mapping exists yet, so this stops
  *   one step earlier than Meta rather than risk targeting the wrong location.
@@ -116,7 +120,7 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
 
   const { data: connectedAccount } = await supabase
     .from("prompter_connected_accounts")
-    .select("id, external_account_id, status")
+    .select("id, external_account_id, status, selected_page_id")
     .eq("tenant_id", session.tenantId)
     .eq("platform", connectorPlatform)
     .maybeSingle();
@@ -192,6 +196,13 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
       headline: proposal?.headline ?? masterCampaign.name,
       primaryText: proposal?.primary_text ?? "",
       cta: proposal?.cta ?? "Pelajari Lebih Lanjut",
+      // Track B — Meta's own required Page selection, set by the Owner via
+      // the Connections page (features/connections/meta-page-picker.tsx).
+      // Undefined for TikTok/X (the field is Meta-specific) and for a Meta
+      // account that hasn't picked a Page yet — connector.createCreative()
+      // already throws its existing, unchanged error in that case, so
+      // behavior for an unselected Page is identical to before this change.
+      pageId: connectedAccount.selected_page_id ?? undefined,
     });
 
     await connector.createAd(accessToken, adAccountId, {
