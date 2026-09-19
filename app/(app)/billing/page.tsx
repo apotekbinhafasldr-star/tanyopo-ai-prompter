@@ -187,7 +187,11 @@ export default async function BillingPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4 pt-4">
-          <PricingCards currentPlan={subscription.plan} readOnly={!isOwner} />
+          <PricingCards
+            currentPlan={subscription.plan}
+            readOnly={!isOwner}
+            paymentConfigured={paymentProvider.isConfigured()}
+          />
           <details className="rounded-[var(--radius-md)] border border-border">
             <summary className="cursor-pointer p-3 text-xs font-medium text-muted-foreground">
               Bandingkan Fitur
