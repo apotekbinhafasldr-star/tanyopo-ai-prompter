@@ -114,6 +114,16 @@ export const serverEnv = {
     // NOT_CONFIGURED end-to-end until both exist.
     processorSecret: readOptional("JOBS_PROCESSOR_SECRET"),
   },
+  // Batch B11 hotfix — replaces Netlify's non-production Team Login gate
+  // (which was found to block Xendit's webhook callback entirely, with no
+  // per-path exception available) with an app-level Basic-Auth wall in
+  // proxy.ts. Unset in every environment except a deliberately-configured
+  // Deploy Preview context — never set in production, where this gate
+  // must stay a no-op.
+  preview: {
+    basicAuthUser: readOptional("PREVIEW_BASIC_AUTH_USER"),
+    basicAuthPassword: readOptional("PREVIEW_BASIC_AUTH_PASSWORD"),
+  },
 };
 
 /** True when every credential a connector needs to operate is present. */
