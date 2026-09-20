@@ -1,7 +1,37 @@
 import { timingSafeEqual } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
-import { publicEnv, serverEnv } from "@/lib/env";
+import { publicEnv } from "@/lib/env";
+
+// Netlify injects a global `Netlify.env` accessor on its Edge Function
+// runtime — not declared by any type package we depend on, so this is a
+// minimal ambient shape covering only the one method used below.
+declare const Netlify: { env: { get(name: string): string | undefined } } | undefined;
+
+/**
+ * Batch B11 hotfix (round 2) — Next.js's `proxy` (middleware) runs on
+ * Netlify as an Edge Function, a separate runtime from the Node function
+ * that serves pages/API routes. Verified live: PAYMENT_PROVIDER_WEBHOOK_SECRET
+ * (read inside the Node function, app/api/webhooks/payment/route.ts) was
+ * correctly picked up, while PREVIEW_BASIC_AUTH_USER/PASSWORD (read here,
+ * via plain `process.env`) were not — `hasValidBasicAuth()` kept silently
+ * treating itself as unconfigured. Netlify's own docs for Edge Functions
+ * name `Netlify.env.get()` as the fallback for exactly this gap. Guarded
+ * because that global only exists on Netlify's edge runtime, never in
+ * local dev, tests, or the Node function.
+ */
+function readPreviewCredential(name: string): string | undefined {
+  const fromProcessEnv = process.env[name];
+  if (fromProcessEnv) {
+    return fromProcessEnv;
+  }
+
+  try {
+    return typeof Netlify !== "undefined" ? Netlify.env.get(name) : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 const PUBLIC_PATHS = ["/", "/login", "/register", "/forgot-password"];
 const AUTH_ONLY_PATHS = ["/login", "/register"];
@@ -44,7 +74,8 @@ export function isPublicAsset(pathname: string) {
  * never production, so this gate never activates there.
  */
 export function hasValidBasicAuth(request: NextRequest): boolean {
-  const { basicAuthUser, basicAuthPassword } = serverEnv.preview;
+  const basicAuthUser = readPreviewCredential("PREVIEW_BASIC_AUTH_USER");
+  const basicAuthPassword = readPreviewCredential("PREVIEW_BASIC_AUTH_PASSWORD");
   if (!basicAuthUser || !basicAuthPassword) {
     return true;
   }
