@@ -10,17 +10,18 @@ import { processPaymentWebhook } from "@/services/payment-webhook";
  * copy) and delegates everything else to services/payment-webhook.ts,
  * which is unit-testable without an HTTP server.
  *
- * `x-payment-signature` is a placeholder header name — no real
- * processor is integrated yet (NullPaymentProvider.isConfigured() is
- * always false today, so this route always responds 503 in practice).
- * A real adapter (Midtrans/Xendit/...) will very likely use a different
- * header (or, for some providers, a token embedded in the body itself)
- * — update this one line when that adapter is built, nothing else in
- * this route or in services/payment-webhook.ts needs to change.
+ * Batch B11 — header is now `x-callback-token`, matching Xendit's
+ * Invoice callback verification header (a static shared-secret token
+ * compared in constant time by XenditPaymentProvider.
+ * verifyWebhookSignature(), not an HMAC signature). Still routes through
+ * the same provider-agnostic processPaymentWebhook() below unchanged —
+ * only this one header name is provider-specific, and only because
+ * different providers name it differently; the verification logic
+ * itself lives entirely in the adapter.
  */
 export async function POST(request: NextRequest) {
   const rawBody = await request.text();
-  const signatureHeader = request.headers.get("x-payment-signature");
+  const signatureHeader = request.headers.get("x-callback-token");
 
   const admin = createAdminClient();
   if (!admin) {

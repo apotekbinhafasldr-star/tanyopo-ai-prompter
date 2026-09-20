@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { requireSessionContext } from "@/services/session";
 import { changePlan } from "@/services/billing";
@@ -64,6 +65,31 @@ export async function changePlanAction(
 }
 
 /**
+ * Batch B11 hotfix — the checkout redirect origin must match whichever
+ * deployment actually started the checkout (Deploy Preview vs.
+ * Production), never a single fixed value. NEXT_PUBLIC_APP_URL is one
+ * global env var (always Production's URL, across every Netlify
+ * context) — using it unconditionally sent a Deploy Preview payer back
+ * to the Production domain after paying, where the Deploy Preview's
+ * session cookie doesn't exist (different origin), landing them on
+ * /login instead of back in their own session.
+ *
+ * The `origin` header is safe to trust here without extra allowlisting:
+ * this function only ever runs after Next.js's own Server Actions origin
+ * check has already accepted the request (a mismatched Origin header
+ * never reaches this far), so it always reflects the real deployment the
+ * browser is actually on. Falls back to the fixed publicEnv.appUrl only
+ * when the header is absent (e.g. a non-browser caller), which keeps
+ * Production's behavior exactly as before and never makes Production
+ * depend on any preview URL.
+ */
+async function resolveCheckoutOrigin(): Promise<string> {
+  const headerList = await headers();
+  const origin = headerList.get("origin");
+  return origin && origin.startsWith("https://") ? origin : publicEnv.appUrl;
+}
+
+/**
  * Batch B10 — checkout core entry point (Bagian G of the brief). Never
  * accepts a price from the client: services/checkout.ts#startCheckout()
  * always looks up the canonical amount from lib/billing/plans.ts
@@ -87,13 +113,14 @@ export async function startCheckoutAction(
     return { error: "Paket tidak valid." };
   }
 
+  const origin = await resolveCheckoutOrigin();
   const supabase = await createClient();
   const result = await startCheckout(supabase, {
     tenantId: session.tenantId,
     userId: session.userId,
     plan: plan as SubscriptionPlan,
-    successUrl: `${publicEnv.appUrl}/billing?checkout=success`,
-    cancelUrl: `${publicEnv.appUrl}/billing?checkout=cancelled`,
+    successUrl: `${origin}/billing?checkout=success`,
+    cancelUrl: `${origin}/billing?checkout=cancelled`,
   });
 
   if (!result.ok || !result.checkoutUrl) {

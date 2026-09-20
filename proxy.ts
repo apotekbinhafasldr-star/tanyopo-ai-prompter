@@ -1,6 +1,37 @@
+import { timingSafeEqual } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { publicEnv } from "@/lib/env";
+
+// Netlify injects a global `Netlify.env` accessor on its Edge Function
+// runtime — not declared by any type package we depend on, so this is a
+// minimal ambient shape covering only the one method used below.
+declare const Netlify: { env: { get(name: string): string | undefined } } | undefined;
+
+/**
+ * Batch B11 hotfix (round 2) — Next.js's `proxy` (middleware) runs on
+ * Netlify as an Edge Function, a separate runtime from the Node function
+ * that serves pages/API routes. Verified live: PAYMENT_PROVIDER_WEBHOOK_SECRET
+ * (read inside the Node function, app/api/webhooks/payment/route.ts) was
+ * correctly picked up, while PREVIEW_BASIC_AUTH_USER/PASSWORD (read here,
+ * via plain `process.env`) were not — `hasValidBasicAuth()` kept silently
+ * treating itself as unconfigured. Netlify's own docs for Edge Functions
+ * name `Netlify.env.get()` as the fallback for exactly this gap. Guarded
+ * because that global only exists on Netlify's edge runtime, never in
+ * local dev, tests, or the Node function.
+ */
+function readPreviewCredential(name: string): string | undefined {
+  const fromProcessEnv = process.env[name];
+  if (fromProcessEnv) {
+    return fromProcessEnv;
+  }
+
+  try {
+    return typeof Netlify !== "undefined" ? Netlify.env.get(name) : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 const PUBLIC_PATHS = ["/", "/login", "/register", "/forgot-password"];
 const AUTH_ONLY_PATHS = ["/login", "/register"];
@@ -9,6 +40,13 @@ export function isPublicAsset(pathname: string) {
   return (
     pathname.startsWith("/_next") ||
     pathname.startsWith("/api/v1/integrations") || // signed service auth, not cookie auth
+    // Batch B11 hotfix — Xendit's callback is a server-to-server POST with
+    // no Supabase session cookie; without this it was being bounced to
+    // /login before app/api/webhooks/payment/route.ts ever ran. Its own
+    // security is the x-callback-token verification inside that route
+    // (unchanged) — same "signed service auth, not cookie auth" shape as
+    // /api/v1/integrations above.
+    pathname === "/api/webhooks/payment" ||
     pathname === "/favicon.ico" ||
     // Both handle their own auth (exchange a Supabase recovery/PKCE code,
     // or verify a token_hash) for a session — the request arrives with no
@@ -23,6 +61,58 @@ export function isPublicAsset(pathname: string) {
 }
 
 /**
+ * Batch B11 hotfix — app-level replacement for Netlify's non-production
+ * Team Login (SSO) protection, which was found to gate every request at
+ * the edge with no per-path exception mechanism (Netlify's own docs:
+ * "private projects can't receive third-party webhooks"), permanently
+ * blocking Xendit's callback from ever reaching this app. This runs only
+ * for paths that reach past isPublicAsset() above, so
+ * /api/webhooks/payment is never subject to it.
+ *
+ * A no-op (always returns true) unless BOTH env vars are set — they are
+ * deliberately configured only on the Netlify "Deploy Preview" context,
+ * never production, so this gate never activates there.
+ */
+export function hasValidBasicAuth(request: NextRequest): boolean {
+  const basicAuthUser = readPreviewCredential("PREVIEW_BASIC_AUTH_USER");
+  const basicAuthPassword = readPreviewCredential("PREVIEW_BASIC_AUTH_PASSWORD");
+  if (!basicAuthUser || !basicAuthPassword) {
+    return true;
+  }
+
+  const header = request.headers.get("authorization");
+  if (!header?.startsWith("Basic ")) {
+    return false;
+  }
+
+  let decoded: string;
+  try {
+    decoded = Buffer.from(header.slice("Basic ".length), "base64").toString("utf-8");
+  } catch {
+    return false;
+  }
+
+  const separatorIndex = decoded.indexOf(":");
+  if (separatorIndex === -1) {
+    return false;
+  }
+
+  const suppliedUser = Buffer.from(decoded.slice(0, separatorIndex));
+  const suppliedPassword = Buffer.from(decoded.slice(separatorIndex + 1));
+  const expectedUser = Buffer.from(basicAuthUser);
+  const expectedPassword = Buffer.from(basicAuthPassword);
+
+  // Length-guard before timingSafeEqual (throws on mismatched length
+  // otherwise) — same constant-time-comparison shape used by
+  // lib/umkmpro/signature.ts and the Xendit adapter's webhook verification.
+  const userMatches = suppliedUser.length === expectedUser.length && timingSafeEqual(suppliedUser, expectedUser);
+  const passwordMatches =
+    suppliedPassword.length === expectedPassword.length && timingSafeEqual(suppliedPassword, expectedPassword);
+
+  return userMatches && passwordMatches;
+}
+
+/**
  * Refreshes the Supabase session cookie on every request and gates access
  * to authenticated areas of the app. Next.js 16 renamed `middleware.ts` to
  * `proxy.ts`; this file runs on the `nodejs` runtime (the only option in 16).
@@ -32,6 +122,13 @@ export async function proxy(request: NextRequest) {
 
   if (isPublicAsset(pathname)) {
     return NextResponse.next();
+  }
+
+  if (!hasValidBasicAuth(request)) {
+    return new NextResponse("Authentication required.", {
+      status: 401,
+      headers: { "WWW-Authenticate": 'Basic realm="LINOE Preview"' },
+    });
   }
 
   let response = NextResponse.next({ request });

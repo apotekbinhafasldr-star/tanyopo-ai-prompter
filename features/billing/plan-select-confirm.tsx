@@ -3,7 +3,7 @@
 import { useActionState, useState } from "react";
 import { cn } from "@/lib/utils/cn";
 import { formatCurrency } from "@/lib/utils/format";
-import { changePlanAction, type BillingActionState } from "@/features/billing/actions";
+import { changePlanAction, startCheckoutAction, type BillingActionState } from "@/features/billing/actions";
 import type { SubscriptionPlan } from "@/types/database";
 
 const initialState: BillingActionState = { error: null };
@@ -26,6 +26,17 @@ const initialState: BillingActionState = { error: null };
  * (not the lighter `actionBar` tint used for "Lihat Detail"), so the
  * button reads unmistakably as the primary action against every card
  * background, including Growth's gradient.
+ *
+ * Batch B11 UI-wiring hotfix — `useCheckout` (computed by the caller as
+ * `paymentConfigured && tier.priceIDR > 0`) switches the confirm step's
+ * form action to startCheckoutAction, the real B10 checkout entry point
+ * (services/checkout.ts -> PaymentProvider.createCheckoutSession() ->
+ * redirect to the provider's hosted checkout). The FREE tier is never
+ * routed to checkout even when a provider is configured — startCheckout()
+ * itself fails closed on a zero-price plan ("Paket ini tidak memerlukan
+ * pembayaran."), so FREE always keeps the old reference-only
+ * changePlanAction path. When no provider is configured, every tier keeps
+ * that same original fallback, unchanged.
  */
 export function PlanSelectConfirm({
   planId,
@@ -36,6 +47,7 @@ export function PlanSelectConfirm({
   mutedTextClassName,
   dividerClassName,
   readOnly,
+  useCheckout,
 }: {
   planId: SubscriptionPlan;
   planName: string;
@@ -45,9 +57,13 @@ export function PlanSelectConfirm({
   mutedTextClassName: string;
   dividerClassName: string;
   readOnly: boolean;
+  useCheckout: boolean;
 }) {
   const [confirming, setConfirming] = useState(false);
-  const [state, formAction, pending] = useActionState(changePlanAction, initialState);
+  const [state, formAction, pending] = useActionState(
+    useCheckout ? startCheckoutAction : changePlanAction,
+    initialState,
+  );
 
   if (readOnly) {
     return <p className={cn("text-xs", mutedTextClassName)}>Hanya Owner yang dapat memilih paket.</p>;
@@ -76,8 +92,9 @@ export function PlanSelectConfirm({
         <span>{pricePeriodLabel}</span>
       </p>
       <p className={cn("text-xs", mutedTextClassName)}>
-        Pembayaran online sedang dipersiapkan. Paket aktif Anda belum berubah sampai pembayaran tersedia dan
-        berhasil diverifikasi.
+        {useCheckout
+          ? "Anda akan diarahkan ke halaman pembayaran untuk menyelesaikan paket ini."
+          : "Pembayaran online sedang dipersiapkan. Paket aktif Anda belum berubah sampai pembayaran tersedia dan berhasil diverifikasi."}
       </p>
       <form action={formAction} className="flex flex-col gap-2">
         <input type="hidden" name="plan" value={planId} />
@@ -95,7 +112,7 @@ export function PlanSelectConfirm({
               primaryCtaClassName,
             )}
           >
-            {pending ? "Menyimpan..." : "Simpan Pilihan Paket"}
+            {pending ? "Memproses..." : useCheckout ? "Lanjutkan ke Pembayaran" : "Simpan Pilihan Paket"}
           </button>
           <button
             type="button"

@@ -36,6 +36,16 @@ import type { SubscriptionPlan } from "@/types/database";
  * stays a lighter-weight secondary action). No new selection mechanism —
  * same PlanSelectConfirm/changePlanAction as before, just surfaced
  * without requiring an extra tap to expand detail first.
+ *
+ * Batch B11 UI-wiring hotfix — `paymentConfigured` (from
+ * getPaymentProvider().isConfigured() on app/(app)/billing/page.tsx) is
+ * threaded down to each non-current, purchasable card. Per tier,
+ * PlanSelectConfirm is told `useCheckout = paymentConfigured &&
+ * tier.priceIDR > 0` — only a paid tier with a configured provider is
+ * routed to the real startCheckoutAction/Xendit flow. FREE keeps the old
+ * reference-only changePlanAction path unconditionally (it never needs
+ * payment), and every tier falls back to that same old path when no
+ * provider is configured, unchanged from before this hotfix.
  */
 interface TierVisual {
   icon: LucideIcon;
@@ -133,20 +143,38 @@ const TIER_VISUALS: Record<PlanTierId, TierVisual> = {
 export function PricingCards({
   currentPlan,
   readOnly,
+  paymentConfigured,
 }: {
   currentPlan: SubscriptionPlan;
   readOnly: boolean;
+  paymentConfigured: boolean;
 }) {
   return (
     <div className="flex flex-col gap-3">
       {PLAN_TIERS.map((tier) => (
-        <PricingCard key={tier.id} tier={tier} isCurrent={tier.id === currentPlan} readOnly={readOnly} />
+        <PricingCard
+          key={tier.id}
+          tier={tier}
+          isCurrent={tier.id === currentPlan}
+          readOnly={readOnly}
+          paymentConfigured={paymentConfigured}
+        />
       ))}
     </div>
   );
 }
 
-function PricingCard({ tier, isCurrent, readOnly }: { tier: PlanTierConfig; isCurrent: boolean; readOnly: boolean }) {
+function PricingCard({
+  tier,
+  isCurrent,
+  readOnly,
+  paymentConfigured,
+}: {
+  tier: PlanTierConfig;
+  isCurrent: boolean;
+  readOnly: boolean;
+  paymentConfigured: boolean;
+}) {
   const visual = TIER_VISUALS[tier.id];
   const Icon = visual.icon;
   const isComingSoon = tier.availability === "COMING_SOON";
@@ -231,6 +259,7 @@ function PricingCard({ tier, isCurrent, readOnly }: { tier: PlanTierConfig; isCu
                 mutedTextClassName={visual.subtext}
                 dividerClassName={visual.divider}
                 readOnly={readOnly}
+                useCheckout={paymentConfigured && tier.priceIDR > 0}
               />
             )}
           </div>
