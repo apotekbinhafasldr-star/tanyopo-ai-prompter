@@ -21,9 +21,17 @@ vi.mock("@/services/billing", () => ({ changePlan: vi.fn(async () => ({ error: n
 
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn(async () => currentSupabase) }));
 
+const { headersMock } = vi.hoisted(() => ({ headersMock: vi.fn() }));
+vi.mock("next/headers", () => ({ headers: headersMock }));
+
+function mockHeaders(entries: Record<string, string> = {}) {
+  return { get: (key: string) => entries[key.toLowerCase()] ?? null } as unknown as Headers;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let currentSupabase: any;
 
+import { publicEnv } from "@/lib/env";
 import { startCheckoutAction, scheduleCancellationAction } from "@/features/billing/actions";
 
 describe("startCheckoutAction — Batch B10 Bagian G/I", () => {
@@ -32,6 +40,8 @@ describe("startCheckoutAction — Batch B10 Bagian G/I", () => {
     startCheckoutMock.mockReset();
     requireSessionContextMock.mockResolvedValue({ tenantId: "t1", userId: "u1", role: "owner" });
     currentSupabase = {};
+    headersMock.mockReset();
+    headersMock.mockResolvedValue(mockHeaders());
   });
 
   it("rejects a non-owner without ever calling startCheckout", async () => {
@@ -85,6 +95,47 @@ describe("startCheckoutAction — Batch B10 Bagian G/I", () => {
 
     expect(result.error).toMatch(/dipersiapkan/i);
     expect(redirectMock).not.toHaveBeenCalled();
+  });
+
+  describe("Batch B11 hotfix — checkout redirect origin is context-aware, never a single fixed URL", () => {
+    it("builds successUrl/cancelUrl from the request's Origin header when present (Deploy Preview stays on Deploy Preview)", async () => {
+      headersMock.mockResolvedValue(
+        mockHeaders({ origin: "https://deploy-preview-11--tanyopo-ai-prompter.netlify.app" }),
+      );
+      startCheckoutMock.mockResolvedValue({ ok: true, checkoutUrl: "https://checkout.xendit.co/x" });
+      const fd = new FormData();
+      fd.set("plan", "GROWTH");
+
+      await expect(startCheckoutAction({ error: null }, fd)).rejects.toThrow("REDIRECT:https://checkout.xendit.co/x");
+
+      const callArgs = startCheckoutMock.mock.calls[0][1];
+      expect(callArgs.successUrl).toBe("https://deploy-preview-11--tanyopo-ai-prompter.netlify.app/billing?checkout=success");
+      expect(callArgs.cancelUrl).toBe("https://deploy-preview-11--tanyopo-ai-prompter.netlify.app/billing?checkout=cancelled");
+    });
+
+    it("falls back to publicEnv.appUrl when no Origin header is present (never breaks a non-browser caller)", async () => {
+      headersMock.mockResolvedValue(mockHeaders());
+      startCheckoutMock.mockResolvedValue({ ok: true, checkoutUrl: "https://checkout.xendit.co/y" });
+      const fd = new FormData();
+      fd.set("plan", "GROWTH");
+
+      await expect(startCheckoutAction({ error: null }, fd)).rejects.toThrow("REDIRECT:https://checkout.xendit.co/y");
+
+      const callArgs = startCheckoutMock.mock.calls[0][1];
+      expect(callArgs.successUrl).toBe(`${publicEnv.appUrl}/billing?checkout=success`);
+    });
+
+    it("falls back to publicEnv.appUrl for a non-https Origin header (defense in depth)", async () => {
+      headersMock.mockResolvedValue(mockHeaders({ origin: "http://not-secure.example.com" }));
+      startCheckoutMock.mockResolvedValue({ ok: true, checkoutUrl: "https://checkout.xendit.co/z" });
+      const fd = new FormData();
+      fd.set("plan", "GROWTH");
+
+      await expect(startCheckoutAction({ error: null }, fd)).rejects.toThrow("REDIRECT:https://checkout.xendit.co/z");
+
+      const callArgs = startCheckoutMock.mock.calls[0][1];
+      expect(callArgs.successUrl).toBe(`${publicEnv.appUrl}/billing?checkout=success`);
+    });
   });
 });
 
