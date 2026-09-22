@@ -7,6 +7,7 @@ import { loginSchema, registerSchema, forgotPasswordSchema, resetPasswordSchema 
 import { publicEnv } from "@/lib/env";
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
 import { isExistingAccountSignUp } from "@/lib/auth/existing-account";
+import { mapSignupError } from "@/lib/auth/signup-error";
 
 /**
  * Best-effort brake on trial-farming (repeated signups to get fresh
@@ -145,7 +146,7 @@ export async function registerAction(
   }
 
   if (error) {
-    return { error: "Gagal membuat akun. Silakan coba lagi." };
+    return { error: mapSignupError(error) };
   }
 
   // If the project requires email confirmation, signUp succeeds but no
