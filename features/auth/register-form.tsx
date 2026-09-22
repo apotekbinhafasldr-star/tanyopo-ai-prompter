@@ -5,6 +5,7 @@ import Link from "next/link";
 import { registerAction, type AuthActionState } from "@/features/auth/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -83,14 +84,7 @@ export function RegisterForm() {
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="password">Kata Sandi</Label>
-            <Input
-              id="password"
-              name="password"
-              type="password"
-              autoComplete="new-password"
-              minLength={8}
-              required
-            />
+            <PasswordInput id="password" name="password" autoComplete="new-password" minLength={8} required />
             <p className="text-xs text-muted-foreground">Minimal 8 karakter.</p>
           </div>
           {state.error ? (

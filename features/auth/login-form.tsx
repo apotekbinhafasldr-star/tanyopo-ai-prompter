@@ -5,6 +5,7 @@ import Link from "next/link";
 import { loginAction, type AuthActionState } from "@/features/auth/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -45,13 +46,7 @@ export function LoginForm({ next, resetSuccess }: { next?: string; resetSuccess?
                 Lupa kata sandi?
               </Link>
             </div>
-            <Input
-              id="password"
-              name="password"
-              type="password"
-              autoComplete="current-password"
-              required
-            />
+            <PasswordInput id="password" name="password" autoComplete="current-password" required />
           </div>
           {state.error ? (
             <p role="alert" className="text-sm text-danger">
