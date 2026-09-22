@@ -112,8 +112,8 @@ export async function registerAction(
         // /onboarding and stored in prompter_brand_profiles.
         jenis_usaha: "lainnya",
       },
-      // No emailRedirectTo here (see B12): the production Supabase project
-      // has exactly one Redirect URLs entry, an exact-match bare
+      // No emailRedirectTo here (see B12 P0-1): the production Supabase
+      // project has exactly one Redirect URLs entry, an exact-match bare
       // `/auth/callback` with no wildcard, so any redirectTo carrying a
       // query string (e.g. `?next=/onboarding`) would silently fail that
       // check and fall back to the Site URL instead of taking effect.
@@ -122,7 +122,10 @@ export async function registerAction(
       // `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=signup&next=/onboarding`
       // (app/auth/confirm/route.ts) — a path that bypasses this allow-list
       // check entirely, since it never goes through Supabase's own
-      // redirect step.
+      // redirect step. Verified in the Supabase Dashboard (2026-09) that
+      // this template is configured exactly this way and Site URL already
+      // points at this app's own production domain — not a stale/unset
+      // fallback — so this flow is confirmed live end-to-end.
     },
   });
 
@@ -182,10 +185,13 @@ export async function forgotPasswordAction(
   // No query string here: Supabase's Redirect URLs allow list holds the
   // exact `${appUrl}/auth/callback` entry with no wildcard, and requires an
   // exact match on redirectTo — anything appended (e.g. `?next=...`) fails
-  // that match, so Supabase silently falls back to this shared project's
-  // Site URL (localhost, since the project is also used by UMKMpro AI).
-  // app/auth/callback/route.ts's default `next` covers the destination
-  // instead.
+  // that match, so Supabase would silently fall back to this shared
+  // project's Site URL if this ever stopped matching. app/auth/callback/
+  // route.ts's default `next` covers the destination instead. Verified in
+  // the Supabase Dashboard (B12 P0-1, 2026-09) that this redirectTo
+  // matches the project's sole allow-list entry exactly, so this flow is
+  // confirmed live end-to-end — Site URL is not this app's fallback path
+  // in normal operation, only a safety net if the match ever breaks.
   await supabase.auth.resetPasswordForEmail(parsed.data.email, {
     redirectTo: `${publicEnv.appUrl}/auth/callback`,
   });

@@ -18,9 +18,11 @@ import { createClient } from "@/lib/supabase/server";
  * redirectTo carrying a query string would silently fail to match and
  * fall back to the Site URL instead.
  *
- * This route does nothing until that email template is updated — until
- * then, signup confirmation still uses Supabase's default
- * {{ .ConfirmationURL }} link, which never reaches this path.
+ * Batch B12 P0-1 verification (2026-09): the "Confirm signup" template is
+ * confirmed configured this way in the Supabase Dashboard, so this route
+ * is live and handling real signup confirmations — not dormant. If a
+ * future audit finds signup confirmation broken, check the Dashboard
+ * template content first rather than assuming this route is unreachable.
  */
 function safeNext(next: string | null): string {
   if (!next || !next.startsWith("/") || next.startsWith("//")) {
