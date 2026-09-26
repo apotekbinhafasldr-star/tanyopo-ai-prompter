@@ -3,8 +3,12 @@ import { PLAN_TIERS, findPlanTier } from "@/lib/billing/plans";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
 
-const { getPaymentProviderMock } = vi.hoisted(() => ({ getPaymentProviderMock: vi.fn() }));
+const { getPaymentProviderMock, createAdminClientMock } = vi.hoisted(() => ({
+  getPaymentProviderMock: vi.fn(),
+  createAdminClientMock: vi.fn(() => null as unknown),
+}));
 vi.mock("@/lib/billing/get-payment-provider", () => ({ getPaymentProvider: getPaymentProviderMock }));
+vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: createAdminClientMock }));
 
 import { startCheckout } from "@/services/checkout";
 
@@ -35,6 +39,8 @@ function mockProvider(overrides: Partial<{ isConfigured: boolean; createCheckout
 
 beforeEach(() => {
   getPaymentProviderMock.mockReset();
+  createAdminClientMock.mockReset();
+  createAdminClientMock.mockReturnValue(null);
 });
 
 describe("startCheckout — Batch B10 checkout core", () => {
@@ -167,6 +173,73 @@ describe("startCheckout — Batch B10 checkout core", () => {
     // startCheckout never touches prompter_subscriptions at all.
     expect(supabase.from).toHaveBeenCalledWith("prompter_payment_transactions");
     expect(supabase.from).not.toHaveBeenCalledWith("prompter_subscriptions");
+  });
+
+  it("Payment Remediation M — carries the transaction id through to the success/cancel URLs so a return trip can reconcile against the real transaction", async () => {
+    const provider = mockProvider();
+    getPaymentProviderMock.mockReturnValue(provider);
+    const supabase = mockSupabase({ data: { id: "txn_42" }, error: null });
+
+    await startCheckout(supabase, {
+      tenantId: "t1",
+      userId: "u1",
+      plan: "PRO",
+      successUrl: "https://app.example.com/billing?checkout=success",
+      cancelUrl: "https://app.example.com/billing?checkout=cancelled",
+    });
+
+    expect(provider.createCheckoutSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        successUrl: "https://app.example.com/billing?checkout=success&txn=txn_42",
+        cancelUrl: "https://app.example.com/billing?checkout=cancelled&txn=txn_42",
+      }),
+    );
+  });
+
+  it("Payment Remediation — checkout still succeeds when the admin client isn't configured (best-effort provider_payment_id write only)", async () => {
+    createAdminClientMock.mockReturnValue(null);
+    const provider = mockProvider();
+    getPaymentProviderMock.mockReturnValue(provider);
+    const supabase = mockSupabase({ data: { id: "txn_1" }, error: null });
+
+    const result = await startCheckout(supabase, {
+      tenantId: "t1",
+      userId: "u1",
+      plan: "PRO",
+      successUrl: "https://app.example.com/billing",
+      cancelUrl: "https://app.example.com/billing",
+    });
+
+    expect(result.ok).toBe(true);
+  });
+
+  it("Payment Remediation — records the provider's checkout session id onto the transaction via the admin client, scoped to that PENDING row only", async () => {
+    const eq = vi.fn(() => ({ eq }));
+    const update = vi.fn(() => ({ eq }));
+    const adminFrom = vi.fn(() => ({ update }));
+    createAdminClientMock.mockReturnValue({ from: adminFrom } as unknown);
+
+    const provider = mockProvider({
+      createCheckoutSession: vi.fn(async () => ({
+        checkoutUrl: "https://pay.example.com/session/xyz",
+        externalSessionId: "xyz",
+      })),
+    });
+    getPaymentProviderMock.mockReturnValue(provider);
+    const supabase = mockSupabase({ data: { id: "txn_99" }, error: null });
+
+    await startCheckout(supabase, {
+      tenantId: "t1",
+      userId: "u1",
+      plan: "PRO",
+      successUrl: "https://app.example.com/billing",
+      cancelUrl: "https://app.example.com/billing",
+    });
+
+    expect(adminFrom).toHaveBeenCalledWith("prompter_payment_transactions");
+    expect(update).toHaveBeenCalledWith({ provider_payment_id: "xyz" });
+    expect(eq).toHaveBeenCalledWith("id", "txn_99");
+    expect(eq).toHaveBeenCalledWith("status", "PENDING");
   });
 
   it("findPlanTier sanity check used by startCheckout — every ACTIVE tier has a positive price except FREE", () => {

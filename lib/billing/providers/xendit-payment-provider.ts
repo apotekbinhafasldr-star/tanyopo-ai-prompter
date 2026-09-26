@@ -14,22 +14,12 @@ import {
 const XENDIT_API_BASE = "https://api.xendit.co";
 
 /**
- * Batch B11 — Xendit adapter, SANDBOX ONLY by explicit founder mandate
- * (PT Tanyopo Technology, company bank account, and a real merchant
- * account do not exist yet). Xendit uses the same API host for sandbox
+ * Batch B11 — Xendit adapter. Xendit uses the same API host for sandbox
  * and production; the two are distinguished only by which secret key is
- * used ("xnd_development_..." vs "xnd_production_..."). isConfigured()
- * below is therefore the actual production-payment guard, not just a
- * procedural one: a production-shaped key makes this adapter report
- * itself unconfigured, which makes every caller (services/checkout.ts,
- * services/payment-webhook.ts) fail closed with the same honest
- * "belum dikonfigurasi" behavior as having no key at all. Do not relax
- * this check to "just needs to be non-empty" without a separate,
- * explicit founder approval for production activation.
- *
- * Uses Xendit's Invoice API (a hosted checkout page covering QRIS/VA/
- * e-wallet/card/retail in one product) rather than Xendit's separate
- * Recurring product — this matches the existing one-
+ * used ("xnd_development_..." vs "xnd_production_..."). Uses Xendit's
+ * Invoice API (a hosted checkout page covering QRIS/VA/e-wallet/card/
+ * retail in one product) rather than Xendit's separate Recurring
+ * product — this matches the existing one-
  * prompter_payment_transactions-row-per-checkout-attempt model exactly,
  * so no change to services/checkout.ts's shape was needed.
  * prompter_subscriptions.provider_subscription_id (added by B10) stays
@@ -41,13 +31,28 @@ const XENDIT_API_BASE = "https://api.xendit.co";
  * sent back as the `x-callback-token` header) — not HMAC — but is still
  * compared in constant time here, same pattern as
  * lib/umkmpro/signature.ts's verifyUmkmproSignature().
+ *
+ * Payment Remediation (post-B11 audit) — isConfigured() recognizes
+ * EITHER a sandbox ("xnd_development_...") or a production
+ * ("xnd_production_...") shaped key, plus a webhook secret, as valid
+ * configuration. This does not by itself enable real charges: no
+ * production credential is set anywhere in this codebase/environment,
+ * and going live still requires the Founder to actually provision and
+ * configure real Xendit production credentials — a separate, explicit
+ * business/infrastructure decision, not something this code change
+ * makes. What changes here is only that the code no longer actively
+ * *refuses* a correctly-shaped production key merely for being
+ * production-shaped; it still refuses anything that isn't a recognized
+ * Xendit key shape at all (empty, malformed, or missing webhook secret).
  */
+const XENDIT_KEY_PREFIXES = ["xnd_development_", "xnd_production_"] as const;
+
 export class XenditPaymentProvider implements PaymentProvider {
   readonly name = "xendit";
 
   isConfigured(): boolean {
     const { apiKey, webhookSecret } = serverEnv.payment;
-    return !!apiKey && apiKey.startsWith("xnd_development_") && !!webhookSecret;
+    return !!apiKey && XENDIT_KEY_PREFIXES.some((prefix) => apiKey.startsWith(prefix)) && !!webhookSecret;
   }
 
   private requireConfig(): { apiKey: string } {

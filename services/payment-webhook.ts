@@ -68,34 +68,66 @@ export async function processPaymentWebhook(
     return { ok: false, status: 400, message: "Could not parse webhook event." };
   }
 
-  // Best-effort, append-only delivery log — a duplicate/replayed
-  // delivery of an event we've already logged is expected and harmless
-  // (the unique constraint on (source_system, external_event_id) is
-  // what makes this safe), so its error is deliberately swallowed here
-  // rather than short-circuiting activation below.
-  const { error: insertError } = await admin.from("prompter_webhook_events").insert({
-    source_system: provider.name,
-    external_event_id: event.externalEventId,
-    event_type: event.eventType,
-    payload: {
-      externalPaymentId: event.externalPaymentId,
-      status: event.status,
-      amount: event.amount,
-      currency: event.currency,
-    } as Json,
-    status: event.status === "PAID" ? "PROCESSED" : "IGNORED",
-    processed_at: new Date().toISOString(),
-  });
+  // Append-only delivery log. Inserted as RECEIVED first (never PROCESSED
+  // up front) because the outcome of activation below isn't known yet —
+  // Payment Remediation fix: this row's final `status` is now set from
+  // what fn_apply_verified_payment() actually reports, not from the
+  // provider's own claimed status, so "PROCESSED" only ever means
+  // activation genuinely succeeded (or was already-applied), never a
+  // false success recorded ahead of finding out.
+  const eventPayload = {
+    externalPaymentId: event.externalPaymentId,
+    status: event.status,
+    amount: event.amount,
+    currency: event.currency,
+  } as Json;
 
-  if (insertError && insertError.code !== UNIQUE_VIOLATION) {
-    return { ok: false, status: 500, message: "Failed to record webhook event." };
+  const { data: insertedRow, error: insertError } = await admin
+    .from("prompter_webhook_events")
+    .insert({
+      source_system: provider.name,
+      external_event_id: event.externalEventId,
+      event_type: event.eventType,
+      payload: eventPayload,
+      status: "RECEIVED",
+    })
+    .select("id")
+    .single();
+
+  let eventRowId: string | null = insertedRow?.id ?? null;
+
+  if (insertError) {
+    if (insertError.code !== UNIQUE_VIOLATION) {
+      return { ok: false, status: 500, message: "Failed to record webhook event." };
+    }
+    // Redelivery of an event we've already logged once — look the
+    // existing row back up so a retried activation's real outcome still
+    // gets recorded on it, instead of leaving it stuck at whatever its
+    // first delivery attempt left behind.
+    const { data: existingRow } = await admin
+      .from("prompter_webhook_events")
+      .select("id")
+      .eq("source_system", provider.name)
+      .eq("external_event_id", event.externalEventId)
+      .maybeSingle();
+    eventRowId = existingRow?.id ?? null;
   }
 
+  const markEvent = async (status: "PROCESSED" | "FAILED" | "IGNORED", error: string | null) => {
+    if (!eventRowId) return;
+    await admin
+      .from("prompter_webhook_events")
+      .update({ status, error, processed_at: new Date().toISOString() })
+      .eq("id", eventRowId);
+  };
+
   if (event.status !== "PAID") {
+    await markEvent("IGNORED", null);
     return { ok: true, status: 200, message: `Recorded ${event.status} event, no activation needed.` };
   }
 
   if (!event.internalTransactionId) {
+    await markEvent("FAILED", "NO_INTERNAL_TRANSACTION_REFERENCE");
     return { ok: false, status: 400, message: "Webhook event has no internal transaction reference." };
   }
 
@@ -115,7 +147,9 @@ export async function processPaymentWebhook(
     // Transient/unexpected failure — ask the processor to retry. The
     // transaction is still PENDING (fn_apply_verified_payment only ever
     // mutates it inside its own successful transaction), so a retry is
-    // always safe, never a double-activation.
+    // always safe, never a double-activation. Recorded as FAILED, not
+    // PROCESSED — this delivery did not actually activate anything.
+    await markEvent("FAILED", rpcError?.message ?? "RPC_NO_RESULT");
     return { ok: false, status: 500, message: "Failed to apply verified payment." };
   }
 
@@ -126,9 +160,12 @@ export async function processPaymentWebhook(
     // so a misconfigured integration is loud, not silently accepted;
     // everything else is a resolved 200 (we successfully processed the
     // notification — the payment itself is what didn't check out).
+    await markEvent("FAILED", activation.reason ?? "PAYMENT_NOT_APPLIED");
     const status = activation.reason === "TRANSACTION_NOT_FOUND" ? 400 : 200;
     return { ok: status === 200, status, message: activation.reason ?? "Payment not applied." };
   }
+
+  await markEvent("PROCESSED", null);
 
   return {
     ok: true,

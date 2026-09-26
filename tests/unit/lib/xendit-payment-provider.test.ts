@@ -14,7 +14,7 @@ vi.mock("@/lib/env", () => ({ serverEnv: serverEnvMock }));
 import { XenditPaymentProvider } from "@/lib/billing/providers/xendit-payment-provider";
 import { PaymentProviderConfigError } from "@/lib/billing/payment-provider";
 
-describe("XenditPaymentProvider — Batch B11, sandbox only", () => {
+describe("XenditPaymentProvider — Batch B11 adapter", () => {
   beforeEach(() => {
     serverEnvMock.payment.providerName = "xendit";
     serverEnvMock.payment.apiKey = "xnd_development_abc123";
@@ -22,13 +22,18 @@ describe("XenditPaymentProvider — Batch B11, sandbox only", () => {
     vi.unstubAllGlobals();
   });
 
-  describe("isConfigured — the actual production-payment guard", () => {
-    it("reports configured with a sandbox-prefixed key and a webhook secret", () => {
+  describe("isConfigured — recognizes any valid Xendit key shape (Payment Remediation Phase 3)", () => {
+    it("Poin E — reports configured with a sandbox-prefixed key ('xnd_development_...') and a webhook secret", () => {
       expect(new XenditPaymentProvider().isConfigured()).toBe(true);
     });
 
-    it("refuses a production-shaped key ('xnd_production_...') even if present", () => {
+    it("Poin F — reports configured with a production-shaped key ('xnd_production_...') and a webhook secret, without making any real/live call — isConfigured() is a pure string check, no network access", () => {
       serverEnvMock.payment.apiKey = "xnd_production_realkey";
+      expect(new XenditPaymentProvider().isConfigured()).toBe(true);
+    });
+
+    it("still refuses a key that doesn't match either recognized Xendit shape at all", () => {
+      serverEnvMock.payment.apiKey = "totally-not-a-xendit-key";
       expect(new XenditPaymentProvider().isConfigured()).toBe(false);
     });
 
@@ -37,7 +42,7 @@ describe("XenditPaymentProvider — Batch B11, sandbox only", () => {
       expect(new XenditPaymentProvider().isConfigured()).toBe(false);
     });
 
-    it("refuses when no webhook secret is set", () => {
+    it("refuses when no webhook secret is set, even with a well-shaped key", () => {
       serverEnvMock.payment.webhookSecret = undefined;
       expect(new XenditPaymentProvider().isConfigured()).toBe(false);
     });
