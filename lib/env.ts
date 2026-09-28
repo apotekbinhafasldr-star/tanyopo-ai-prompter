@@ -114,6 +114,14 @@ export const serverEnv = {
     // NOT_CONFIGURED end-to-end until both exist.
     processorSecret: readOptional("JOBS_PROCESSOR_SECRET"),
   },
+  // LINOE Demo Account & Safe Trial Environment (Phase 1). Signs the
+  // isolated per-session demo token (lib/demo/session.ts) — never the
+  // Supabase secret key or any other credential reused across purposes.
+  // Unset = every demo entry point responds NOT_CONFIGURED rather than
+  // falling back to a guessable/shared default secret (lib/demo/is-demo-request.ts).
+  demo: {
+    sessionSecret: readOptional("DEMO_SESSION_SECRET"),
+  },
 };
 
 /** True when every credential a connector needs to operate is present. */

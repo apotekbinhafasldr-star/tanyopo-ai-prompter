@@ -32,6 +32,12 @@ export function FinalCta() {
           <Button asChild size="lg" variant="outline">
             <Link href="/login">Masuk</Link>
           </Button>
+          {/* LINOE Demo Environment Phase 1 -- low-friction entry into an
+              isolated, temporary demo session (no account, no shared
+              credential). See /demo and app/api/demo/start/route.ts. */}
+          <Button asChild size="lg" variant="ghost">
+            <Link href="/api/demo/start">Coba Demo</Link>
+          </Button>
         </div>
       </Reveal>
     </section>
