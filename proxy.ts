@@ -56,6 +56,16 @@ export function isPublicAsset(pathname: string) {
     // redirected to /login before app/auth/confirm/route.ts ever ran.)
     pathname === "/auth/callback" ||
     pathname === "/auth/confirm" ||
+    // LINOE Demo Environment Phase 1 -- the demo tree authenticates
+    // visitors with its own signed, tenant-less cookie (lib/demo/session.ts),
+    // never a Supabase session. Exempting it here means the Supabase
+    // cookie-refresh/redirect logic below never runs for it at all --
+    // there is nothing for a demo visitor's (nonexistent) auth state to
+    // interact with, and an authenticated real user browsing /demo is
+    // never redirected away from it either.
+    pathname === "/demo" ||
+    pathname.startsWith("/demo/") ||
+    pathname.startsWith("/api/demo/") ||
     /\.(svg|png|jpg|jpeg|gif|webp|ico|css|js|map)$/.test(pathname)
   );
 }

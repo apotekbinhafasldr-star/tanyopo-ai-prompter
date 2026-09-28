@@ -1415,6 +1415,15 @@ export interface Database {
         Args: { p_cancel: boolean };
         Returns: { allowed: boolean; reason: string | null }[];
       };
+      // LINOE Demo Environment Phase 1 -- see
+      // supabase/migrations/20260928120000_prompter_demo_ai_usage.sql.
+      // Not tenant-scoped and not part of the tenant/RLS model above --
+      // demo sessions are never a real tenant (see that migration's own
+      // docstring).
+      fn_consume_demo_ai_usage: {
+        Args: { p_session_id: string; p_hard_cap: number };
+        Returns: { allowed: boolean; used_count: number }[];
+      };
     };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;

@@ -28,6 +28,22 @@ describe("isPublicAsset — B12 hotfix regression: auth routes that handle their
   it("Batch B11 hotfix — exempts /api/webhooks/payment so Xendit's callback never hits cookie gating or Basic-Auth", () => {
     expect(isPublicAsset("/api/webhooks/payment")).toBe(true);
   });
+
+  it("LINOE Demo Environment Phase 1 — exempts /demo and its subroutes (own signed cookie, never a Supabase session)", () => {
+    expect(isPublicAsset("/demo")).toBe(true);
+    expect(isPublicAsset("/demo/dashboard")).toBe(true);
+    expect(isPublicAsset("/demo/products/demo-product-kopi")).toBe(true);
+    expect(isPublicAsset("/demo/campaign")).toBe(true);
+  });
+
+  it("LINOE Demo Environment Phase 1 — exempts /api/demo/* (session-issuing route, no Supabase session yet)", () => {
+    expect(isPublicAsset("/api/demo/start")).toBe(true);
+  });
+
+  it("does not exempt an unrelated /demo-looking path by accident", () => {
+    expect(isPublicAsset("/demography")).toBe(false);
+    expect(isPublicAsset("/api/demonstration")).toBe(false);
+  });
 });
 
 function requestWithAuthHeader(header: string | null) {
