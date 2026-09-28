@@ -3,6 +3,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { findPlanTier } from "@/lib/billing/plans";
 import { getPaymentProvider } from "@/lib/billing/get-payment-provider";
+import { createAdminClient } from "@/lib/supabase/admin";
 import type { Database, SubscriptionPlan } from "@/types/database";
 
 export interface StartCheckoutInput {
@@ -75,11 +76,41 @@ export async function startCheckout(
       plan: input.plan,
       amountIDR: tier.priceIDR,
       internalTransactionId: txn.id,
-      successUrl: input.successUrl,
-      cancelUrl: input.cancelUrl,
+      // Payment Remediation — carries txn.id through so the return trip
+      // can reconcile against the real, authoritative transaction row
+      // instead of a bare "success"/"cancelled" query param.
+      successUrl: appendTxnParam(input.successUrl, txn.id),
+      cancelUrl: appendTxnParam(input.cancelUrl, txn.id),
     });
+
+    // Payment Remediation — record the provider's own checkout/session id
+    // on the transaction immediately, not only once the webhook arrives.
+    // This is what lets a return-trip reconciliation poll the provider
+    // directly (getPaymentStatus()) while a webhook is still in flight,
+    // without waiting on it. Uses the admin client because the
+    // tenant-scoped client has no UPDATE policy on this table by design
+    // (see the B10 migration) — only service_role may ever mutate a
+    // payment_transactions row. Best-effort: if the admin client isn't
+    // configured, or this update fails, the checkout itself still
+    // succeeds — the only thing lost is the early polling hint, and the
+    // webhook remains the sole path that ever activates anything.
+    const admin = createAdminClient();
+    if (admin) {
+      await admin
+        .from("prompter_payment_transactions")
+        .update({ provider_payment_id: session.externalSessionId })
+        .eq("id", txn.id)
+        .eq("status", "PENDING");
+    }
+
     return { ok: true, checkoutUrl: session.checkoutUrl };
   } catch {
     return { ok: false, error: "Gagal memulai proses pembayaran. Silakan coba lagi." };
   }
+}
+
+/** Appends `?txn=<id>` (or `&txn=<id>`) to a caller-supplied redirect URL. */
+function appendTxnParam(url: string, transactionId: string): string {
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}txn=${encodeURIComponent(transactionId)}`;
 }

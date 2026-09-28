@@ -700,8 +700,17 @@ export interface Database {
         };
         // Only service_role (no RLS UPDATE policy for anon/authenticated
         // at all) ever transitions a transaction's status -- see the B10
-        // migration. Not writable via the typed client from app code.
-        Update: never;
+        // migration. Not writable via the tenant-scoped client from app
+        // code. Payment Remediation: the admin/service-role client now
+        // also records the provider's own checkout session id here right
+        // after checkout (services/checkout.ts), ahead of the webhook.
+        Update: Partial<{
+          status: PaymentTransactionStatus;
+          provider_payment_id: string | null;
+          provider_event_id: string | null;
+          failure_reason: string | null;
+          paid_at: string | null;
+        }>;
         Relationships: [];
       };
       prompter_compliance_flags: {
@@ -1149,7 +1158,16 @@ export interface Database {
           error?: string | null;
           processed_at?: string | null;
         };
-        Update: never; // written only by the service-role client
+        // Payment Remediation: the admin/service-role client now updates
+        // an already-logged event's status/error once the real outcome
+        // of processing it is known (services/payment-webhook.ts) --
+        // still never writable via the tenant-scoped client (no RLS
+        // UPDATE policy for anon/authenticated on this table at all).
+        Update: Partial<{
+          status: WebhookEventStatus;
+          error: string | null;
+          processed_at: string | null;
+        }>;
         Relationships: [];
       };
       prompter_growth_goals: {
