@@ -5,6 +5,7 @@ import { Trash2, Lightbulb, ArrowLeft, Star, Check, ImagePlus, Sparkles } from "
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { ConfirmForm } from "@/components/shared/confirm-form";
 import { requireSessionContext } from "@/services/session";
 import { createClient } from "@/lib/supabase/server";
 import { publicStorageUrl } from "@/lib/utils/storage-url";
@@ -263,13 +264,16 @@ export default async function CampaignDetailPage({
               </Button>
             </form>
           ) : null}
-          <form action={deleteCampaignAction}>
+          <ConfirmForm
+            action={deleteCampaignAction}
+            message="Hapus draft campaign ini? Tindakan ini tidak dapat dibatalkan."
+          >
             <input type="hidden" name="campaignId" value={id} />
             <Button type="submit" variant="ghost" size="sm" disabled={!isDraft}>
               <Trash2 />
               Hapus Draft
             </Button>
-          </form>
+          </ConfirmForm>
         </div>
       </div>
 
