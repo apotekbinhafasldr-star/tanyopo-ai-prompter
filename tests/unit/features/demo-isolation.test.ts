@@ -8,16 +8,28 @@ import path from "node:path";
  * design report relies on: the demo code path has no way to reach a real
  * tenant, RLS-scoped table, or ad-platform/billing integration, because
  * it never imports the modules that do.
+ *
+ * Assertions run against `executable(source)` — block/line comments
+ * stripped — rather than the raw file text. Several of these modules
+ * deliberately *document*, by name, the real functions/tables they must
+ * never touch (that's the point of the safety comments), which would
+ * otherwise make a plain substring check on the raw text self-defeating.
  */
 const demoDir = path.resolve(__dirname, "../../../features/demo");
 const demoFiles = readdirSync(demoDir)
   .filter((f) => f.endsWith(".ts") || f.endsWith(".tsx"))
   .map((f) => ({ name: f, source: readFileSync(path.join(demoDir, f), "utf-8") }));
 
+function executable(source: string): string {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, "") // block comments (JSDoc etc.)
+    .replace(/^\s*\/\/.*$/gm, ""); // whole-line `//` comments
+}
+
 describe("features/demo/* — never reaches real tenant identity", () => {
   it("never imports services/session (requireSessionContext) — a demo session is never a real tenant session", () => {
     for (const file of demoFiles) {
-      expect(file.source, `${file.name} must not import services/session`).not.toMatch(
+      expect(executable(file.source), `${file.name} must not import services/session`).not.toMatch(
         /from ["']@\/services\/session["']/,
       );
     }
@@ -25,7 +37,7 @@ describe("features/demo/* — never reaches real tenant identity", () => {
 
   it("never imports the user's own Supabase server client (@/lib/supabase/server) — no RLS-scoped query is possible from demo code", () => {
     for (const file of demoFiles) {
-      expect(file.source, `${file.name} must not import lib/supabase/server`).not.toMatch(
+      expect(executable(file.source), `${file.name} must not import lib/supabase/server`).not.toMatch(
         /from ["']@\/lib\/supabase\/server["']/,
       );
     }
@@ -33,7 +45,7 @@ describe("features/demo/* — never reaches real tenant identity", () => {
 });
 
 describe("features/demo/campaign-actions.ts — advertising safety (Founder hard requirement #4)", () => {
-  const source = readFileSync(path.join(demoDir, "campaign-actions.ts"), "utf-8");
+  const source = executable(readFileSync(path.join(demoDir, "campaign-actions.ts"), "utf-8"));
 
   it("never imports a real ad-platform connector or OAuth/credential module", () => {
     expect(source).not.toMatch(/from ["']@\/lib\/connectors/);
@@ -54,23 +66,27 @@ describe("features/demo/campaign-actions.ts — advertising safety (Founder hard
 describe("features/demo/* — billing safety (Founder hard requirement #5)", () => {
   it("no demo file references real billing/checkout/subscription modules", () => {
     for (const file of demoFiles) {
-      expect(file.source, `${file.name} must not import services/checkout or services/billing`).not.toMatch(
-        /from ["']@\/services\/(checkout|billing)["']/,
-      );
+      expect(
+        executable(file.source),
+        `${file.name} must not import services/checkout or services/billing`,
+      ).not.toMatch(/from ["']@\/services\/(checkout|billing)["']/);
     }
   });
 });
 
 describe("features/demo/ai-actions.ts — AI cost ceiling (Founder hard requirement #3)", () => {
-  const source = readFileSync(path.join(demoDir, "ai-actions.ts"), "utf-8");
+  const source = executable(readFileSync(path.join(demoDir, "ai-actions.ts"), "utf-8"));
 
   it("never calls the tenant-scoped runAiJob chokepoint (would consume/require a real tenant's AI allowance)", () => {
     expect(source).not.toMatch(/runAiJob/);
   });
 
   it("checks the demo AI usage cap before every live AI call", () => {
-    const liveCallCount = (source.match(/routeStructuredGeneration/g) ?? []).length;
-    const capCheckCount = (source.match(/checkAndConsumeDemoAiUsage/g) ?? []).length;
+    // Matched with a trailing "(" so the import statement (which also
+    // contains the bare identifier) isn't double-counted as a call.
+    const liveCallCount = (source.match(/routeStructuredGeneration\(/g) ?? []).length;
+    const capCheckCount = (source.match(/checkAndConsumeDemoAiUsage\(/g) ?? []).length;
+    expect(liveCallCount).toBeGreaterThan(0);
     expect(capCheckCount).toBeGreaterThanOrEqual(liveCallCount);
   });
 });

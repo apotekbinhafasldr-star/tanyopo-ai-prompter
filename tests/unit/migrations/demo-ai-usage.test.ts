@@ -17,6 +17,12 @@ const migrationPath = path.resolve(
 );
 const sql = readFileSync(migrationPath, "utf-8");
 
+/** Strips `-- ...` line comments so assertions check executable SQL, not prose explaining it. */
+const executableSql = sql
+  .split("\n")
+  .map((line) => line.replace(/--.*$/, ""))
+  .join("\n");
+
 describe("demo AI-usage migration — safety invariants", () => {
   it("creates the table with RLS enabled", () => {
     expect(sql).toContain(
@@ -31,8 +37,11 @@ describe("demo AI-usage migration — safety invariants", () => {
   });
 
   it("is never scoped by tenant_id — a demo session is never a real tenant", () => {
-    expect(sql).not.toMatch(/tenant_id/);
-    expect(sql).not.toMatch(/fn_current_tenant_id/);
+    // Checked against the executable SQL only — the migration's own
+    // comments explain (by name) *why* there is no tenant_id here, which
+    // would otherwise make this assertion self-defeating.
+    expect(executableSql).not.toMatch(/tenant_id/);
+    expect(executableSql).not.toMatch(/fn_current_tenant_id/);
   });
 
   it("the consume function is SECURITY DEFINER with a pinned search_path, and revokes execute from anon/authenticated/public", () => {
