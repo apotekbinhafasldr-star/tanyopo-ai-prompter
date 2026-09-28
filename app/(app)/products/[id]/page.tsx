@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Tabs } from "@/components/shared/tabs";
+import { ConfirmForm } from "@/components/shared/confirm-form";
 import { requireSessionContext } from "@/services/session";
 import { createClient } from "@/lib/supabase/server";
 import { formatCurrency, formatDate, productTypeLabel, channelLabel, campaignStatusLabel } from "@/lib/utils/format";
@@ -159,7 +160,11 @@ export default async function ProductDetailPage({
                   <span className="absolute bottom-1 left-1 rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-medium text-white">
                     {m.media_type === "IMAGE" ? "Foto" : "Video"}
                   </span>
-                  <form action={deleteProductMediaAction} className="absolute right-1 top-1">
+                  <ConfirmForm
+                    action={deleteProductMediaAction}
+                    message="Hapus foto/video ini? Tindakan ini tidak dapat dibatalkan."
+                    className="absolute right-1 top-1"
+                  >
                     <input type="hidden" name="mediaId" value={m.id} />
                     <input type="hidden" name="productId" value={id} />
                     <input type="hidden" name="storagePath" value={m.storage_path} />
@@ -174,7 +179,7 @@ export default async function ProductDetailPage({
                     >
                       <XIcon className="size-4 sm:size-3.5" aria-hidden />
                     </button>
-                  </form>
+                  </ConfirmForm>
                 </div>
               ))}
             </div>
