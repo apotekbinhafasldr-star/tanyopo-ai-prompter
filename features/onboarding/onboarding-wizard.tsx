@@ -125,7 +125,7 @@ export function OnboardingWizard() {
           {step === 1 && (
             <div className="flex flex-col gap-3">
               <h2 className="text-lg font-semibold text-foreground">
-                Siapa nama bisnis Anda?
+                Apa nama bisnis Anda?
               </h2>
               <p className="text-sm text-muted-foreground">
                 Nama ini akan digunakan AI saat membuat konten dan campaign.
