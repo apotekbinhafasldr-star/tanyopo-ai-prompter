@@ -19,8 +19,11 @@ export const brand = {
   lockup: "LINOE by Tanyopo",
   shortName: "LINOE",
   parentCompany: "Tanyopo",
-  /** Full ecosystem/company name for legal-ish footer text. */
-  companyFull: "Tanyopo Labs",
+  /** Full legal entity name for the corporate footer (PR #4 round-2 refinement). */
+  companyFull: "PT Tanyopo Future Technology",
+  /** Footer location line — intentionally coarse (village/region only), never a
+   * detailed street/house address, per Founder instruction. */
+  companyLocation: "Ladang Rimba — Aceh Selatan, Indonesia",
   /** Logo mark initial/monogram fallback when the full mark can't render. */
   initial: "L",
   category: "AI Marketing & Growth Platform",

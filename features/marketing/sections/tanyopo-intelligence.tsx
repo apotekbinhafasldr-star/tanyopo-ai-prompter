@@ -77,7 +77,7 @@ export function TanyopoIntelligence() {
         <TanyopoIntelligenceDiagram />
 
         <Reveal
-          className="relative mx-auto mt-12 max-w-5xl overflow-hidden rounded-full border border-white/10 shadow-[0_16px_40px_-16px_rgba(15,23,60,0.55)] sm:mt-16"
+          className="relative mx-auto mt-14 max-w-5xl overflow-hidden rounded-full border border-white/10 shadow-[0_16px_40px_-16px_rgba(15,23,60,0.55)] sm:mt-20"
           delayMs={150}
         >
           <div

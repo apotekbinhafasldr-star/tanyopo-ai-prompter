@@ -2,7 +2,21 @@ import { Package, Brain, Target, FileText, Megaphone, Search, BarChart3, Setting
 import { Reveal } from "@/features/marketing/components/reveal";
 
 /**
- * Tanyopo Intelligence — V7 (connected flow, Founder mobile-review round).
+ * Tanyopo Intelligence — V8 (bigger + more dominant flow, second Founder
+ * mobile-review round). V7 fixed the mobile "disconnected cards" complaint
+ * by chaining the nodes into one path, but Founder's next review found the
+ * result still too similar to the prior version — the core and the flow
+ * itself needed to be visibly bigger and more dominant, not just correctly
+ * connected. V8 keeps V7's connected-chain architecture and, on top of it:
+ * substantially enlarges the AI core (size-72/80/96 vs V7's 60/72/80) and
+ * its glow/ring/icon/text; thickens every connector's halo/core/dash/
+ * particle on BOTH the desktop ConnectorOverlay and MobileFlowOverlay; and
+ * adds explicit glowing "junction" markers at every stop the flow visits
+ * (Produk, each of the 6 capability cards, Growth) on both overlays, so the
+ * connection reads as real linked nodes rather than a line merely passing
+ * behind the cards. Mobile's viewBox also grew taller (330 -> 380) to give
+ * the bigger core and its icon row more open vertical room.
+ *
  * Desktop: Produk (input) left / AI Core center / Growth (output) right,
  * with ONE continuous chained "energy flow" path running Produk -> Core ->
  * Strategi -> Konten -> Campaign -> SEO -> Analitik -> Optimasi -> Growth
@@ -188,9 +202,9 @@ function MobileFunctionNode({
  * a plain line, reusing the same tanyopo-spine/-particle treatment. */
 function EnergyConnector() {
   return (
-    <div aria-hidden className="relative h-8 w-3 shrink-0">
+    <div aria-hidden className="relative h-12 w-4 shrink-0">
       <div className="tanyopo-spine absolute inset-0 rounded-full" />
-      <div className="tanyopo-spine-particle absolute left-1/2 size-3 -translate-x-1/2 rounded-full" />
+      <div className="tanyopo-spine-particle absolute left-1/2 size-4 -translate-x-1/2 rounded-full" />
     </div>
   );
 }
@@ -222,18 +236,33 @@ function MobileFlowOverlay() {
   // nodes in their single row (same x positions the row itself lays out
   // to: evenly spaced across the 360-wide viewBox). Each segment gently
   // dips between nodes so the chain reads as a moving current, not a flat
-  // ruler line.
+  // ruler line. Viewbox height grew (330 -> 380) to give the now-larger
+  // core, and the row below it, more open vertical room — a taller
+  // section reads clearer than a cramped one on a phone.
   const segments = [
-    { d: "M180,210 C120,240 60,270 30,290", bold: true }, // Core -> Strategi
-    { d: "M30,290 C50,270 70,270 90,290", bold: false }, // Strategi -> Konten
-    { d: "M90,290 C110,270 130,270 150,290", bold: false }, // Konten -> Campaign
-    { d: "M150,290 C170,270 190,270 210,290", bold: false }, // Campaign -> SEO
-    { d: "M210,290 C230,270 250,270 270,290", bold: false }, // SEO -> Analitik
-    { d: "M270,290 C290,270 310,270 330,290", bold: false }, // Analitik -> Optimasi
+    { d: "M180,250 C120,285 60,320 30,345", bold: true }, // Core -> Strategi (the boldest wire: this is the core's own output)
+    { d: "M30,345 C50,320 70,320 90,345", bold: false }, // Strategi -> Konten
+    { d: "M90,345 C110,320 130,320 150,345", bold: false }, // Konten -> Campaign
+    { d: "M150,345 C170,320 190,320 210,345", bold: false }, // Campaign -> SEO
+    { d: "M210,345 C230,320 250,320 270,345", bold: false }, // SEO -> Analitik
+    { d: "M270,345 C290,320 310,320 330,345", bold: false }, // Analitik -> Optimasi
+  ];
+  // A small glowing marker at every junction the flow actually visits —
+  // the core's own exit point plus each of the six function nodes — so
+  // the connection reads as real "connection points," not just a line
+  // passing behind the cards.
+  const junctions = [
+    { x: 180, y: 250, r: 5 }, // leaves the core
+    { x: 30, y: 345, r: 4 },
+    { x: 90, y: 345, r: 4 },
+    { x: 150, y: 345, r: 4 },
+    { x: 210, y: 345, r: 4 },
+    { x: 270, y: 345, r: 4 },
+    { x: 330, y: 345, r: 4 },
   ];
 
   return (
-    <svg aria-hidden className="pointer-events-none absolute inset-0 size-full" viewBox="0 0 360 330" preserveAspectRatio="none" fill="none">
+    <svg aria-hidden className="pointer-events-none absolute inset-0 size-full" viewBox="0 0 360 380" preserveAspectRatio="none" fill="none">
       <defs>
         <linearGradient id="tanyopo-m-flow" x1="0" y1="0" x2="1" y2="0">
           <stop offset="0%" stopColor="#06b6d4" />
@@ -246,10 +275,10 @@ function MobileFlowOverlay() {
           <stop offset="100%" stopColor="#a5f3fc" stopOpacity="0" />
         </radialGradient>
         <filter id="tanyopo-m-halo" x="-120%" y="-120%" width="340%" height="340%">
-          <feGaussianBlur stdDeviation="6" />
+          <feGaussianBlur stdDeviation="9" />
         </filter>
         <filter id="tanyopo-m-glow" x="-100%" y="-100%" width="300%" height="300%">
-          <feGaussianBlur stdDeviation="3" result="blur" />
+          <feGaussianBlur stdDeviation="4" result="blur" />
           <feMerge>
             <feMergeNode in="blur" />
             <feMergeNode in="SourceGraphic" />
@@ -259,13 +288,13 @@ function MobileFlowOverlay() {
 
       {segments.map((seg, i) => {
         const id = `tanyopo-m-seg-${i}`;
-        const haloWidth = seg.bold ? 11 : 8;
-        const coreWidth = seg.bold ? 4.5 : 3;
-        const dashWidth = seg.bold ? 2.5 : 1.8;
-        const particleR = seg.bold ? 5.5 : 4;
+        const haloWidth = seg.bold ? 20 : 15;
+        const coreWidth = seg.bold ? 8 : 6;
+        const dashWidth = seg.bold ? 4 : 3;
+        const particleR = seg.bold ? 7 : 5.5;
         return (
           <g key={id}>
-            <path d={seg.d} stroke="url(#tanyopo-m-flow)" strokeWidth={haloWidth} strokeLinecap="round" filter="url(#tanyopo-m-halo)" opacity="0.7" />
+            <path d={seg.d} stroke="url(#tanyopo-m-flow)" strokeWidth={haloWidth} strokeLinecap="round" filter="url(#tanyopo-m-halo)" opacity="0.8" />
             <path
               d={seg.d}
               stroke="url(#tanyopo-m-flow)"
@@ -282,7 +311,7 @@ function MobileFlowOverlay() {
               strokeWidth={dashWidth}
               strokeLinecap="round"
               className="tanyopo-connector-path"
-              opacity="0.95"
+              opacity="1"
               style={{ animationDelay: `${stopDelay(i + 1)}ms` }}
             />
             <circle r={particleR} className="tanyopo-energy-particle" fill="url(#tanyopo-m-particle-fill)" filter="url(#tanyopo-m-glow)">
@@ -293,6 +322,20 @@ function MobileFlowOverlay() {
           </g>
         );
       })}
+
+      {junctions.map((j, i) => (
+        <g key={`tanyopo-m-junction-${i}`}>
+          <circle cx={j.x} cy={j.y} r={j.r + 5} fill="url(#tanyopo-m-particle-fill)" filter="url(#tanyopo-m-glow)" opacity="0.55" />
+          <circle
+            cx={j.x}
+            cy={j.y}
+            r={j.r}
+            fill="#ffffff"
+            className="tanyopo-connector-glow"
+            style={{ animationDelay: `${i * 220}ms` }}
+          />
+        </g>
+      ))}
     </svg>
   );
 }
@@ -302,28 +345,28 @@ function AiCore() {
     <Reveal className="tanyopo-core-reveal relative z-10 mx-auto flex shrink-0">
       <div
         aria-hidden
-        className="marketing-glow-pulse pointer-events-none absolute inset-[-2.5rem] -z-10 rounded-full blur-2xl"
-        style={{ background: "radial-gradient(circle, rgba(59,99,251,0.55) 0%, rgba(139,92,246,0.4) 55%, transparent 75%)" }}
+        className="marketing-glow-pulse pointer-events-none absolute inset-[-3.5rem] -z-10 rounded-full blur-3xl sm:inset-[-4.5rem]"
+        style={{ background: "radial-gradient(circle, rgba(59,99,251,0.65) 0%, rgba(139,92,246,0.48) 50%, transparent 75%)" }}
       />
       <div
-        className="relative flex size-60 flex-col items-center justify-center gap-2 rounded-full px-6 text-center sm:size-72 desktop:size-80"
+        className="relative flex size-72 flex-col items-center justify-center gap-2.5 rounded-full px-7 text-center sm:size-80 desktop:size-96"
         style={{
-          background: "radial-gradient(circle at 50% 35%, #4c56d6 0%, #2c2f8f 45%, #181a54 75%, #10112f 100%)",
+          background: "radial-gradient(circle at 50% 35%, #545fe8 0%, #2c2f8f 45%, #181a54 75%, #10112f 100%)",
           boxShadow:
-            "0 0 0 3px rgba(255,255,255,0.9), 0 0 0 8px rgba(103,232,249,0.25), 0 0 60px 10px rgba(59,99,251,0.65), 0 0 130px 36px rgba(139,92,246,0.35)",
+            "0 0 0 3px rgba(255,255,255,0.95), 0 0 0 10px rgba(103,232,249,0.32), 0 0 90px 18px rgba(59,99,251,0.75), 0 0 180px 50px rgba(139,92,246,0.42)",
         }}
       >
-        <span aria-hidden className="tanyopo-core-ring pointer-events-none absolute inset-[-10px] rounded-full" style={{ animationDelay: "0ms" }} />
-        <span aria-hidden className="tanyopo-core-ring pointer-events-none absolute inset-[-10px] rounded-full" style={{ animationDelay: "1000ms" }} />
-        <span aria-hidden className="tanyopo-core-ring pointer-events-none absolute inset-[-10px] rounded-full" style={{ animationDelay: "2000ms" }} />
-        <Brain className="size-9 text-violet-200 sm:size-10 desktop:size-11" strokeWidth={1.5} aria-hidden />
-        <p className="text-lg font-bold leading-tight text-white sm:text-xl desktop:text-2xl">
+        <span aria-hidden className="tanyopo-core-ring pointer-events-none absolute inset-[-14px] rounded-full" style={{ animationDelay: "0ms" }} />
+        <span aria-hidden className="tanyopo-core-ring pointer-events-none absolute inset-[-14px] rounded-full" style={{ animationDelay: "1000ms" }} />
+        <span aria-hidden className="tanyopo-core-ring pointer-events-none absolute inset-[-14px] rounded-full" style={{ animationDelay: "2000ms" }} />
+        <Brain className="size-11 text-violet-200 sm:size-12 desktop:size-14" strokeWidth={1.5} aria-hidden />
+        <p className="text-xl font-bold leading-tight text-white sm:text-2xl desktop:text-3xl">
           Tanyopo
           <br />
           Intelligence
         </p>
-        <p className="max-w-[13rem] text-xs leading-relaxed text-blue-100/80 sm:max-w-[14rem] sm:text-sm">
-          Menganalisis, menyusun strategi, dan menggerakkan seluruh proses pemasaran dengan AI.
+        <p className="max-w-[15rem] text-xs leading-relaxed text-blue-100/80 sm:max-w-[17rem] sm:text-sm desktop:max-w-[19rem] desktop:text-base">
+          Otak pusat yang menganalisis, menyusun strategi, dan menggerakkan seluruh proses pemasaran dengan AI.
         </p>
       </div>
     </Reveal>
@@ -354,6 +397,22 @@ function ConnectorOverlay() {
     { d: "M700,520 C760,565 840,565 900,520", arrow: false },
     { d: "M900,520 C960,565 1040,565 1100,520", arrow: false },
     { d: "M1100,520 C1170,460 1140,300 940,175", arrow: true },
+  ];
+  // Visible "connection point" markers at every real stop the flow visits —
+  // Produk's own exit, each of the six capability cards, and Growth's
+  // entry — so the chain reads as genuine linked nodes, not just a line
+  // passing behind the cards (same treatment as MobileFlowOverlay's
+  // `junctions`, mirrored here for desktop per Founder's brief that the
+  // flow must look connected "di SETIAP lini," not mobile-only).
+  const junctions = [
+    { x: 260, y: 175, r: 7 }, // Produk Anda (input)
+    { x: 100, y: 520, r: 6 },
+    { x: 300, y: 520, r: 6 },
+    { x: 500, y: 520, r: 6 },
+    { x: 700, y: 520, r: 6 },
+    { x: 900, y: 520, r: 6 },
+    { x: 1100, y: 520, r: 6 },
+    { x: 940, y: 175, r: 7 }, // Pertumbuhan Bisnis (output)
   ];
 
   return (
@@ -401,14 +460,14 @@ function ConnectorOverlay() {
       {segments.map((seg, i) => {
         const id = `tanyopo-seg-${i}`;
         const gradient = seg.arrow ? "url(#tanyopo-flow-h)" : "url(#tanyopo-flow-fan)";
-        const haloWidth = seg.arrow ? 20 : 17;
-        const coreWidth = seg.arrow ? 6.5 : 5.5;
-        const dashWidth = seg.arrow ? 3.5 : 3;
-        const particleR = seg.arrow ? 8 : 7;
+        const haloWidth = seg.arrow ? 26 : 22;
+        const coreWidth = seg.arrow ? 9 : 7.5;
+        const dashWidth = seg.arrow ? 4.5 : 4;
+        const particleR = seg.arrow ? 9.5 : 8.5;
         return (
           <g key={id}>
             {/* Soft bloom halo — solid color, wide, blurred, always on. */}
-            <path d={seg.d} stroke={gradient} strokeWidth={haloWidth} strokeLinecap="round" filter="url(#tanyopo-halo)" opacity="0.7" />
+            <path d={seg.d} stroke={gradient} strokeWidth={haloWidth} strokeLinecap="round" filter="url(#tanyopo-halo)" opacity="0.8" />
             {/* Solid saturated core — the wire itself, crisp, never faint. */}
             <path
               d={seg.d}
@@ -428,7 +487,7 @@ function ConnectorOverlay() {
               strokeLinecap="round"
               markerEnd={seg.arrow ? "url(#tanyopo-arrow)" : undefined}
               className="tanyopo-connector-path"
-              opacity="0.95"
+              opacity="1"
               style={{ animationDelay: `${stopDelay(i)}ms` }}
             />
             {/* Traveling energy particle — the clearest "it's moving" cue. */}
@@ -440,6 +499,13 @@ function ConnectorOverlay() {
           </g>
         );
       })}
+
+      {junctions.map((j, i) => (
+        <g key={`tanyopo-junction-${i}`}>
+          <circle cx={j.x} cy={j.y} r={j.r + 7} fill="url(#tanyopo-particle-fill)" filter="url(#tanyopo-glow)" opacity="0.55" />
+          <circle cx={j.x} cy={j.y} r={j.r} fill="#ffffff" className="tanyopo-connector-glow" style={{ animationDelay: `${i * 220}ms` }} />
+        </g>
+      ))}
     </svg>
   );
 }
