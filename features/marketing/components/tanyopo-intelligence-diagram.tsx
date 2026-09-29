@@ -2,21 +2,30 @@ import { Package, Brain, Target, FileText, Megaphone, Search, BarChart3, Setting
 import { Reveal } from "@/features/marketing/components/reveal";
 
 /**
- * Tanyopo Intelligence — Animated V6 (final correction). Desktop: Produk
- * left / AI Core center / Growth right, with a continuous chained "energy
- * flow" path running Produk -> Core -> Strategi -> Konten -> Campaign ->
- * SEO -> Analitik -> Optimasi -> Growth (ConnectorOverlay). Mobile is a
- * compact energy NETWORK, not a flowchart list: Produk and Growth stay
- * simple full-width stops connected to the core by a short glowing
- * connector, but the core itself stays the visual hub of the whole
- * section, with six individually glowing branch lines fanning out to a
- * single open row of small icon nodes (MobileBranchOverlay) — a row, not a
- * multi-row grid, so no node ever sits behind another and hides its own
- * branch line — instead of the functions reading as a plain stacked list.
- * Every connector layers a blurred bloom
- * halo, a solid saturated core stroke with a subtle electric flicker, a
- * bright traveling dash, and a small particle that physically travels the
- * path via native SVG animateMotion/mpath.
+ * Tanyopo Intelligence — V7 (connected flow, Founder mobile-review round).
+ * Desktop: Produk (input) left / AI Core center / Growth (output) right,
+ * with ONE continuous chained "energy flow" path running Produk -> Core ->
+ * Strategi -> Konten -> Campaign -> SEO -> Analitik -> Optimasi -> Growth
+ * (ConnectorOverlay) — the core sits inline in that path, not beside it.
+ *
+ * Mobile (V6 fixed a stacked-grid complaint but Founder's follow-up phone
+ * review found the six function nodes read as disconnected — each only
+ * had its own separate spoke back to the core, in parallel, with no line
+ * between the functions themselves, so it still looked like "a bunch of
+ * standalone cards" rather than one process moving through them in order).
+ * V7 replaces that radial six-spoke fan (MobileBranchOverlay) with a single
+ * connected chain (MobileFlowOverlay): Core -> Strategi -> Konten ->
+ * Campaign -> SEO -> Analitik -> Optimasi, visiting every node in sequence
+ * in one open row, so the same left-to-right story the desktop version
+ * tells is legible on a phone too. Produk and Growth stay simple
+ * full-width stops linked to that chain by a short glowing connector, and
+ * both endpoint cards now carry an explicit "Input" / "Output · Hasil
+ * Akhir" tag so their role in the flow doesn't depend on position alone.
+ *
+ * Every connector (desktop and mobile) layers a blurred bloom halo, a
+ * solid saturated core stroke with a subtle electric flicker, a bright
+ * traveling dash, and a small particle that physically travels the path
+ * via native SVG animateMotion/mpath.
  *
  * Every capability listed is something LINOE already does today — nothing
  * invented (product spec §3/§7). Every animation is CSS transform/opacity/
@@ -88,7 +97,13 @@ function EndpointCard({
           <p className="text-sm font-bold text-white sm:text-base">{label}</p>
         </div>
         <p className="mt-1.5 text-xs leading-relaxed text-white/65 sm:text-sm">{description}</p>
-        {accent === "end" ? <p className="mt-1.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-300/90">Hasil akhir</p> : null}
+        {accent === "end" ? (
+          <p className="mt-1.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-300/90">
+            Output &middot; Hasil Akhir
+          </p>
+        ) : (
+          <p className="mt-1.5 text-[10px] font-semibold uppercase tracking-wide text-cyan-300/90">Input</p>
+        )}
       </div>
     </div>
   );
@@ -180,11 +195,21 @@ function EnergyConnector() {
   );
 }
 
-/** Mobile-only branch overlay — six curved branches fanning from the AI
- * core down into a SINGLE open row of six icon nodes, so every branch stays
- * in open space (nothing else occludes it) and the core reads as the hub of
- * a radiating energy network rather than a plain vertical list. Same
- * three-layer technique as the desktop ConnectorOverlay (blurred halo
+/** Mobile-only flow overlay — ONE continuous connected path: Core ->
+ * Strategi -> Konten -> Campaign -> SEO -> Analitik -> Optimasi, visiting
+ * every function node in sequence instead of six separate spokes fanning
+ * out from the core in parallel. A radial "starburst" (the previous
+ * design) reads as six independent, disconnected cards that merely sit
+ * near the core; a single chained path reads as what it actually is — one
+ * process moving through the core and then through each function in
+ * order, the same "Produk -> Intelligence -> Strategi -> Konten ->
+ * Campaign -> SEO -> Analitik -> Optimasi -> Growth" flow the desktop
+ * version already draws. The core is still the visual origin of the chain
+ * (the first, boldest segment leaves the core), so it keeps reading as the
+ * hub the whole flow moves through, not just a floating decoration above a
+ * row of cards.
+ *
+ * Same three-layer technique as the desktop ConnectorOverlay (blurred halo
  * behind a solid core stroke, bright traveling dash, and a
  * physically-moving particle via animateMotion), with its own
  * uniquely-prefixed def ids since both overlays exist in the DOM at once
@@ -192,20 +217,25 @@ function EnergyConnector() {
  * `url(#id)` references resolve to the wrong tree. viewBox is tuned to the
  * core's base size (size-60) plus the icon row below it — purely
  * decorative, so modest stretch at other widths is fine. */
-function MobileBranchOverlay() {
-  const branches = [
-    "M180,210 C120,240 60,270 30,290",
-    "M180,210 C140,240 110,270 90,290",
-    "M180,210 C165,240 155,270 150,290",
-    "M180,210 C195,240 205,270 210,290",
-    "M180,210 C220,240 250,270 270,290",
-    "M180,210 C240,240 300,270 330,290",
+function MobileFlowOverlay() {
+  // Point 0 is the core's lower edge; points 1-6 are the six function
+  // nodes in their single row (same x positions the row itself lays out
+  // to: evenly spaced across the 360-wide viewBox). Each segment gently
+  // dips between nodes so the chain reads as a moving current, not a flat
+  // ruler line.
+  const segments = [
+    { d: "M180,210 C120,240 60,270 30,290", bold: true }, // Core -> Strategi
+    { d: "M30,290 C50,270 70,270 90,290", bold: false }, // Strategi -> Konten
+    { d: "M90,290 C110,270 130,270 150,290", bold: false }, // Konten -> Campaign
+    { d: "M150,290 C170,270 190,270 210,290", bold: false }, // Campaign -> SEO
+    { d: "M210,290 C230,270 250,270 270,290", bold: false }, // SEO -> Analitik
+    { d: "M270,290 C290,270 310,270 330,290", bold: false }, // Analitik -> Optimasi
   ];
 
   return (
     <svg aria-hidden className="pointer-events-none absolute inset-0 size-full" viewBox="0 0 360 330" preserveAspectRatio="none" fill="none">
       <defs>
-        <linearGradient id="tanyopo-m-flow" x1="0" y1="0" x2="0" y2="1">
+        <linearGradient id="tanyopo-m-flow" x1="0" y1="0" x2="1" y2="0">
           <stop offset="0%" stopColor="#06b6d4" />
           <stop offset="50%" stopColor="#3b82f6" />
           <stop offset="100%" stopColor="#7c3aed" />
@@ -227,15 +257,19 @@ function MobileBranchOverlay() {
         </filter>
       </defs>
 
-      {branches.map((d, i) => {
-        const id = `tanyopo-m-branch-${i}`;
+      {segments.map((seg, i) => {
+        const id = `tanyopo-m-seg-${i}`;
+        const haloWidth = seg.bold ? 11 : 8;
+        const coreWidth = seg.bold ? 4.5 : 3;
+        const dashWidth = seg.bold ? 2.5 : 1.8;
+        const particleR = seg.bold ? 5.5 : 4;
         return (
           <g key={id}>
-            <path d={d} stroke="url(#tanyopo-m-flow)" strokeWidth="9" strokeLinecap="round" filter="url(#tanyopo-m-halo)" opacity="0.7" />
+            <path d={seg.d} stroke="url(#tanyopo-m-flow)" strokeWidth={haloWidth} strokeLinecap="round" filter="url(#tanyopo-m-halo)" opacity="0.7" />
             <path
-              d={d}
+              d={seg.d}
               stroke="url(#tanyopo-m-flow)"
-              strokeWidth="3.5"
+              strokeWidth={coreWidth}
               strokeLinecap="round"
               opacity="1"
               className="tanyopo-connector-glow"
@@ -243,15 +277,15 @@ function MobileBranchOverlay() {
             />
             <path
               id={id}
-              d={d}
+              d={seg.d}
               stroke="#ffffff"
-              strokeWidth="2"
+              strokeWidth={dashWidth}
               strokeLinecap="round"
               className="tanyopo-connector-path"
               opacity="0.95"
               style={{ animationDelay: `${stopDelay(i + 1)}ms` }}
             />
-            <circle r="5" className="tanyopo-energy-particle" fill="url(#tanyopo-m-particle-fill)" filter="url(#tanyopo-m-glow)">
+            <circle r={particleR} className="tanyopo-energy-particle" fill="url(#tanyopo-m-particle-fill)" filter="url(#tanyopo-m-glow)">
               <animateMotion dur="1.6s" repeatCount="indefinite" begin={`${i * 0.2}s`}>
                 <mpath href={`#${id}`} />
               </animateMotion>
@@ -443,17 +477,18 @@ export function TanyopoIntelligenceDiagram() {
 
       {/* Mobile / tablet — a compact energy NETWORK, not a flowchart list:
           Produk and Growth stay simple full-width stops, but the core stays
-          the visual hub with six individual glowing branches fanning out to
-          a single open row of small icon nodes (MobileBranchOverlay), so the
-          "core drives every function" reading survives on a phone instead of
-          collapsing into a straight top-to-bottom stack. */}
+          the visual hub: a single connected chain (MobileFlowOverlay) leaves
+          the core and visits each of the six function nodes in sequence, so
+          the section reads as one process moving through the core and then
+          through each function in order — not six standalone cards that
+          merely sit near the core. */}
       <div className="relative flex flex-col items-center gap-1 desktop:hidden">
         <Reveal className="relative z-10 w-full max-w-sm">
           <EndpointCard number={1} icon={Package} label="Produk Anda" description="Masukkan produk atau jasa Anda. LINOE memahami bisnis Anda secara mendalam." accent="start" delayMs={stopDelay(0)} />
         </Reveal>
         <EnergyConnector />
         <div className="relative w-full max-w-sm">
-          <MobileBranchOverlay />
+          <MobileFlowOverlay />
           <AiCore />
           <div className="relative z-10 mt-5 flex items-start justify-between px-1">
             {CAPABILITIES.map((item, i) => (
