@@ -2,39 +2,35 @@ import { Package, Brain, Target, FileText, Megaphone, Search, BarChart3, Setting
 import { Reveal } from "@/features/marketing/components/reveal";
 
 /**
- * Tanyopo Intelligence — V8 (bigger + more dominant flow, second Founder
- * mobile-review round). V7 fixed the mobile "disconnected cards" complaint
- * by chaining the nodes into one path, but Founder's next review found the
- * result still too similar to the prior version — the core and the flow
- * itself needed to be visibly bigger and more dominant, not just correctly
- * connected. V8 keeps V7's connected-chain architecture and, on top of it:
- * substantially enlarges the AI core (size-72/80/96 vs V7's 60/72/80) and
- * its glow/ring/icon/text; thickens every connector's halo/core/dash/
- * particle on BOTH the desktop ConnectorOverlay and MobileFlowOverlay; and
- * adds explicit glowing "junction" markers at every stop the flow visits
- * (Produk, each of the 6 capability cards, Growth) on both overlays, so the
- * connection reads as real linked nodes rather than a line merely passing
- * behind the cards. Mobile's viewBox also grew taller (330 -> 380) to give
- * the bigger core and its icon row more open vertical room.
+ * Tanyopo Intelligence — V9 (visible branching network, third Founder
+ * mobile-review round). V8 made the core and every connector bigger and
+ * bolder, but kept V7's shape: ONE continuous winding path through all 8
+ * stops. Founder's next review explicitly rejected that shape — it still
+ * read as a single decorative curve behind the cards, not the core
+ * visibly sending/receiving energy to and from every function
+ * ("JANGAN hanya satu garis melengkung besar — saya ingin BRANCHING
+ * CONNECTIONS"). V9 replaces the winding chain with a real tree on BOTH
+ * overlays: a bold TRUNK leaves the core straight into a horizontal
+ * SPINE, which BRANCHES directly to every function node — so each one
+ * has its own thick, unambiguous wire traceable straight back to the
+ * core, not a link inferred through its neighbors. Every wire is also
+ * substantially thicker/brighter than V8's already-boosted values, and a
+ * glowing junction marker sits at every real connection point (trunk
+ * exit, spine takeoffs, every node entry). Mobile's function-node grid
+ * changed from one 6-across row to 2 rows x 3 cols (viewBox 380 -> 480)
+ * so each branch has real width to read without zooming, and the section
+ * is allowed to grow taller for it, per Founder's explicit "boleh lebih
+ * tinggi, lebih baik besar dan jelas daripada padat dan kecil."
  *
- * Desktop: Produk (input) left / AI Core center / Growth (output) right,
- * with ONE continuous chained "energy flow" path running Produk -> Core ->
- * Strategi -> Konten -> Campaign -> SEO -> Analitik -> Optimasi -> Growth
- * (ConnectorOverlay) — the core sits inline in that path, not beside it.
+ * Desktop: Produk (input) left / AI Core center / Growth (output) right;
+ * ConnectorOverlay's trunk+spine fans out from the core to all 6
+ * capability cards below it, plus the Produk-in / Growth-out edges.
  *
- * Mobile (V6 fixed a stacked-grid complaint but Founder's follow-up phone
- * review found the six function nodes read as disconnected — each only
- * had its own separate spoke back to the core, in parallel, with no line
- * between the functions themselves, so it still looked like "a bunch of
- * standalone cards" rather than one process moving through them in order).
- * V7 replaces that radial six-spoke fan (MobileBranchOverlay) with a single
- * connected chain (MobileFlowOverlay): Core -> Strategi -> Konten ->
- * Campaign -> SEO -> Analitik -> Optimasi, visiting every node in sequence
- * in one open row, so the same left-to-right story the desktop version
- * tells is legible on a phone too. Produk and Growth stay simple
- * full-width stops linked to that chain by a short glowing connector, and
- * both endpoint cards now carry an explicit "Input" / "Output · Hasil
- * Akhir" tag so their role in the flow doesn't depend on position alone.
+ * Mobile: Produk and Growth stay simple full-width stops linked by a
+ * short glowing connector; MobileFlowOverlay's trunk+spine+branches fan
+ * out from the core to the 2x3 function-node grid. Both endpoint cards
+ * carry an explicit "Input" / "Output · Hasil Akhir" tag so their role in
+ * the flow doesn't depend on position alone.
  *
  * Every connector (desktop and mobile) layers a blurred bloom halo, a
  * solid saturated core stroke with a subtle electric flicker, a bright
@@ -164,10 +160,10 @@ function CapabilityCard({
   );
 }
 
-/** Compact mobile function node — a small icon node in a SINGLE open row
- * below the core (not a multi-row grid), so every one of the six branch
- * lines from the core stays in open space, fully visible, rather than
- * disappearing behind an opaque card in a lower row. */
+/** Compact mobile function node — sits in a 2-row x 3-col grid below the
+ * core (see MobileFlowOverlay's docblock for why: a single 6-across row
+ * left too little width per branch line to read as a real connection, so
+ * V9 gives the network two rows of open vertical room instead). */
 function MobileFunctionNode({
   number,
   icon: Icon,
@@ -182,17 +178,17 @@ function MobileFunctionNode({
   pulseDelayMs: number;
 }) {
   return (
-    <Reveal delayMs={revealDelayMs} className="flex flex-col items-center gap-1">
+    <Reveal delayMs={revealDelayMs} className="flex flex-col items-center gap-1.5">
       <span
-        className="tanyopo-node-pulse relative flex size-11 items-center justify-center rounded-full text-white"
+        className="tanyopo-node-pulse relative flex size-14 items-center justify-center rounded-full text-white"
         style={{ background: ICON_BADGE_BG, animationDelay: `${pulseDelayMs}ms` }}
       >
-        <Icon className="size-5" aria-hidden />
-        <span className="absolute -right-1 -top-1 flex size-4 items-center justify-center rounded-full border border-cyan-300/60 bg-[#0c1631] text-[8px] font-bold text-cyan-300">
+        <Icon className="size-6" aria-hidden />
+        <span className="absolute -right-1 -top-1 flex size-5 items-center justify-center rounded-full border border-cyan-300/60 bg-[#0c1631] text-[9px] font-bold text-cyan-300">
           {number}
         </span>
       </span>
-      <p className="max-w-14 text-center text-[10px] font-semibold leading-tight text-white/85">{label}</p>
+      <p className="max-w-20 text-center text-[11px] font-semibold leading-tight text-white/85">{label}</p>
     </Reveal>
   );
 }
@@ -209,62 +205,70 @@ function EnergyConnector() {
   );
 }
 
-/** Mobile-only flow overlay — ONE continuous connected path: Core ->
- * Strategi -> Konten -> Campaign -> SEO -> Analitik -> Optimasi, visiting
- * every function node in sequence instead of six separate spokes fanning
- * out from the core in parallel. A radial "starburst" (the previous
- * design) reads as six independent, disconnected cards that merely sit
- * near the core; a single chained path reads as what it actually is — one
- * process moving through the core and then through each function in
- * order, the same "Produk -> Intelligence -> Strategi -> Konten ->
- * Campaign -> SEO -> Analitik -> Optimasi -> Growth" flow the desktop
- * version already draws. The core is still the visual origin of the chain
- * (the first, boldest segment leaves the core), so it keeps reading as the
- * hub the whole flow moves through, not just a floating decoration above a
- * row of cards.
+/** Mobile-only flow overlay — V9 (visible branching network, second
+ * Founder mobile-review round). V7/V8's single chained path (Core ->
+ * Strategi -> Konten -> ... -> Optimasi) was architecturally connected but
+ * Founder's follow-up review found it still read as one thin decorative
+ * line behind the cards, not a network the core is visibly sending energy
+ * through to EVERY node. V9 replaces the single winding chain with a real
+ * tree: one bold TRUNK leaves the core, feeds a horizontal SPINE, which
+ * BRANCHES directly down to Strategi/Konten/Campaign (row 1), and each of
+ * those continues straight down to SEO/Analitik/Optimasi (row 2) — so
+ * every node has its own thick, unambiguous line traceable straight back
+ * to the core, exactly the "branching connections, not one big curve"
+ * Founder asked for. The function-node grid below is now 2 rows x 3 cols
+ * (see MobileFunctionNode/TanyopoIntelligenceDiagram) instead of one
+ * 6-across row, so each branch has real width to read clearly without
+ * zooming, and the section is allowed to grow taller for it (viewBox
+ * height 380 -> 480).
  *
  * Same three-layer technique as the desktop ConnectorOverlay (blurred halo
  * behind a solid core stroke, bright traveling dash, and a
- * physically-moving particle via animateMotion), with its own
+ * physically-moving particle via animateMotion), plus glowing junction
+ * markers at every branch point and node entry, with its own
  * uniquely-prefixed def ids since both overlays exist in the DOM at once
  * (one hidden via CSS, not unmounted) and duplicate SVG ids would let
- * `url(#id)` references resolve to the wrong tree. viewBox is tuned to the
- * core's base size (size-60) plus the icon row below it — purely
- * decorative, so modest stretch at other widths is fine. */
+ * `url(#id)` references resolve to the wrong tree. */
 function MobileFlowOverlay() {
-  // Point 0 is the core's lower edge; points 1-6 are the six function
-  // nodes in their single row (same x positions the row itself lays out
-  // to: evenly spaced across the 360-wide viewBox). Each segment gently
-  // dips between nodes so the chain reads as a moving current, not a flat
-  // ruler line. Viewbox height grew (330 -> 380) to give the now-larger
-  // core, and the row below it, more open vertical room — a taller
-  // section reads clearer than a cramped one on a phone.
+  // Column centers for the 2x3 node grid (evenly spaced across the
+  // 360-wide viewBox), and the two row y-levels.
+  const COLS = [60, 180, 300];
+  const SPINE_Y = 300;
+  const ROW1_Y = 355;
+  const ROW2_Y = 445;
+
   const segments = [
-    { d: "M180,250 C120,285 60,320 30,345", bold: true }, // Core -> Strategi (the boldest wire: this is the core's own output)
-    { d: "M30,345 C50,320 70,320 90,345", bold: false }, // Strategi -> Konten
-    { d: "M90,345 C110,320 130,320 150,345", bold: false }, // Konten -> Campaign
-    { d: "M150,345 C170,320 190,320 210,345", bold: false }, // Campaign -> SEO
-    { d: "M210,345 C230,320 250,320 270,345", bold: false }, // SEO -> Analitik
-    { d: "M270,345 C290,320 310,320 330,345", bold: false }, // Analitik -> Optimasi
+    // Trunk: the core's own single output, leaving straight down into the
+    // spine — the thickest, boldest wire, since every branch traces back
+    // through this one line to the core.
+    { d: `M180,250 L180,${SPINE_Y}`, tier: "trunk" as const },
+    // Spine: the horizontal distribution wire the trunk feeds into.
+    { d: `M${COLS[0]},${SPINE_Y} L${COLS[2]},${SPINE_Y}`, tier: "spine" as const },
+    // Row 1 branches: spine -> Strategi / Konten / Campaign.
+    ...COLS.map((x) => ({ d: `M${x},${SPINE_Y} L${x},${ROW1_Y}`, tier: "branch" as const })),
+    // Row 2 verticals: each row-1 node continues straight down to its
+    // row-2 partner (Strategi->SEO, Konten->Analitik, Campaign->Optimasi),
+    // so the network keeps reading as one connected system, not two
+    // separate unrelated rows.
+    ...COLS.map((x) => ({ d: `M${x},${ROW1_Y} L${x},${ROW2_Y}`, tier: "branch" as const })),
   ];
-  // A small glowing marker at every junction the flow actually visits —
-  // the core's own exit point plus each of the six function nodes — so
-  // the connection reads as real "connection points," not just a line
-  // passing behind the cards.
+
+  // A glowing marker at every real connection point: the core's exit, the
+  // spine's two ends plus its three branch takeoffs, and every node entry
+  // in both rows.
   const junctions = [
-    { x: 180, y: 250, r: 5 }, // leaves the core
-    { x: 30, y: 345, r: 4 },
-    { x: 90, y: 345, r: 4 },
-    { x: 150, y: 345, r: 4 },
-    { x: 210, y: 345, r: 4 },
-    { x: 270, y: 345, r: 4 },
-    { x: 330, y: 345, r: 4 },
+    { x: 180, y: 250, r: 7 }, // leaves the core
+    { x: COLS[0], y: SPINE_Y, r: 5 },
+    { x: COLS[1], y: SPINE_Y, r: 5 },
+    { x: COLS[2], y: SPINE_Y, r: 5 },
+    ...COLS.map((x) => ({ x, y: ROW1_Y, r: 5 })),
+    ...COLS.map((x) => ({ x, y: ROW2_Y, r: 5 })),
   ];
 
   return (
-    <svg aria-hidden className="pointer-events-none absolute inset-0 size-full" viewBox="0 0 360 380" preserveAspectRatio="none" fill="none">
+    <svg aria-hidden className="pointer-events-none absolute inset-0 size-full" viewBox="0 0 360 480" preserveAspectRatio="none" fill="none">
       <defs>
-        <linearGradient id="tanyopo-m-flow" x1="0" y1="0" x2="1" y2="0">
+        <linearGradient id="tanyopo-m-flow" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor="#06b6d4" />
           <stop offset="50%" stopColor="#3b82f6" />
           <stop offset="100%" stopColor="#7c3aed" />
@@ -274,11 +278,11 @@ function MobileFlowOverlay() {
           <stop offset="60%" stopColor="#ffffff" />
           <stop offset="100%" stopColor="#a5f3fc" stopOpacity="0" />
         </radialGradient>
-        <filter id="tanyopo-m-halo" x="-120%" y="-120%" width="340%" height="340%">
-          <feGaussianBlur stdDeviation="9" />
+        <filter id="tanyopo-m-halo" x="-140%" y="-140%" width="380%" height="380%">
+          <feGaussianBlur stdDeviation="11" />
         </filter>
         <filter id="tanyopo-m-glow" x="-100%" y="-100%" width="300%" height="300%">
-          <feGaussianBlur stdDeviation="4" result="blur" />
+          <feGaussianBlur stdDeviation="4.5" result="blur" />
           <feMerge>
             <feMergeNode in="blur" />
             <feMergeNode in="SourceGraphic" />
@@ -288,13 +292,13 @@ function MobileFlowOverlay() {
 
       {segments.map((seg, i) => {
         const id = `tanyopo-m-seg-${i}`;
-        const haloWidth = seg.bold ? 20 : 15;
-        const coreWidth = seg.bold ? 8 : 6;
-        const dashWidth = seg.bold ? 4 : 3;
-        const particleR = seg.bold ? 7 : 5.5;
+        const haloWidth = seg.tier === "trunk" ? 26 : seg.tier === "spine" ? 22 : 18;
+        const coreWidth = seg.tier === "trunk" ? 10 : seg.tier === "spine" ? 8.5 : 7;
+        const dashWidth = seg.tier === "trunk" ? 5 : 4;
+        const particleR = seg.tier === "trunk" ? 8.5 : 7;
         return (
           <g key={id}>
-            <path d={seg.d} stroke="url(#tanyopo-m-flow)" strokeWidth={haloWidth} strokeLinecap="round" filter="url(#tanyopo-m-halo)" opacity="0.8" />
+            <path d={seg.d} stroke="url(#tanyopo-m-flow)" strokeWidth={haloWidth} strokeLinecap="round" filter="url(#tanyopo-m-halo)" opacity="0.85" />
             <path
               d={seg.d}
               stroke="url(#tanyopo-m-flow)"
@@ -302,7 +306,7 @@ function MobileFlowOverlay() {
               strokeLinecap="round"
               opacity="1"
               className="tanyopo-connector-glow"
-              style={{ animationDelay: `${i * 220}ms` }}
+              style={{ animationDelay: `${i * 200}ms` }}
             />
             <path
               id={id}
@@ -315,7 +319,7 @@ function MobileFlowOverlay() {
               style={{ animationDelay: `${stopDelay(i + 1)}ms` }}
             />
             <circle r={particleR} className="tanyopo-energy-particle" fill="url(#tanyopo-m-particle-fill)" filter="url(#tanyopo-m-glow)">
-              <animateMotion dur="1.6s" repeatCount="indefinite" begin={`${i * 0.2}s`}>
+              <animateMotion dur="1.4s" repeatCount="indefinite" begin={`${i * 0.18}s`}>
                 <mpath href={`#${id}`} />
               </animateMotion>
             </circle>
@@ -325,14 +329,14 @@ function MobileFlowOverlay() {
 
       {junctions.map((j, i) => (
         <g key={`tanyopo-m-junction-${i}`}>
-          <circle cx={j.x} cy={j.y} r={j.r + 5} fill="url(#tanyopo-m-particle-fill)" filter="url(#tanyopo-m-glow)" opacity="0.55" />
+          <circle cx={j.x} cy={j.y} r={j.r + 6} fill="url(#tanyopo-m-particle-fill)" filter="url(#tanyopo-m-glow)" opacity="0.6" />
           <circle
             cx={j.x}
             cy={j.y}
             r={j.r}
             fill="#ffffff"
             className="tanyopo-connector-glow"
-            style={{ animationDelay: `${i * 220}ms` }}
+            style={{ animationDelay: `${i * 200}ms` }}
           />
         </g>
       ))}
@@ -373,46 +377,56 @@ function AiCore() {
   );
 }
 
-/** Desktop-only animated "AI energy flow" overlay — ONE continuous chain of
- * 8 curved segments (Produk -> Core -> Strategi -> Konten -> Campaign ->
- * SEO -> Analitik -> Optimasi -> Growth). Each segment layers three things:
- * a thick glowing gradient wire with a subtle electric flicker
+/** Desktop-only animated "AI energy flow" overlay — V9 (visible branching
+ * network, second Founder mobile-review round). V7/V8 drew ONE continuous
+ * winding chain through all 8 stops; Founder's follow-up review explicitly
+ * rejected that shape ("JANGAN hanya membuat satu garis melengkung besar
+ * di belakang semua card — saya ingin BRANCHING CONNECTIONS") because it
+ * still read as a single decorative curve rather than the core visibly
+ * sending energy to every function. V9 replaces it with a real tree: a
+ * bold TRUNK leaves the core straight down into a horizontal SPINE, which
+ * BRANCHES directly to each of the 6 capability cards below (matching
+ * their grid-cols-6 column x-positions) — so every card has its own thick
+ * line traceable straight back to the core — plus the existing Produk-in /
+ * Growth-out edges on either side of the core. Each wire layers three
+ * things: a thick glowing gradient halo with a subtle electric flicker
  * (tanyopo-connector-glow), a bright traveling dash highlight
- * (tanyopo-connector-path, existing), and a small glowing particle that
- * physically travels along the path (native SVG animateMotion/mpath — no
- * JS animation loop, GPU-friendly). Positioned with a percentage-based
- * viewBox (preserveAspectRatio="none") so it stretches to the diagram's
- * own box — purely decorative, so minor stretch at unusual widths is
- * acceptable. */
+ * (tanyopo-connector-path), and a small glowing particle that physically
+ * travels along the path (native SVG animateMotion/mpath — no JS animation
+ * loop, GPU-friendly), plus a glowing junction marker at every real
+ * connection point. Positioned with a percentage-based viewBox
+ * (preserveAspectRatio="none") so it stretches to the diagram's own box —
+ * purely decorative, so minor stretch at unusual widths is acceptable. */
 function ConnectorOverlay() {
-  // Flow order. The 6 middle segments connect capability card i to card
-  // i+1 (centers at x=100/300/500/700/900/1100, matching the grid-cols-6
-  // column midpoints), dipping in a gentle wave between them.
+  // Capability card centers (matching the grid-cols-6 column midpoints).
+  const CARD_XS = [100, 300, 500, 700, 900, 1100];
+  const ROW_Y = 520;
+  const SPINE_Y = 455;
+
   const segments = [
-    { d: "M260,175 C340,175 380,220 465,255", arrow: true },
-    { d: "M600,330 C420,410 220,470 100,520", arrow: false },
-    { d: "M100,520 C160,565 240,565 300,520", arrow: false },
-    { d: "M300,520 C360,565 440,565 500,520", arrow: false },
-    { d: "M500,520 C560,565 640,565 700,520", arrow: false },
-    { d: "M700,520 C760,565 840,565 900,520", arrow: false },
-    { d: "M900,520 C960,565 1040,565 1100,520", arrow: false },
-    { d: "M1100,520 C1170,460 1140,300 940,175", arrow: true },
+    // Produk -> Core: the flow's input edge.
+    { d: "M260,175 C340,175 380,225 480,265", tier: "edge" as const },
+    // Trunk: the core's single output, straight down into the spine — the
+    // one line every branch traces back through to the core.
+    { d: `M600,400 L600,${SPINE_Y}`, tier: "trunk" as const },
+    // Spine: the horizontal wire the trunk feeds, spanning the full
+    // capability row.
+    { d: `M${CARD_XS[0]},${SPINE_Y} L${CARD_XS[5]},${SPINE_Y}`, tier: "spine" as const },
+    // Branches: spine -> each of the 6 capability cards, direct and equal.
+    ...CARD_XS.map((x) => ({ d: `M${x},${SPINE_Y} C ${x},${SPINE_Y + 22} ${x},${SPINE_Y + 40} ${x},${ROW_Y}`, tier: "branch" as const })),
+    // Optimasi -> Growth: the flow's output edge (aggregated result).
+    { d: "M1100,520 C1170,460 1140,300 940,175", tier: "edge" as const },
   ];
+
   // Visible "connection point" markers at every real stop the flow visits —
-  // Produk's own exit, each of the six capability cards, and Growth's
-  // entry — so the chain reads as genuine linked nodes, not just a line
-  // passing behind the cards (same treatment as MobileFlowOverlay's
-  // `junctions`, mirrored here for desktop per Founder's brief that the
-  // flow must look connected "di SETIAP lini," not mobile-only).
+  // Produk's own exit, the core's trunk exit, the spine, all 6 capability
+  // cards, and Growth's entry — so the network reads as genuine linked
+  // nodes, not a line passing behind the cards.
   const junctions = [
-    { x: 260, y: 175, r: 7 }, // Produk Anda (input)
-    { x: 100, y: 520, r: 6 },
-    { x: 300, y: 520, r: 6 },
-    { x: 500, y: 520, r: 6 },
-    { x: 700, y: 520, r: 6 },
-    { x: 900, y: 520, r: 6 },
-    { x: 1100, y: 520, r: 6 },
-    { x: 940, y: 175, r: 7 }, // Pertumbuhan Bisnis (output)
+    { x: 260, y: 175, r: 8 }, // Produk Anda (input)
+    { x: 600, y: 400, r: 8 }, // leaves the core
+    ...CARD_XS.map((x) => ({ x, y: ROW_Y, r: 7 })),
+    { x: 940, y: 175, r: 8 }, // Pertumbuhan Bisnis (output)
   ];
 
   return (
@@ -459,15 +473,15 @@ function ConnectorOverlay() {
 
       {segments.map((seg, i) => {
         const id = `tanyopo-seg-${i}`;
-        const gradient = seg.arrow ? "url(#tanyopo-flow-h)" : "url(#tanyopo-flow-fan)";
-        const haloWidth = seg.arrow ? 26 : 22;
-        const coreWidth = seg.arrow ? 9 : 7.5;
-        const dashWidth = seg.arrow ? 4.5 : 4;
-        const particleR = seg.arrow ? 9.5 : 8.5;
+        const gradient = seg.tier === "edge" ? "url(#tanyopo-flow-h)" : "url(#tanyopo-flow-fan)";
+        const haloWidth = seg.tier === "edge" || seg.tier === "trunk" ? 28 : seg.tier === "spine" ? 24 : 20;
+        const coreWidth = seg.tier === "edge" || seg.tier === "trunk" ? 10 : seg.tier === "spine" ? 8.5 : 7.5;
+        const dashWidth = seg.tier === "edge" || seg.tier === "trunk" ? 5 : 4.2;
+        const particleR = seg.tier === "edge" || seg.tier === "trunk" ? 10 : 8.5;
         return (
           <g key={id}>
             {/* Soft bloom halo — solid color, wide, blurred, always on. */}
-            <path d={seg.d} stroke={gradient} strokeWidth={haloWidth} strokeLinecap="round" filter="url(#tanyopo-halo)" opacity="0.8" />
+            <path d={seg.d} stroke={gradient} strokeWidth={haloWidth} strokeLinecap="round" filter="url(#tanyopo-halo)" opacity="0.85" />
             {/* Solid saturated core — the wire itself, crisp, never faint. */}
             <path
               d={seg.d}
@@ -476,7 +490,7 @@ function ConnectorOverlay() {
               strokeLinecap="round"
               opacity="1"
               className="tanyopo-connector-glow"
-              style={{ animationDelay: `${i * 220}ms` }}
+              style={{ animationDelay: `${i * 200}ms` }}
             />
             {/* Bright dashed highlight traveling along the core. */}
             <path
@@ -485,14 +499,14 @@ function ConnectorOverlay() {
               stroke="#ffffff"
               strokeWidth={dashWidth}
               strokeLinecap="round"
-              markerEnd={seg.arrow ? "url(#tanyopo-arrow)" : undefined}
+              markerEnd={seg.tier === "edge" ? "url(#tanyopo-arrow)" : undefined}
               className="tanyopo-connector-path"
               opacity="1"
               style={{ animationDelay: `${stopDelay(i)}ms` }}
             />
             {/* Traveling energy particle — the clearest "it's moving" cue. */}
             <circle r={particleR} className="tanyopo-energy-particle" fill="url(#tanyopo-particle-fill)" filter="url(#tanyopo-glow)">
-              <animateMotion dur="1.6s" repeatCount="indefinite" begin={`${i * 0.2}s`}>
+              <animateMotion dur="1.4s" repeatCount="indefinite" begin={`${i * 0.18}s`}>
                 <mpath href={`#${id}`} />
               </animateMotion>
             </circle>
@@ -514,7 +528,10 @@ export function TanyopoIntelligenceDiagram() {
   return (
     <div className="relative mx-auto max-w-6xl">
       {/* Desktop — Produk (left) -> AI Core (center, dominant) -> Growth (right),
-          one continuous chained path running through the 6-card row below the core. */}
+          with a branching tree (trunk -> spine -> 6 direct branches) fanning
+          out from the core to every capability card below it, so each card
+          traces straight back to the core rather than through one long
+          winding line. */}
       <div className="relative hidden desktop:block">
         <ConnectorOverlay />
         <div className="relative z-10 flex items-center justify-between gap-6 px-4 xl:px-10">
@@ -541,13 +558,12 @@ export function TanyopoIntelligenceDiagram() {
         </div>
       </div>
 
-      {/* Mobile / tablet — a compact energy NETWORK, not a flowchart list:
-          Produk and Growth stay simple full-width stops, but the core stays
-          the visual hub: a single connected chain (MobileFlowOverlay) leaves
-          the core and visits each of the six function nodes in sequence, so
-          the section reads as one process moving through the core and then
-          through each function in order — not six standalone cards that
-          merely sit near the core. */}
+      {/* Mobile / tablet — a real branching energy NETWORK, not a flowchart
+          list: Produk and Growth stay simple full-width stops, but the core
+          is the visual hub a trunk-and-spine tree (MobileFlowOverlay) fans
+          out from, branching directly to each of the six function nodes
+          (2 rows x 3 cols below the core), so every node traces straight
+          back to the core rather than through one long winding line. */}
       <div className="relative flex flex-col items-center gap-1 desktop:hidden">
         <Reveal className="relative z-10 w-full max-w-sm">
           <EndpointCard number={1} icon={Package} label="Produk Anda" description="Masukkan produk atau jasa Anda. LINOE memahami bisnis Anda secara mendalam." accent="start" delayMs={stopDelay(0)} />
@@ -556,7 +572,11 @@ export function TanyopoIntelligenceDiagram() {
         <div className="relative w-full max-w-sm">
           <MobileFlowOverlay />
           <AiCore />
-          <div className="relative z-10 mt-5 flex items-start justify-between px-1">
+          {/* 2 rows x 3 cols (not one 6-across row) — see MobileFlowOverlay's
+              docblock: this gives each branch line real width to read
+              clearly without zooming, and lets the section grow taller
+              instead of cramming everything into one viewport-width row. */}
+          <div className="relative z-10 mt-7 grid grid-cols-3 items-start justify-items-center gap-x-3 gap-y-11 px-1">
             {CAPABILITIES.map((item, i) => (
               <MobileFunctionNode
                 key={item.title}
