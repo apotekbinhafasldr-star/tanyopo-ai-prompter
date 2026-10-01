@@ -20,6 +20,7 @@ import { PlanForm } from "@/features/billing/plan-form";
 import { PricingCards } from "@/features/billing/pricing-cards";
 import { FeatureComparison } from "@/features/billing/feature-comparison";
 import { CancellationToggle } from "@/features/billing/cancellation-toggle";
+import { reconcileCheckoutReturn, type ReconciledPaymentStatus } from "@/services/payment-reconciliation";
 
 const INVOICE_STATUS_VARIANT: Record<string, "success" | "warning" | "danger" | "neutral"> = {
   DRAFT: "neutral",
@@ -68,15 +69,44 @@ const STATUS_LABEL: Record<string, string> = {
   CANCELED: "Berakhir",
 };
 
-export default async function BillingPage() {
+// Billing reconciliation banner — shown only on a return trip from checkout
+// (`/billing?txn=<id>`). Copy is purely informational: it never claims a
+// subscription is active except when reconcileCheckoutReturn() itself
+// reports PAID, which it only ever does by reading the real transaction row
+// (never by trusting the redirect itself). See services/payment-reconciliation.ts.
+const RECONCILIATION_COPY: Record<ReconciledPaymentStatus, { variant: "success" | "warning" | "danger"; text: string }> = {
+  PAID: { variant: "success", text: "Pembayaran berhasil. Paket Anda sudah aktif." },
+  PENDING: {
+    variant: "warning",
+    text: "Pembayaran sedang diproses. Status paket akan diperbarui otomatis begitu konfirmasi diterima — tidak perlu membayar ulang.",
+  },
+  FAILED: { variant: "danger", text: "Pembayaran tidak berhasil diverifikasi. Silakan coba lagi." },
+  EXPIRED: { variant: "danger", text: "Sesi pembayaran ini sudah kedaluwarsa. Silakan mulai pembayaran baru." },
+  CANCELLED: { variant: "warning", text: "Pembayaran dibatalkan." },
+  NOT_FOUND: { variant: "danger", text: "Referensi pembayaran tidak ditemukan." },
+};
+
+const RECONCILIATION_BANNER_CLASS: Record<"success" | "warning" | "danger", string> = {
+  success: "flex items-center gap-2 rounded-[var(--radius-md)] border border-success/30 bg-success/5 p-3 text-sm text-success",
+  warning: "flex items-center gap-2 rounded-[var(--radius-md)] border border-warning/30 bg-warning/5 p-3 text-sm text-warning",
+  danger: "flex items-center gap-2 rounded-[var(--radius-md)] border border-danger/30 bg-danger/5 p-3 text-sm text-danger",
+};
+
+export default async function BillingPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ txn?: string }>;
+}) {
+  const { txn } = await searchParams;
   const session = await requireSessionContext();
   const supabase = await createClient();
 
-  const [subscription, aiJobCount, verifiedAttributedValue, invoices] = await Promise.all([
+  const [subscription, aiJobCount, verifiedAttributedValue, invoices, reconciliation] = await Promise.all([
     getOrCreateSubscription(supabase, session.tenantId),
     getMonthlyAiJobCount(supabase, session.tenantId),
     getVerifiedAttributedValueThisMonth(supabase, session.tenantId),
     listInvoices(supabase, session.tenantId),
+    txn ? reconcileCheckoutReturn(supabase, session.tenantId, txn) : Promise.resolve(null),
   ]);
 
   const successFee = calculateSuccessFee({
@@ -97,6 +127,12 @@ export default async function BillingPage() {
           Lihat paket, masa coba, dan penggunaan LINOE Anda.
         </p>
       </div>
+
+      {reconciliation ? (
+        <div className={RECONCILIATION_BANNER_CLASS[RECONCILIATION_COPY[reconciliation.status].variant]}>
+          <p>{RECONCILIATION_COPY[reconciliation.status].text}</p>
+        </div>
+      ) : null}
 
       <Card>
         <CardHeader className="flex flex-row items-center gap-2 space-y-0">
