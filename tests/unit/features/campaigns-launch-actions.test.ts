@@ -55,11 +55,25 @@ function buildHarness(options: {
   const connectedAccountMaybeSingle = maybeSingle(options.connectedAccount);
   const credentialsMaybeSingle = maybeSingle({ data: { encrypted_access_token: "cipher" }, error: null });
 
+  // Chainable `.update(...).eq(...).eq(...)...` builder — the real
+  // Supabase query builder is thenable at every step (awaitable directly)
+  // and also exposes `.select()` for a final result with `data`. Used both
+  // by the P0 atomic claim (`update().eq().eq().eq().select()`) and by the
+  // older single-`.eq()` status writes later in the action.
+  function updateBuilder(result: { data?: unknown; error: unknown }) {
+    const builder: PromiseLike<typeof result> & { eq: () => typeof builder; select: () => Promise<typeof result> } = {
+      eq: () => builder,
+      select: vi.fn(async () => result),
+      then: (resolve: (value: typeof result) => unknown) => resolve(result),
+    } as never;
+    return builder;
+  }
+
   const regularFrom = vi.fn((table: string) => {
     if (table === "prompter_channel_campaigns") {
       return {
         select: () => ({ eq: () => ({ eq: () => ({ single: channelCampaignSingle }) }) }),
-        update: () => ({ eq: vi.fn(async () => ({ error: null })) }),
+        update: vi.fn(() => updateBuilder({ data: [{ id: "cc1" }], error: null })),
       };
     }
     if (table === "prompter_master_campaigns") {
@@ -131,5 +145,62 @@ describe("launchChannelCampaignAction — Track B pageId threading", () => {
       "act_123",
       expect.objectContaining({ pageId: undefined }),
     );
+  });
+});
+
+describe("launchChannelCampaignAction — P0 idempotency guard", () => {
+  beforeEach(() => {
+    requireSessionContextMock.mockClear();
+    connectorMock.createCampaign.mockClear();
+  });
+
+  it("aborts without calling the connector when the atomic claim finds no SCHEDULED row (already launched or in-flight elsewhere)", async () => {
+    const channelCampaignSingle = single({
+      data: { id: "cc1", channel: "FACEBOOK", master_campaign_id: "mc1" },
+      error: null,
+    });
+    const masterCampaignSingle = single({
+      data: {
+        id: "mc1",
+        status: "SCHEDULED",
+        name: "Promo Akhir Tahun",
+        objective: "INCREASE_SALES",
+        daily_budget: 50000,
+        total_budget: null,
+        ai_proposal: { headline: "Diskon Besar", primary_text: "Beli sekarang", cta: "Beli Sekarang" },
+      },
+      error: null,
+    });
+
+    function updateBuilder(result: { data?: unknown; error: unknown }) {
+      const builder = {
+        eq: () => builder,
+        select: vi.fn(async () => result),
+        then: (resolve: (value: typeof result) => unknown) => resolve(result),
+      };
+      return builder;
+    }
+
+    const regularFrom = vi.fn((table: string) => {
+      if (table === "prompter_channel_campaigns") {
+        return {
+          select: () => ({ eq: () => ({ eq: () => ({ single: channelCampaignSingle }) }) }),
+          // Simulates a concurrent request having already flipped this row
+          // out of SCHEDULED — the claim's WHERE clause matches zero rows.
+          update: vi.fn(() => updateBuilder({ data: [], error: null })),
+        };
+      }
+      if (table === "prompter_master_campaigns") {
+        return { select: () => ({ eq: () => ({ eq: () => ({ single: masterCampaignSingle }) }) }) };
+      }
+      throw new Error(`Unexpected table on regular client in idempotency test: ${table}`);
+    });
+
+    harness = { regularFrom, adminFrom: vi.fn() };
+
+    const result = await launchChannelCampaignAction("cc1");
+
+    expect(result.error).toBe("Campaign ini sudah diluncurkan atau sedang diproses oleh permintaan lain.");
+    expect(connectorMock.createCampaign).not.toHaveBeenCalled();
   });
 });
