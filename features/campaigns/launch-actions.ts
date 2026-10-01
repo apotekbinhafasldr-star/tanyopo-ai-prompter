@@ -118,6 +118,31 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
     return { error: "Campaign harus berstatus Terjadwal (sudah disetujui) sebelum diluncurkan." };
   }
 
+  // P0 remediation (Meta Ads production readiness): atomic claim to prevent
+  // a duplicate/concurrent launch of this same channel campaign. Previously
+  // nothing server-side re-checked this row's own current status before
+  // proceeding — only the launch button's client-side `loading`→`disabled`
+  // state did, which does not protect against a second tab, a network
+  // retry, or two near-simultaneous clicks. This is a single conditional
+  // UPDATE, atomic at the database row level: it only matches (and only
+  // then do we proceed) if this channel campaign's status is still
+  // SCHEDULED, so a second concurrent call for the same row finds zero
+  // matching rows and aborts here instead of creating a second Meta
+  // campaign for the same request.
+  const { data: claimedRows, error: claimError } = await supabase
+    .from("prompter_channel_campaigns")
+    .update({ error: null })
+    .eq("id", channelCampaignId)
+    .eq("tenant_id", session.tenantId)
+    .eq("status", "SCHEDULED")
+    .select("id");
+
+  if (claimError || !claimedRows || claimedRows.length === 0) {
+    return {
+      error: "Campaign ini sudah diluncurkan atau sedang diproses oleh permintaan lain.",
+    };
+  }
+
   const { data: connectedAccount } = await supabase
     .from("prompter_connected_accounts")
     .select("id, external_account_id, status, selected_page_id")
