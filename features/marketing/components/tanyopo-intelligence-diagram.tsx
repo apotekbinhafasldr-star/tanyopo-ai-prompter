@@ -3,55 +3,60 @@ import { Reveal } from "@/features/marketing/components/reveal";
 import { cn } from "@/lib/utils/cn";
 
 /**
- * "LINOE final landing visual" — founder-approved simplification of the
- * Tanyopo Intelligence diagram. Supersedes V3 (numbered flowchart) and the
- * unmerged V4 hub-and-spoke network (PR #20, never landed on main) with a
- * deliberately simpler shape the founder asked for explicitly after
- * seeing V4: "no complicated network, no dozens of crossing lines, no
- * floating disconnected icons" — simple, symmetrical, premium, easy to
- * understand.
+ * Tanyopo Intelligence diagram — revision 2 of the "final landing visual"
+ * (PR #21). Founder rejected revision 1: core read as too small, the
+ * energy flow was reduced to one short vertical bar, and the capability
+ * cards looked like ordinary disconnected tiles. This revision keeps
+ * revision 1's simple, symmetric 3-left/3-right shape (explicitly
+ * requested, and still the thing that rules out the earlier V4
+ * hub-and-spoke "complicated network") but fixes exactly those three
+ * complaints:
+ *   1. Core is substantially larger (desktop size-60 vs rev1's size-36)
+ *      and uses a visible layered ring (deep-blue center, cyan inner
+ *      glow, violet outer glow, thin bright outer ring) so it reads as
+ *      the unmistakable centerpiece.
+ *   2. The connection is now a real SVG overlay — one smooth curved,
+ *      glow-filtered, cyan->blue->violet gradient path per card (six
+ *      total, not two bars), with a gentle animated dash so the flow
+ *      reads as alive without being distracting. Coordinates are
+ *      percentages of the container (viewBox 0 0 100 100,
+ *      preserveAspectRatio="none"), the same technique used for the
+ *      (unmerged) V4 PR #20 diagram, so it's proven to stay responsive
+ *      without any JS measurement — but with only 6 simple curves
+ *      between two fixed groups, not a dense hub-and-spoke mesh.
+ *   3. Cards keep a light translucent surface + glow icon, but now sit
+ *      directly on top of their own incoming curve's endpoint, so each
+ *      one visibly terminates a glowing line rather than floating free.
+ * Mobile is a deliberately different, simpler composition (not a shrunk
+ * desktop copy): a large core, one visible vertical "spine" SVG path
+ * fanning out to all six cards stacked in a single column below it.
  *
- * Structure: one dominant central AI core, with exactly two energy
- * ribbons (left and right — reusing the same marketing-line-flow /
- * marketing-glow-pulse keyframes every prior version used, defined in
- * app/globals.css and untouched here) connecting the core to two
- * three-card capability groups. No per-card line, no crossing paths, no
- * SVG network — a plain flex/grid layout, so there is nothing to break on
- * narrow screens: mobile collapses to core -> one ribbon -> a simple
- * 2-column card grid, never a shrunk copy of the desktop diagram.
- *
- * Capability set/grouping matches the founder's explicit left/right
- * brief: Produk Anda, Strategi Marketing, Analitik on the left;
- * Konten & Copywriting, Campaign, Optimasi on the right. Card copy is
- * condensed to one short line each (not a bullet list) per "No huge
- * cards, no unnecessary technical details" — every capability named is
- * something LINOE already does today, nothing invented.
- *
- * tanyopo-intelligence.tsx (the section wrapper — heading, supporting
- * copy, and the "Hasil Nyata..." value strip) is untouched by this file;
- * its existing heading "Tanyopo Intelligence di Balik Setiap Hasil Besar"
- * already matches the founder's brief verbatim.
+ * tanyopo-intelligence.tsx (heading, supporting copy, the "Hasil
+ * Nyata..." strip) is untouched — its heading already reads "Tanyopo
+ * Intelligence di Balik Setiap Hasil Besar" verbatim, per founder brief.
  */
 type Capability = { icon: LucideIcon; title: string; description: string };
 
 const LEFT_CAPABILITIES: Capability[] = [
-  { icon: Package, title: "Produk Anda", description: "Data produk, harga, stok, dan keunggulan — siap dianalisis AI." },
-  { icon: Target, title: "Strategi Marketing", description: "Target, channel, dan peluang pasar disusun otomatis." },
-  { icon: BarChart3, title: "Analitik", description: "Hasil real-time dengan insight yang mudah dipahami." },
+  { icon: Package, title: "Produk Anda", description: "Data produk, harga, stok, dan keunggulan." },
+  { icon: Target, title: "Strategi Marketing", description: "Target, channel, dan peluang pasar." },
+  { icon: BarChart3, title: "Analitik", description: "Hasil real-time, insight mudah dipahami." },
 ];
 
 const RIGHT_CAPABILITIES: Capability[] = [
-  { icon: FileText, title: "Konten & Copywriting", description: "Ide, caption, materi iklan, dan visual siap pakai." },
-  { icon: Rocket, title: "Campaign", description: "Eksekusi campaign ke channel yang relevan." },
-  { icon: Sliders, title: "Optimasi", description: "Rekomendasi AI untuk hasil yang lebih baik." },
+  { icon: FileText, title: "Konten & Copywriting", description: "Ide, caption, materi iklan, dan visual." },
+  { icon: Rocket, title: "Campaign", description: "Eksekusi campaign ke channel relevan." },
+  { icon: Sliders, title: "Optimasi", description: "Rekomendasi AI untuk hasil lebih baik." },
 ];
 
-/** Small, translucent capability card — no heavy border, large rounded corners, short copy only. */
+const ALL_CAPABILITIES = [...LEFT_CAPABILITIES, ...RIGHT_CAPABILITIES];
+
+/** Small, translucent capability card — sits at a curve's endpoint, so it visibly reads as "powered by" the glowing line rather than a free-floating tile. */
 function CapabilityCard({ icon: Icon, title, description }: Capability) {
   return (
-    <div className="flex w-full max-w-xs items-start gap-3 rounded-[1.5rem] bg-white/70 p-4 text-left shadow-[0_8px_24px_-12px_rgba(59,130,246,0.35)] ring-1 ring-white/80 backdrop-blur-sm">
+    <div className="relative z-10 flex w-full max-w-xs items-start gap-3 rounded-[1.25rem] bg-white/80 p-3.5 text-left shadow-[0_10px_28px_-14px_rgba(37,99,235,0.45)] ring-1 ring-white/90 backdrop-blur-sm lg:max-w-[12rem] lg:p-3">
       <span
-        className="flex size-10 shrink-0 items-center justify-center rounded-full text-white shadow-[0_0_16px_-2px_rgba(59,130,246,0.7)]"
+        className="flex size-10 shrink-0 items-center justify-center rounded-full text-white shadow-[0_0_18px_-2px_rgba(59,130,246,0.75)]"
         style={{ background: "linear-gradient(135deg, #22d3ee 0%, #3b82f6 55%, #8b5cf6 100%)" }}
       >
         <Icon className="size-4" aria-hidden />
@@ -65,77 +70,170 @@ function CapabilityCard({ icon: Icon, title, description }: Capability) {
 }
 
 /**
- * The one dominant element on the page (founder: "BESAR, dominan,
- * bercahaya" — but elegant, controlled glow, not excessive neon). Sizes
- * and glow intensity are deliberately a notch below the earlier V3/V4
- * attempts so it reads as premium rather than sci-fi.
+ * The centerpiece. Founder correction: "substantially larger," with a
+ * layered deep-blue/cyan/violet glow and a bright thin outer ring so it
+ * immediately attracts the eye even before the connecting lines are read.
  */
-function AiCore() {
+function AiCore({ className }: { className?: string }) {
   return (
-    <div className="relative flex shrink-0 flex-col items-center gap-3">
+    <div className={cn("relative z-10 flex shrink-0 flex-col items-center gap-3", className)}>
       <div className="relative flex items-center justify-center">
+        {/* Violet outer glow — widest, softest */}
         <div
           aria-hidden
-          className="marketing-glow-pulse pointer-events-none absolute inset-0 -z-10 rounded-full blur-2xl"
-          style={{ background: "radial-gradient(circle, rgba(34,211,238,0.5) 0%, rgba(139,92,246,0.45) 55%, transparent 75%)" }}
+          className="marketing-glow-pulse pointer-events-none absolute inset-0 -z-10 rounded-full blur-3xl"
+          style={{ background: "radial-gradient(circle, rgba(139,92,246,0.55) 0%, transparent 72%)" }}
         />
+        {/* Cyan inner glow — tighter, brighter */}
         <div
-          className="flex size-28 items-center justify-center rounded-full text-white shadow-[0_0_60px_-10px_rgba(99,102,241,0.6)] ring-4 ring-white/40 sm:size-32 lg:size-36"
-          style={{ background: "radial-gradient(circle at 35% 30%, #67e8f9 0%, #3b82f6 45%, #8b5cf6 90%)" }}
+          aria-hidden
+          className="pointer-events-none absolute -inset-4 -z-10 rounded-full opacity-80 blur-xl"
+          style={{ background: "radial-gradient(circle, rgba(34,211,238,0.6) 0%, transparent 70%)" }}
+        />
+        {/* Deep-blue center sphere with a thin bright outer ring */}
+        <div
+          className="flex size-40 items-center justify-center rounded-full text-white shadow-[0_0_90px_-12px_rgba(37,99,235,0.75)] ring-[3px] ring-[#a5f3fc]/80 sm:size-48 lg:size-60"
+          style={{ background: "radial-gradient(circle at 32% 28%, #67e8f9 0%, #3b82f6 42%, #1d4ed8 78%, #4c1d95 100%)" }}
         >
-          <Brain className="size-10 sm:size-12 lg:size-14" aria-hidden />
+          <Brain className="size-14 sm:size-16 lg:size-20" aria-hidden />
         </div>
       </div>
       <div className="flex flex-col items-center gap-1 px-2">
-        <p className="text-lg font-bold text-foreground sm:text-xl">Tanyopo Intelligence</p>
-        <p className="text-[11px] font-semibold uppercase tracking-wide text-brand">AI Business Brain</p>
+        <p className="text-xl font-bold text-foreground sm:text-2xl">Tanyopo Intelligence</p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-brand">AI Business Brain</p>
       </div>
     </div>
   );
 }
 
-/** One simple, controlled-glow energy ribbon — reuses the existing marketing-line-flow keyframe (app/globals.css, unchanged). Desktop: horizontal, between the core and a card group. Mobile: a short vertical ribbon from the core down into the card grid. */
-function EnergyRibbon({ orientation }: { orientation: "horizontal" | "vertical" }) {
+type Point = { x: number; y: number };
+
+/**
+ * Six glow-filtered, animated-dash SVG curves from the core to every
+ * capability card — the actual fix for "the AI energy flow is almost
+ * invisible." Percentage coordinates (viewBox 0 0 100 100,
+ * preserveAspectRatio="none") line up with the HTML nodes positioned the
+ * same way, so this stays responsive without JS measurement.
+ */
+function EnergyFlow({ core, targets }: { core: Point; targets: Point[] }) {
   return (
-    <div
+    <svg
       aria-hidden
-      className={cn(
-        "marketing-line-flow shrink-0 rounded-full shadow-[0_0_18px_-4px_rgba(59,130,246,0.6)]",
-        orientation === "horizontal" ? "hidden h-2.5 min-w-8 flex-1 lg:block" : "h-8 w-2.5 sm:h-10",
-      )}
-      style={{ background: "linear-gradient(90deg, #22d3ee 0%, #3b82f6 50%, #8b5cf6 100%)" }}
-    />
+      className="pointer-events-none absolute inset-0 h-full w-full"
+      viewBox="0 0 100 100"
+      preserveAspectRatio="none"
+    >
+      <defs>
+        <linearGradient id="tiFlowGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stopColor="#22d3ee" />
+          <stop offset="50%" stopColor="#3b82f6" />
+          <stop offset="100%" stopColor="#8b5cf6" />
+        </linearGradient>
+        <filter id="tiFlowGlow" x="-60%" y="-60%" width="220%" height="220%">
+          <feGaussianBlur stdDeviation="1.8" result="blur" />
+          <feMerge>
+            <feMergeNode in="blur" />
+            <feMergeNode in="SourceGraphic" />
+          </feMerge>
+        </filter>
+      </defs>
+      {targets.map((t, i) => {
+        // Gentle curve: control point offset perpendicular-ish toward the
+        // midpoint, so left/right groups fan out smoothly with no two
+        // lines crossing.
+        const mx = (core.x + t.x) / 2;
+        const my = (core.y + t.y) / 2 + (t.y - core.y) * 0.08;
+        return (
+          <path
+            key={i}
+            d={`M ${core.x} ${core.y} Q ${mx} ${my} ${t.x} ${t.y}`}
+            fill="none"
+            stroke="url(#tiFlowGradient)"
+            strokeWidth={1.4}
+            strokeLinecap="round"
+            vectorEffect="non-scaling-stroke"
+            filter="url(#tiFlowGlow)"
+            className="ti-flow-path"
+          />
+        );
+      })}
+    </svg>
   );
 }
+
+// Desktop: core centered at (50, 50); 3 left cards at x=10, 3 right cards
+// at x=90, evenly spaced in y so curves fan out without crossing.
+const DESKTOP_CORE: Point = { x: 50, y: 50 };
+const DESKTOP_TARGETS: Point[] = [
+  { x: 22, y: 18 },
+  { x: 22, y: 50 },
+  { x: 22, y: 82 },
+  { x: 78, y: 18 },
+  { x: 78, y: 50 },
+  { x: 78, y: 82 },
+];
+
+// Mobile: core near the top at (50, 14); all 6 cards stacked in one
+// column below it, each with its own curve from the core (a visible
+// "spine fanning into branches", not one short vertical bar).
+const MOBILE_CORE: Point = { x: 50, y: 16 };
+const MOBILE_TARGETS: Point[] = [
+  { x: 50, y: 24 },
+  { x: 50, y: 38 },
+  { x: 50, y: 52 },
+  { x: 50, y: 66 },
+  { x: 50, y: 80 },
+  { x: 50, y: 94 },
+];
 
 export function TanyopoIntelligenceDiagram() {
   return (
     <div className="relative mx-auto max-w-5xl">
-      <Reveal className="flex flex-col items-center gap-8 sm:gap-10">
-        {/* Desktop/tablet — symmetric: [3 cards] — ribbon — core — ribbon — [3 cards]. Exactly two ribbons, no per-card lines, nothing crosses. */}
-        <div className="hidden w-full items-center justify-center gap-4 lg:flex xl:gap-8">
-          <div className="flex flex-col items-end gap-4">
-            {LEFT_CAPABILITIES.map((item) => (
-              <CapabilityCard key={item.title} {...item} />
-            ))}
-          </div>
-          <EnergyRibbon orientation="horizontal" />
-          <AiCore />
-          <EnergyRibbon orientation="horizontal" />
-          <div className="flex flex-col items-start gap-4">
-            {RIGHT_CAPABILITIES.map((item) => (
-              <CapabilityCard key={item.title} {...item} />
-            ))}
+      {/* Gentle animated flow-dash for the SVG paths — scoped class/keyframe names; respects prefers-reduced-motion. */}
+      <style>{`
+        .ti-flow-path { stroke-dasharray: 5 4; animation: ti-flow-dash 2.8s linear infinite; }
+        @keyframes ti-flow-dash { to { stroke-dashoffset: -36; } }
+        @media (prefers-reduced-motion: reduce) {
+          .ti-flow-path { animation: none; }
+        }
+      `}</style>
+      <Reveal className="w-full">
+        {/* Desktop/tablet — core centered, 3 cards left / 3 cards right, six individually-curved energy paths (no two crossing). */}
+        <div className="relative hidden h-[560px] w-full lg:block xl:h-[600px]">
+          <EnergyFlow core={DESKTOP_CORE} targets={DESKTOP_TARGETS} />
+          {DESKTOP_TARGETS.map((pos, i) => (
+            <div
+              key={ALL_CAPABILITIES[i].title}
+              className="absolute"
+              style={{
+                left: `${pos.x}%`,
+                top: `${pos.y}%`,
+                transform: i < 3 ? "translate(-100%, -50%)" : "translate(0%, -50%)",
+              }}
+            >
+              <CapabilityCard {...ALL_CAPABILITIES[i]} />
+            </div>
+          ))}
+          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
+            <AiCore />
           </div>
         </div>
 
-        {/* Mobile/small tablet — core on top, one short ribbon, then a clean 2-column grid of all six cards. No desktop diagram squeezed down; a completely separate, simpler layout. */}
-        <div className="flex w-full flex-col items-center gap-0 lg:hidden">
-          <AiCore />
-          <EnergyRibbon orientation="vertical" />
-          <div className="mt-2 grid w-full grid-cols-1 gap-3 sm:grid-cols-2">
-            {[...LEFT_CAPABILITIES, ...RIGHT_CAPABILITIES].map((item) => (
-              <CapabilityCard key={item.title} {...item} />
+        {/* Mobile/small tablet — large core up top, a visible fanning spine down to all six cards stacked in one column. Not a shrunk desktop layout. */}
+        <div className="relative flex w-full flex-col items-center lg:hidden">
+          <div className="relative w-full" style={{ minHeight: "clamp(760px, 190vw, 880px)" }}>
+            <EnergyFlow core={MOBILE_CORE} targets={MOBILE_TARGETS} />
+            <div className="absolute left-1/2" style={{ top: `${MOBILE_CORE.y}%`, transform: "translate(-50%, -50%)" }}>
+              <AiCore />
+            </div>
+            {MOBILE_TARGETS.map((pos, i) => (
+              <div
+                key={ALL_CAPABILITIES[i].title}
+                className="absolute w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2"
+                style={{ left: `${pos.x}%`, top: `${pos.y}%` }}
+              >
+                <CapabilityCard {...ALL_CAPABILITIES[i]} />
+              </div>
             ))}
           </div>
         </div>
