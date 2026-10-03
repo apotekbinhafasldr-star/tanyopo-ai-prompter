@@ -1,5 +1,7 @@
 export { Hero } from "@/features/marketing/sections/hero";
 export { TanyopoIntelligence } from "@/features/marketing/sections/tanyopo-intelligence";
+export { IdeToResult } from "@/features/marketing/sections/ide-ke-hasil";
+export { DeviceShowcase } from "@/features/marketing/sections/device-showcase";
 export { HowItWorks } from "@/features/marketing/sections/how-it-works";
 export { AiTeam } from "@/features/marketing/sections/ai-team";
 export { AdPersonaBridge } from "@/features/marketing/sections/adpersona-bridge";
