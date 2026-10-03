@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, Plug2, Brain, Rocket, TrendingUp, type LucideIcon } from "lucide-react";
+import { ArrowRight, ArrowLeft, Plug2, Brain, Rocket, TrendingUp, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Reveal } from "@/features/marketing/components/reveal";
 import { cn } from "@/lib/utils/cn";
@@ -95,13 +95,22 @@ function StepIcon({ icon: Icon, index }: { icon: LucideIcon; index: number }) {
   );
 }
 
-/** A bare workflow node — glowing icon + numbered badge + title + description. No border/box around it (round 9: "do not place each step inside a large box"). */
+/**
+ * A bare workflow node — glowing icon + numbered badge + title +
+ * description. No border/box around it. `min-w-0` is load-bearing on
+ * mobile: inside a CSS Grid `1fr` column, a text child's implicit
+ * "auto" minimum width is its *content* width unless overridden, which
+ * can silently force the column (and the whole grid) wider than its
+ * container — the classic cause of a grid that looks fine in isolation
+ * but overflows its real parent. `break-words` is a second, redundant
+ * guard against the same failure mode for any unexpectedly long word.
+ */
 function StepNode({ step, index }: { step: Step; index: number }) {
   return (
-    <div className="flex w-full flex-col items-center gap-3 px-2 text-center">
+    <div className="flex min-w-0 w-full flex-col items-center gap-3 px-1 text-center">
       <StepIcon icon={step.icon} index={index} />
-      <span className="text-sm font-semibold text-white">{step.title}</span>
-      <span className="text-xs leading-relaxed text-white/60">{step.description}</span>
+      <span className="break-words text-sm font-semibold text-white">{step.title}</span>
+      <span className="break-words text-xs leading-relaxed text-white/60">{step.description}</span>
     </div>
   );
 }
@@ -113,15 +122,22 @@ function StepNode({ step, index }: { step: Step; index: number }) {
  * arrowhead, rather than a plain icon — so the connection itself reads
  * as energy flowing from node to node, not just a UI affordance.
  * `direction` picks the line's orientation: `right` (desktop/tablet
- * horizontal row) or `down` (mobile 2x2's row-to-row wrap).
+ * horizontal row, and the 1->2 / 3->4 hops within the mobile 2x2's
+ * rows) or `down` (the 2->3 row-to-row hop) or `left` (the mobile 2x2
+ * layout's snake/boustrophedon turn: row two reads right-to-left so
+ * node 3, directly under node 2, connects to node 4 at its left —
+ * matching the founder's exact diagram `[1]->[2] / v / [4]<-[3]`).
  */
-function StepConnector({ direction }: { direction: "right" | "down" }) {
+function StepConnector({ direction }: { direction: "right" | "left" | "down" }) {
   const isDown = direction === "down";
+  const isLeft = direction === "left";
+  const ArrowIcon = isLeft ? ArrowLeft : ArrowRight;
   return (
     <div
       className={cn(
         "flex shrink-0 items-center justify-center gap-1 opacity-80",
         isDown ? "h-6 w-full flex-col" : "h-full w-8 flex-row sm:w-12",
+        isLeft && "flex-row-reverse",
       )}
     >
       <span
@@ -132,7 +148,7 @@ function StepConnector({ direction }: { direction: "right" | "down" }) {
           boxShadow: "0 0 8px 1px rgba(99,102,241,0.6)",
         }}
       />
-      <ArrowRight
+      <ArrowIcon
         className={cn("size-3.5 shrink-0 text-cyan-300/80", isDown && "rotate-90")}
         style={{ filter: "drop-shadow(0 0 4px rgba(34,211,238,0.8))" }}
         aria-hidden
@@ -179,17 +195,31 @@ export function IdeToResult() {
         </Reveal>
 
         <Reveal className="w-full" delayMs={100}>
-          {/* Below sm: compact 2x2 grid (1-2 top row, 3-4 bottom row) with its own connectors. */}
-          <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-y-5 sm:hidden">
+          {/*
+            Below sm: compact 2x2 grid, read as a snake/boustrophedon —
+            1 -> 2 across the top, down into 3 (directly beneath 2),
+            then 3 -> 4 back across the bottom: [1]->[2] / v / [4]<-[3].
+            Row two's DOM order is deliberately [4, 3] (not [3, 4]) so
+            node 3 lands in the grid's right column, directly under
+            node 2, matching that exact shape. `grid-cols-[1fr_auto_1fr]`
+            keeps both node columns equal width; the middle column is
+            only as wide as the connector itself, never fixed-px wider
+            than the viewport, so nothing here can push past 100%.
+          */}
+          <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-y-3 sm:hidden">
             <StepNode step={STEPS[0]} index={0} />
             <StepConnector direction="right" />
             <StepNode step={STEPS[1]} index={1} />
-            <div className="col-span-3 flex justify-center">
+
+            <div aria-hidden />
+            <div aria-hidden />
+            <div className="flex justify-center">
               <StepConnector direction="down" />
             </div>
-            <StepNode step={STEPS[2]} index={2} />
-            <StepConnector direction="right" />
+
             <StepNode step={STEPS[3]} index={3} />
+            <StepConnector direction="left" />
+            <StepNode step={STEPS[2]} index={2} />
           </div>
 
           {/* sm and up: one horizontal row, left -> right. */}
