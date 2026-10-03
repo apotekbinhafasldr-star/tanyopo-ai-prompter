@@ -3,59 +3,58 @@ import { Reveal } from "@/features/marketing/components/reveal";
 import { cn } from "@/lib/utils/cn";
 
 /**
- * Tanyopo Intelligence diagram — revision 7 ("final deterministic
- * rebuild") of the PR #21 final-landing-visual work, tightening revision
- * 6's left/core/right composition to the founder's exact deterministic
- * spec (fixed zone widths, fixed core/node sizes, fixed energy stroke
- * widths — not "approximately" via Tailwind's spacing scale):
+ * Tanyopo Intelligence diagram — revision 8 ("ribbon energy + in-sphere
+ * title") of the PR #21 final-landing-visual work, on top of revision
+ * 7's left/core/right composition (unchanged: `grid-cols-[28%_44%_28%]`
+ * on desktop, three nodes per side, centered core, no below-core grid,
+ * no standalone "Pertumbuhan Bisnis" node). This round's founder
+ * feedback targeted two specific things, both addressed here:
  *
- *   LeftNodes (28%)      Core, true visual center (44%)   RightNodes (28%)
- *   Produk Anda                                        Konten & Copywriting
- *   Strategi Marketing                                  Campaign
- *   Analitik                                             Optimasi
+ *   1. "Tanyopo Intelligence" / "AI Business Brain" now render INSIDE
+ *      the core sphere (stacked under the brain icon), not underneath
+ *      it — `AiCore` no longer renders a separate text block below the
+ *      circle.
+ *   2. The energy connections now read as luminous flowing ribbons
+ *      rather than thin wires: each of the six `EnergyNetwork` branches
+ *      is three stroke layers — a broad translucent glow (blurred), a
+ *      medium colored energy layer, and a narrow bright center — plus a
+ *      subtle magenta highlight on two branches. Still plain curved SVG
+ *      paths (no rings, no straight connector/bus lines, no spiderweb).
  *
- * Still true (do not reintroduce without explicit founder sign-off):
- *   - no six-card 2x3 grid stacked BELOW the core on desktop
- *   - no horizontal/vertical divider bars
- *   - no standalone "Pertumbuhan Bisnis" outcome card — growth is already
- *     communicated by this section's own heading/copy and bottom bar in
- *     tanyopo-intelligence.tsx (untouched)
+ * Also tightened per "reduce unnecessary vertical whitespace":
+ * `min-h-[560px]`→`min-h-[480px]` (desktop), card gap `gap-7`→`gap-5`.
  *
  * Desktop: `grid-cols-[28%_44%_28%]` — explicit LeftNodes / Core /
- * RightNodes zones (not `1fr`/`auto`, so the 28/44/28 split is exact
- * regardless of content), `min-h-[560px] lg:min-h-[600px]` (founder's
- * 560–620px spec), core fixed at `size-[260px]` (founder's ~260px spec),
- * each node capped at `max-w-[280px]` with `min-h-[90px]` (founder's
- * 240–280px / 90px spec). DOM order mirrors the founder's required
- * logical structure: EnergySVG, then LeftNodes, then Core, then
- * RightNodes — three nodes vertically surrounding the core on each side,
- * nothing below this row.
+ * RightNodes zones, `min-h-[480px] lg:min-h-[520px]`, core fixed at
+ * `size-[260px]`, each node capped at `max-w-[280px]` with
+ * `min-h-[90px]`. DOM order mirrors the required logical structure:
+ * EnergySVG, then LeftNodes, then Core, then RightNodes — three nodes
+ * vertically surrounding the core on each side, nothing below this row.
  *
- * Mobile: a centered core fixed at `size-[200px]` (founder's 190–210px
- * spec) directly above a true 2-column x 3-row grid of the same six
- * nodes (same row order as before), with the energy network fanning from
- * the core straight into the grid — no stacked single-column fallback,
- * no extra divider bars between them.
+ * Mobile: a centered core fixed at `size-[200px]` directly above a true
+ * 2-column x 3-row grid of the same six nodes, with the energy network
+ * fanning from the core straight into the grid — no stacked
+ * single-column fallback, no extra divider bars between them.
  *
  * Energy network: `EnergyNetwork`, a decorative SVG overlay absolutely
  * positioned (`inset-0`, `pointer-events-none`) inside the already-
  * `relative` composition wrapper. It never participates in grid/flex
  * sizing — the surrounding grid/flex rules are what place the core and
- * cards; the SVG only draws six organic energy paths between fixed
- * percentage anchor points on top of that fixed layout, each as a wide
- * blurred glow pass (founder's ~16–24px-equivalent width, via
- * `vector-effect="non-scaling-stroke"` so the width is a fixed screen
- * size, opacity ~0.3) plus a bright narrower pass on top (~5–6px
- * equivalent, opacity ~0.9), cyan->blue->violet, with a subtle magenta
- * highlight pass on two branches. It renders at `z-0`, strictly behind
- * the core/cards at `z-10`.
+ * cards; the SVG only draws six organic ribbon paths between fixed
+ * percentage anchor points on top of that fixed layout. It renders at
+ * `z-0`, strictly behind the core/cards at `z-10`.
  *
  * A restrained ambient background field (soft cyan/blue/violet radial
  * glows, `AmbientField`) sits behind the whole composition at `-z-10` —
  * decorative only, does not affect layout, background stays light.
  *
- * tanyopo-intelligence.tsx (heading, supporting copy, bottom value
- * strip) and every other section of the landing page are untouched.
+ * tanyopo-intelligence.tsx — this round's founder brief also asked for
+ * new copy on that file's bottom outcome strip ("Hasil Nyata untuk
+ * Pertumbuhan Bisnis Anda" + 4 emoji items), so unlike prior revisions
+ * that file is NOT fully untouched this round; see its own file header
+ * for exactly what changed there. Everything else in it (heading,
+ * supporting copy) and every other section of the landing page remain
+ * untouched.
  */
 type Capability = { icon: LucideIcon; title: string; description: string };
 
@@ -115,52 +114,61 @@ function CapabilityCard({ icon: Icon, title, description }: Capability) {
 
 /**
  * The centerpiece and visual hero of the section. Desktop: a fixed
- * `size-[260px]` (founder's ~260px spec). Mobile: a fixed `size-[200px]`
- * (founder's 190–210px spec). Deep-blue -> electric blue -> violet
- * radial core, strong cyan outer ring, violet secondary glow, a wide
- * soft ambient halo, and a bright inner highlight so it reads as
- * dominant against every surrounding node — never a flat blue circle.
- * All glow layers are decorative, absolutely positioned within this
- * already-relative wrapper, and sit behind the core circle (`-z-10`), so
- * none of them affect the core's own size or surrounding layout.
+ * `size-[260px]`. Mobile: a fixed `size-[200px]`. Deep-blue -> electric
+ * blue -> violet radial core, strong cyan outer ring, violet secondary
+ * glow, a wide soft ambient halo, and a bright inner highlight so it
+ * reads as dominant against every surrounding node — never a flat blue
+ * circle. All glow layers are decorative, absolutely positioned within
+ * this already-relative wrapper, and sit behind the core circle
+ * (`-z-10`), so none of them affect the core's own size or surrounding
+ * layout.
+ *
+ * Per explicit founder correction: "Tanyopo Intelligence" / "AI Business
+ * Brain" render INSIDE the sphere, stacked under the brain icon — there
+ * is no separate text block below the circle anymore.
  */
 function AiCore({ variant }: { variant: "desktop" | "mobile" }) {
+  const isDesktop = variant === "desktop";
   return (
-    <div className="relative z-10 flex shrink-0 flex-col items-center gap-3">
-      <div className="relative flex items-center justify-center">
-        <div
+    <div className="relative z-10 flex shrink-0 items-center justify-center">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -inset-12 -z-10 rounded-full opacity-70 blur-3xl"
+        style={{ background: "radial-gradient(circle, rgba(34,211,238,0.45) 0%, rgba(139,92,246,0.3) 55%, transparent 78%)" }}
+      />
+      <div
+        aria-hidden
+        className="marketing-glow-pulse pointer-events-none absolute inset-0 -z-10 rounded-full blur-3xl"
+        style={{ background: "radial-gradient(circle, rgba(139,92,246,0.55) 0%, transparent 72%)" }}
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -inset-4 -z-10 rounded-full opacity-80 blur-xl"
+        style={{ background: "radial-gradient(circle, rgba(34,211,238,0.65) 0%, transparent 70%)" }}
+      />
+      <div
+        className={cn(
+          "relative flex items-center justify-center overflow-hidden rounded-full text-white shadow-[0_0_100px_-12px_rgba(37,99,235,0.85)] ring-[3px] ring-[#a5f3fc]/90",
+          isDesktop ? "size-[260px]" : "size-[200px]",
+        )}
+        style={{ background: "radial-gradient(circle at 32% 28%, #67e8f9 0%, #3b82f6 42%, #1d4ed8 78%, #4c1d95 100%)" }}
+      >
+        <span
           aria-hidden
-          className="pointer-events-none absolute -inset-12 -z-10 rounded-full opacity-70 blur-3xl"
-          style={{ background: "radial-gradient(circle, rgba(34,211,238,0.45) 0%, rgba(139,92,246,0.3) 55%, transparent 78%)" }}
+          className="pointer-events-none absolute -left-4 -top-6 size-28 rounded-full opacity-70 blur-xl"
+          style={{ background: "radial-gradient(circle, rgba(255,255,255,0.85) 0%, transparent 70%)" }}
         />
-        <div
-          aria-hidden
-          className="marketing-glow-pulse pointer-events-none absolute inset-0 -z-10 rounded-full blur-3xl"
-          style={{ background: "radial-gradient(circle, rgba(139,92,246,0.55) 0%, transparent 72%)" }}
-        />
-        <div
-          aria-hidden
-          className="pointer-events-none absolute -inset-4 -z-10 rounded-full opacity-80 blur-xl"
-          style={{ background: "radial-gradient(circle, rgba(34,211,238,0.65) 0%, transparent 70%)" }}
-        />
-        <div
-          className={cn(
-            "relative flex items-center justify-center overflow-hidden rounded-full text-white shadow-[0_0_100px_-12px_rgba(37,99,235,0.85)] ring-[3px] ring-[#a5f3fc]/90",
-            variant === "desktop" ? "size-[260px]" : "size-[200px]",
-          )}
-          style={{ background: "radial-gradient(circle at 32% 28%, #67e8f9 0%, #3b82f6 42%, #1d4ed8 78%, #4c1d95 100%)" }}
-        >
-          <span
-            aria-hidden
-            className="pointer-events-none absolute -left-4 -top-6 size-28 rounded-full opacity-70 blur-xl"
-            style={{ background: "radial-gradient(circle, rgba(255,255,255,0.85) 0%, transparent 70%)" }}
-          />
-          <Brain className={cn("relative z-10", variant === "desktop" ? "size-20" : "size-16")} aria-hidden />
+        <div className="relative z-10 flex flex-col items-center gap-1.5 px-5 text-center">
+          <Brain className={isDesktop ? "size-10" : "size-8"} aria-hidden />
+          <p className={cn("font-bold leading-tight", isDesktop ? "text-lg" : "text-base")}>
+            Tanyopo
+            <br />
+            Intelligence
+          </p>
+          <p className={cn("font-semibold uppercase tracking-wide text-cyan-100", isDesktop ? "text-[11px]" : "text-[10px]")}>
+            AI Business Brain
+          </p>
         </div>
-      </div>
-      <div className="flex flex-col items-center gap-1 px-2">
-        <p className={cn("font-bold text-foreground", variant === "desktop" ? "text-2xl" : "text-xl")}>Tanyopo Intelligence</p>
-        <p className="text-xs font-semibold uppercase tracking-wide text-brand">AI Business Brain</p>
       </div>
     </div>
   );
@@ -189,40 +197,44 @@ function AmbientField() {
 }
 
 /**
- * Six clearly visible luminous energy streams from the core out to each
- * capability node — the visual feature the mockup calls out as most
- * important. Rendered as a decorative SVG overlay, absolutely positioned
- * (`inset-0`, `pointer-events-none`) *inside the already-`relative`
- * composition wrapper*. It never sizes or shifts that wrapper — the
- * grid/flex rules already in place are what place the core and cards;
- * this only draws organic curved paths between fixed percentage anchor
- * points on top of that fixed layout. Each branch is a wide blurred glow
- * path plus a bright narrower path on top (cyan -> blue -> violet), and
- * two branches add a subtle magenta highlight pass for variety. The
- * whole SVG is `z-0`, strictly behind the core/cards at `z-10`, so
- * streams read as flowing *behind* them, never over them.
+ * Six luminous flowing energy ribbons from the core out to each
+ * capability node. Rendered as a decorative SVG overlay, absolutely
+ * positioned (`inset-0`, `pointer-events-none`) *inside the already-
+ * `relative` composition wrapper*. It never sizes or shifts that
+ * wrapper — the grid/flex rules already in place are what place the
+ * core and cards; this only draws organic curved paths between fixed
+ * percentage anchor points on top of that fixed layout.
  *
- * `desktop` fans from the core's center to three organic anchor points
- * on each side (matching the three stacked nodes in each column).
- * `mobile` fans from the point directly below the core down into all six
- * grid cells (2 columns x 3 rows).
+ * Per explicit founder correction, each branch is three stroke layers
+ * (not two) so it reads as a flowing ribbon rather than a wire: a broad
+ * translucent glow (blurred), a medium colored energy layer, and a
+ * narrow bright center — plus a subtle magenta highlight on two
+ * branches. Still a plain curved stroked path (no rings, no straight
+ * connector/bus lines, no spiderweb). The whole SVG is `z-0`, strictly
+ * behind the core/cards at `z-10`, so ribbons read as flowing *behind*
+ * them, never over them.
+ *
+ * `desktop` fans from the core's center to three anchor points on each
+ * side (matching the three stacked nodes in each column). `mobile` fans
+ * from the point directly below the core down into all six grid cells
+ * (2 columns x 3 rows).
  */
 function EnergyNetwork({ variant }: { variant: "desktop" | "mobile" }) {
   const desktopLines = [
-    { d: "M50,50 C40,44 32,30 34,16", highlight: true },
-    { d: "M50,50 C42,50 38,50 32,50", highlight: false },
-    { d: "M50,50 C40,56 32,70 34,84", highlight: false },
-    { d: "M50,50 C60,44 68,30 66,16", highlight: false },
-    { d: "M50,50 C58,50 62,50 68,50", highlight: false },
-    { d: "M50,50 C60,56 68,70 66,84", highlight: true },
+    { d: "M50,50 C40,44 34,34 30,25", highlight: true },
+    { d: "M50,50 C42,50 36,50 30,50", highlight: false },
+    { d: "M50,50 C40,56 34,66 30,75", highlight: false },
+    { d: "M50,50 C60,44 66,34 70,25", highlight: false },
+    { d: "M50,50 C58,50 64,50 70,50", highlight: false },
+    { d: "M50,50 C60,56 66,66 70,75", highlight: true },
   ];
   const mobileLines = [
-    { d: "M50,2 C34,6 26,10 25,17", highlight: true },
-    { d: "M50,2 C66,6 74,10 75,17", highlight: false },
-    { d: "M50,2 C26,18 24,36 25,50", highlight: false },
-    { d: "M50,2 C74,18 76,36 75,50", highlight: false },
-    { d: "M50,2 C20,24 22,62 25,83", highlight: false },
-    { d: "M50,2 C80,24 78,62 75,83", highlight: true },
+    { d: "M50,3 C34,8 26,12 25,17", highlight: true },
+    { d: "M50,3 C66,8 74,12 75,17", highlight: false },
+    { d: "M50,3 C26,22 24,38 25,50", highlight: false },
+    { d: "M50,3 C74,22 76,38 75,50", highlight: false },
+    { d: "M50,3 C20,30 22,65 25,83", highlight: false },
+    { d: "M50,3 C80,30 78,65 75,83", highlight: true },
   ];
   const lines = variant === "desktop" ? desktopLines : mobileLines;
   const gradientId = `energy-gradient-${variant}`;
@@ -241,42 +253,52 @@ function EnergyNetwork({ variant }: { variant: "desktop" | "mobile" }) {
           <stop offset="50%" stopColor="#3b82f6" />
           <stop offset="100%" stopColor="#8b5cf6" />
         </linearGradient>
-        <filter id={blurId} x="-80%" y="-80%" width="260%" height="260%">
-          <feGaussianBlur stdDeviation="5" />
+        <filter id={blurId} x="-100%" y="-100%" width="300%" height="300%">
+          <feGaussianBlur stdDeviation="6" />
         </filter>
       </defs>
       {lines.map((line, index) => (
         <g key={index}>
-          {/* A. wide blurred glow pass — founder's ~16-24px-equivalent width, ~0.25-0.40 opacity, screen-fixed via non-scaling-stroke */}
+          {/* 1. broad translucent glow layer */}
           <path
             d={line.d}
             stroke={`url(#${gradientId})`}
-            strokeWidth={20}
+            strokeWidth={30}
             strokeLinecap="round"
             fill="none"
-            opacity={0.32}
+            opacity={0.18}
             filter={`url(#${blurId})`}
             vectorEffect="non-scaling-stroke"
           />
-          {/* B. bright energy-center pass — founder's ~4-7px-equivalent width, ~0.8-1 opacity */}
+          {/* 2. medium colored energy layer */}
           <path
             d={line.d}
             stroke={`url(#${gradientId})`}
-            strokeWidth={5.5}
+            strokeWidth={11}
             strokeLinecap="round"
             fill="none"
-            opacity={0.92}
+            opacity={0.5}
             vectorEffect="non-scaling-stroke"
           />
-          {/* Subtle magenta highlight on select branches for organic variety */}
+          {/* 3. narrow bright center layer */}
+          <path
+            d={line.d}
+            stroke={`url(#${gradientId})`}
+            strokeWidth={3.2}
+            strokeLinecap="round"
+            fill="none"
+            opacity={0.95}
+            vectorEffect="non-scaling-stroke"
+          />
+          {/* Subtle magenta highlight on select branches */}
           {line.highlight && (
             <path
               d={line.d}
-              stroke="#e879f9"
-              strokeWidth={1.4}
+              stroke="#f0abfc"
+              strokeWidth={1.2}
               strokeLinecap="round"
               fill="none"
-              opacity={0.45}
+              opacity={0.4}
               vectorEffect="non-scaling-stroke"
             />
           )}
@@ -293,8 +315,9 @@ export function TanyopoIntelligenceDiagram() {
         {/*
           DESKTOP/TABLET — one fixed visual composition, explicit LEFT
           28% / CENTER 44% / RIGHT 28% zones (`grid-cols-[28%_44%_28%]`,
-          not 1fr/auto, so the split is exact regardless of content),
-          560-620px tall. Logical structure:
+          not 1fr/auto, so the split is exact regardless of content).
+          Tightened per founder follow-up ("reduce unnecessary vertical
+          whitespace"). Logical structure:
             Diagram
              +-- EnergySVG
              +-- LeftNodes (Produk, Strategi, Analitik)
@@ -303,12 +326,12 @@ export function TanyopoIntelligenceDiagram() {
           Three nodes vertically surround the core on each side. No
           capability cards, dividers, or outcome node below this row.
         */}
-        <div className="relative hidden min-h-[560px] grid-cols-[28%_44%_28%] items-center gap-x-8 lg:grid lg:min-h-[600px] xl:gap-x-12">
+        <div className="relative hidden min-h-[480px] grid-cols-[28%_44%_28%] items-center gap-x-8 lg:grid lg:min-h-[520px] xl:gap-x-12">
           <AmbientField />
           {/* EnergySVG */}
           <EnergyNetwork variant="desktop" />
           {/* LeftNodes */}
-          <div className="relative z-10 flex flex-col items-end justify-center gap-7">
+          <div className="relative z-10 flex flex-col items-end justify-center gap-5">
             {LEFT_CAPABILITIES.map((item) => (
               <CapabilityCard key={item.title} {...item} />
             ))}
@@ -318,7 +341,7 @@ export function TanyopoIntelligenceDiagram() {
             <AiCore variant="desktop" />
           </div>
           {/* RightNodes */}
-          <div className="relative z-10 flex flex-col items-start justify-center gap-7">
+          <div className="relative z-10 flex flex-col items-start justify-center gap-5">
             {RIGHT_CAPABILITIES.map((item) => (
               <CapabilityCard key={item.title} {...item} />
             ))}
@@ -335,7 +358,7 @@ export function TanyopoIntelligenceDiagram() {
           fanning straight from the core into it. No single-column
           stack, no divider bars, no separate growth card.
         */}
-        <div className="relative flex w-full flex-col items-center gap-3 lg:hidden">
+        <div className="relative flex w-full flex-col items-center gap-2 lg:hidden">
           <AmbientField />
           {/* MobileCore */}
           <AiCore variant="mobile" />

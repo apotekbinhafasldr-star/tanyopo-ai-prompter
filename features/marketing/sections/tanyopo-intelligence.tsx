@@ -1,8 +1,15 @@
-import { CheckCircle2 } from "lucide-react";
 import { Reveal } from "@/features/marketing/components/reveal";
 import { TanyopoIntelligenceDiagram } from "@/features/marketing/components/tanyopo-intelligence-diagram";
 
-const INDICATORS = ["Lebih Efisien", "Hasil Terukur", "Mudah Digunakan", "Aman & Terpercaya"];
+// Founder-specified outcome strip items (emoji glyph, not a lucide icon,
+// per the approved mockup copy) — each pairs a short benefit title with
+// a one-line concrete description, replacing the prior flat label list.
+const OUTCOMES = [
+  { emoji: "⚡", title: "Lebih Efisien", description: "Hemat waktu & tenaga" },
+  { emoji: "📊", title: "Hasil Terukur", description: "Data real, bukan asumsi" },
+  { emoji: "👥", title: "Mudah Digunakan", description: "Cocok untuk semua UMKM" },
+  { emoji: "🛡", title: "Aman & Terpercaya", description: "Data bisnis Anda terlindungi" },
+];
 
 /**
  * "Bagaimana LINOE Bekerja" / Tanyopo Intelligence.
@@ -20,14 +27,21 @@ const INDICATORS = ["Lebih Efisien", "Hasil Terukur", "Mudah Digunakan", "Aman &
  * only a short top fade continues the Hero's own ink tone before opening
  * into the light, glowing backdrop.
  *
- * "Tanyopo Intelligence Siap Kapan Saja..." in the bottom bar is a
- * deliberate rewrite of the founder's requested "AI Bekerja 24/7..." —
- * LINOE's automation still requires Owner approval before executing
- * anything (see services/automation-settings.ts /
- * toggleEmergencyStopAction), so it does not run autonomous background
- * jobs around the clock. This keeps the same "always available to help"
- * spirit without the unsupported 24/7-autonomous claim, consistent with
- * the honesty rule this same section's own prior brief established.
+ * Bottom outcome strip (`OUTCOMES`): per the founder's latest Tanyopo
+ * Intelligence visual brief, rewritten from a flat "Tanyopo Intelligence
+ * Siap Kapan Saja..." + plain label list to "Hasil Nyata untuk
+ * Pertumbuhan Bisnis Anda" + four emoji items, each with its own
+ * one-line description. This is the one part of this file the latest
+ * brief asked to change — the heading above the diagram and its
+ * supporting sentence are untouched, as is everything else in this
+ * file and every other section of the landing page. (The dropped
+ * "Tanyopo Intelligence Siap Kapan Saja" line was itself a deliberate
+ * rewrite of an earlier "AI Bekerja 24/7..." ask for the same honesty
+ * reason noted historically here: LINOE's automation still requires
+ * Owner approval before executing anything — see
+ * services/automation-settings.ts / toggleEmergencyStopAction — so no
+ * wording here should imply autonomous 24/7 operation or guaranteed
+ * growth/results.)
  */
 export function TanyopoIntelligence() {
   return (
@@ -69,21 +83,22 @@ export function TanyopoIntelligence() {
           delayMs={100}
         >
           <div
-            className="flex flex-col items-center gap-4 px-5 py-6 text-center sm:px-8 sm:py-7"
+            className="flex flex-col items-center gap-5 px-5 py-6 text-center sm:px-8 sm:py-7"
             style={{
               background:
                 "linear-gradient(120deg, color-mix(in srgb, #22d3ee 9%, var(--surface)), color-mix(in srgb, #8b5cf6 9%, var(--surface)))",
             }}
           >
-            <p className="text-base font-bold text-foreground sm:text-lg">
-              Tanyopo Intelligence Siap Kapan Saja untuk Pertumbuhan Bisnis Anda
-            </p>
-            <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2">
-              {INDICATORS.map((label) => (
-                <span key={label} className="inline-flex items-center gap-1.5 text-xs font-medium text-foreground sm:text-sm">
-                  <CheckCircle2 className="size-3.5 shrink-0 text-success" aria-hidden />
-                  {label}
-                </span>
+            <p className="text-base font-bold text-foreground sm:text-lg">Hasil Nyata untuk Pertumbuhan Bisnis Anda</p>
+            <div className="grid w-full grid-cols-2 gap-x-4 gap-y-4 sm:grid-cols-4">
+              {OUTCOMES.map((item) => (
+                <div key={item.title} className="flex flex-col items-center gap-1">
+                  <span aria-hidden className="text-xl leading-none">
+                    {item.emoji}
+                  </span>
+                  <span className="text-sm font-semibold text-foreground">{item.title}</span>
+                  <span className="text-xs text-muted-foreground">{item.description}</span>
+                </div>
               ))}
             </div>
           </div>
