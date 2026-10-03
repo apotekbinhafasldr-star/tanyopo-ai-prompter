@@ -3,68 +3,83 @@ import { Reveal } from "@/features/marketing/components/reveal";
 import { cn } from "@/lib/utils/cn";
 
 /**
- * Tanyopo Intelligence diagram — revision 5 ("final visual pass") of the
- * PR #21 final-landing-visual work, layered on top of revision 4's
- * approved structure. Revision 4 fixed the mobile layout: a real
- * two-column CSS Grid (`grid-cols-2`) instead of the broken single-column
- * stack, with the exact row order the founder specified:
- *   row 1: Produk Anda          | Strategi Marketing
- *   row 2: Konten & Copywriting | Campaign
- *   row 3: Analitik             | Optimasi
- * plus the "Pertumbuhan Bisnis" outcome node centered below the six
- * capabilities on both breakpoints. NONE of that structure changes here —
- * same grid/flex flow, same card positions, same mobile 2x3 shape.
+ * Tanyopo Intelligence diagram — revision 6 ("strict mockup rebuild") of
+ * the PR #21 final-landing-visual work. Founder rejected revision 5
+ * (luminous core + branching network bolted onto the old "core -> 2x3
+ * grid below -> growth node" structure): the composition itself was
+ * wrong, not just the glow level. This revision replaces the composition
+ * entirely to match the approved mockup:
  *
- * What this revision adds, per explicit founder sign-off for a premium
- * finishing pass:
- *   1. A more luminous AiCore — an added inner highlight layer and a
- *      brighter/wider halo on top of the existing cyan/blue/violet glow.
- *   2. A visible branching "energy network" from the core out to all six
- *      capability cards (both sides on desktop, both columns on mobile),
- *      rendered as a decorative SVG overlay (`EnergyNetwork`) — each
- *      branch is a bright cyan->blue->violet line plus a wider blurred
- *      glow behind it. This supersedes the old "no SVG" guidance now that
- *      the founder has asked for a visible branching network specifically;
- *      it is purely decorative, absolutely positioned (`inset-0`,
- *      `pointer-events-none`) *inside an already-`relative` flow
- *      container*, so it never participates in grid/flex sizing and
- *      cannot reintroduce the old overflow/empty-column failure mode —
- *      the underlying grid/flex structure is unchanged and still drives
- *      all real layout. Energy lines render at the back (`z-0`); cards and
- *      the core stay in front at `z-10`.
- *   3. Cosmetic-only card polish: slightly stronger glass blur, a thin
- *      violet/blue edge illumination ring, and a brighter icon glow.
- *      No change to card markup structure, spacing, or position.
- *   4. The capability system still connects down to "Pertumbuhan Bisnis"
- *      via the existing cyan->violet->green `VerticalEnergyBar`, now with
- *      a slightly stronger glow to match the brighter core.
+ *   LEFT NODES          CORE (true visual center)          RIGHT NODES
+ *   Produk Anda                                        Konten & Copywriting
+ *   Strategi Marketing                                  Campaign
+ *   Analitik                                             Optimasi
+ *
+ * Removed for good (do not reintroduce without explicit founder sign-off):
+ *   - the six-card 2x3 grid stacked BELOW the core on desktop
+ *   - the horizontal/vertical divider bars leading to it
+ *   - the standalone "Pertumbuhan Bisnis" outcome card — growth is already
+ *     communicated by this section's own heading/copy and bottom bar in
+ *     tanyopo-intelligence.tsx (untouched)
+ *
+ * Desktop: one 3-column composition (left column / core / right column),
+ * three capability nodes vertically surrounding the core on each side —
+ * this is the one piece of the old layout that was already structurally
+ * correct, so its grid mechanics (`grid-cols-[1fr_auto_1fr]`) carry over.
+ * The core itself now dominates (240–256px) with a wider halo.
+ *
+ * Mobile: a large centered core directly above a true 2-column x 3-row
+ * grid of the same six nodes (same row order as before), with the energy
+ * network fanning from the core straight into the grid — no stacked
+ * single-column fallback, no extra divider bars between them.
+ *
+ * Energy network: `EnergyNetwork`, a decorative SVG overlay absolutely
+ * positioned (`inset-0`, `pointer-events-none`) inside the already-
+ * `relative` composition wrapper. It never participates in grid/flex
+ * sizing — the surrounding grid/flex rules are what place the core and
+ * cards; the SVG only draws six organic, blurred+bright cyan->blue->
+ * violet (with a subtle magenta highlight on two branches) energy paths
+ * between fixed percentage anchor points on top of that fixed layout. It
+ * renders at `z-0`, strictly behind the core/cards at `z-10`.
+ *
+ * A restrained ambient background field (soft cyan/blue/violet radial
+ * glows, `AmbientField`) sits behind the whole composition at `-z-10` —
+ * decorative only, does not affect layout, background stays light.
  *
  * tanyopo-intelligence.tsx (heading, supporting copy, bottom value
- * strip) is untouched, as is every other section of the landing page.
+ * strip) and every other section of the landing page are untouched.
  */
 type Capability = { icon: LucideIcon; title: string; description: string };
 
 const PRODUK: Capability = { icon: Package, title: "Produk Anda", description: "Data produk, harga, stok, dan keunggulan." };
-const STRATEGI: Capability = { icon: Target, title: "Strategi Marketing", description: "Target, channel, dan peluang pasar." };
-const ANALITIK: Capability = { icon: BarChart3, title: "Analitik", description: "Hasil real-time, insight mudah dipahami." };
-const KONTEN: Capability = { icon: FileText, title: "Konten & Copywriting", description: "Ide, caption, materi iklan, dan visual." };
-const CAMPAIGN: Capability = { icon: Rocket, title: "Campaign", description: "Eksekusi campaign ke channel relevan." };
-const OPTIMASI: Capability = { icon: Sliders, title: "Optimasi", description: "Rekomendasi AI untuk hasil lebih baik." };
+const STRATEGI: Capability = {
+  icon: Target,
+  title: "Strategi Marketing",
+  description: "Menentukan target, channel, dan peluang pasar.",
+};
+const ANALITIK: Capability = {
+  icon: BarChart3,
+  title: "Analitik",
+  description: "Hasil real-time dan insight yang mudah dipahami.",
+};
+const KONTEN: Capability = {
+  icon: FileText,
+  title: "Konten & Copywriting",
+  description: "Ide, caption, materi iklan, dan visual yang menarik.",
+};
+const CAMPAIGN: Capability = { icon: Rocket, title: "Campaign", description: "Eksekusi campaign ke channel yang relevan." };
+const OPTIMASI: Capability = { icon: Sliders, title: "Optimasi", description: "Rekomendasi AI untuk hasil yang lebih baik." };
 
 const LEFT_CAPABILITIES: Capability[] = [PRODUK, STRATEGI, ANALITIK];
 const RIGHT_CAPABILITIES: Capability[] = [KONTEN, CAMPAIGN, OPTIMASI];
 
-// Exact row-major order the founder specified for the mobile 2-column grid.
+// Row-major order for the mobile 2-column grid — unchanged from the
+// approved mobile row order (row 1: Produk/Strategi, row 2: Konten/
+// Campaign, row 3: Analitik/Optimasi).
 const MOBILE_GRID_ORDER: Capability[] = [PRODUK, STRATEGI, KONTEN, CAMPAIGN, ANALITIK, OPTIMASI];
 
-const GROWTH: Capability = {
-  icon: TrendingUp,
-  title: "Pertumbuhan Bisnis",
-  description: "Hasil nyata dari seluruh sistem AI yang terhubung.",
-};
-
-/** Compact capability card — white/translucent glass, rounded, thin violet/blue edge illumination + blue shadow, icon + title + one short line. Always normal grid/flex flow, never absolutely positioned (the edge illumination is a layered box-shadow, not a border-breaking overlay, so card geometry/spacing is unchanged from the approved layout). `accent="success"` is used only for the Pertumbuhan Bisnis outcome node, to read as the destination rather than one of the six inputs. */
-function CapabilityCard({ icon: Icon, title, description, accent = "brand" }: Capability & { accent?: "brand" | "success" }) {
+/** Premium white-translucent glass node — rounded, subtle border, soft shadow, glowing icon container, cyan/blue/violet accents. Always normal grid/flex flow, never absolutely positioned; sized to feel embedded in the energy network without dominating the core. */
+function CapabilityCard({ icon: Icon, title, description }: Capability) {
   return (
     <div
       className="relative z-10 flex h-full w-full items-start gap-3 rounded-2xl border border-sky-100/80 bg-white/80 p-3.5 text-left backdrop-blur-md"
@@ -76,14 +91,8 @@ function CapabilityCard({ icon: Icon, title, description, accent = "brand" }: Ca
       <span
         className="flex size-10 shrink-0 items-center justify-center rounded-full text-white"
         style={{
-          background:
-            accent === "success"
-              ? "linear-gradient(135deg, #3b82f6 0%, #22c55e 100%)"
-              : "linear-gradient(135deg, #22d3ee 0%, #3b82f6 55%, #8b5cf6 100%)",
-          boxShadow:
-            accent === "success"
-              ? "0 0 20px -2px rgba(34,197,94,0.8)"
-              : "0 0 20px -2px rgba(59,130,246,0.85)",
+          background: "linear-gradient(135deg, #22d3ee 0%, #3b82f6 55%, #8b5cf6 100%)",
+          boxShadow: "0 0 20px -2px rgba(59,130,246,0.85)",
         }}
       >
         <Icon className="size-4" aria-hidden />
@@ -97,14 +106,16 @@ function CapabilityCard({ icon: Icon, title, description, accent = "brand" }: Ca
 }
 
 /**
- * The centerpiece. Desktop: 224–240px (size-56 / xl:size-60), within the
- * 220–240px spec. Mobile: a flat 192px (size-48), within this round's
- * 170–200px spec. Deep-blue center, cyan inner glow, violet outer glow,
- * thin bright outer ring, plus (final visual pass) a brighter/wider outer
- * halo layer and a soft inner highlight for a more luminous read. All
- * glow layers are decorative, absolutely positioned within this
- * already-relative wrapper, and sit behind the core circle (`-z-10`), so
- * none of them affect the core's own size or the surrounding layout.
+ * The centerpiece and visual hero of the section. Desktop: 240–256px
+ * (size-60 / xl:size-64), within the founder's 230–280px spec. Mobile: a
+ * flat 208px (size-52), within the 170–210px spec. Deep-blue -> electric
+ * blue -> violet radial core, strong cyan outer ring, violet secondary
+ * glow, a wide soft ambient halo, and a bright inner highlight so it
+ * reads as dominant against every surrounding node — never a flat blue
+ * circle. All glow layers are decorative, absolutely positioned within
+ * this already-relative wrapper, and sit behind the core circle
+ * (`-z-10`), so none of them affect the core's own size or surrounding
+ * layout.
  */
 function AiCore({ variant }: { variant: "desktop" | "mobile" }) {
   return (
@@ -112,7 +123,7 @@ function AiCore({ variant }: { variant: "desktop" | "mobile" }) {
       <div className="relative flex items-center justify-center">
         <div
           aria-hidden
-          className="pointer-events-none absolute -inset-10 -z-10 rounded-full opacity-70 blur-3xl"
+          className="pointer-events-none absolute -inset-12 -z-10 rounded-full opacity-70 blur-3xl"
           style={{ background: "radial-gradient(circle, rgba(34,211,238,0.45) 0%, rgba(139,92,246,0.3) 55%, transparent 78%)" }}
         />
         <div
@@ -127,17 +138,17 @@ function AiCore({ variant }: { variant: "desktop" | "mobile" }) {
         />
         <div
           className={cn(
-            "relative flex items-center justify-center overflow-hidden rounded-full text-white shadow-[0_0_90px_-10px_rgba(37,99,235,0.8)] ring-[3px] ring-[#a5f3fc]/90",
-            variant === "desktop" ? "size-56 xl:size-60" : "size-48",
+            "relative flex items-center justify-center overflow-hidden rounded-full text-white shadow-[0_0_100px_-12px_rgba(37,99,235,0.85)] ring-[3px] ring-[#a5f3fc]/90",
+            variant === "desktop" ? "size-60 xl:size-64" : "size-52",
           )}
           style={{ background: "radial-gradient(circle at 32% 28%, #67e8f9 0%, #3b82f6 42%, #1d4ed8 78%, #4c1d95 100%)" }}
         >
           <span
             aria-hidden
-            className="pointer-events-none absolute -left-4 -top-6 size-24 rounded-full opacity-70 blur-xl"
+            className="pointer-events-none absolute -left-4 -top-6 size-28 rounded-full opacity-70 blur-xl"
             style={{ background: "radial-gradient(circle, rgba(255,255,255,0.85) 0%, transparent 70%)" }}
           />
-          <Brain className={cn("relative z-10", variant === "desktop" ? "size-16 xl:size-20" : "size-14")} aria-hidden />
+          <Brain className={cn("relative z-10", variant === "desktop" ? "size-16 xl:size-20" : "size-16")} aria-hidden />
         </div>
       </div>
       <div className="flex flex-col items-center gap-1 px-2">
@@ -148,67 +159,63 @@ function AiCore({ variant }: { variant: "desktop" | "mobile" }) {
   );
 }
 
-/** Simple vertical cyan->blue->violet (or violet->green) gradient connector — plain CSS, no SVG. Used for the one connection that is naturally a single straight line: core-to-grid entry, and capability-system-to-growth-node. */
-function VerticalEnergyBar({ className, toGreen }: { className?: string; toGreen?: boolean }) {
+/**
+ * Restrained ambient energy field behind the whole composition — soft
+ * cyan/blue/violet radial glows only, no dark section, background stays
+ * primarily light. Purely decorative: absolutely positioned (`inset-0`,
+ * `-z-10`, `pointer-events-none`) inside the composition's own
+ * `relative` wrapper, so it never affects sizing or layout.
+ */
+function AmbientField() {
   return (
     <div
       aria-hidden
-      className={cn("w-1.5 shrink-0 rounded-full shadow-[0_0_20px_-2px_rgba(59,130,246,0.75)]", className)}
+      className="pointer-events-none absolute -inset-x-6 -inset-y-10 -z-10 opacity-80 sm:-inset-x-10"
       style={{
-        background: toGreen
-          ? "linear-gradient(180deg, #8b5cf6 0%, #22c55e 100%)"
-          : "linear-gradient(180deg, #22d3ee 0%, #3b82f6 50%, #8b5cf6 100%)",
+        background:
+          "radial-gradient(38% 46% at 8% 30%, rgba(34,211,238,0.16) 0%, transparent 72%), " +
+          "radial-gradient(42% 50% at 92% 70%, rgba(139,92,246,0.16) 0%, transparent 72%), " +
+          "radial-gradient(60% 38% at 50% 0%, rgba(59,130,246,0.12) 0%, transparent 75%)",
       }}
     />
   );
 }
 
-/** Horizontal distribution bar above the mobile grid — reads as "energy entering the whole capability system" without needing a line per card. */
-function HorizontalEnergyBar() {
-  return (
-    <div
-      aria-hidden
-      className="h-1.5 w-full max-w-xs rounded-full shadow-[0_0_16px_-2px_rgba(59,130,246,0.6)]"
-      style={{ background: "linear-gradient(90deg, #22d3ee 0%, #3b82f6 50%, #8b5cf6 100%)" }}
-    />
-  );
-}
-
 /**
- * Branching "energy network" from the core out to all six capability
- * cards — the final-visual-pass addition the founder asked for. Rendered
- * as a decorative SVG overlay, absolutely positioned (`inset-0`,
- * `pointer-events-none`) *inside the already-`relative` grid/flex
- * container that lays the cards out*. It never sizes or shifts that
- * container — the grid/flex rules already in place are what place the
- * cards; this only draws lines between approximate anchor points on top
- * of that fixed layout. Each branch is a wide, blurred glow line plus a
- * thin bright line on top (cyan -> blue -> violet), and the whole SVG is
- * `z-0`, strictly behind the cards and core at `z-10`, so lines read as
- * running *behind* the cards and text, never over them.
+ * Six clearly visible luminous energy streams from the core out to each
+ * capability node — the visual feature the mockup calls out as most
+ * important. Rendered as a decorative SVG overlay, absolutely positioned
+ * (`inset-0`, `pointer-events-none`) *inside the already-`relative`
+ * composition wrapper*. It never sizes or shifts that wrapper — the
+ * grid/flex rules already in place are what place the core and cards;
+ * this only draws organic curved paths between fixed percentage anchor
+ * points on top of that fixed layout. Each branch is a wide blurred glow
+ * path plus a bright narrower path on top (cyan -> blue -> violet), and
+ * two branches add a subtle magenta highlight pass for variety. The
+ * whole SVG is `z-0`, strictly behind the core/cards at `z-10`, so
+ * streams read as flowing *behind* them, never over them.
  *
- * `desktop` fans out from the core's center to three anchor points on
- * each side (matching the three stacked cards in each column). `mobile`
- * fans out from the point directly below the core (where the vertical +
- * horizontal bars already feed in) down to all six grid cells (2
- * columns x 3 rows).
+ * `desktop` fans from the core's center to three organic anchor points
+ * on each side (matching the three stacked nodes in each column).
+ * `mobile` fans from the point directly below the core down into all six
+ * grid cells (2 columns x 3 rows).
  */
 function EnergyNetwork({ variant }: { variant: "desktop" | "mobile" }) {
   const desktopLines = [
-    "M50,50 Q42,34 34,18",
-    "M50,50 L34,50",
-    "M50,50 Q42,66 34,82",
-    "M50,50 Q58,34 66,18",
-    "M50,50 L66,50",
-    "M50,50 Q58,66 66,82",
+    { d: "M50,50 C40,44 32,30 34,16", highlight: true },
+    { d: "M50,50 C42,50 38,50 32,50", highlight: false },
+    { d: "M50,50 C40,56 32,70 34,84", highlight: false },
+    { d: "M50,50 C60,44 68,30 66,16", highlight: false },
+    { d: "M50,50 C58,50 62,50 68,50", highlight: false },
+    { d: "M50,50 C60,56 68,70 66,84", highlight: true },
   ];
   const mobileLines = [
-    "M50,0 Q30,8 25,17",
-    "M50,0 Q70,8 75,17",
-    "M50,0 Q22,28 25,50",
-    "M50,0 Q78,28 75,50",
-    "M50,0 Q18,55 25,83",
-    "M50,0 Q82,55 75,83",
+    { d: "M50,2 C34,6 26,10 25,17", highlight: true },
+    { d: "M50,2 C66,6 74,10 75,17", highlight: false },
+    { d: "M50,2 C26,18 24,36 25,50", highlight: false },
+    { d: "M50,2 C74,18 76,36 75,50", highlight: false },
+    { d: "M50,2 C20,24 22,62 25,83", highlight: false },
+    { d: "M50,2 C80,24 78,62 75,83", highlight: true },
   ];
   const lines = variant === "desktop" ? desktopLines : mobileLines;
   const gradientId = `energy-gradient-${variant}`;
@@ -227,31 +234,45 @@ function EnergyNetwork({ variant }: { variant: "desktop" | "mobile" }) {
           <stop offset="50%" stopColor="#3b82f6" />
           <stop offset="100%" stopColor="#8b5cf6" />
         </linearGradient>
-        <filter id={blurId} x="-60%" y="-60%" width="220%" height="220%">
-          <feGaussianBlur stdDeviation="2.4" />
+        <filter id={blurId} x="-80%" y="-80%" width="260%" height="260%">
+          <feGaussianBlur stdDeviation="3" />
         </filter>
       </defs>
-      {lines.map((d, index) => (
+      {lines.map((line, index) => (
         <g key={index}>
+          {/* A. blurred wide glow path */}
           <path
-            d={d}
+            d={line.d}
             stroke={`url(#${gradientId})`}
-            strokeWidth={3.5}
+            strokeWidth={4.5}
             strokeLinecap="round"
             fill="none"
-            opacity={0.45}
+            opacity={0.55}
             filter={`url(#${blurId})`}
             vectorEffect="non-scaling-stroke"
           />
+          {/* B. bright narrower main path */}
           <path
-            d={d}
+            d={line.d}
             stroke={`url(#${gradientId})`}
-            strokeWidth={1}
+            strokeWidth={1.4}
             strokeLinecap="round"
             fill="none"
-            opacity={0.9}
+            opacity={0.95}
             vectorEffect="non-scaling-stroke"
           />
+          {/* Subtle magenta highlight on select branches for organic variety */}
+          {line.highlight && (
+            <path
+              d={line.d}
+              stroke="#e879f9"
+              strokeWidth={0.6}
+              strokeLinecap="round"
+              fill="none"
+              opacity={0.5}
+              vectorEffect="non-scaling-stroke"
+            />
+          )}
         </g>
       ))}
     </svg>
@@ -262,44 +283,34 @@ export function TanyopoIntelligenceDiagram() {
   return (
     <div className="relative mx-auto max-w-5xl">
       <Reveal className="w-full">
-        {/* DESKTOP/TABLET — core centered, 3 cards left / 3 cards right (unchanged, working layout), growth node centered below with a vertical connector down from the core. */}
-        <div className="hidden lg:flex lg:flex-col lg:items-center">
-          <div className="relative grid w-full grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-x-6 xl:gap-x-10">
-            <EnergyNetwork variant="desktop" />
-            <div className="flex flex-col items-end justify-center gap-6">
-              {LEFT_CAPABILITIES.map((item) => (
-                <CapabilityCard key={item.title} {...item} />
-              ))}
-            </div>
-            <div className="flex items-center justify-center px-2">
-              <AiCore variant="desktop" />
-            </div>
-            <div className="flex flex-col items-start justify-center gap-6">
-              {RIGHT_CAPABILITIES.map((item) => (
-                <CapabilityCard key={item.title} {...item} />
-              ))}
-            </div>
+        {/* DESKTOP/TABLET — deterministic 3-column composition: left capability column, core as true visual center, right capability column. Three nodes per side vertically surround the core. No content below this row. */}
+        <div className="relative hidden grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-x-8 lg:grid xl:gap-x-12">
+          <AmbientField />
+          <EnergyNetwork variant="desktop" />
+          <div className="relative z-10 flex flex-col items-end justify-center gap-7">
+            {LEFT_CAPABILITIES.map((item) => (
+              <CapabilityCard key={item.title} {...item} />
+            ))}
           </div>
-          <VerticalEnergyBar className="h-10" toGreen />
-          <div className="w-full max-w-xs">
-            <CapabilityCard {...GROWTH} accent="success" />
+          <div className="relative z-10 flex items-center justify-center px-2">
+            <AiCore variant="desktop" />
+          </div>
+          <div className="relative z-10 flex flex-col items-start justify-center gap-7">
+            {RIGHT_CAPABILITIES.map((item) => (
+              <CapabilityCard key={item.title} {...item} />
+            ))}
           </div>
         </div>
 
-        {/* MOBILE/TABLET — core on top, then a real 2-column x 3-row grid (never a single stacked column), growth node centered below. */}
-        <div className="flex w-full flex-col items-center gap-0 lg:hidden">
+        {/* MOBILE/TABLET — large centered core directly above a true 2-column x 3-row grid, with the energy network fanning straight from the core into the grid. No single-column stack, no extra divider bars. */}
+        <div className="relative flex w-full flex-col items-center gap-3 lg:hidden">
+          <AmbientField />
           <AiCore variant="mobile" />
-          <VerticalEnergyBar className="h-8" />
-          <HorizontalEnergyBar />
-          <div className="relative mt-4 grid w-full grid-cols-2 gap-3 sm:gap-4">
+          <div className="relative grid w-full grid-cols-2 gap-3 sm:gap-4">
             <EnergyNetwork variant="mobile" />
             {MOBILE_GRID_ORDER.map((item) => (
               <CapabilityCard key={item.title} {...item} />
             ))}
-          </div>
-          <VerticalEnergyBar className="mt-4 h-8" toGreen />
-          <div className="w-full max-w-xs">
-            <CapabilityCard {...GROWTH} accent="success" />
           </div>
         </div>
       </Reveal>
