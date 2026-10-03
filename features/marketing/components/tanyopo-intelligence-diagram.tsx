@@ -3,12 +3,17 @@ import { Reveal } from "@/features/marketing/components/reveal";
 import { cn } from "@/lib/utils/cn";
 
 /**
- * Tanyopo Intelligence diagram — revision 9 ("three final visual
- * fixes") of the PR #21 final-landing-visual work. Founder visually
- * inspected the deploy preview and called out exactly three problems,
- * all addressed here (composition itself — left/core/right on wider
- * screens, three nodes per side, no below-core grid, no standalone
- * "Pertumbuhan Bisnis" node — is otherwise unchanged):
+ * Tanyopo Intelligence diagram — revision 10 ("final visual
+ * finishing — energy connections only") of the PR #21
+ * final-landing-visual work. This round's brief said the core/cards
+ * are now in approximately correct positions and must not move again;
+ * the only outstanding item in this file is the energy connections'
+ * taper (see `EnergyNetwork`'s own header comment for the de Casteljau
+ * split used to make each ribbon visibly thicker near the core and
+ * narrower at the card). The composition itself — left/core/right on
+ * wider screens, three nodes per side, no below-core grid, no
+ * standalone "Pertumbuhan Bisnis" node — is unchanged from revision 9,
+ * whose three fixes remain valid and are summarized below:
  *
  *   1. The dark/grey band behind the section heading was coming from
  *      tanyopo-intelligence.tsx (the parent section), not this file —
@@ -239,58 +244,63 @@ function AmbientField() {
  * core and cards; this only draws organic curved paths between fixed
  * percentage anchor points on top of that fixed layout.
  *
- * Per explicit founder correction, each branch is three stroke layers
- * (not two) so it reads as a flowing ribbon rather than a wire: a broad
- * translucent glow (blurred), a medium colored energy layer, and a
- * narrow bright center — plus a subtle magenta highlight on two
- * branches. Still a plain curved stroked path (no rings, no straight
- * connector/bus lines, no spiderweb). The whole SVG is `z-0`, strictly
- * behind the core/cards at `z-10`, so ribbons read as flowing *behind*
- * them, never over them.
+ * Revision 9 ("final visual finishing") reworked the taper: founder
+ * feedback asked for ribbons that are visibly "thicker near the core"
+ * and narrow down toward each card. Each branch's original single
+ * cubic Bezier is now split into two segments at its exact midpoint
+ * (de Casteljau split, so the tangent matches exactly at the seam —
+ * no visible kink): a `near` segment (closest to the core) rendered
+ * with wider stroke widths, and a `far` segment (closest to the card)
+ * rendered with narrower stroke widths. Each segment still gets the
+ * same three-layer ribbon treatment (broad blurred glow / medium
+ * colored energy / narrow bright center) so the taper reads as one
+ * continuous flowing ribbon, not two different lines glued together.
+ * A subtle magenta highlight rides on top of both segments of two
+ * branches, same as before, also tapering with the ribbon.
  *
- * Each branch starts from its own point near the core's edge (not all
- * six from one dead-center point — see the comment below), already
- * aimed at its own target, so the six branches read as distinct
- * connections rather than overlapping into a ring/blob at the core.
- * `desktop` fans out to three anchor points on each side (matching the
- * three stacked nodes in each column). `mobile` fans from points near
- * the core's bottom edge down into all six grid cells (2 columns x 3
- * rows).
+ * Each branch still starts from its own point near the core's edge
+ * (not all six from one dead-center point), already aimed at its own
+ * target, so the six branches read as distinct connections rather
+ * than overlapping into a ring/blob at the core. `desktop` fans out to
+ * three anchor points on each side (matching the three stacked nodes
+ * in each column). `mobile` fans from points near the core's bottom
+ * edge down into all six grid cells (2 columns x 3 rows). Endpoints
+ * stay at x=22/78 (desktop) — well inside each card's footprint — so
+ * every stream visibly terminates behind its card's inner edge, never
+ * stopping short in the gutter.
  */
 function EnergyNetwork({ variant }: { variant: "desktop" | "mobile" }) {
-  // Each branch starts from its OWN point just inside the core's edge,
-  // already heading toward its own target — not all six from the exact
-  // same center point. That bunching was the previous "ring/blob"
-  // artifact: six wide blurred strokes overlapping at one spot read as
-  // a solid circle around the core instead of six distinct connections.
-  // The inner few units of each path sit behind the core (which renders
-  // above the energy layer at z-10), so visually each ribbon simply
-  // emerges from behind the sphere already aimed at its own card.
-  // Endpoints pushed to x=22/78 (well inside each card's footprint, not
-  // just at the theoretical 28% column boundary) so every stream
-  // visibly terminates behind its card's inner edge instead of stopping
-  // short in the gutter — the gap between the previous x=30/70 endpoints
-  // and the actual card edge was reading as "lines stopping in empty
-  // space" per founder feedback.
+  // Each line is pre-split at its curve's exact midpoint (de Casteljau),
+  // so `near` (core-side, wider strokes) and `far` (card-side, narrower
+  // strokes) share one continuous tangent at the seam.
   const desktopLines = [
-    { d: "M46,44 C38,38 28,30 22,25", highlight: true },
-    { d: "M44,50 C36,50 28,50 22,50", highlight: false },
-    { d: "M46,56 C38,62 28,70 22,75", highlight: false },
-    { d: "M54,44 C62,38 72,30 78,25", highlight: false },
-    { d: "M56,50 C64,50 72,50 78,50", highlight: false },
-    { d: "M54,56 C62,62 72,70 78,75", highlight: true },
+    { near: "M46,44 C42,41 37.5,37.5 33.3,34.1", far: "M33.3,34.1 C29,30.8 25,27.5 22,25", highlight: true },
+    { near: "M44,50 C40,50 36,50 32.3,50", far: "M32.3,50 C28.5,50 25,50 22,50", highlight: false },
+    { near: "M46,56 C42,59 37.5,62.5 33.3,65.9", far: "M33.3,65.9 C29,69.3 25,72.5 22,75", highlight: false },
+    { near: "M54,44 C58,41 62.5,37.5 66.8,34.1", far: "M66.8,34.1 C71,30.8 75,27.5 78,25", highlight: false },
+    { near: "M56,50 C60,50 64,50 67.8,50", far: "M67.8,50 C71.5,50 75,50 78,50", highlight: false },
+    { near: "M54,56 C58,59 62.5,62.5 66.8,65.9", far: "M66.8,65.9 C71,69.3 75,72.5 78,75", highlight: true },
   ];
   const mobileLines = [
-    { d: "M42,6 C36,9 28,13 25,17", highlight: true },
-    { d: "M58,6 C64,9 72,13 75,17", highlight: false },
-    { d: "M40,8 C32,16 26,32 25,50", highlight: false },
-    { d: "M60,8 C68,16 74,32 75,50", highlight: false },
-    { d: "M38,10 C28,24 24,58 25,83", highlight: false },
-    { d: "M62,10 C72,24 76,58 75,83", highlight: true },
+    { near: "M42,6 C39,7.5 35.5,9.25 32.4,11.1", far: "M32.4,11.1 C29.25,13 26.5,15 25,17", highlight: true },
+    { near: "M58,6 C61,7.5 64.5,9.25 67.6,11.1", far: "M67.6,11.1 C70.75,13 73.5,15 75,17", highlight: false },
+    { near: "M40,8 C36,12 32.5,18 29.9,25.3", far: "M29.9,25.3 C27.25,32.5 25.5,41 25,50", highlight: false },
+    { near: "M60,8 C64,12 67.5,18 70.1,25.3", far: "M70.1,25.3 C72.75,32.5 74.5,41 75,50", highlight: false },
+    { near: "M38,10 C33,17 29.5,29 27.4,42.4", far: "M27.4,42.4 C25.25,55.75 24.5,70.5 25,83", highlight: false },
+    { near: "M62,10 C67,17 70.5,29 72.6,42.4", far: "M72.6,42.4 C74.75,55.75 75.5,70.5 75,83", highlight: true },
   ];
   const lines = variant === "desktop" ? desktopLines : mobileLines;
   const gradientId = `energy-gradient-${variant}`;
   const blurId = `energy-blur-${variant}`;
+
+  // Ribbon layer widths/opacities, tapered: `near` (core-side) wider,
+  // `far` (card-side) narrower — same three-layer treatment on both so
+  // the seam reads as one continuous ribbon rather than two lines.
+  const layers = [
+    { key: "glow", near: 24, far: 13, opacity: 0.18, blur: true },
+    { key: "medium", near: 13, far: 7, opacity: 0.5, blur: false },
+    { key: "bright", near: 4, far: 2, opacity: 0.95, blur: false },
+  ] as const;
 
   return (
     <svg
@@ -311,48 +321,54 @@ function EnergyNetwork({ variant }: { variant: "desktop" | "mobile" }) {
       </defs>
       {lines.map((line, index) => (
         <g key={index}>
-          {/* 1. broad translucent glow layer */}
-          <path
-            d={line.d}
-            stroke={`url(#${gradientId})`}
-            strokeWidth={22}
-            strokeLinecap="round"
-            fill="none"
-            opacity={0.18}
-            filter={`url(#${blurId})`}
-            vectorEffect="non-scaling-stroke"
-          />
-          {/* 2. medium colored energy layer */}
-          <path
-            d={line.d}
-            stroke={`url(#${gradientId})`}
-            strokeWidth={11}
-            strokeLinecap="round"
-            fill="none"
-            opacity={0.5}
-            vectorEffect="non-scaling-stroke"
-          />
-          {/* 3. narrow bright center layer */}
-          <path
-            d={line.d}
-            stroke={`url(#${gradientId})`}
-            strokeWidth={3.2}
-            strokeLinecap="round"
-            fill="none"
-            opacity={0.95}
-            vectorEffect="non-scaling-stroke"
-          />
-          {/* Subtle magenta highlight on select branches */}
+          {layers.map((layer) => (
+            <g key={layer.key}>
+              {/* near (core-side) — wider */}
+              <path
+                d={line.near}
+                stroke={`url(#${gradientId})`}
+                strokeWidth={layer.near}
+                strokeLinecap="round"
+                fill="none"
+                opacity={layer.opacity}
+                filter={layer.blur ? `url(#${blurId})` : undefined}
+                vectorEffect="non-scaling-stroke"
+              />
+              {/* far (card-side) — tapers narrower */}
+              <path
+                d={line.far}
+                stroke={`url(#${gradientId})`}
+                strokeWidth={layer.far}
+                strokeLinecap="round"
+                fill="none"
+                opacity={layer.opacity}
+                filter={layer.blur ? `url(#${blurId})` : undefined}
+                vectorEffect="non-scaling-stroke"
+              />
+            </g>
+          ))}
+          {/* Subtle magenta highlight on select branches, tapering with the ribbon */}
           {line.highlight && (
-            <path
-              d={line.d}
-              stroke="#f0abfc"
-              strokeWidth={1.2}
-              strokeLinecap="round"
-              fill="none"
-              opacity={0.4}
-              vectorEffect="non-scaling-stroke"
-            />
+            <>
+              <path
+                d={line.near}
+                stroke="#f0abfc"
+                strokeWidth={1.6}
+                strokeLinecap="round"
+                fill="none"
+                opacity={0.4}
+                vectorEffect="non-scaling-stroke"
+              />
+              <path
+                d={line.far}
+                stroke="#f0abfc"
+                strokeWidth={0.9}
+                strokeLinecap="round"
+                fill="none"
+                opacity={0.4}
+                vectorEffect="non-scaling-stroke"
+              />
+            </>
           )}
         </g>
       ))}
