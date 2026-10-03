@@ -23,9 +23,16 @@ const OUTCOMES = [
  * panel to a light section bathed in a soft cyan/blue/violet ambient
  * glow, with the AI core diagram itself (features/marketing/components/
  * tanyopo-intelligence-diagram.tsx) sitting directly on that glow rather
- * than inside a dark card. Background never gets as dark as the Hero —
- * only a short top fade continues the Hero's own ink tone before opening
- * into the light, glowing backdrop.
+ * than inside a dark card.
+ *
+ * The section used to carry a short top fade continuing the Hero's own
+ * ink tone before opening into the light backdrop — removed per explicit
+ * founder correction: that fade sat directly behind the "BAGAIMANA LINOE
+ * BEKERJA" / "Tanyopo Intelligence di Balik Setiap Hasil Besar" heading,
+ * reading as a dark/grey band that made the heading look low-contrast.
+ * The section background is now one continuous light surface (`bg-
+ * background`, #fafafa) with only the existing subtle cyan/blue/violet
+ * radial glow (unchanged) — no dark overlay, no inherited Hero band.
  *
  * Bottom outcome strip (`OUTCOMES`): per the founder's latest Tanyopo
  * Intelligence visual brief, rewritten from a flat "Tanyopo Intelligence
@@ -46,11 +53,6 @@ const OUTCOMES = [
 export function TanyopoIntelligence() {
   return (
     <section className="relative overflow-hidden bg-background py-16 sm:py-24">
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-x-0 top-0 h-40 sm:h-56"
-        style={{ background: "linear-gradient(180deg, var(--ink) 0%, transparent 100%)" }}
-      />
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0"

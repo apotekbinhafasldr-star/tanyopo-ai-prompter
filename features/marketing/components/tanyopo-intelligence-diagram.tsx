@@ -3,58 +3,77 @@ import { Reveal } from "@/features/marketing/components/reveal";
 import { cn } from "@/lib/utils/cn";
 
 /**
- * Tanyopo Intelligence diagram — revision 8 ("ribbon energy + in-sphere
- * title") of the PR #21 final-landing-visual work, on top of revision
- * 7's left/core/right composition (unchanged: `grid-cols-[28%_44%_28%]`
- * on desktop, three nodes per side, centered core, no below-core grid,
- * no standalone "Pertumbuhan Bisnis" node). This round's founder
- * feedback targeted two specific things, both addressed here:
+ * Tanyopo Intelligence diagram — revision 9 ("three final visual
+ * fixes") of the PR #21 final-landing-visual work. Founder visually
+ * inspected the deploy preview and called out exactly three problems,
+ * all addressed here (composition itself — left/core/right on wider
+ * screens, three nodes per side, no below-core grid, no standalone
+ * "Pertumbuhan Bisnis" node — is otherwise unchanged):
  *
- *   1. "Tanyopo Intelligence" / "AI Business Brain" now render INSIDE
- *      the core sphere (stacked under the brain icon), not underneath
- *      it — `AiCore` no longer renders a separate text block below the
- *      circle.
- *   2. The energy connections now read as luminous flowing ribbons
- *      rather than thin wires: each of the six `EnergyNetwork` branches
- *      is three stroke layers — a broad translucent glow (blurred), a
- *      medium colored energy layer, and a narrow bright center — plus a
- *      subtle magenta highlight on two branches. Still plain curved SVG
- *      paths (no rings, no straight connector/bus lines, no spiderweb).
+ *   1. The dark/grey band behind the section heading was coming from
+ *      tanyopo-intelligence.tsx (the parent section), not this file —
+ *      see that file's own header for the fix (removing the leftover
+ *      Hero-ink top-fade div). Nothing to fix here, noted for context.
+ *   2. The 3-column left/core/right composition only activated at the
+ *      `lg` (1024px) breakpoint, so any tablet/landscape viewport
+ *      narrower than that fell back to the "core above a 2x3 grid"
+ *      mobile composition — which is what the founder was seeing and
+ *      correctly rejected as "core floating above all six cards". Fixed
+ *      by moving the breakpoint to `md` (768px): the left/core/right
+ *      composition (where the core is geometrically centered among all
+ *      six nodes, vertically aligned with the middle row) now covers
+ *      desktop AND tablet/landscape; only phone-portrait widths below
+ *      768px keep the stacked core-above-grid fallback. Core size also
+ *      brought down to the founder's new spec: `size-[230px]` for the
+ *      left/core/right composition (was 260px, founder's 210–240px
+ *      spec), `size-[170px]` for the phone fallback (was 200px,
+ *      founder's 150–180px spec).
+ *   3. The six energy branches all previously started from the exact
+ *      same point (dead center of the core), so their wide blurred
+ *      glow layers overlapped right at the core and read as a solid
+ *      ring/blob rather than six distinct connections. Fixed by
+ *      starting each branch from a different point just inside the
+ *      core's edge, in the direction of its own target node — the
+ *      inner portion is hidden behind the core (which renders above the
+ *      energy layer at `z-10`), so each branch now visibly emerges from
+ *      behind the sphere already heading toward its own card, instead
+ *      of all six bunching into one shape at the center.
  *
- * Also tightened per "reduce unnecessary vertical whitespace":
- * `min-h-[560px]`→`min-h-[480px]` (desktop), card gap `gap-7`→`gap-5`.
+ * Desktop/tablet (`md:` and up): `grid-cols-[28%_44%_28%]` — explicit
+ * LeftNodes / Core / RightNodes zones, core fixed at `size-[230px]`,
+ * each node capped at `max-w-[280px]` with `min-h-[90px]` (the
+ * `lg:min-w-[240px]` floor only applies at `lg`+, where the 28% column
+ * is wide enough not to overflow). DOM order mirrors the required
+ * logical structure: EnergySVG, then LeftNodes, then Core, then
+ * RightNodes — three nodes vertically surrounding the core on each
+ * side, nothing below this row.
  *
- * Desktop: `grid-cols-[28%_44%_28%]` — explicit LeftNodes / Core /
- * RightNodes zones, `min-h-[480px] lg:min-h-[520px]`, core fixed at
- * `size-[260px]`, each node capped at `max-w-[280px]` with
- * `min-h-[90px]`. DOM order mirrors the required logical structure:
- * EnergySVG, then LeftNodes, then Core, then RightNodes — three nodes
- * vertically surrounding the core on each side, nothing below this row.
- *
- * Mobile: a centered core fixed at `size-[200px]` directly above a true
- * 2-column x 3-row grid of the same six nodes, with the energy network
- * fanning from the core straight into the grid — no stacked
- * single-column fallback, no extra divider bars between them.
+ * Phone (below `md`): a centered core fixed at `size-[170px]` directly
+ * above a true 2-column x 3-row grid of the same six nodes, with the
+ * energy network fanning from the core straight into the grid — no
+ * stacked single-column fallback, no extra divider bars between them.
  *
  * Energy network: `EnergyNetwork`, a decorative SVG overlay absolutely
  * positioned (`inset-0`, `pointer-events-none`) inside the already-
  * `relative` composition wrapper. It never participates in grid/flex
  * sizing — the surrounding grid/flex rules are what place the core and
- * cards; the SVG only draws six organic ribbon paths between fixed
- * percentage anchor points on top of that fixed layout. It renders at
+ * cards; the SVG only draws six ribbon paths, each spread from its own
+ * start point near the core's edge (see fix #3 above) to its own node,
+ * as three stroke layers (broad translucent blurred glow, medium
+ * colored energy layer, narrow bright center) plus a subtle magenta
+ * highlight on two branches — still plain curved stroked paths, no
+ * rings, no straight connector/bus lines, no spiderweb. It renders at
  * `z-0`, strictly behind the core/cards at `z-10`.
  *
  * A restrained ambient background field (soft cyan/blue/violet radial
  * glows, `AmbientField`) sits behind the whole composition at `-z-10` —
  * decorative only, does not affect layout, background stays light.
  *
- * tanyopo-intelligence.tsx — this round's founder brief also asked for
- * new copy on that file's bottom outcome strip ("Hasil Nyata untuk
- * Pertumbuhan Bisnis Anda" + 4 emoji items), so unlike prior revisions
- * that file is NOT fully untouched this round; see its own file header
- * for exactly what changed there. Everything else in it (heading,
- * supporting copy) and every other section of the landing page remain
- * untouched.
+ * tanyopo-intelligence.tsx — this round's brief said to keep the
+ * "Hasil Nyata untuk Pertumbuhan Bisnis Anda" outcome strip exactly as
+ * it is; only its top dark-band div changes (see that file's header).
+ * Everything else in it and every other section of the landing page
+ * remain untouched.
  */
 type Capability = { icon: LucideIcon; title: string; description: string };
 
@@ -113,19 +132,21 @@ function CapabilityCard({ icon: Icon, title, description }: Capability) {
 }
 
 /**
- * The centerpiece and visual hero of the section. Desktop: a fixed
- * `size-[260px]`. Mobile: a fixed `size-[200px]`. Deep-blue -> electric
- * blue -> violet radial core, strong cyan outer ring, violet secondary
- * glow, a wide soft ambient halo, and a bright inner highlight so it
- * reads as dominant against every surrounding node — never a flat blue
- * circle. All glow layers are decorative, absolutely positioned within
- * this already-relative wrapper, and sit behind the core circle
- * (`-z-10`), so none of them affect the core's own size or surrounding
- * layout.
+ * The centerpiece and visual hero of the section. `desktop` variant
+ * (used for the left/core/right composition, `md` breakpoint and up): a
+ * fixed `size-[230px]` (founder's 210–240px spec). `mobile` variant
+ * (phone fallback below `md`): a fixed `size-[170px]` (founder's
+ * 150–180px spec). Deep-blue -> electric blue -> violet radial core,
+ * strong cyan outer ring, violet secondary glow, a wide soft ambient
+ * halo, and a bright inner highlight so it reads as dominant against
+ * every surrounding node — never a flat blue circle. All glow layers
+ * are decorative, absolutely positioned within this already-relative
+ * wrapper, and sit behind the core circle (`-z-10`), so none of them
+ * affect the core's own size or surrounding layout.
  *
- * Per explicit founder correction: "Tanyopo Intelligence" / "AI Business
- * Brain" render INSIDE the sphere, stacked under the brain icon — there
- * is no separate text block below the circle anymore.
+ * "Tanyopo Intelligence" / "AI Business Brain" render INSIDE the
+ * sphere, centered both horizontally and vertically, stacked under the
+ * brain icon — there is no separate text block below the circle.
  */
 function AiCore({ variant }: { variant: "desktop" | "mobile" }) {
   const isDesktop = variant === "desktop";
@@ -149,7 +170,7 @@ function AiCore({ variant }: { variant: "desktop" | "mobile" }) {
       <div
         className={cn(
           "relative flex items-center justify-center overflow-hidden rounded-full text-white shadow-[0_0_100px_-12px_rgba(37,99,235,0.85)] ring-[3px] ring-[#a5f3fc]/90",
-          isDesktop ? "size-[260px]" : "size-[200px]",
+          isDesktop ? "size-[230px]" : "size-[170px]",
         )}
         style={{ background: "radial-gradient(circle at 32% 28%, #67e8f9 0%, #3b82f6 42%, #1d4ed8 78%, #4c1d95 100%)" }}
       >
@@ -158,14 +179,19 @@ function AiCore({ variant }: { variant: "desktop" | "mobile" }) {
           className="pointer-events-none absolute -left-4 -top-6 size-28 rounded-full opacity-70 blur-xl"
           style={{ background: "radial-gradient(circle, rgba(255,255,255,0.85) 0%, transparent 70%)" }}
         />
-        <div className="relative z-10 flex flex-col items-center gap-1.5 px-5 text-center">
-          <Brain className={isDesktop ? "size-10" : "size-8"} aria-hidden />
-          <p className={cn("font-bold leading-tight", isDesktop ? "text-lg" : "text-base")}>
+        <div
+          className={cn(
+            "relative z-10 flex flex-col items-center justify-center gap-1.5 text-center",
+            isDesktop ? "px-5" : "px-4",
+          )}
+        >
+          <Brain className={isDesktop ? "size-9" : "size-7"} aria-hidden />
+          <p className={cn("font-bold leading-tight", isDesktop ? "text-base" : "text-sm")}>
             Tanyopo
             <br />
             Intelligence
           </p>
-          <p className={cn("font-semibold uppercase tracking-wide text-cyan-100", isDesktop ? "text-[11px]" : "text-[10px]")}>
+          <p className={cn("font-semibold uppercase tracking-wide text-cyan-100", isDesktop ? "text-[10px]" : "text-[9px]")}>
             AI Business Brain
           </p>
         </div>
@@ -214,27 +240,39 @@ function AmbientField() {
  * behind the core/cards at `z-10`, so ribbons read as flowing *behind*
  * them, never over them.
  *
- * `desktop` fans from the core's center to three anchor points on each
- * side (matching the three stacked nodes in each column). `mobile` fans
- * from the point directly below the core down into all six grid cells
- * (2 columns x 3 rows).
+ * Each branch starts from its own point near the core's edge (not all
+ * six from one dead-center point — see the comment below), already
+ * aimed at its own target, so the six branches read as distinct
+ * connections rather than overlapping into a ring/blob at the core.
+ * `desktop` fans out to three anchor points on each side (matching the
+ * three stacked nodes in each column). `mobile` fans from points near
+ * the core's bottom edge down into all six grid cells (2 columns x 3
+ * rows).
  */
 function EnergyNetwork({ variant }: { variant: "desktop" | "mobile" }) {
+  // Each branch starts from its OWN point just inside the core's edge,
+  // already heading toward its own target — not all six from the exact
+  // same center point. That bunching was the previous "ring/blob"
+  // artifact: six wide blurred strokes overlapping at one spot read as
+  // a solid circle around the core instead of six distinct connections.
+  // The inner few units of each path sit behind the core (which renders
+  // above the energy layer at z-10), so visually each ribbon simply
+  // emerges from behind the sphere already aimed at its own card.
   const desktopLines = [
-    { d: "M50,50 C40,44 34,34 30,25", highlight: true },
-    { d: "M50,50 C42,50 36,50 30,50", highlight: false },
-    { d: "M50,50 C40,56 34,66 30,75", highlight: false },
-    { d: "M50,50 C60,44 66,34 70,25", highlight: false },
-    { d: "M50,50 C58,50 64,50 70,50", highlight: false },
-    { d: "M50,50 C60,56 66,66 70,75", highlight: true },
+    { d: "M46,44 C40,40 34,32 30,25", highlight: true },
+    { d: "M44,50 C40,50 35,50 30,50", highlight: false },
+    { d: "M46,56 C40,60 34,68 30,75", highlight: false },
+    { d: "M54,44 C60,40 66,32 70,25", highlight: false },
+    { d: "M56,50 C60,50 65,50 70,50", highlight: false },
+    { d: "M54,56 C60,60 66,68 70,75", highlight: true },
   ];
   const mobileLines = [
-    { d: "M50,3 C34,8 26,12 25,17", highlight: true },
-    { d: "M50,3 C66,8 74,12 75,17", highlight: false },
-    { d: "M50,3 C26,22 24,38 25,50", highlight: false },
-    { d: "M50,3 C74,22 76,38 75,50", highlight: false },
-    { d: "M50,3 C20,30 22,65 25,83", highlight: false },
-    { d: "M50,3 C80,30 78,65 75,83", highlight: true },
+    { d: "M42,6 C36,9 28,13 25,17", highlight: true },
+    { d: "M58,6 C64,9 72,13 75,17", highlight: false },
+    { d: "M40,8 C32,16 26,32 25,50", highlight: false },
+    { d: "M60,8 C68,16 74,32 75,50", highlight: false },
+    { d: "M38,10 C28,24 24,58 25,83", highlight: false },
+    { d: "M62,10 C72,24 76,58 75,83", highlight: true },
   ];
   const lines = variant === "desktop" ? desktopLines : mobileLines;
   const gradientId = `energy-gradient-${variant}`;
@@ -263,7 +301,7 @@ function EnergyNetwork({ variant }: { variant: "desktop" | "mobile" }) {
           <path
             d={line.d}
             stroke={`url(#${gradientId})`}
-            strokeWidth={30}
+            strokeWidth={22}
             strokeLinecap="round"
             fill="none"
             opacity={0.18}
@@ -313,11 +351,14 @@ export function TanyopoIntelligenceDiagram() {
     <div className="relative mx-auto max-w-5xl">
       <Reveal className="w-full">
         {/*
-          DESKTOP/TABLET — one fixed visual composition, explicit LEFT
-          28% / CENTER 44% / RIGHT 28% zones (`grid-cols-[28%_44%_28%]`,
-          not 1fr/auto, so the split is exact regardless of content).
-          Tightened per founder follow-up ("reduce unnecessary vertical
-          whitespace"). Logical structure:
+          DESKTOP/TABLET (md and up, 768px+) — one fixed visual
+          composition, explicit LEFT 28% / CENTER 44% / RIGHT 28% zones
+          (`grid-cols-[28%_44%_28%]`, not 1fr/auto, so the split is
+          exact regardless of content). Breakpoint moved from `lg`
+          (1024px) to `md` (768px) per explicit founder correction: this
+          composition — core geometrically centered among all six nodes,
+          vertically aligned with the middle row — must cover desktop
+          AND tablet/landscape, not just >=1024px. Logical structure:
             Diagram
              +-- EnergySVG
              +-- LeftNodes (Produk, Strategi, Analitik)
@@ -326,7 +367,7 @@ export function TanyopoIntelligenceDiagram() {
           Three nodes vertically surround the core on each side. No
           capability cards, dividers, or outcome node below this row.
         */}
-        <div className="relative hidden min-h-[480px] grid-cols-[28%_44%_28%] items-center gap-x-8 lg:grid lg:min-h-[520px] xl:gap-x-12">
+        <div className="relative hidden min-h-[480px] grid-cols-[28%_44%_28%] items-center gap-x-6 md:grid md:gap-x-8 lg:min-h-[520px] xl:gap-x-12">
           <AmbientField />
           {/* EnergySVG */}
           <EnergyNetwork variant="desktop" />
@@ -349,8 +390,9 @@ export function TanyopoIntelligenceDiagram() {
         </div>
 
         {/*
-          MOBILE/TABLET — cannot reproduce the desktop 3-column
-          composition at this width, so it fans vertically instead:
+          PHONE ONLY (below md, <768px) — cannot reproduce the
+          left/core/right composition at this width, so it fans
+          vertically instead:
             MobileCore
             EnergySVG
             MobileNodes (2-column x 3-row grid)
@@ -358,7 +400,7 @@ export function TanyopoIntelligenceDiagram() {
           fanning straight from the core into it. No single-column
           stack, no divider bars, no separate growth card.
         */}
-        <div className="relative flex w-full flex-col items-center gap-2 lg:hidden">
+        <div className="relative flex w-full flex-col items-center gap-2 md:hidden">
           <AmbientField />
           {/* MobileCore */}
           <AiCore variant="mobile" />
