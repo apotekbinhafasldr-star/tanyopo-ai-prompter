@@ -3,37 +3,33 @@ import { Reveal } from "@/features/marketing/components/reveal";
 import { cn } from "@/lib/utils/cn";
 
 /**
- * Tanyopo Intelligence diagram — revision 2 of the "final landing visual"
- * (PR #21). Founder rejected revision 1: core read as too small, the
- * energy flow was reduced to one short vertical bar, and the capability
- * cards looked like ordinary disconnected tiles. This revision keeps
- * revision 1's simple, symmetric 3-left/3-right shape (explicitly
- * requested, and still the thing that rules out the earlier V4
- * hub-and-spoke "complicated network") but fixes exactly those three
- * complaints:
- *   1. Core is substantially larger (desktop size-60 vs rev1's size-36)
- *      and uses a visible layered ring (deep-blue center, cyan inner
- *      glow, violet outer glow, thin bright outer ring) so it reads as
- *      the unmistakable centerpiece.
- *   2. The connection is now a real SVG overlay — one smooth curved,
- *      glow-filtered, cyan->blue->violet gradient path per card (six
- *      total, not two bars), with a gentle animated dash so the flow
- *      reads as alive without being distracting. Coordinates are
- *      percentages of the container (viewBox 0 0 100 100,
- *      preserveAspectRatio="none"), the same technique used for the
- *      (unmerged) V4 PR #20 diagram, so it's proven to stay responsive
- *      without any JS measurement — but with only 6 simple curves
- *      between two fixed groups, not a dense hub-and-spoke mesh.
- *   3. Cards keep a light translucent surface + glow icon, but now sit
- *      directly on top of their own incoming curve's endpoint, so each
- *      one visibly terminates a glowing line rather than floating free.
- * Mobile is a deliberately different, simpler composition (not a shrunk
- * desktop copy): a large core, one visible vertical "spine" SVG path
- * fanning out to all six cards stacked in a single column below it.
+ * Tanyopo Intelligence diagram — revision 3 ("deterministic UI") of the
+ * PR #21 final-landing-visual work. Founder rejected revision 2 for still
+ * being built on approximate absolute/percentage positioning instead of a
+ * fixed, explicit structure. This revision rebuilds the composition on
+ * exactly the architecture specified:
  *
- * tanyopo-intelligence.tsx (heading, supporting copy, the "Hasil
- * Nyata..." strip) is untouched — its heading already reads "Tanyopo
- * Intelligence di Balik Setiap Hasil Besar" verbatim, per founder brief.
+ * DESKTOP: a real 3-column CSS Grid (`minmax(0,1fr) auto minmax(0,1fr)`)
+ * — left column = 3 cards (normal flex flow, no absolute positioning, so
+ * there is no overflow/clipping risk at any width), center column = the
+ * core, right column = 3 cards. The core is vertically centered against
+ * the row by the grid's own `items-center`. A single SVG layer sits
+ * behind everything (six static, two-layer — wide soft glow + narrow
+ * bright — gradient Bezier curves, no filter, no animation, per the
+ * explicit "a beautiful static path beats a broken animation" guidance)
+ * with approximate endpoints near each card; it only has to read as
+ * "core connects to this card," not land on an exact pixel.
+ *
+ * MOBILE: core → a continuous CSS gradient "spine" bar → six stacked
+ * cards, each with a short horizontal "branch" tick connecting it to the
+ * spine. No SVG, no absolute-positioned cards at all on mobile — the
+ * spine/ticks are the only absolutely-positioned elements, and they're
+ * purely decorative accents layered behind normal-flow content, so there
+ * is nothing that can cause horizontal overflow.
+ *
+ * tanyopo-intelligence.tsx (heading, supporting copy, bottom value strip)
+ * is untouched — its heading already reads "Tanyopo Intelligence di
+ * Balik Setiap Hasil Besar" verbatim, per founder brief.
  */
 type Capability = { icon: LucideIcon; title: string; description: string };
 
@@ -51,12 +47,12 @@ const RIGHT_CAPABILITIES: Capability[] = [
 
 const ALL_CAPABILITIES = [...LEFT_CAPABILITIES, ...RIGHT_CAPABILITIES];
 
-/** Small, translucent capability card — sits at a curve's endpoint, so it visibly reads as "powered by" the glowing line rather than a free-floating tile. */
+/** Compact capability card — white/translucent, rounded, subtle border + blue shadow, icon + title + one short line. Always normal document flow (flex/grid), never absolutely positioned. */
 function CapabilityCard({ icon: Icon, title, description }: Capability) {
   return (
-    <div className="relative z-10 flex w-full max-w-xs items-start gap-3 rounded-[1.25rem] bg-white/80 p-3.5 text-left shadow-[0_10px_28px_-14px_rgba(37,99,235,0.45)] ring-1 ring-white/90 backdrop-blur-sm lg:max-w-[12rem] lg:p-3">
+    <div className="relative z-10 flex w-full max-w-xs items-start gap-3 rounded-2xl border border-sky-100 bg-white/85 p-3.5 text-left shadow-[0_10px_26px_-16px_rgba(37,99,235,0.5)] backdrop-blur-sm">
       <span
-        className="flex size-10 shrink-0 items-center justify-center rounded-full text-white shadow-[0_0_18px_-2px_rgba(59,130,246,0.75)]"
+        className="flex size-10 shrink-0 items-center justify-center rounded-full text-white shadow-[0_0_16px_-2px_rgba(59,130,246,0.75)]"
         style={{ background: "linear-gradient(135deg, #22d3ee 0%, #3b82f6 55%, #8b5cf6 100%)" }}
       >
         <Icon className="size-4" aria-hidden />
@@ -70,36 +66,39 @@ function CapabilityCard({ icon: Icon, title, description }: Capability) {
 }
 
 /**
- * The centerpiece. Founder correction: "substantially larger," with a
- * layered deep-blue/cyan/violet glow and a bright thin outer ring so it
- * immediately attracts the eye even before the connecting lines are read.
+ * The centerpiece. Desktop: 224–240px (size-56 / xl:size-60), within the
+ * founder's 220–240px spec. Mobile: a fixed 160px (size-40), within the
+ * 150–170px spec — set as a flat size per variant rather than a
+ * cascading responsive class, so it can't drift out of range at any
+ * width. Deep-blue center, cyan inner glow, violet outer glow, thin
+ * bright outer ring.
  */
-function AiCore({ className }: { className?: string }) {
+function AiCore({ variant }: { variant: "desktop" | "mobile" }) {
   return (
-    <div className={cn("relative z-10 flex shrink-0 flex-col items-center gap-3", className)}>
+    <div className="relative z-10 flex shrink-0 flex-col items-center gap-3">
       <div className="relative flex items-center justify-center">
-        {/* Violet outer glow — widest, softest */}
         <div
           aria-hidden
           className="marketing-glow-pulse pointer-events-none absolute inset-0 -z-10 rounded-full blur-3xl"
-          style={{ background: "radial-gradient(circle, rgba(139,92,246,0.55) 0%, transparent 72%)" }}
+          style={{ background: "radial-gradient(circle, rgba(139,92,246,0.5) 0%, transparent 72%)" }}
         />
-        {/* Cyan inner glow — tighter, brighter */}
         <div
           aria-hidden
-          className="pointer-events-none absolute -inset-4 -z-10 rounded-full opacity-80 blur-xl"
+          className="pointer-events-none absolute -inset-4 -z-10 rounded-full opacity-75 blur-xl"
           style={{ background: "radial-gradient(circle, rgba(34,211,238,0.6) 0%, transparent 70%)" }}
         />
-        {/* Deep-blue center sphere with a thin bright outer ring */}
         <div
-          className="flex size-40 items-center justify-center rounded-full text-white shadow-[0_0_90px_-12px_rgba(37,99,235,0.75)] ring-[3px] ring-[#a5f3fc]/80 sm:size-48 lg:size-60"
+          className={cn(
+            "flex items-center justify-center rounded-full text-white shadow-[0_0_80px_-12px_rgba(37,99,235,0.7)] ring-[3px] ring-[#a5f3fc]/80",
+            variant === "desktop" ? "size-56 xl:size-60" : "size-40",
+          )}
           style={{ background: "radial-gradient(circle at 32% 28%, #67e8f9 0%, #3b82f6 42%, #1d4ed8 78%, #4c1d95 100%)" }}
         >
-          <Brain className="size-14 sm:size-16 lg:size-20" aria-hidden />
+          <Brain className={variant === "desktop" ? "size-16 xl:size-20" : "size-12"} aria-hidden />
         </div>
       </div>
       <div className="flex flex-col items-center gap-1 px-2">
-        <p className="text-xl font-bold text-foreground sm:text-2xl">Tanyopo Intelligence</p>
+        <p className={cn("font-bold text-foreground", variant === "desktop" ? "text-2xl" : "text-lg")}>Tanyopo Intelligence</p>
         <p className="text-xs font-semibold uppercase tracking-wide text-brand">AI Business Brain</p>
       </div>
     </div>
@@ -109,130 +108,110 @@ function AiCore({ className }: { className?: string }) {
 type Point = { x: number; y: number };
 
 /**
- * Six glow-filtered, animated-dash SVG curves from the core to every
- * capability card — the actual fix for "the AI energy flow is almost
- * invisible." Percentage coordinates (viewBox 0 0 100 100,
- * preserveAspectRatio="none") line up with the HTML nodes positioned the
- * same way, so this stays responsive without JS measurement.
+ * Desktop energy layer — six static, two-layer Bezier curves (wide
+ * low-opacity glow + narrow bright line, no filter, no animation) from
+ * the core to each card's approximate position. Sits behind the grid
+ * content (z-0) inside the same `relative` grid container, using
+ * percentage coordinates (viewBox 0 0 100 100, preserveAspectRatio=
+ * "none") that stretch to match the grid's own content-driven height —
+ * exact to the grid's fluid 1fr columns isn't knowable without JS
+ * measurement, so endpoints are deliberately placed just inside each
+ * card group (not claiming a precise pixel), which is enough for the
+ * line to visibly originate at the core and terminate near its card.
  */
-function EnergyFlow({ core, targets }: { core: Point; targets: Point[] }) {
+function DesktopEnergyFlow() {
+  const core: Point = { x: 50, y: 50 };
+  const targets: Point[] = [
+    { x: 34, y: 17 },
+    { x: 34, y: 50 },
+    { x: 34, y: 83 },
+    { x: 66, y: 17 },
+    { x: 66, y: 50 },
+    { x: 66, y: 83 },
+  ];
   return (
     <svg
       aria-hidden
-      className="pointer-events-none absolute inset-0 h-full w-full"
+      className="pointer-events-none absolute inset-0 z-0 h-full w-full"
       viewBox="0 0 100 100"
       preserveAspectRatio="none"
     >
       <defs>
-        <linearGradient id="tiFlowGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+        <linearGradient id="tiFlowGradientDesktop" x1="0%" y1="0%" x2="100%" y2="0%">
           <stop offset="0%" stopColor="#22d3ee" />
           <stop offset="50%" stopColor="#3b82f6" />
           <stop offset="100%" stopColor="#8b5cf6" />
         </linearGradient>
-        <filter id="tiFlowGlow" x="-60%" y="-60%" width="220%" height="220%">
-          <feGaussianBlur stdDeviation="1.8" result="blur" />
-          <feMerge>
-            <feMergeNode in="blur" />
-            <feMergeNode in="SourceGraphic" />
-          </feMerge>
-        </filter>
       </defs>
       {targets.map((t, i) => {
-        // Gentle curve: control point offset perpendicular-ish toward the
-        // midpoint, so left/right groups fan out smoothly with no two
-        // lines crossing.
         const mx = (core.x + t.x) / 2;
-        const my = (core.y + t.y) / 2 + (t.y - core.y) * 0.08;
+        const my = (core.y + t.y) / 2 + (t.y - core.y) * 0.1;
+        const d = `M ${core.x} ${core.y} Q ${mx} ${my} ${t.x} ${t.y}`;
         return (
-          <path
-            key={i}
-            d={`M ${core.x} ${core.y} Q ${mx} ${my} ${t.x} ${t.y}`}
-            fill="none"
-            stroke="url(#tiFlowGradient)"
-            strokeWidth={1.4}
-            strokeLinecap="round"
-            vectorEffect="non-scaling-stroke"
-            filter="url(#tiFlowGlow)"
-            className="ti-flow-path"
-          />
+          <g key={i}>
+            {/* layer 1: wide, low-opacity glow */}
+            <path d={d} fill="none" stroke="url(#tiFlowGradientDesktop)" strokeWidth={5} strokeLinecap="round" strokeOpacity={0.3} vectorEffect="non-scaling-stroke" />
+            {/* layer 2: narrow, bright energy line */}
+            <path d={d} fill="none" stroke="url(#tiFlowGradientDesktop)" strokeWidth={1.6} strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+          </g>
         );
       })}
     </svg>
   );
 }
 
-// Desktop: core centered at (50, 50); 3 left cards at x=10, 3 right cards
-// at x=90, evenly spaced in y so curves fan out without crossing.
-const DESKTOP_CORE: Point = { x: 50, y: 50 };
-const DESKTOP_TARGETS: Point[] = [
-  { x: 22, y: 18 },
-  { x: 22, y: 50 },
-  { x: 22, y: 82 },
-  { x: 78, y: 18 },
-  { x: 78, y: 50 },
-  { x: 78, y: 82 },
-];
-
-// Mobile: core near the top at (50, 14); all 6 cards stacked in one
-// column below it, each with its own curve from the core (a visible
-// "spine fanning into branches", not one short vertical bar).
-const MOBILE_CORE: Point = { x: 50, y: 16 };
-const MOBILE_TARGETS: Point[] = [
-  { x: 50, y: 24 },
-  { x: 50, y: 38 },
-  { x: 50, y: 52 },
-  { x: 50, y: 66 },
-  { x: 50, y: 80 },
-  { x: 50, y: 94 },
-];
+/** Mobile energy spine — one continuous vertical gradient bar running behind the stacked cards (each card adds its own short horizontal "branch" tick alongside it). Pure CSS (no SVG, no absolute-positioned cards). */
+function MobileEnergySpine() {
+  return (
+    <div
+      aria-hidden
+      className="pointer-events-none absolute bottom-0 left-4 top-0 w-1 rounded-full"
+      style={{ background: "linear-gradient(180deg, #22d3ee 0%, #3b82f6 50%, #8b5cf6 100%)" }}
+    />
+  );
+}
 
 export function TanyopoIntelligenceDiagram() {
   return (
     <div className="relative mx-auto max-w-5xl">
-      {/* Gentle animated flow-dash for the SVG paths — scoped class/keyframe names; respects prefers-reduced-motion. */}
-      <style>{`
-        .ti-flow-path { stroke-dasharray: 5 4; animation: ti-flow-dash 2.8s linear infinite; }
-        @keyframes ti-flow-dash { to { stroke-dashoffset: -36; } }
-        @media (prefers-reduced-motion: reduce) {
-          .ti-flow-path { animation: none; }
-        }
-      `}</style>
       <Reveal className="w-full">
-        {/* Desktop/tablet — core centered, 3 cards left / 3 cards right, six individually-curved energy paths (no two crossing). */}
-        <div className="relative hidden h-[560px] w-full lg:block xl:h-[600px]">
-          <EnergyFlow core={DESKTOP_CORE} targets={DESKTOP_TARGETS} />
-          {DESKTOP_TARGETS.map((pos, i) => (
-            <div
-              key={ALL_CAPABILITIES[i].title}
-              className="absolute"
-              style={{
-                left: `${pos.x}%`,
-                top: `${pos.y}%`,
-                transform: i < 3 ? "translate(-100%, -50%)" : "translate(0%, -50%)",
-              }}
-            >
-              <CapabilityCard {...ALL_CAPABILITIES[i]} />
-            </div>
-          ))}
-          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
-            <AiCore />
+        {/* DESKTOP/TABLET: 3 cards | CORE | 3 cards — explicit 3-column grid, core vertically centered against the card columns, six static energy curves behind everything. */}
+        <div className="relative hidden lg:grid lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] lg:items-center lg:gap-x-6 xl:gap-x-10">
+          <DesktopEnergyFlow />
+          <div className="relative z-10 flex flex-col items-end justify-center gap-6">
+            {LEFT_CAPABILITIES.map((item) => (
+              <CapabilityCard key={item.title} {...item} />
+            ))}
+          </div>
+          <div className="relative z-10 flex items-center justify-center px-2">
+            <AiCore variant="desktop" />
+          </div>
+          <div className="relative z-10 flex flex-col items-start justify-center gap-6">
+            {RIGHT_CAPABILITIES.map((item) => (
+              <CapabilityCard key={item.title} {...item} />
+            ))}
           </div>
         </div>
 
-        {/* Mobile/small tablet — large core up top, a visible fanning spine down to all six cards stacked in one column. Not a shrunk desktop layout. */}
-        <div className="relative flex w-full flex-col items-center lg:hidden">
-          <div className="relative w-full" style={{ minHeight: "clamp(760px, 190vw, 880px)" }}>
-            <EnergyFlow core={MOBILE_CORE} targets={MOBILE_TARGETS} />
-            <div className="absolute left-1/2" style={{ top: `${MOBILE_CORE.y}%`, transform: "translate(-50%, -50%)" }}>
-              <AiCore />
-            </div>
-            {MOBILE_TARGETS.map((pos, i) => (
-              <div
-                key={ALL_CAPABILITIES[i].title}
-                className="absolute w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2"
-                style={{ left: `${pos.x}%`, top: `${pos.y}%` }}
-              >
-                <CapabilityCard {...ALL_CAPABILITIES[i]} />
+        {/* MOBILE: CORE -> vertical energy spine -> six stacked cards, each with a short branch tick. Completely different composition from desktop, not a shrunk copy. */}
+        <div className="flex w-full flex-col items-center gap-0 lg:hidden">
+          <AiCore variant="mobile" />
+          {/* short connector bridging the core down to the top of the spine */}
+          <div
+            aria-hidden
+            className="h-6 w-1 shrink-0 rounded-full"
+            style={{ background: "linear-gradient(180deg, #22d3ee 0%, #3b82f6 100%)" }}
+          />
+          <div className="relative flex w-full flex-col items-stretch gap-5 py-1 pl-9 pr-1">
+            <MobileEnergySpine />
+            {ALL_CAPABILITIES.map((item) => (
+              <div key={item.title} className="relative">
+                <div
+                  aria-hidden
+                  className="pointer-events-none absolute -left-5 top-1/2 h-0.5 w-5 -translate-y-1/2"
+                  style={{ background: "linear-gradient(90deg, #3b82f6 0%, #8b5cf6 100%)" }}
+                />
+                <CapabilityCard {...item} />
               </div>
             ))}
           </div>
