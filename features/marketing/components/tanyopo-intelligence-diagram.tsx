@@ -39,11 +39,19 @@ import { cn } from "@/lib/utils/cn";
  *      behind the sphere already heading toward its own card, instead
  *      of all six bunching into one shape at the center.
  *
- * Desktop/tablet (`md:` and up): `grid-cols-[28%_44%_28%]` — explicit
- * LeftNodes / Core / RightNodes zones, core fixed at `size-[230px]`,
- * each node capped at `max-w-[280px]` with `min-h-[90px]` (the
- * `lg:min-w-[240px]` floor only applies at `lg`+, where the 28% column
- * is wide enough not to overflow). DOM order mirrors the required
+ * Desktop/tablet (`md:` and up): `grid-cols-[28fr_44fr_28fr]` —
+ * explicit LeftNodes / Core / RightNodes zones in a 28/44/28 ratio.
+ * `fr` rather than literal `%` on purpose: three `%` tracks summing to
+ * 100% plus a non-zero `gap-x` overflow their container (gaps are added
+ * on top of percentage tracks, not subtracted from them first), which
+ * was silently throwing off exactly where each column's real edge
+ * landed — part of why the energy streams' endpoints weren't lining up
+ * with the cards. `fr` tracks share the space left over *after* gaps
+ * are subtracted, so 28/44/28 stays an exact ratio with no overflow.
+ * Core fixed at `size-[230px]`, each node capped at `max-w-[280px]`
+ * with `min-h-[90px]` (the `lg:min-w-[240px]` floor only applies at
+ * `lg`+, where the 28fr column is wide enough not to overflow). DOM
+ * order mirrors the required
  * logical structure: EnergySVG, then LeftNodes, then Core, then
  * RightNodes — three nodes vertically surrounding the core on each
  * side, nothing below this row.
@@ -258,13 +266,19 @@ function EnergyNetwork({ variant }: { variant: "desktop" | "mobile" }) {
   // The inner few units of each path sit behind the core (which renders
   // above the energy layer at z-10), so visually each ribbon simply
   // emerges from behind the sphere already aimed at its own card.
+  // Endpoints pushed to x=22/78 (well inside each card's footprint, not
+  // just at the theoretical 28% column boundary) so every stream
+  // visibly terminates behind its card's inner edge instead of stopping
+  // short in the gutter — the gap between the previous x=30/70 endpoints
+  // and the actual card edge was reading as "lines stopping in empty
+  // space" per founder feedback.
   const desktopLines = [
-    { d: "M46,44 C40,40 34,32 30,25", highlight: true },
-    { d: "M44,50 C40,50 35,50 30,50", highlight: false },
-    { d: "M46,56 C40,60 34,68 30,75", highlight: false },
-    { d: "M54,44 C60,40 66,32 70,25", highlight: false },
-    { d: "M56,50 C60,50 65,50 70,50", highlight: false },
-    { d: "M54,56 C60,60 66,68 70,75", highlight: true },
+    { d: "M46,44 C38,38 28,30 22,25", highlight: true },
+    { d: "M44,50 C36,50 28,50 22,50", highlight: false },
+    { d: "M46,56 C38,62 28,70 22,75", highlight: false },
+    { d: "M54,44 C62,38 72,30 78,25", highlight: false },
+    { d: "M56,50 C64,50 72,50 78,50", highlight: false },
+    { d: "M54,56 C62,62 72,70 78,75", highlight: true },
   ];
   const mobileLines = [
     { d: "M42,6 C36,9 28,13 25,17", highlight: true },
@@ -352,9 +366,10 @@ export function TanyopoIntelligenceDiagram() {
       <Reveal className="w-full">
         {/*
           DESKTOP/TABLET (md and up, 768px+) — one fixed visual
-          composition, explicit LEFT 28% / CENTER 44% / RIGHT 28% zones
-          (`grid-cols-[28%_44%_28%]`, not 1fr/auto, so the split is
-          exact regardless of content). Breakpoint moved from `lg`
+          composition, explicit LEFT 28fr / CENTER 44fr / RIGHT 28fr
+          zones (`grid-cols-[28fr_44fr_28fr]` — `fr`, not `%`, so the
+          28/44/28 ratio holds exactly even with a non-zero gap-x).
+          Breakpoint moved from `lg`
           (1024px) to `md` (768px) per explicit founder correction: this
           composition — core geometrically centered among all six nodes,
           vertically aligned with the middle row — must cover desktop
@@ -367,7 +382,7 @@ export function TanyopoIntelligenceDiagram() {
           Three nodes vertically surround the core on each side. No
           capability cards, dividers, or outcome node below this row.
         */}
-        <div className="relative hidden min-h-[480px] grid-cols-[28%_44%_28%] items-center gap-x-6 md:grid md:gap-x-8 lg:min-h-[520px] xl:gap-x-12">
+        <div className="relative hidden min-h-[480px] grid-cols-[28fr_44fr_28fr] items-center gap-x-6 md:grid md:gap-x-8 lg:min-h-[520px] xl:gap-x-12">
           <AmbientField />
           {/* EnergySVG */}
           <EnergyNetwork variant="desktop" />

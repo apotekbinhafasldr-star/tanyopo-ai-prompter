@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import {
   Hero,
   TanyopoIntelligence,
+  DeviceShowcase,
   HowItWorks,
   AiTeam,
   AdPersonaBridge,
@@ -27,6 +28,7 @@ export default function LandingPage() {
     <>
       <Hero />
       <TanyopoIntelligence />
+      <DeviceShowcase />
       <AiTeam />
       <AdPersonaBridge />
       <HowItWorks />
