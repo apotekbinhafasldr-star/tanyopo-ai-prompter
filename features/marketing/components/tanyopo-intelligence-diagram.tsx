@@ -3,15 +3,25 @@ import { Reveal } from "@/features/marketing/components/reveal";
 import { cn } from "@/lib/utils/cn";
 
 /**
- * Tanyopo Intelligence diagram — revision 10 ("final visual
- * finishing — energy connections only") of the PR #21
- * final-landing-visual work. This round's brief said the core/cards
- * are now in approximately correct positions and must not move again;
- * the only outstanding item in this file is the energy connections'
- * taper (see `EnergyNetwork`'s own header comment for the de Casteljau
- * split used to make each ribbon visibly thicker near the core and
- * narrower at the card). The composition itself — left/core/right on
- * wider screens, three nodes per side, no below-core grid, no
+ * Tanyopo Intelligence diagram — revision 11 ("final micro-fix — six
+ * energy flows") of the PR #21 final-landing-visual work. Founder
+ * reported only FOUR of the six desktop energy branches as clearly
+ * visible — the two middle ones (core -> Strategi Marketing, core ->
+ * Campaign) were present in code but drawn as perfectly flat
+ * horizontal lines (every control point at y=50), which read as
+ * visually weak next to the four curving branches. Fixed by giving
+ * those two branches the same gentle organic bulge as the others
+ * (see `EnergyNetwork`'s `desktopLines` array and its inline
+ * comments) — same start/end anchor points, same three-layer
+ * taper treatment, just an actual curve instead of a flat segment.
+ * No branch was removed or rebuilt, no core/card position changed,
+ * mobile is untouched (its equivalent branches were never flat).
+ *
+ * Revision 10 ("final visual finishing — energy connections only")
+ * reworked the taper so every branch is visibly thicker near the core
+ * and narrower at the card (see `EnergyNetwork`'s own header comment
+ * for the de Casteljau split). The composition itself — left/core/
+ * right on wider screens, three nodes per side, no below-core grid, no
  * standalone "Pertumbuhan Bisnis" node — is unchanged from revision 9,
  * whose three fixes remain valid and are summarized below:
  *
@@ -275,10 +285,20 @@ function EnergyNetwork({ variant }: { variant: "desktop" | "mobile" }) {
   // strokes) share one continuous tangent at the seam.
   const desktopLines = [
     { near: "M46,44 C42,41 37.5,37.5 33.3,34.1", far: "M33.3,34.1 C29,30.8 25,27.5 22,25", highlight: true },
-    { near: "M44,50 C40,50 36,50 32.3,50", far: "M32.3,50 C28.5,50 25,50 22,50", highlight: false },
+    // Middle-left (core -> Strategi Marketing): previously a perfectly
+    // flat horizontal line (all control points at y=50), which read as
+    // visually weak/easy-to-miss next to the curving top/bottom
+    // branches and was reported as effectively invisible. Given a
+    // gentle organic upward bulge (still a de Casteljau split at the
+    // midpoint, so the near/far tangent still matches exactly) so it
+    // reads as its own distinct flowing ribbon rather than a flat
+    // connector, while still starting/ending at the same anchor points
+    // (44,50) / (22,50) as before — no layout or card-position change.
+    { near: "M44,50 C41,48 37,47 33,47", far: "M33,47 C29,47 25,48 22,50", highlight: false },
     { near: "M46,56 C42,59 37.5,62.5 33.3,65.9", far: "M33.3,65.9 C29,69.3 25,72.5 22,75", highlight: false },
     { near: "M54,44 C58,41 62.5,37.5 66.8,34.1", far: "M66.8,34.1 C71,30.8 75,27.5 78,25", highlight: false },
-    { near: "M56,50 C60,50 64,50 67.8,50", far: "M67.8,50 C71.5,50 75,50 78,50", highlight: false },
+    // Middle-right (core -> Campaign): same fix, mirrored.
+    { near: "M56,50 C59,48 63,47 67,47", far: "M67,47 C71,47 75,48 78,50", highlight: false },
     { near: "M54,56 C58,59 62.5,62.5 66.8,65.9", far: "M66.8,65.9 C71,69.3 75,72.5 78,75", highlight: true },
   ];
   const mobileLines = [
