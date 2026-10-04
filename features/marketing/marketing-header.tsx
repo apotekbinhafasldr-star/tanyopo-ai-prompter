@@ -100,10 +100,17 @@ export function MarketingHeader() {
     >
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
         <span onClick={() => setMenuOpen(false)}>
-          {/* Batch B10: Landing is frozen — explicitly pin the pre-B10
-              asset so this header's rendered logo doesn't change when the
-              shared component's default asset was updated for app UI. */}
-          <LinoeLogo size="md" variant="legacy" />
+          {/* Mobile navbar logo fix (founder-reported): this header is the
+              ONLY navbar mobile ever sees (no hero-overlay alternative
+              there), so the old Batch B10 "Landing is frozen" pin to
+              `variant="legacy"` left mobile showing the prior logo asset
+              while hero-integrated-nav.tsx (desktop, unscrolled) already
+              rendered the current official asset directly. Dropping the
+              override here means this now renders LinoeLogo's own default
+              (`variant="official"` — /brand/linoe/linoe-logo-official.png),
+              the same asset hero-integrated-nav.tsx already uses — no new
+              asset, no redesign, just matching the current default. */}
+          <LinoeLogo size="md" />
         </span>
 
         <nav
