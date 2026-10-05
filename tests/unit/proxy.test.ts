@@ -44,6 +44,12 @@ describe("isPublicAsset — B12 hotfix regression: auth routes that handle their
     expect(isPublicAsset("/demography")).toBe(false);
     expect(isPublicAsset("/api/demonstration")).toBe(false);
   });
+
+  it("TikTok URL-prefix verification — exempts only the exact verification file, no other .txt", () => {
+    expect(isPublicAsset("/tiktokiVFBxYCt3jynuM9zWCeMZN7GSgt3EVUL.txt")).toBe(true);
+    expect(isPublicAsset("/tiktokOTHER.txt")).toBe(false);
+    expect(isPublicAsset("/robots.txt")).toBe(false);
+  });
 });
 
 function requestWithAuthHeader(header: string | null) {
