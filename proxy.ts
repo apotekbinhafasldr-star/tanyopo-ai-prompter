@@ -66,6 +66,10 @@ export function isPublicAsset(pathname: string) {
     pathname === "/demo" ||
     pathname.startsWith("/demo/") ||
     pathname.startsWith("/api/demo/") ||
+    // TikTok Developer URL-prefix verification: TikTok's crawler fetches
+    // this one static file (public/) with no session, so it must not be
+    // bounced to /login. Exact match for that single file only.
+    pathname === "/tiktokiVFBxYCt3jynuM9zWCeMZN7GSgt3EVUL.txt" ||
     /\.(svg|png|jpg|jpeg|gif|webp|ico|css|js|map)$/.test(pathname)
   );
 }
