@@ -38,6 +38,9 @@ import { CHANNEL_TO_CONNECTOR } from "@/lib/connectors/channel-map";
 import { getConnector } from "@/lib/connectors/get-connector";
 import { recommendPublishTime } from "@/lib/scheduling/recommend-time";
 import { ScheduleForm, type ScheduleRecommendation } from "@/features/content/schedule-form";
+import { QuickReviewSummary } from "@/features/campaigns/quick-review-summary";
+import { DetailDisclosure } from "@/features/campaigns/detail-disclosure";
+import { isQuickReview } from "@/lib/campaigns/review-mode";
 import type { CampaignProposal } from "@/schemas/ai/campaign-proposal";
 import type { Channel, ConnectorPlatform, OptimizationActionType, RiskLevel } from "@/types/database";
 
@@ -223,6 +226,9 @@ export default async function CampaignDetailPage({
   const proposal = campaign.ai_proposal as CampaignProposal | null;
   const boundCopyAction = updateCampaignCopyAction.bind(null, id);
   const isDraft = campaign.status === "DRAFT";
+  // PR-A phase-1 gate: simplified review ONLY for a DRAFT reached from Quick
+  // Promote. Every other status/entry keeps the full page unchanged.
+  const quickReview = isQuickReview(from, campaign.status, !!proposal);
   const isAwaitingApproval = campaign.status === "AWAITING_APPROVAL";
   const banner = STATUS_BANNER[campaign.status];
   const bannerClass =
@@ -255,7 +261,7 @@ export default async function CampaignDetailPage({
           ) : null}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {isDraft ? <SubmitForApprovalButton /> : null}
+          {isDraft && !quickReview ? <SubmitForApprovalButton /> : null}
           {isAwaitingApproval && session.role === "owner" ? (
             <form action={cancelSubmissionAction}>
               <input type="hidden" name="campaignId" value={id} />
@@ -326,7 +332,39 @@ export default async function CampaignDetailPage({
         </Card>
       ) : null}
 
-      <Card id="ringkasan-target-budget">
+      {quickReview && proposal ? (
+        <QuickReviewSummary
+          objective={campaign.objective}
+          dailyBudget={campaign.daily_budget}
+          totalBudget={campaign.total_budget}
+          currency={campaign.currency}
+          allocation={
+            Array.isArray(proposal.budget_allocation)
+              ? proposal.budget_allocation.map((b) => ({ channel: b.channel, percentage: b.percentage }))
+              : null
+          }
+          fallbackChannels={campaign.channels}
+          headline={proposal.headline ?? null}
+          primaryText={proposal.primary_text ?? null}
+          cta={proposal.cta ?? null}
+          schedule={(channelCampaigns ?? []).map((cc) => {
+            if (cc.scheduled_at) {
+              return { channel: cc.channel, label: formatScheduleLabel(cc.scheduled_at, timeZone), scheduled: true };
+            }
+            const slot = recommendPublishTime(cc.channel, timeZone);
+            return {
+              channel: cc.channel,
+              label: slot ? formatScheduleLabel(slot.utcIso, timeZone) : null,
+              scheduled: false,
+            };
+          })}
+          changeBudgetHref={product ? `/promote?product=${product.id}` : "/promote"}
+          action={<SubmitForApprovalButton fullWidth />}
+        />
+      ) : null}
+
+      <DetailDisclosure enabled={quickReview}>
+      <Card id={quickReview ? undefined : "ringkasan-target-budget"}>
         <CardHeader>
           <CardTitle>Ringkasan Target &amp; Budget</CardTitle>
         </CardHeader>
@@ -917,8 +955,9 @@ export default async function CampaignDetailPage({
           ) : null}
         </>
       )}
+      </DetailDisclosure>
 
-      {isDraft ? (
+      {isDraft && !quickReview ? (
         <Card className="border-brand/30 bg-brand-muted/40">
           <CardContent className="flex flex-col gap-4 p-5 sm:p-6">
             <div className="flex flex-col gap-1">
