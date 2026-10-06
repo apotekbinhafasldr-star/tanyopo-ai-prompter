@@ -6,6 +6,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { requireSessionContext } from "@/services/session";
 import { getConnector } from "@/lib/connectors/get-connector";
 import { CHANNEL_TO_CONNECTOR } from "@/lib/connectors/channel-map";
+import { allocateDailyBudget } from "@/lib/campaigns/budget-allocation";
+import { checkBudgetGuard } from "@/lib/budget-guard";
+import { getMonthToDateSpend } from "@/services/budget-guard";
 import { decryptToken } from "@/lib/crypto/token-cipher";
 import type { CampaignProposal } from "@/schemas/ai/campaign-proposal";
 import type { ConnectorPlatform } from "@/types/database";
@@ -105,7 +108,7 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
 
   const { data: masterCampaign, error: masterError } = await supabase
     .from("prompter_master_campaigns")
-    .select("id, status, name, objective, daily_budget, total_budget, ai_proposal")
+    .select("id, status, name, objective, currency, daily_budget, total_budget, ai_proposal")
     .eq("id", channelCampaign.master_campaign_id)
     .eq("tenant_id", session.tenantId)
     .single();
@@ -116,6 +119,82 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
 
   if (masterCampaign.status !== "SCHEDULED") {
     return { error: "Campaign harus berstatus Terjadwal (sudah disetujui) sebelum diluncurkan." };
+  }
+
+  // P0 budget launch safety — ALL budget validation completes here, BEFORE
+  // the atomic claim and before any connector call, so a rejected launch
+  // writes nothing and creates nothing on the ad platform.
+  //
+  // `daily_budget` is the master's TOTAL daily budget across the campaign;
+  // it is split across the PAID channel rows by their `budget_percentage`
+  // (SEO takes no share). `total_budget` is never used as a daily budget.
+  // Only IDR is supported: the app does not verify the ad account's own
+  // currency (separate gate before any real ad launch).
+  if (masterCampaign.currency !== "IDR") {
+    return {
+      error: `Peluncuran otomatis hanya mendukung mata uang IDR (campaign ini ${masterCampaign.currency}).`,
+    };
+  }
+
+  const { data: channelRows, error: channelRowsError } = await supabase
+    .from("prompter_channel_campaigns")
+    .select("id, channel, budget_percentage")
+    .eq("master_campaign_id", masterCampaign.id)
+    .eq("tenant_id", session.tenantId);
+
+  if (channelRowsError || !channelRows) {
+    return { error: "Gagal membaca alokasi budget channel. Coba lagi." };
+  }
+
+  const allocation = allocateDailyBudget(
+    masterCampaign.daily_budget,
+    channelRows.map((row) => ({
+      id: row.id,
+      channel: row.channel,
+      budgetPercentage: row.budget_percentage == null ? null : Number(row.budget_percentage),
+    })),
+  );
+  if (!allocation.ok) {
+    return { error: allocation.error };
+  }
+
+  const allocatedDailyBudget = allocation.allocations[channelCampaign.id];
+  if (allocatedDailyBudget == null) {
+    return { error: "Channel ini tidak memiliki alokasi budget berbayar, sehingga tidak dapat diluncurkan." };
+  }
+
+  // Budget Guard, re-run read-only right before the external side effect.
+  // Deliberately NOT getOrCreateBudgetPolicy (it INSERTs): a read error
+  // fails closed; an absent policy row means "no limits configured", same
+  // as the default that service would have created.
+  const { data: policyRow, error: policyError } = await supabase
+    .from("prompter_budget_policies")
+    .select("*")
+    .eq("tenant_id", session.tenantId)
+    .maybeSingle();
+  if (policyError) {
+    return { error: "Gagal memeriksa kebijakan Budget Guard. Peluncuran dibatalkan, coba lagi." };
+  }
+  const policy = policyRow ?? {
+    tenant_id: session.tenantId,
+    daily_limit: null,
+    monthly_limit: null,
+    campaign_limit: null,
+    currency: "IDR",
+    require_approval_above: null,
+    autopilot_limit: null,
+    created_at: new Date(0).toISOString(),
+    updated_at: new Date(0).toISOString(),
+  };
+  const monthToDateSpend = await getMonthToDateSpend(supabase, session.tenantId);
+  const guard = checkBudgetGuard(policy, {
+    dailyBudget: masterCampaign.daily_budget,
+    totalBudget: masterCampaign.total_budget,
+    campaignCurrency: masterCampaign.currency,
+    monthToDateSpend,
+  });
+  if (!guard.allowed) {
+    return { error: guard.reason ?? "Peluncuran ditolak oleh Budget Guard." };
   }
 
   // P0 remediation (Meta Ads production readiness): atomic claim to prevent
@@ -185,10 +264,16 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
 
   const proposal = masterCampaign.ai_proposal as CampaignProposal | null;
   const adAccountId = connectedAccount.external_account_id;
-  // Simplification: treats the budget as already being in the ad account's
-  // minor unit (true for IDR, which has no sub-unit in practice) — a
-  // cents-based currency would need multiplying by 100 here.
-  const dailyBudgetMinorUnits = Math.round(masterCampaign.daily_budget ?? masterCampaign.total_budget ?? 0);
+  // This row's own share of the master daily budget (validated above), in
+  // IDR whole units — IDR has no sub-unit in practice. Whether the platform
+  // API's budget unit matches is a separate gate before real ad launch.
+  const dailyBudgetMinorUnits = allocatedDailyBudget;
+  const budgetAuditContext = {
+    allocated_daily_budget: allocatedDailyBudget,
+    budget_percentage: channelRows.find((row) => row.id === channelCampaign.id)?.budget_percentage ?? null,
+    master_daily_budget: masterCampaign.daily_budget,
+    paid_total_percentage: allocation.paidTotalPercentage,
+  };
 
   let externalCampaignId: string | null = null;
 
@@ -247,7 +332,7 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
       action: "campaign.launched",
       resource_type: "prompter_channel_campaigns",
       resource_id: channelCampaignId,
-      context: { platform: connectorPlatform, external_campaign_id: externalCampaignId },
+      context: { platform: connectorPlatform, external_campaign_id: externalCampaignId, ...budgetAuditContext },
     });
 
     revalidatePath(`/campaigns/${masterCampaign.id}`);
@@ -266,7 +351,7 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
       action: "campaign.launch_failed",
       resource_type: "prompter_channel_campaigns",
       resource_id: channelCampaignId,
-      context: { platform: connectorPlatform, error: message },
+      context: { platform: connectorPlatform, error: message, ...budgetAuditContext },
     });
 
     revalidatePath(`/campaigns/${masterCampaign.id}`);
