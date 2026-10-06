@@ -20,7 +20,7 @@ import { TikTokLoginKitConnector } from "@/lib/connectors/tiktok-login-kit-conne
 import { ConnectorConfigError } from "@/lib/connectors/types";
 
 function mockFetch(status: number, body: unknown) {
-  const fn = vi.fn(async () => ({
+  const fn = vi.fn(async (..._args: unknown[]) => ({
     ok: status >= 200 && status < 300,
     status,
     json: async () => body,
