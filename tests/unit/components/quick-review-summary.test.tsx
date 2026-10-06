@@ -1,6 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
 import { QuickReviewSummary, describeBudget, type QuickReviewSummaryProps } from "@/features/campaigns/quick-review-summary";
+
+// Vitest globals are off, so RTL does not auto-clean between tests.
+afterEach(() => cleanup());
 
 const base: QuickReviewSummaryProps = {
   objective: "INCREASE_SALES",

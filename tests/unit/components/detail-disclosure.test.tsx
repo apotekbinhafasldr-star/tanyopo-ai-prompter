@@ -1,6 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
 import { DetailDisclosure } from "@/features/campaigns/detail-disclosure";
+
+// Vitest globals are off, so RTL does not auto-clean between tests.
+afterEach(() => cleanup());
 
 describe("DetailDisclosure", () => {
   it("renders children untouched (no <details>) when disabled", () => {
