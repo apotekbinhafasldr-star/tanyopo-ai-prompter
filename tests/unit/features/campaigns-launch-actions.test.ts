@@ -59,6 +59,8 @@ function buildHarness(
     policy?: Record<string, unknown> | null;
     policyError?: unknown;
     monthToDateSpend?: number;
+    metricsError?: unknown;
+    metricsRows?: unknown[] | null;
     claimRows?: unknown[];
   } = {},
 ): Harness {
@@ -126,8 +128,13 @@ function buildHarness(
       return { select: () => ({ eq: () => ({ maybeSingle: policyMaybeSingle }) }) };
     }
     if (table === "prompter_marketing_metrics") {
-      const result = { data: [{ spend: options.monthToDateSpend ?? 0 }], error: null };
-      return { select: () => ({ eq: () => ({ gte: async () => result }) }) };
+      const result = {
+        data: options.metricsError ? null : options.metricsRows !== undefined ? options.metricsRows : [{ spend: options.monthToDateSpend ?? 0 }],
+        error: options.metricsError ?? null,
+      };
+      const gte = vi.fn(async () => result);
+      metricsGte = gte;
+      return { select: () => ({ eq: () => ({ gte }) }) };
     }
     if (table === "prompter_audit_logs") {
       return { insert: auditInsert };
@@ -146,6 +153,7 @@ function buildHarness(
 }
 
 let harness: Harness;
+let metricsGte: ReturnType<typeof vi.fn> | null = null;
 
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn(async () => ({ from: harness.regularFrom })) }));
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: vi.fn(() => ({ from: harness.adminFrom })) }));
@@ -218,6 +226,7 @@ describe("launchChannelCampaignAction — P0 idempotency guard", () => {
 
 describe("launchChannelCampaignAction — P0 budget launch safety", () => {
   beforeEach(() => {
+    metricsGte = null;
     requireSessionContextMock.mockClear();
     connectorMock.createCampaign.mockClear();
     connectorMock.createAdSet.mockClear();
@@ -419,5 +428,100 @@ describe("launchChannelCampaignAction — P0 budget launch safety", () => {
     const result = await launchChannelCampaignAction("cc1");
     expect(result.error).toMatch(/belum didukung/);
     expectNoSideEffects(harness);
+  });
+  describe("month-to-date spend (fail closed)", () => {
+    it("blocks before any side effect when the metrics query errors", async () => {
+      harness = buildHarness({ policy: {
+      tenant_id: "t1",
+      daily_limit: null,
+      monthly_limit: 50000000,
+      campaign_limit: null,
+      currency: "IDR",
+      require_approval_above: null,
+      autopilot_limit: null,
+      created_at: "",
+      updated_at: "",
+    }, metricsError: { message: "db down" } });
+      const result = await launchChannelCampaignAction("cc1");
+      expect(result.error).toMatch(/pengeluaran bulan ini/);
+      expectNoSideEffects(harness);
+    });
+
+    it("blocks when the metrics query returns no data", async () => {
+      harness = buildHarness({ policy: {
+      tenant_id: "t1",
+      daily_limit: null,
+      monthly_limit: 50000000,
+      campaign_limit: null,
+      currency: "IDR",
+      require_approval_above: null,
+      autopilot_limit: null,
+      created_at: "",
+      updated_at: "",
+    }, metricsRows: null });
+      const result = await launchChannelCampaignAction("cc1");
+      expect(result.error).toMatch(/pengeluaran bulan ini/);
+      expectNoSideEffects(harness);
+    });
+
+    it.each([["abc"], [Number.POSITIVE_INFINITY], [-5]])("blocks on invalid spend value %s", async (spend) => {
+      harness = buildHarness({ policy: {
+      tenant_id: "t1",
+      daily_limit: null,
+      monthly_limit: 50000000,
+      campaign_limit: null,
+      currency: "IDR",
+      require_approval_above: null,
+      autopilot_limit: null,
+      created_at: "",
+      updated_at: "",
+    }, metricsRows: [{ spend }] });
+      const result = await launchChannelCampaignAction("cc1");
+      expect(result.error).toMatch(/tidak valid/);
+      expectNoSideEffects(harness);
+    });
+
+    it("allows a successful query with zero recorded spend when the other guards pass", async () => {
+      harness = buildHarness({ policy: {
+      tenant_id: "t1",
+      daily_limit: null,
+      monthly_limit: 50000000,
+      campaign_limit: null,
+      currency: "IDR",
+      require_approval_above: null,
+      autopilot_limit: null,
+      created_at: "",
+      updated_at: "",
+    }, metricsRows: [] });
+      const result = await launchChannelCampaignAction("cc1");
+      expect(result.error).toBeNull();
+      expect(connectorMock.createCampaign).toHaveBeenCalledTimes(1);
+      expect(metricsGte).not.toBeNull();
+    });
+
+    it("still rejects when real recorded spend plus projection exceeds the monthly limit", async () => {
+      harness = buildHarness({ policy: {
+      tenant_id: "t1",
+      daily_limit: null,
+      monthly_limit: 1000000,
+      campaign_limit: null,
+      currency: "IDR",
+      require_approval_above: null,
+      autopilot_limit: null,
+      created_at: "",
+      updated_at: "",
+    }, monthToDateSpend: 999999 });
+      const result = await launchChannelCampaignAction("cc1");
+      expect(result.error).toMatch(/bulan ini/);
+      expectNoSideEffects(harness);
+    });
+
+    it("does not query month-to-date spend when monthly_limit is null", async () => {
+      harness = buildHarness({ metricsError: { message: "would fail if queried" } });
+      const result = await launchChannelCampaignAction("cc1");
+      expect(result.error).toBeNull();
+      expect(metricsGte).toBeNull();
+      expect(harness.regularFrom.mock.calls.map((c) => c[0])).not.toContain("prompter_marketing_metrics");
+    });
   });
 });

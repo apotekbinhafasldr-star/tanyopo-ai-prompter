@@ -8,7 +8,6 @@ import { getConnector } from "@/lib/connectors/get-connector";
 import { CHANNEL_TO_CONNECTOR } from "@/lib/connectors/channel-map";
 import { allocateDailyBudget } from "@/lib/campaigns/budget-allocation";
 import { checkBudgetGuard } from "@/lib/budget-guard";
-import { getMonthToDateSpend } from "@/services/budget-guard";
 import { decryptToken } from "@/lib/crypto/token-cipher";
 import type { CampaignProposal } from "@/schemas/ai/campaign-proposal";
 import type { ConnectorPlatform } from "@/types/database";
@@ -186,7 +185,29 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
     created_at: new Date(0).toISOString(),
     updated_at: new Date(0).toISOString(),
   };
-  const monthToDateSpend = await getMonthToDateSpend(supabase, session.tenantId);
+
+  // Month-to-date spend only influences Budget Guard when a monthly limit is
+  // set. Read it here read-only and FAIL CLOSED: unlike the shared
+  // getMonthToDateSpend() (which maps a query error to 0 for its other
+  // callers), a failed or non-finite read must never be treated as "no spend"
+  // at this gate. Same semantics as that helper otherwise: session tenant,
+  // rows dated from the 1st of the current month.
+  let monthToDateSpend = 0;
+  if (policy.monthly_limit != null) {
+    const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10);
+    const { data: spendRows, error: spendError } = await supabase
+      .from("prompter_marketing_metrics")
+      .select("spend")
+      .eq("tenant_id", session.tenantId)
+      .gte("date", monthStart);
+    if (spendError || !spendRows) {
+      return { error: "Gagal memeriksa pengeluaran bulan ini. Peluncuran dibatalkan, coba lagi." };
+    }
+    monthToDateSpend = spendRows.reduce((sum, row) => sum + Number(row.spend ?? 0), 0);
+    if (!Number.isFinite(monthToDateSpend) || monthToDateSpend < 0) {
+      return { error: "Data pengeluaran bulan ini tidak valid. Peluncuran dibatalkan." };
+    }
+  }
   const guard = checkBudgetGuard(policy, {
     dailyBudget: masterCampaign.daily_budget,
     totalBudget: masterCampaign.total_budget,
