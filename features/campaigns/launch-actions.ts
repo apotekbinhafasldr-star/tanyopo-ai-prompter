@@ -8,6 +8,12 @@ import { getConnector } from "@/lib/connectors/get-connector";
 import { CHANNEL_TO_CONNECTOR } from "@/lib/connectors/channel-map";
 import { allocateDailyBudget } from "@/lib/campaigns/budget-allocation";
 import { checkBudgetGuard } from "@/lib/budget-guard";
+import {
+  BUDGET_WRITE_DISABLED_MESSAGE,
+  evaluateExternalBudgetWrite,
+  isBudgetWritePlatformEnabled,
+} from "@/lib/campaigns/external-budget-guard";
+import { readEmergencyStopStrict } from "@/services/automation-settings";
 import { decryptToken } from "@/lib/crypto/token-cipher";
 import type { CampaignProposal } from "@/schemas/ai/campaign-proposal";
 import type { ConnectorPlatform } from "@/types/database";
@@ -103,6 +109,13 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
   const connectorPlatform = CHANNEL_TO_CONNECTOR[channelCampaign.channel];
   if (!connectorPlatform) {
     return { error: `Peluncuran otomatis untuk ${channelCampaign.channel} belum didukung.` };
+  }
+
+  // S1 External Budget Safety Gate, static layer: default deny for every
+  // platform. Runs before any further read and long before the claim, the
+  // credentials or any connector call. See lib/campaigns/external-budget-guard.ts.
+  if (!isBudgetWritePlatformEnabled(connectorPlatform)) {
+    return { error: BUDGET_WRITE_DISABLED_MESSAGE };
   }
 
   const { data: masterCampaign, error: masterError } = await supabase
@@ -216,6 +229,27 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
   });
   if (!guard.allowed) {
     return { error: guard.reason ?? "Peluncuran ditolak oleh Budget Guard." };
+  }
+
+  // S1 External Budget Safety Gate, evidence layer: still before the claim,
+  // so a denial writes nothing (no claim, status update or audit) and calls
+  // no platform API. The ad-account currency and the current external budget
+  // are NOT VERIFIED anywhere yet (null), which the gate always denies.
+  const emergencyStopActive = await readEmergencyStopStrict(supabase, session.tenantId);
+  const gate = evaluateExternalBudgetWrite({
+    operation: "LAUNCH",
+    platform: connectorPlatform,
+    emergencyStopActive,
+    masterCurrency: masterCampaign.currency,
+    accountCurrency: null,
+    proposedDailyBudget: allocatedDailyBudget,
+    currentExternalDailyBudget: null,
+    otherPaidChannelsDailyTotal: null,
+    masterDailyBudget: masterCampaign.daily_budget,
+    budgetGuard: { allowed: true },
+  });
+  if (!gate.allowed) {
+    return { error: gate.message };
   }
 
   // P0 remediation (Meta Ads production readiness): atomic claim to prevent

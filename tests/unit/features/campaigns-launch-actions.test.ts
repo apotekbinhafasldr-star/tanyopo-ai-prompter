@@ -2,6 +2,22 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
+// LEGACY SIMULATION ONLY (S1 test isolation). These PR #26 budget-allocation
+// tests exercise the launch flow *past* the External Budget Safety Gate, which
+// is default-deny in production. They simulate an open gate by mocking ONLY
+// the gate's verdict and the Emergency Stop read. Their assertions are
+// unchanged. The real, default-deny gate is covered with no gate mock in
+// launch-budget-gate.test.ts and launch-budget-gate-evidence.test.ts.
+vi.mock("@/lib/campaigns/external-budget-guard", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/lib/campaigns/external-budget-guard")>();
+  return {
+    ...real,
+    isBudgetWritePlatformEnabled: () => true,
+    evaluateExternalBudgetWrite: () => ({ allowed: true as const }),
+  };
+});
+vi.mock("@/services/automation-settings", () => ({ readEmergencyStopStrict: vi.fn(async () => false) }));
+
 const { requireSessionContextMock } = vi.hoisted(() => ({
   requireSessionContextMock: vi.fn(async () => ({ tenantId: "t1", userId: "u1", role: "owner" })),
 }));

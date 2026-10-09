@@ -46,3 +46,31 @@ export async function getOrCreateAutomationSettings(
 
   return created ?? { tenant_id: tenantId, ...DEFAULT_SETTINGS };
 }
+
+/**
+ * Reads the Emergency Stop flag read-only and FAIL CLOSED, for the external
+ * budget safety gate: `null` means "could not be verified" (query error,
+ * thrown error, or a non-boolean value) and the gate treats it as a denial.
+ * A tenant with no settings row has never toggled Emergency Stop, which is
+ * the same inactive state a new tenant starts in (see
+ * getOrCreateAutomationSettings), so a missing row reads as `false`. Unlike
+ * getOrCreateAutomationSettings this never inserts a row.
+ */
+export async function readEmergencyStopStrict(
+  supabase: SupabaseClient<Database>,
+  tenantId: string,
+): Promise<boolean | null> {
+  try {
+    const { data, error } = await supabase
+      .from("prompter_automation_settings")
+      .select("emergency_stop_active")
+      .eq("tenant_id", tenantId)
+      .maybeSingle();
+
+    if (error) return null;
+    if (!data) return false;
+    return typeof data.emergency_stop_active === "boolean" ? data.emergency_stop_active : null;
+  } catch {
+    return null;
+  }
+}
