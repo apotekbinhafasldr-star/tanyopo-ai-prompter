@@ -3,15 +3,15 @@ import { buildApprovalHarness } from "../helpers/budget-gate-harness";
 
 // REAL gate logic; only the platform enablement list is injected (META on) to
 // reach the evidence layers behind the default-deny platform lock.
-vi.mock("@/lib/campaigns/external-budget-guard", async (importOriginal) => {
-  const real = await importOriginal<typeof import("@/lib/campaigns/external-budget-guard")>();
-  const enabled = ["META"] as const;
+vi.mock("@/lib/campaigns/external-budget-guard", async () => {
+  // Test-only: the real evaluation logic from the internal core, with META on.
+  const core = await import("@/lib/campaigns/external-budget-guard-core");
+  const enabled: readonly import("@/types/database").ConnectorPlatform[] = ["META"];
   return {
-    ...real,
-    isBudgetWritePlatformEnabled: (platform: Parameters<typeof real.isBudgetWritePlatformEnabled>[0]) =>
-      real.isBudgetWritePlatformEnabled(platform, enabled),
-    evaluateExternalBudgetWrite: (request: Parameters<typeof real.evaluateExternalBudgetWrite>[0]) =>
-      real.evaluateExternalBudgetWrite(request, enabled),
+    BUDGET_WRITE_DISABLED_MESSAGE: core.BUDGET_WRITE_DISABLED_MESSAGE,
+    isBudgetWritePlatformEnabled: (platform: import("@/types/database").ConnectorPlatform) => enabled.includes(platform),
+    evaluateExternalBudgetWrite: (request: import("@/lib/campaigns/external-budget-guard-core").ExternalBudgetWriteRequest) =>
+      core.evaluateWithPlatforms(request, enabled),
   };
 });
 

@@ -24,6 +24,38 @@ function walk(dir: string, out: string[] = []): string[] {
   return out;
 }
 
+/** Number of top-level arguments of every call `name(...)` in `text`. */
+function argumentCounts(text: string, name: string): number[] {
+  const counts: number[] = [];
+  let from = 0;
+  for (;;) {
+    const at = text.indexOf(`${name}(`, from);
+    if (at === -1) return counts;
+    let depth = 0;
+    let args = 0;
+    let sawContent = false;
+    let i = at + name.length;
+    for (; i < text.length; i++) {
+      const ch = text[i];
+      if (ch === "(" || ch === "[" || ch === "{") {
+        depth++;
+        if (depth > 1) sawContent = true;
+      } else if (ch === ")" || ch === "]" || ch === "}") {
+        depth--;
+        if (depth === 0) break;
+      } else if (ch === "," && depth === 1) {
+        if (sawContent) args++;
+        sawContent = false;
+      } else if (depth >= 1 && !/\s/.test(ch)) {
+        sawContent = true;
+      }
+    }
+    if (sawContent) args++;
+    counts.push(args);
+    from = i;
+  }
+}
+
 function rel(file: string) {
   return path.relative(ROOT, file).split(path.sep).join("/");
 }
@@ -73,11 +105,41 @@ describe("external budget write call sites", () => {
     expect(gate).toBeLessThan(text.indexOf('.from("prompter_oauth_credentials")'));
   });
 
-  it("no production code passes its own platform list to the gate (no bypass seam)", () => {
+  it("no production code can inject a platform list into the gate (no bypass seam)", () => {
+    const GUARD = "lib/campaigns/external-budget-guard.ts";
+    const CORE = "lib/campaigns/external-budget-guard-core.ts";
     for (const { file, text } of sources) {
-      if (file === "lib/campaigns/external-budget-guard.ts") continue;
+      if (file === GUARD || file === CORE) continue;
       expect(text, file).not.toMatch(/BUDGET_WRITE_ENABLED_PLATFORMS/);
-      expect(text, file).not.toMatch(/evaluateExternalBudgetWrite\([^)]*,\s*\[/);
+      expect(text, file).not.toMatch(/external-budget-guard-core/);
+      expect(text, file).not.toMatch(/evaluateWithPlatforms/);
+      // Any second argument (literal, variable or expression) is a seam.
+      for (const name of ["evaluateExternalBudgetWrite", "isBudgetWritePlatformEnabled"]) {
+        for (const count of argumentCounts(text, name)) expect(count, `${file}: ${name}`).toBe(1);
+      }
     }
+  });
+
+  it("only the public gate module imports the internal core", () => {
+    const importers = sources.filter(({ text }) => /external-budget-guard-core/.test(text)).map(({ file }) => file);
+    expect(importers).toEqual(["lib/campaigns/external-budget-guard.ts"]);
+  });
+
+  it("call sites call the gate with exactly one argument", () => {
+    for (const file of ["features/campaigns/launch-actions.ts", "features/approvals/actions.ts"]) {
+      const text = sources.find((s) => s.file === file)!.text;
+      const counts = argumentCounts(text, "evaluateExternalBudgetWrite");
+      expect(counts.length, file).toBeGreaterThan(0);
+      expect(counts.every((c) => c === 1), file).toBe(true);
+    }
+  });
+
+  it("argumentCounts detects a second argument (self-check of the scanner)", () => {
+    const g = "evaluateExternalBudgetWrite";
+    expect(argumentCounts(`${g}({ a: 1, b: [1, 2] })`, g)).toEqual([1]);
+    expect(argumentCounts(`${g}({ a: 1 }, list)`, g)).toEqual([2]);
+    expect(argumentCounts(`${g}(req, ["META"])`, g)).toEqual([2]);
+    expect(argumentCounts(`${g}(req,\n)`, g)).toEqual([1]);
+    expect(argumentCounts("isBudgetWritePlatformEnabled(p, fn(a, b))", "isBudgetWritePlatformEnabled")).toEqual([2]);
   });
 });
