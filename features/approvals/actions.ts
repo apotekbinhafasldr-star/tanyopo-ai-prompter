@@ -8,6 +8,8 @@ import { setChannelCampaignsStatus } from "@/services/channel-campaigns";
 import { getConnector } from "@/lib/connectors/get-connector";
 import { CHANNEL_TO_CONNECTOR } from "@/lib/connectors/channel-map";
 import { decryptToken } from "@/lib/crypto/token-cipher";
+import { evaluateExternalBudgetWrite } from "@/lib/campaigns/external-budget-guard";
+import { readEmergencyStopStrict } from "@/services/automation-settings";
 import type { ConnectorPlatform, OptimizationActionType } from "@/types/database";
 
 export interface ApprovalActionState {
@@ -173,6 +175,38 @@ async function executeAutopilotAction(
   const connectorPlatform: ConnectorPlatform | undefined = CHANNEL_TO_CONNECTOR[channelCampaign.channel];
   if (!connectorPlatform) {
     return `Eksekusi dibatalkan: ${channelCampaign.channel} tidak punya connector.`;
+  }
+
+  // S1 External Budget Safety Gate. Budget changes only (PAUSE_CHANNEL lowers
+  // risk and is unchanged). Runs before the connected account, credentials
+  // and decryption are touched, and before updateBudget. Current external
+  // budget, account currency and a recomputed Budget Guard are NOT VERIFIED
+  // here, so the gate denies every platform.
+  if (actionType === "INCREASE_BUDGET" || actionType === "DECREASE_BUDGET") {
+    const emergencyStopActive = await readEmergencyStopStrict(supabase, tenantId);
+    const gate = evaluateExternalBudgetWrite({
+      operation: actionType,
+      platform: connectorPlatform,
+      emergencyStopActive,
+      masterCurrency: null,
+      accountCurrency: null,
+      proposedDailyBudget: typeof ctx?.suggested_daily_budget === "number" ? ctx.suggested_daily_budget : null,
+      currentExternalDailyBudget: null,
+      otherPaidChannelsDailyTotal: null,
+      masterDailyBudget: null,
+      budgetGuard: { unavailable: true },
+    });
+    if (!gate.allowed) {
+      await supabase.from("prompter_audit_logs").insert({
+        tenant_id: tenantId,
+        actor_user_id: actorUserId,
+        action: "autopilot_action.blocked_budget_gate",
+        resource_type: "prompter_channel_campaigns",
+        resource_id: channelCampaignId,
+        context: { platform: connectorPlatform, action_type: actionType, gate_code: gate.code },
+      });
+      return `Eksekusi dibatalkan: ${gate.message}`;
+    }
   }
 
   const { data: connectedAccount } = await supabase
