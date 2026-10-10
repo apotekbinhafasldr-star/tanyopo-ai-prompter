@@ -49,6 +49,8 @@ interface Harness {
   adminFrom: ReturnType<typeof vi.fn>;
   claimUpdate: ReturnType<typeof vi.fn>;
   auditInsert: ReturnType<typeof vi.fn>;
+  /** Every column list passed to select() on prompter_connected_accounts. */
+  connectedAccountSelects: string[];
 }
 
 type ChannelRow = { id: string; channel: string; budget_percentage: number | null };
@@ -67,6 +69,8 @@ const CONNECTED = {
 function buildHarness(
   options: {
     connectedAccount?: { data: unknown; error: unknown };
+    /** Result of the separate `selected_page_id` read; defaults to connectedAccount. */
+    pageRead?: { data: unknown; error: unknown };
     channel?: string;
     channelId?: string;
     master?: Record<string, unknown>;
@@ -99,6 +103,8 @@ function buildHarness(
     error: null,
   });
   const connectedAccountMaybeSingle = maybeSingle(options.connectedAccount ?? CONNECTED);
+  const pageReadMaybeSingle = options.pageRead ? maybeSingle(options.pageRead) : connectedAccountMaybeSingle;
+  const connectedAccountSelects: string[] = [];
   const credentialsMaybeSingle = maybeSingle({ data: { encrypted_access_token: "cipher" }, error: null });
   const rowsResult = { data: options.rowsError ? null : (options.rows ?? DEFAULT_ROWS), error: options.rowsError ?? null };
   const policyMaybeSingle = maybeSingle({ data: options.policy ?? null, error: options.policyError ?? null });
@@ -138,7 +144,17 @@ function buildHarness(
       return { select: () => ({ eq: () => ({ eq: () => ({ single: masterCampaignSingle }) }) }) };
     }
     if (table === "prompter_connected_accounts") {
-      return { select: () => ({ eq: () => ({ eq: () => ({ maybeSingle: connectedAccountMaybeSingle }) }) }) };
+      return {
+        select: (columns: string) => {
+          connectedAccountSelects.push(columns);
+          const isPageRead = columns === "selected_page_id";
+          return {
+            eq: () => ({
+              eq: () => ({ maybeSingle: isPageRead ? pageReadMaybeSingle : connectedAccountMaybeSingle }),
+            }),
+          };
+        },
+      };
     }
     if (table === "prompter_budget_policies") {
       return { select: () => ({ eq: () => ({ maybeSingle: policyMaybeSingle }) }) };
@@ -165,7 +181,7 @@ function buildHarness(
     throw new Error(`Unexpected table on admin client: ${table}`);
   });
 
-  return { regularFrom, adminFrom, claimUpdate, auditInsert };
+  return { regularFrom, adminFrom, claimUpdate, auditInsert, connectedAccountSelects };
 }
 
 let harness: Harness;
@@ -210,6 +226,126 @@ describe("launchChannelCampaignAction — Track B pageId threading", () => {
         error: null,
       },
     });
+
+    const result = await launchChannelCampaignAction("cc1");
+
+    expect(result.error).toBeNull();
+    expect(connectorMock.createCreative).toHaveBeenCalledWith(
+      "access-token-abc",
+      "act_123",
+      expect.objectContaining({ pageId: undefined }),
+    );
+  });
+});
+
+describe("launchChannelCampaignAction — schema without Track B columns / failed connection reads (fail closed)", () => {
+  const MISSING_COLUMN = { code: "42703", message: "column selected_page_id does not exist" };
+
+  beforeEach(() => {
+    requireSessionContextMock.mockClear();
+    decryptTokenMock.mockClear();
+    connectorMock.createCampaign.mockClear();
+    connectorMock.createAdSet.mockClear();
+    connectorMock.createCreative.mockClear();
+    connectorMock.createAd.mockClear();
+  });
+
+  function expectNothingHappened(h: Harness) {
+    expectNoSideEffects(h);
+    expect(connectorMock.createCreative).not.toHaveBeenCalled();
+    expect(connectorMock.createAd).not.toHaveBeenCalled();
+    expect(decryptTokenMock).not.toHaveBeenCalled();
+  }
+
+  it("reads the base account without any Track B column, and selected_page_id separately for META", async () => {
+    harness = buildHarness();
+
+    const result = await launchChannelCampaignAction("cc1");
+
+    expect(result.error).toBeNull();
+    expect(harness.connectedAccountSelects).toEqual(["id, external_account_id, status", "selected_page_id"]);
+  });
+
+  it("never reads selected_page_id for TikTok (the column is Meta-only)", async () => {
+    harness = buildHarness({
+      channel: "TIKTOK",
+      rows: [{ id: "cc1", channel: "TIKTOK", budget_percentage: 100 }],
+    });
+
+    const result = await launchChannelCampaignAction("cc1");
+
+    expect(result.error).toBeNull();
+    expect(harness.connectedAccountSelects).toEqual(["id, external_account_id, status"]);
+    expect(connectorMock.createCreative).toHaveBeenCalledWith(
+      "access-token-abc",
+      "act_123",
+      expect.objectContaining({ pageId: undefined }),
+    );
+  });
+
+  it("aborts with no side effect when selected_page_id cannot be read (production schema without Track B)", async () => {
+    harness = buildHarness({ pageRead: { data: null, error: MISSING_COLUMN } });
+
+    const result = await launchChannelCampaignAction("cc1");
+
+    expect(result.error).toMatch(/Pilihan Page Facebook tidak dapat dibaca/);
+    expect(result.error).not.toMatch(/belum terhubung/i);
+    expectNothingHappened(harness);
+  });
+
+  it("aborts with no side effect when the selected_page_id read returns no row", async () => {
+    harness = buildHarness({ pageRead: { data: null, error: null } });
+
+    const result = await launchChannelCampaignAction("cc1");
+
+    expect(result.error).toMatch(/Pilihan Page Facebook tidak dapat dibaca/);
+    expectNothingHappened(harness);
+  });
+
+  it("does not turn an unreadable Page into a default: pageId is never passed on failure", async () => {
+    harness = buildHarness({ pageRead: { data: { selected_page_id: "page_42" }, error: MISSING_COLUMN } });
+
+    const result = await launchChannelCampaignAction("cc1");
+
+    expect(result.error).toMatch(/Pilihan Page Facebook tidak dapat dibaca/);
+    expectNothingHappened(harness);
+  });
+
+  it("aborts with no side effect when the base connection read errors (not reported as 'belum terhubung')", async () => {
+    harness = buildHarness({ connectedAccount: { data: null, error: { code: "42501", message: "denied" } } });
+
+    const result = await launchChannelCampaignAction("cc1");
+
+    expect(result.error).toMatch(/Gagal membaca data koneksi akun/);
+    expect(result.error).not.toMatch(/belum terhubung/i);
+    expectNothingHappened(harness);
+  });
+
+  it("aborts with no side effect when the account is genuinely not connected", async () => {
+    harness = buildHarness({ connectedAccount: { data: null, error: null } });
+
+    const result = await launchChannelCampaignAction("cc1");
+
+    expect(result.error).toMatch(/belum terhubung/i);
+    expectNothingHappened(harness);
+  });
+
+  it("aborts with no side effect when the account exists but is not CONNECTED", async () => {
+    harness = buildHarness({
+      connectedAccount: {
+        data: { id: "acct1", external_account_id: "act_123", status: "EXPIRED" },
+        error: null,
+      },
+    });
+
+    const result = await launchChannelCampaignAction("cc1");
+
+    expect(result.error).toMatch(/belum terhubung/i);
+    expectNothingHappened(harness);
+  });
+
+  it("still reaches the existing 'no Page selected' behaviour when the column is readable and null", async () => {
+    harness = buildHarness({ pageRead: { data: { selected_page_id: null }, error: null } });
 
     const result = await launchChannelCampaignAction("cc1");
 
