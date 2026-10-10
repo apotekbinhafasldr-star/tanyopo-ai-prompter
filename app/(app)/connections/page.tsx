@@ -67,10 +67,15 @@ interface ConnectedAccountRow {
   status: string;
   expires_at: string | null;
   last_refreshed_at: string | null;
-  // Track B — only ever populated for platform === "META"; null for
-  // TIKTOK/X rows and for any META row that hasn't picked a Page yet.
-  selected_page_name: string | null;
 }
+
+/**
+ * Track B Page selection state for the Meta card. It is read in its own
+ * query so the base connection status never depends on a column that may not
+ * exist in the database yet. `readable: false` means "could not be read" and
+ * is NOT the same as "no Page chosen" (`readable: true, name: null`).
+ */
+type MetaPageSelection = { readable: true; name: string | null } | { readable: false };
 
 function computeStatus(platform: ConnectorPlatform, account: ConnectedAccountRow | undefined): ConnectionStatus {
   const connector = getConnector(platform);
@@ -90,16 +95,40 @@ export default async function ConnectionsPage({
   const session = await requireSessionContext();
   const supabase = await createClient();
 
-  const [{ data: connectedAccounts }, { data: brandProfile }, showRegionalCapabilities] = await Promise.all([
-    supabase
-      .from("prompter_connected_accounts")
-      .select("platform, external_account_name, status, expires_at, last_refreshed_at, selected_page_name")
-      .eq("tenant_id", session.tenantId),
-    supabase.from("prompter_brand_profiles").select("country_code").eq("tenant_id", session.tenantId).maybeSingle(),
-    isFeatureEnabled(supabase, session.tenantId, "regional_capabilities"),
-  ]);
+  // The base read deliberately names no Track B column, so connection status
+  // renders correctly against the current production schema.
+  const [{ data: connectedAccounts, error: accountsError }, { data: brandProfile }, showRegionalCapabilities] =
+    await Promise.all([
+      supabase
+        .from("prompter_connected_accounts")
+        .select("platform, external_account_name, status, expires_at, last_refreshed_at")
+        .eq("tenant_id", session.tenantId),
+      supabase.from("prompter_brand_profiles").select("country_code").eq("tenant_id", session.tenantId).maybeSingle(),
+      isFeatureEnabled(supabase, session.tenantId, "regional_capabilities"),
+    ]);
+
+  // A failed read must never be shown as "Belum Terhubung": that would claim
+  // the accounts are not connected when the truth is that we could not tell.
+  const accountsReadFailed = Boolean(accountsError) || !connectedAccounts;
+  if (accountsError) {
+    // Code only: never log row data or the full error object.
+    console.error("[connections] could not read prompter_connected_accounts", { code: accountsError.code });
+  }
 
   const accountByPlatform = new Map((connectedAccounts ?? []).map((a) => [a.platform, a]));
+
+  let metaPageSelection: MetaPageSelection = { readable: false };
+  if (!accountsReadFailed && session.role === "owner" && accountByPlatform.has("META")) {
+    const { data: pageRow, error: pageError } = await supabase
+      .from("prompter_connected_accounts")
+      .select("selected_page_name")
+      .eq("tenant_id", session.tenantId)
+      .eq("platform", "META")
+      .maybeSingle();
+    if (!pageError && pageRow) {
+      metaPageSelection = { readable: true, name: pageRow.selected_page_name ?? null };
+    }
+  }
 
   const capabilitiesByPlatform = showRegionalCapabilities
     ? new Map(
@@ -131,16 +160,26 @@ export default async function ConnectionsPage({
         </div>
       ) : null}
 
+      {accountsReadFailed ? (
+        <div role="alert" className="rounded-[var(--radius-md)] bg-danger-muted p-4 text-sm text-danger">
+          Status koneksi tidak dapat dibaca saat ini, jadi tidak ditampilkan. Ini bukan berarti akun Anda belum
+          terhubung. Muat ulang halaman; jika masalah berlanjut, hubungi admin.
+        </div>
+      ) : null}
+
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        {(["META", "TIKTOK", "X"] as const).map((platform) => (
-          <ConnectorCard
-            key={platform}
-            platform={platform}
-            account={accountByPlatform.get(platform)}
-            isOwner={session.role === "owner"}
-            capabilities={capabilitiesByPlatform.get(platform)}
-          />
-        ))}
+        {accountsReadFailed
+          ? null
+          : (["META", "TIKTOK", "X"] as const).map((platform) => (
+              <ConnectorCard
+                key={platform}
+                platform={platform}
+                account={accountByPlatform.get(platform)}
+                isOwner={session.role === "owner"}
+                capabilities={capabilitiesByPlatform.get(platform)}
+                metaPageSelection={metaPageSelection}
+              />
+            ))}
 
         <PlaceholderCard
           icon={Globe}
@@ -167,11 +206,13 @@ function ConnectorCard({
   account,
   isOwner,
   capabilities,
+  metaPageSelection,
 }: {
   platform: ConnectorPlatform;
   account: ConnectedAccountRow | undefined;
   isOwner: boolean;
   capabilities?: CapabilityRow[];
+  metaPageSelection: MetaPageSelection;
 }) {
   const info = PLATFORM_INFO[platform];
   const Icon = info.icon;
@@ -218,7 +259,13 @@ function ConnectorCard({
         )}
 
         {platform === "META" && isOwner && (status === "CONNECTED" || status === "EXPIRED" || status === "ACTION_REQUIRED") ? (
-          <MetaPagePicker selectedPageName={account?.selected_page_name ?? null} />
+          metaPageSelection.readable ? (
+            <MetaPagePicker selectedPageName={metaPageSelection.name} />
+          ) : (
+            <p className="border-t border-border pt-3 text-xs text-muted-foreground">
+              Pemilihan Facebook Page belum tersedia saat ini. Status koneksi di atas tidak terpengaruh.
+            </p>
+          )
         ) : null}
 
         {capabilities && capabilities.length > 0 ? (

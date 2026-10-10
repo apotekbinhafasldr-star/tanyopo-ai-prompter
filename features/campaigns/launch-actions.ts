@@ -80,9 +80,10 @@ const DEFAULT_OBJECTIVE: Record<ConnectorPlatform, string> = {
  * campaign's `error` exactly like any other failure:
  * - **Meta**: `createCreative` requires a connected Facebook Page (Track B —
  *   the Owner selects one via the Connections page, features/connections/
- *   meta-page-picker.tsx; `connectedAccount.selected_page_id` is threaded
- *   into the creative call below). A Meta account that hasn't picked a
- *   Page yet still throws the same existing error as before Track B.
+ *   meta-page-picker.tsx; `selected_page_id` is read in its own query and
+ *   threaded into the creative call below; if that read fails the launch
+ *   is aborted before any platform call). A Meta account that hasn't
+ *   picked a Page yet still throws the same existing error as before Track B.
  * - **TikTok/X**: `createAdSet` requires each platform's own numeric location id
  *   (not an ISO country code) — no verified mapping exists yet, so this stops
  *   one step earlier than Meta rather than risk targeting the wrong location.
@@ -252,6 +253,51 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
     return { error: gate.message };
   }
 
+  // Connection reads, still BEFORE the atomic claim: a failed read writes
+  // nothing and calls no platform API (fail closed).
+  //
+  // Schema compatibility: the base account read never names a Track B
+  // column, so it works whether or not the Track B migration has been
+  // applied to the database. `selected_page_id` is read in its own query,
+  // only for META (the only platform that uses it), and ANY failure to read
+  // it aborts the launch. It is never replaced by a default or a guess.
+  const { data: connectedAccount, error: connectedAccountError } = await supabase
+    .from("prompter_connected_accounts")
+    .select("id, external_account_id, status")
+    .eq("tenant_id", session.tenantId)
+    .eq("platform", connectorPlatform)
+    .maybeSingle();
+
+  if (connectedAccountError) {
+    return { error: "Gagal membaca data koneksi akun. Peluncuran dibatalkan, coba lagi." };
+  }
+
+  if (!connectedAccount || connectedAccount.status !== "CONNECTED") {
+    return {
+      error: `${connectorPlatform} belum terhubung. Hubungkan akun di halaman Connections terlebih dahulu.`,
+    };
+  }
+
+  let selectedPageId: string | undefined;
+  if (connectorPlatform === "META") {
+    const { data: pageRow, error: pageError } = await supabase
+      .from("prompter_connected_accounts")
+      .select("selected_page_id")
+      .eq("tenant_id", session.tenantId)
+      .eq("platform", connectorPlatform)
+      .maybeSingle();
+
+    if (pageError || !pageRow) {
+      return {
+        error:
+          "Pilihan Page Facebook tidak dapat dibaca. Peluncuran dibatalkan dan tidak ada yang dibuat di platform iklan.",
+      };
+    }
+    // null (no Page chosen yet) stays undefined: connector.createCreative()
+    // already throws its existing error for that case, unchanged.
+    selectedPageId = pageRow.selected_page_id ?? undefined;
+  }
+
   // P0 remediation (Meta Ads production readiness): atomic claim to prevent
   // a duplicate/concurrent launch of this same channel campaign. Previously
   // nothing server-side re-checked this row's own current status before
@@ -274,19 +320,6 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
   if (claimError || !claimedRows || claimedRows.length === 0) {
     return {
       error: "Campaign ini sudah diluncurkan atau sedang diproses oleh permintaan lain.",
-    };
-  }
-
-  const { data: connectedAccount } = await supabase
-    .from("prompter_connected_accounts")
-    .select("id, external_account_id, status, selected_page_id")
-    .eq("tenant_id", session.tenantId)
-    .eq("platform", connectorPlatform)
-    .maybeSingle();
-
-  if (!connectedAccount || connectedAccount.status !== "CONNECTED") {
-    return {
-      error: `${connectorPlatform} belum terhubung. Hubungkan akun di halaman Connections terlebih dahulu.`,
     };
   }
 
@@ -367,7 +400,8 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
       // account that hasn't picked a Page yet — connector.createCreative()
       // already throws its existing, unchanged error in that case, so
       // behavior for an unselected Page is identical to before this change.
-      pageId: connectedAccount.selected_page_id ?? undefined,
+      // A Page that could not be READ never reaches this point (see above).
+      pageId: selectedPageId,
     });
 
     await connector.createAd(accessToken, adAccountId, {
