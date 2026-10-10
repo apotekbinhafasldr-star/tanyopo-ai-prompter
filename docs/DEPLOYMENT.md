@@ -19,7 +19,7 @@ Copy `.env.example` to `.env.local` for local development. Never commit `.env.lo
 
 ## Database
 
-This app does not own a Supabase project lifecycle — it targets the existing shared project (`umkmpro-ai`, ref `wjjyqovhmwenbcvbnkgx`). New migrations are added to `supabase/migrations/` and applied with the Supabase CLI (`supabase db push`) or the Supabase MCP `apply_migration` tool, by someone with access to that project. See [DATABASE.md](DATABASE.md) for the additive-only rule.
+This app does not own a Supabase project lifecycle — it targets the existing shared project (`umkmpro-ai`, ref `wjjyqovhmwenbcvbnkgx`). New migrations are added to `supabase/migrations/` and are applied to that project only through a deliberate, reviewed step approved by the project owner, and the file is then named with the version the production ledger records. **Never run `supabase db push` / `supabase migration up` against the shared project**: its ledger is shared with UMKMpro AI and the repository history is not a replayable copy of it. See [DATABASE.md](DATABASE.md) for the additive-only rule and the migration ledger notes.
 
 ## Build
 

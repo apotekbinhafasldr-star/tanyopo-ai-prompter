@@ -6,7 +6,7 @@ import type { SubscriptionPlan } from "@/types/database";
  * source of truth (pricing cards, feature comparison) — the numeric
  * `limits` below are the same numbers Batch B9 mirrored, verbatim, into
  * the DB-level `prompter_plan_entitlements` table
- * (supabase/migrations/20260912090000_prompter_b9_entitlement_enforcement.sql),
+ * (supabase/migrations/20260915043800_prompter_b9_entitlement_enforcement.sql),
  * which is what the server-side enforcement functions
  * (`fn_create_ai_job_if_entitled`, `fn_activate_product`,
  * `fn_reserve_active_campaign_slot`) actually read at request time.

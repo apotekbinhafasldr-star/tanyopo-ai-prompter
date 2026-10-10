@@ -231,7 +231,7 @@ export async function recordInvoiceFromProvider(
  * payment, permanently bypassing the 14-day trial cutoff simply by saving
  * a plan on this page. Moving a subscription to ACTIVE is a real billing
  * event and belongs exclusively to fn_apply_verified_payment() (Batch
- * B10, supabase/migrations/20260913090000_prompter_b10_payment_billing_core.sql),
+ * B10, supabase/migrations/20260915051359_prompter_b10_payment_billing_core.sql),
  * called only from the payment webhook route after a verified payment —
  * never to this self-service action.
  *

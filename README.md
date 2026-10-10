@@ -37,10 +37,9 @@ Open [http://localhost:3000](http://localhost:3000).
 
 Schema lives in `supabase/migrations/`. This app **adds** `prompter_`-prefixed tables to an existing Supabase project shared with UMKMpro AI — it never modifies UMKMpro's own tables. See [docs/DATABASE.md](docs/DATABASE.md) for the tenancy model and RLS approach.
 
-```bash
-# Apply migrations to your local/linked Supabase project
-supabase db push
-```
+> **Do not run `supabase db push` (or `supabase migration up`) against the shared production project.** Its migration ledger is shared with UMKMpro AI and the repository history is not a replayable copy of it. Production migrations are applied only through a deliberate, reviewed step approved by the project owner. See [docs/DATABASE.md](docs/DATABASE.md#migration-history-and-the-production-ledger).
+
+To exercise the schema locally, use a throwaway local Supabase stack (`supabase start`) that already contains the UMKMpro identity layer, never the linked production project.
 
 ## Testing
 

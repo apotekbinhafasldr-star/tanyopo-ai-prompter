@@ -17,7 +17,7 @@ import { PLAN_TIERS } from "@/lib/billing/plans";
  */
 const migrationPath = path.resolve(
   __dirname,
-  "../../../supabase/migrations/20260912090000_prompter_b9_entitlement_enforcement.sql",
+  "../../../supabase/migrations/20260915043800_prompter_b9_entitlement_enforcement.sql",
 );
 const sql = readFileSync(migrationPath, "utf-8");
 

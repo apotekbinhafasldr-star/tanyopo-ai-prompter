@@ -11,7 +11,7 @@ import path from "node:path";
  */
 const migrationPath = path.resolve(
   __dirname,
-  "../../../supabase/migrations/20260913090000_prompter_b10_payment_billing_core.sql",
+  "../../../supabase/migrations/20260915051359_prompter_b10_payment_billing_core.sql",
 );
 const sql = readFileSync(migrationPath, "utf-8");
 
