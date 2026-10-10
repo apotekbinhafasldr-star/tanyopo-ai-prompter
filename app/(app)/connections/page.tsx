@@ -47,7 +47,7 @@ const PLATFORM_INFO: Record<
   TIKTOK: {
     icon: Music2,
     title: "TikTok",
-    subtitle: "TikTok for Business",
+    subtitle: "TikTok Login Kit (akun TikTok)",
     authorizePath: "/api/connections/tiktok/authorize",
     notConfiguredHint:
       "Tambahkan TIKTOK_APP_ID, TIKTOK_APP_SECRET, dan TIKTOK_REDIRECT_URI di server untuk mengaktifkan.",
