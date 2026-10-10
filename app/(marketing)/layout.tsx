@@ -1,6 +1,7 @@
 import { MarketingHeader } from "@/features/marketing/marketing-header";
 import { LinoeLogo } from "@/components/brand/linoe-logo";
 import { brand } from "@/lib/brand";
+import { LegalLinks } from "@/features/legal/legal-links";
 
 export default function MarketingLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -13,10 +14,13 @@ export default function MarketingLayout({ children }: { children: React.ReactNod
         <div className="mx-auto flex max-w-6xl flex-col gap-4 px-4 py-10 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between sm:px-6">
           {/* Batch B10: Landing is frozen — pin the pre-B10 asset here too. */}
           <LinoeLogo size="sm" variant="legacy" />
-          <p>
-            © {new Date().getFullYear()} {brand.companyFull}. {brand.lockup} — bagian dari
-            ekosistem Tanyopo, bersama UMKMpro AI.
-          </p>
+          <div className="flex flex-col gap-3">
+            <LegalLinks />
+            <p>
+              © {new Date().getFullYear()} {brand.companyFull}. {brand.lockup} — bagian dari
+              ekosistem Tanyopo, bersama UMKMpro AI.
+            </p>
+          </div>
         </div>
       </footer>
     </div>
