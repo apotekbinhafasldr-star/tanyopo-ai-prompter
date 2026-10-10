@@ -1377,7 +1377,7 @@ export interface Database {
         Args: { p_job_types: JobType[] | null };
         Returns: Database["public"]["Tables"]["prompter_jobs"]["Row"] | null;
       };
-      // Batch B9 — see supabase/migrations/20260912090000_prompter_b9_entitlement_enforcement.sql.
+      // Batch B9 — see supabase/migrations/20260915043800_prompter_b9_entitlement_enforcement.sql.
       fn_create_ai_job_if_entitled: {
         Args: { p_job_type: string; p_input_reference?: Json };
         Returns: {
@@ -1400,7 +1400,7 @@ export interface Database {
         Args: { p_campaign_id: string };
         Returns: { allowed: boolean; reason: string | null }[];
       };
-      // Batch B10 -- see supabase/migrations/20260913090000_prompter_b10_payment_billing_core.sql.
+      // Batch B10 -- see supabase/migrations/20260915051359_prompter_b10_payment_billing_core.sql.
       fn_apply_verified_payment: {
         Args: {
           p_transaction_id: string;
@@ -1416,7 +1416,7 @@ export interface Database {
         Returns: { allowed: boolean; reason: string | null }[];
       };
       // LINOE Demo Environment Phase 1 -- see
-      // supabase/migrations/20260928120000_prompter_demo_ai_usage.sql.
+      // supabase/migrations/20260928161604_prompter_demo_ai_usage.sql.
       // Not tenant-scoped and not part of the tenant/RLS model above --
       // demo sessions are never a real tenant (see that migration's own
       // docstring).

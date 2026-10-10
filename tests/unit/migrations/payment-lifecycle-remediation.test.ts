@@ -12,7 +12,7 @@ import path from "node:path";
  */
 const migrationPath = path.resolve(
   __dirname,
-  "../../../supabase/migrations/20260926120000_prompter_payment_lifecycle_remediation.sql",
+  "../../../supabase/migrations/20260926113000_prompter_payment_lifecycle_remediation.sql",
 );
 const sql = readFileSync(migrationPath, "utf-8");
 

@@ -44,7 +44,7 @@ Verified for this correction: a repository-wide search for any `.from("<umkmpro-
 
 ## Phase 0 schema
 
-Migration: `supabase/migrations/20260829080000_prompter_foundation_schema.sql` (+ a follow-up linter fix in `20260829080100_prompter_fix_function_search_path.sql`).
+Migration: `supabase/migrations/20260829080127_prompter_foundation_schema.sql` (+ a follow-up linter fix in `20260829080155_prompter_fix_function_search_path.sql`).
 
 ### `prompter_brand_profiles`
 
@@ -81,7 +81,7 @@ RLS: tenant members can `SELECT` and `INSERT` (as themselves — `actor_user_id`
 
 ## Phase 1 schema
 
-Migration: `supabase/migrations/20260829120000_prompter_phase1_schema.sql`. Same additive-only rule as Phase 0. Write access (`INSERT`/`UPDATE`/`DELETE`) on every table below is restricted to `owner`/`marketing` roles (these actions create real AI cost or are marketing-facing changes); `SELECT` is open to any tenant member.
+Migration: `supabase/migrations/20260829092303_prompter_phase1_schema.sql`. Same additive-only rule as Phase 0. Write access (`INSERT`/`UPDATE`/`DELETE`) on every table below is restricted to `owner`/`marketing` roles (these actions create real AI cost or are marketing-facing changes); `SELECT` is open to any tenant member.
 
 | Table | Purpose |
 |---|---|
@@ -105,7 +105,7 @@ Also created in the Phase 1 migration, all public-read (so they can be embedded 
 
 ## Phase 2 schema
 
-Migration: `supabase/migrations/20260829140000_prompter_phase2_schema.sql`. Same additive-only rule as Phase 0/1.
+Migration: `supabase/migrations/20260829095447_prompter_phase2_schema.sql`. Same additive-only rule as Phase 0/1.
 
 | Table | Purpose | Write access |
 |---|---|---|
@@ -128,7 +128,7 @@ As of Phase 2, `ACTIVE`, `PAUSED`, `COMPLETED`, `FAILED` exist in the CHECK cons
 
 ## Phase 3 schema
 
-Migrations: `supabase/migrations/20260829160000_prompter_phase3_schema.sql` and a small follow-up (`20260829160100_prompter_channel_campaigns_add_error.sql`, adds `prompter_channel_campaigns.error`). Same additive-only rule as Phase 0-2.
+Migrations: `supabase/migrations/20260829102304_prompter_phase3_schema.sql` and a small follow-up (`20260829102947_prompter_channel_campaigns_add_error.sql`, adds `prompter_channel_campaigns.error`). Same additive-only rule as Phase 0-2.
 
 | Table | Purpose | Write access |
 |---|---|---|
@@ -144,7 +144,7 @@ Migrations: `supabase/migrations/20260829160000_prompter_phase3_schema.sql` and 
 
 ## Phase 4 schema
 
-Migration: `supabase/migrations/20260829180000_prompter_phase4_schema.sql`. Same additive-only rule as Phase 0-3.
+Migration: `supabase/migrations/20260829104743_prompter_phase4_schema.sql`. Same additive-only rule as Phase 0-3.
 
 | Table | Purpose | Write access |
 |---|---|---|
@@ -163,7 +163,7 @@ Two existing tables also gained a Phase 4 column/constraint:
 
 ## Phase 5 schema
 
-Migration: `supabase/migrations/20260829200000_prompter_phase5_schema.sql`. Same additive-only rule as Phase 0-4. Write access on every new table follows the Phase 1 pattern (owner/marketing write, any tenant member read).
+Migration: `supabase/migrations/20260829110644_prompter_phase5_schema.sql`. Same additive-only rule as Phase 0-4. Write access on every new table follows the Phase 1 pattern (owner/marketing write, any tenant member read).
 
 | Table | Purpose |
 |---|---|
@@ -179,7 +179,7 @@ Two existing tables also changed:
 
 ## Phase 7 schema
 
-Migration: `supabase/migrations/20260829240000_prompter_phase7_schema.sql`. Same additive-only rule as Phase 0-6. Write access on every new table follows the Phase 1 pattern (owner/marketing write, any tenant member read), except where noted.
+Migration: `supabase/migrations/20260829114414_prompter_phase7_schema.sql`. Same additive-only rule as Phase 0-6. Write access on every new table follows the Phase 1 pattern (owner/marketing write, any tenant member read), except where noted.
 
 | Table | Purpose | Write access |
 |---|---|---|
@@ -217,7 +217,7 @@ Also added: `prompter_claim_next_job(p_job_types)`, a `SECURITY DEFINER` functio
 
 ## Architecture correction — AI Router usage-accounting columns
 
-Migration: `supabase/migrations/20260829250000_prompter_ai_router_usage_columns.sql`. Not a new phase — a hardening pass that added the multi-provider AI Router (`lib/ai/router.ts`, see [AI_SYSTEM.md](AI_SYSTEM.md)). Same additive-only rule as every phase before it.
+Migration: `supabase/migrations/20260829155306_prompter_ai_router_usage_columns.sql`. Not a new phase — a hardening pass that added the multi-provider AI Router (`lib/ai/router.ts`, see [AI_SYSTEM.md](AI_SYSTEM.md)). Same additive-only rule as every phase before it.
 
 `prompter_ai_jobs` gained four nullable columns: `provider` (which AI provider — `"openai"`/`"anthropic"` — actually produced the result, set by the router, never guessed by feature code), `actor_user_id` (the user who triggered the generation, `references user_profiles(id) on delete set null`), `fallback_provider` (set only when the router's primary provider failed live and a configured fallback served the request instead — names the primary that failed), and `error_category` (a CHECK-constrained coarse failure category — `AUTH`/`RATE_LIMIT`/`CONNECTION`/`API`/`REFUSAL`/`INVALID_OUTPUT`/`CONFIG`/`UNKNOWN` — so AI usage accounting can query without parsing vendor-specific error text). No RLS change was needed — the existing Phase 1 policy (`for all`, owner/marketing, tenant-scoped) already covers these new columns at the row level.
 
@@ -230,3 +230,12 @@ Migration: `supabase/migrations/20260829250000_prompter_ai_router_usage_columns.
 ## Naming convention
 
 Every table, function, and trigger this app introduces is prefixed `prompter_` (the one exception is calling UMKMpro's pre-existing `fn_current_tenant_id()`/`fn_current_role()` helpers directly, since duplicating them would just be two sources of truth for the same tenant check).
+
+## Migration history and the production ledger
+
+The production ledger (`supabase_migrations.schema_migrations` on the shared project `wjjyqovhmwenbcvbnkgx`) is the source of truth for migration **versions**. Each file in `supabase/migrations/` is named with the version recorded in that ledger, followed by the ledger name.
+
+- **R1 reconciliation (2026-10-10):** 10 files were renamed to their ledger versions (content unchanged) and two files that exist only in the ledger were added verbatim: `20260909164100_prompter_growth_recommendation_job_type.sql` and `20260910060428_revert_unused_growth_recommendation_job_type.sql` (the second reverts the first, so the net `prompter_ai_jobs.job_type` constraint has six values). No database change was made.
+- **Track B (`20260913163600_prompter_track_b_meta_page_picker.sql`) is not applied to production.** It has no ledger entry and keeps its draft version. When it is approved it must be applied through a deliberate, reviewed step, and the file renamed to the version the ledger records.
+- **Do not run `supabase db push` / `supabase migration up` against the shared project.** The migrations before `20260829` belong to UMKMpro AI, are not in this repository, and cannot be replayed from here. A schema built only from this directory needs the UMKMpro identity layer first (`public.tenants`, `public.user_profiles`, `public.fn_current_tenant_id()`, `public.fn_current_role()`, `auth.users`, `storage`, `pg_cron`).
+- `tests/unit/migrations/migration-ledger-reconciliation.test.ts` pins the file names and SQL hashes of the reconciled migrations.

@@ -84,7 +84,7 @@ export async function runAiJob<T>(params: RunAiJobParams<T>): Promise<RunAiJobRe
   // trial's 30-total-usage cap, and every paid plan's aiUsageAllowance
   // alike) is actually enforced. fn_create_ai_job_if_entitled() checks
   // entitlement AND inserts the job row in one atomic, tenant-locked
-  // database transaction (supabase/migrations/20260912090000_prompter_b9_entitlement_enforcement.sql)
+  // database transaction (supabase/migrations/20260915043800_prompter_b9_entitlement_enforcement.sql)
   // instead of a separate check-then-insert, closing the previous
   // check-then-act race. Tenant identity is derived server-side inside
   // that function (fn_current_tenant_id()), never sent as a parameter, so
