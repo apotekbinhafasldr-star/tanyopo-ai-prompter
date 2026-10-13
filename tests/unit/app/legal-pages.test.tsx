@@ -56,10 +56,14 @@ describe.each(PAGES)("/$name legal page", ({ Page, meta, path, h1 }) => {
   });
 
   it("shows exactly the approved contact email and no other address", () => {
-    const text = pageText(Page);
-    const emails = text.match(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g) ?? [];
-    expect(emails.length).toBeGreaterThan(0);
-    for (const email of emails) expect(email).toBe(LEGAL.contactEmail);
+    const { container } = render(<Page />);
+    const text = container.textContent ?? "";
+    expect(text).toContain(LEGAL.contactEmail);
+    // Once the approved address is removed, no other "@" address may remain.
+    expect(text.split(LEGAL.contactEmail).join("")).not.toContain("@");
+    const mailtos = Array.from(container.querySelectorAll('a[href^="mailto:"]')).map((a) => a.getAttribute("href"));
+    expect(mailtos.length).toBeGreaterThan(0);
+    for (const href of mailtos) expect(href).toBe(`mailto:${LEGAL.contactEmail}`);
   });
 
   it("promises no response time, 30-day completion, certification or guarantee", () => {
