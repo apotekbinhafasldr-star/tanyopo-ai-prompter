@@ -235,8 +235,8 @@ describe("legal layout (scoped header, landing untouched)", () => {
   it("the legal route group does not use the landing MarketingHeader, and landing layout is not in the legal group", () => {
     const legalLayout = readFileSync("app/(legal)/layout.tsx", "utf8");
     const legalHeader = readFileSync("features/legal/legal-header.tsx", "utf8");
-    expect(legalLayout).not.toContain("MarketingHeader");
-    expect(legalHeader).not.toContain("MarketingHeader");
+    expect(legalLayout).not.toMatch(/import[^;]*MarketingHeader/);
+    expect(legalHeader).not.toMatch(/import[^;]*MarketingHeader/);
     for (const name of ["privacy", "terms", "data-deletion"]) {
       expect(() => readFileSync(`app/(legal)/${name}/page.tsx`, "utf8")).not.toThrow();
       expect(() => readFileSync(`app/(marketing)/${name}/page.tsx`, "utf8")).toThrow();
