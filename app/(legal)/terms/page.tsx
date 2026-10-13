@@ -85,10 +85,10 @@ export default function TermsPage() {
               <>Setiap workspace mendapat satu masa uji coba 14 hari dengan batas yang tampil di aplikasi.</>
             ),
             <>
-              Paket, harga, dan ketersediaan pembayaran daring ditampilkan pada halaman Harga dan di dalam aplikasi,
-              serta dapat berubah. Syarat pembayaran yang berlaku ditampilkan sebelum Anda mengonfirmasi suatu
-              pembayaran.
+              Saat ini pembayaran daring di LINOE masih dalam tahap uji coba (sandbox). Belum ada penagihan atau
+              pembayaran riil melalui LINOE. Ketentuan pembayaran akan diperbarui sebelum pembayaran riil diaktifkan.
             </>,
+            <>Paket dan harga ditampilkan pada halaman Harga dan di dalam aplikasi, serta dapat berubah.</>,
             <>Pembatalan langganan menghentikan perpanjangan, dan akses berlaku sampai akhir periode berjalan.</>,
             <>
               Kebijakan pembatalan dan pengembalian dana ditetapkan terpisah dan diumumkan sebelum berlaku bagi Anda.

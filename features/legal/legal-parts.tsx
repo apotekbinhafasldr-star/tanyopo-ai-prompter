@@ -7,7 +7,7 @@ export interface LegalTocItem {
   title: string;
 }
 
-/** Page shell: header, draft notice, table of contents, body, cross links. */
+/** Page shell: title block, table of contents, body, cross links. */
 export function LegalDocument({
   title,
   intro,
