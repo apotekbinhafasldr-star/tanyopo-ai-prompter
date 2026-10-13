@@ -12,7 +12,23 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+/**
+ * Absolute base for canonical / Open Graph URLs. Read from the public app
+ * URL env var; if it is missing or not a valid URL, no base is set (Next.js
+ * then keeps its default behaviour) rather than guessing a domain.
+ */
+function resolveMetadataBase(): URL | undefined {
+  const raw = process.env.NEXT_PUBLIC_APP_URL;
+  if (!raw) return undefined;
+  try {
+    return new URL(raw);
+  } catch {
+    return undefined;
+  }
+}
+
 export const metadata: Metadata = {
+  metadataBase: resolveMetadataBase(),
   title: {
     default: "LINOE — AI Marketing & Growth Platform by Tanyopo",
     template: "%s",

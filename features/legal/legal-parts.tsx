@@ -30,21 +30,10 @@ export function LegalDocument({
         <p className="mt-3 text-sm text-muted-foreground">
           Penyelenggara: {LEGAL.operator}, {LEGAL.location}.
         </p>
+        {LEGAL.effectiveDate ? (
+          <p className="mt-1 text-sm text-muted-foreground">Berlaku sejak: {LEGAL.effectiveDate}</p>
+        ) : null}
       </header>
-
-      {LEGAL.isDraft ? (
-        <div
-          role="note"
-          className="mb-8 rounded-xl border border-border bg-muted/40 p-4 text-sm leading-relaxed text-foreground"
-        >
-          <p className="font-semibold">Draf — belum final</p>
-          <p className="mt-1 text-muted-foreground">
-            Dokumen ini adalah draf yang disusun pada {LEGAL.draftDate} berdasarkan perilaku aplikasi saat ini. Isinya
-            belum ditinjau penasihat hukum dan belum berlaku sebagai dokumen hukum final. Bagian bertanda “Menunggu
-            keputusan perusahaan” sengaja dikosongkan sampai perusahaan memutuskannya.
-          </p>
-        </div>
-      ) : null}
 
       <nav aria-label="Daftar isi" className="mb-10 rounded-xl border border-border p-4">
         <p className="text-sm font-semibold text-foreground">Daftar isi</p>
@@ -95,18 +84,5 @@ export function LegalList({ items }: { items: ReactNode[] }) {
         <li key={i}>{item}</li>
       ))}
     </ul>
-  );
-}
-
-/**
- * Visible marker for information the company has not decided / supplied yet.
- * Never rendered as if it were a final policy statement.
- */
-export function PendingDecision({ children }: { children: ReactNode }) {
-  return (
-    <p className="rounded-lg border border-dashed border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
-      <span className="font-semibold text-foreground">Menunggu keputusan perusahaan: </span>
-      {children}
-    </p>
   );
 }

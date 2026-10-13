@@ -5,23 +5,26 @@ import type { Metadata } from "next";
  * /data-deletion).
  *
  * Only facts the Founder supplied, or that the code demonstrably does, live
- * here. Anything legal/operational that is NOT yet decided (contact channel,
- * retention periods, deletion SLA, refund policy, ...) is deliberately NOT
- * invented: the pages render an explicit "menunggu keputusan perusahaan"
- * note instead (see <PendingDecision> in legal-parts.tsx).
+ * here. Do not add retention periods, response-time promises (SLA), refund
+ * terms, certifications or server locations until they are decided and
+ * verified.
  */
 export const LEGAL = {
   operator: "PT Tanyopo Future Technology",
-  location: "Ladang Rimba, Aceh Selatan, Indonesia",
-  product: "LINOE by Tanyopo",
-  /** Date this draft text was written. Not an "effective date". */
-  draftDate: "10 Oktober 2026",
   /**
-   * While true, the pages are labelled DRAF and asked NOT to be indexed by
-   * search engines. Flip to false only after the Founder / legal counsel has
-   * reviewed and approved the text for publication.
+   * CANDIDATE address. It must be confirmed by the Founder before the pages
+   * are published; remove this field (and its use in LegalDocument) if the
+   * address should not be shown.
    */
-  isDraft: true,
+  location: "Ladang Rimba, Aceh Selatan, Indonesia",
+  contactEmail: "tanyopofuturetechnology@gmail.com",
+  product: "LINOE by Tanyopo",
+  /**
+   * "Berlaku sejak" date. Intentionally unset: set it to the real date on
+   * which the Founder approves publication. While undefined, no effective
+   * date is rendered.
+   */
+  effectiveDate: undefined as string | undefined,
 } as const;
 
 export const LEGAL_LINKS = [
@@ -42,6 +45,6 @@ export function legalMetadata(opts: { title: string; description: string; path: 
       locale: "id_ID",
       siteName: "LINOE by Tanyopo",
     },
-    robots: LEGAL.isDraft ? { index: false, follow: true } : { index: true, follow: true },
+    robots: { index: true, follow: true },
   };
 }
