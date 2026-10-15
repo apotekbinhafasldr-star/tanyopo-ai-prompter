@@ -24,7 +24,7 @@ describe("classifyCreateFailure", () => {
     expect(classifyCreateFailure(new Error("ECONNRESET"))).toBe("UNCERTAIN");
   });
   it("treats our own config error as NOT_CREATED", () => {
-    expect(classifyCreateFailure(new ConnectorConfigError("Page belum dipilih"))).toBe("NOT_CREATED");
+    expect(classifyCreateFailure(new ConnectorConfigError("META", "Page belum dipilih"))).toBe("NOT_CREATED");
   });
 });
 
@@ -38,10 +38,10 @@ describe("describeLaunchFailure", () => {
     expect(failure.certainty).toBe("UNCERTAIN");
   });
   it("is releasable only for a definitive rejection of the first call with nothing created", () => {
-    const failure = describeLaunchFailure("createCampaign", new ConnectorConfigError("x"), {});
+    const failure = describeLaunchFailure("createCampaign", new ConnectorConfigError("META", "x"), {});
     expect(failure.releasable).toBe(true);
     expect(describeLaunchFailure("createCampaign", new Error("timeout"), {}).releasable).toBe(false);
-    expect(describeLaunchFailure("createAdSet", new ConnectorConfigError("x"), { campaignId: "c1" }).releasable).toBe(false);
+    expect(describeLaunchFailure("createAdSet", new ConnectorConfigError("META", "x"), { campaignId: "c1" }).releasable).toBe(false);
   });
   it("marks database failures as DATABASE and blocks relaunch", () => {
     const failure = describeLaunchFailure("saveResult", new LaunchDatabaseError("progres peluncuran"), { campaignId: "c1" });
