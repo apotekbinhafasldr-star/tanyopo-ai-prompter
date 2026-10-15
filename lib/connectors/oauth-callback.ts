@@ -7,7 +7,8 @@ import { requireSessionContext } from "@/services/session";
 import { getConnector } from "@/lib/connectors/get-connector";
 import { encryptToken, isTokenCipherConfigured } from "@/lib/crypto/token-cipher";
 import { ConnectorConfigError } from "@/lib/connectors/types";
-import { logOauthFailure } from "@/lib/connectors/safe-error-log";
+import { logOauthFailure, logOauthStateRejection } from "@/lib/connectors/safe-error-log";
+import { checkOauthState } from "@/lib/connectors/oauth-state";
 import type { ConnectorPlatform, Database, StoredConnectionStatus } from "@/types/database";
 
 type AccountInsert = Database["public"]["Tables"]["prompter_connected_accounts"]["Insert"];
@@ -58,12 +59,11 @@ export async function handleConnectorOauthCallback(
     return redirectWith(request, { error: "denied" });
   }
 
-  if (!code || !state || !stateCookie) {
-    return redirectWith(request, { error: "invalid_state" });
-  }
-
-  const [expectedState, expectedTenantId] = stateCookie.split(":");
-  if (state !== expectedState || expectedTenantId !== session.tenantId) {
+  // Same accept/reject decision as before; the only addition is WHY it was
+  // rejected, logged as a category + booleans (never state/cookie/code values).
+  const stateCheck = checkOauthState({ code, state, stateCookie, tenantId: session.tenantId });
+  if (!stateCheck.ok) {
+    logOauthStateRejection(platform, stateCheck.reason, stateCheck.present);
     return redirectWith(request, { error: "invalid_state" });
   }
 
@@ -84,7 +84,7 @@ export async function handleConnectorOauthCallback(
   }
 
   try {
-    const tokenResult = await connector.exchangeCodeForToken(code);
+    const tokenResult = await connector.exchangeCodeForToken(stateCheck.code);
     const accounts = await connector.getAccounts(tokenResult.accessToken);
     const primaryAccount = accounts[0];
 
