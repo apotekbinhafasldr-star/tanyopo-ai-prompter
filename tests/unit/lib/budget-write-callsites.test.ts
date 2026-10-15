@@ -90,12 +90,12 @@ describe("external budget write call sites", () => {
     const text = sources.find((s) => s.file === "features/campaigns/launch-actions.ts")!.text;
     const lock = text.indexOf("isBudgetWritePlatformEnabled(");
     expect(lock).toBeGreaterThan(-1);
-    expect(lock).toBeLessThan(text.indexOf(".update({ error: null })"));
+    expect(lock).toBeLessThan(text.indexOf("claimChannelCampaignLaunch(supabase"));
   });
 
   it("the launch gate runs before the atomic claim", () => {
     const text = sources.find((s) => s.file === "features/campaigns/launch-actions.ts")!.text;
-    expect(text.indexOf("evaluateExternalBudgetWrite(")).toBeLessThan(text.indexOf(".update({ error: null })"));
+    expect(text.indexOf("evaluateExternalBudgetWrite(")).toBeLessThan(text.indexOf("claimChannelCampaignLaunch(supabase"));
   });
 
   it("the autopilot gate runs before the connected account and credentials are read", () => {
