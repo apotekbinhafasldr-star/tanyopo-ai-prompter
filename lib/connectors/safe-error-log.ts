@@ -10,6 +10,8 @@
  * `response`.
  */
 
+import { STATE_REJECTION_REASONS, type StatePresence, type StateRejectionReason } from "@/lib/connectors/oauth-state";
+
 const NAME_PATTERN = /^[A-Za-z]{1,40}$/;
 const TYPE_PATTERN = /^[A-Za-z_]{1,40}$/;
 const CODE_PATTERN = /^[A-Za-z0-9_]{1,16}$/;
@@ -48,6 +50,23 @@ export function describeSafeError(err: unknown): SafeErrorSummary {
   if (typeof record.type === "string" && TYPE_PATTERN.test(record.type)) summary.type = record.type;
 
   return summary;
+}
+
+/**
+ * One line per rejected callback state check: the platform, an allowlisted
+ * reason, and which inputs were present (booleans). Never the values — a
+ * `state`, cookie or code must not reach the logs, and neither does the query
+ * string. This is what tells "cookie expired/missing" apart from "Meta sent
+ * no code" without exposing anything sensitive.
+ */
+export function logOauthStateRejection(platform: string, reason: StateRejectionReason, present: StatePresence): void {
+  console.warn("[oauth-callback] state rejected", {
+    platform,
+    reason: STATE_REJECTION_REASONS.includes(reason) ? reason : "unknown",
+    has_code: present.code === true,
+    has_state: present.state === true,
+    has_cookie: present.cookie === true,
+  });
 }
 
 /** One structured line per failure: where it happened, which platform, and the safe summary. */

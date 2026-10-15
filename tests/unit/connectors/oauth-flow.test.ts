@@ -213,9 +213,10 @@ function newDb(): FakeDb {
 }
 
 const PLATFORMS = [
-  { platform: "META", cookie: "meta_oauth_state", callback: metaCallback, authorize: metaAuthorize },
-  { platform: "TIKTOK", cookie: "tiktok_oauth_state", callback: tiktokCallback, authorize: tiktokAuthorize },
-  { platform: "X", cookie: "x_oauth_state", callback: xCallback, authorize: xAuthorize },
+  // Only Meta gets the longer (15 min) state cookie; TikTok and X keep 5 min.
+  { platform: "META", cookie: "meta_oauth_state", maxAge: 900, callback: metaCallback, authorize: metaAuthorize },
+  { platform: "TIKTOK", cookie: "tiktok_oauth_state", maxAge: 300, callback: tiktokCallback, authorize: tiktokAuthorize },
+  { platform: "X", cookie: "x_oauth_state", maxAge: 300, callback: xCallback, authorize: xAuthorize },
 ] as const;
 
 const ACCESS = "plain-access-token-AAA";
@@ -284,7 +285,7 @@ afterEach(() => {
   else process.env.TOKEN_ENCRYPTION_KEY = originalKey;
 });
 
-describe.each(PLATFORMS)("authorize — $platform", ({ platform, cookie, authorize }) => {
+describe.each(PLATFORMS)("authorize — $platform", ({ platform, cookie, maxAge, authorize }) => {
   it("redirects to the platform and stores state bound to the tenant", async () => {
     const res = await authorize(req(`/api/connections/${platform}/authorize`));
     const target = location(res);
@@ -294,7 +295,13 @@ describe.each(PLATFORMS)("authorize — $platform", ({ platform, cookie, authori
     expect(h.cookieSets).toHaveLength(1);
     expect(h.cookieSets[0].name).toBe(cookie);
     expect(h.cookieSets[0].value).toBe(`${state}:t1`);
-    expect(h.cookieSets[0].opts).toMatchObject({ httpOnly: true, sameSite: "lax", maxAge: 300 });
+    expect(h.cookieSets[0].opts).toMatchObject({ httpOnly: true, sameSite: "lax", path: "/", maxAge });
+  });
+
+  it("keeps the other security attributes of the state cookie unchanged", async () => {
+    await authorize(req(`/api/connections/${platform}/authorize`));
+    expect(h.cookieSets[0].opts).toMatchObject({ httpOnly: true, sameSite: "lax", path: "/" });
+    expect(h.cookieSets[0].opts.domain).toBeUndefined(); // host-only, never shared with subdomains
   });
 
   it.each([
@@ -659,6 +666,53 @@ describe.each(PLATFORMS)("callback — $platform", ({ platform, cookie, callback
       expect(db().ops).toHaveLength(0);
     });
 
+    describe("diagnostic category of an invalid_state", () => {
+      // [label, cookie armed as, query, expected reason, expected has_code/has_state/has_cookie]
+      const CASES: [string, [string, string] | null, string, string, [boolean, boolean, boolean]][] = [
+        ["Meta answered without a code (e.g. URL fragment)", ["STATE", "t1"], "state=STATE", "no_code", [false, true, true]],
+        ["no query string at all", ["STATE", "t1"], "", "no_code", [false, false, true]],
+        ["code but no state", ["STATE", "t1"], "code=CODE", "no_state", [true, false, true]],
+        ["cookie missing (expired / never set / consumed)", null, "code=CODE&state=STATE", "no_cookie", [true, true, false]],
+        ["state differs from the cookie", ["OTHER", "t1"], "code=CODE&state=STATE", "state_mismatch", [true, true, true]],
+        ["cookie minted for another tenant", ["STATE", "t2"], "code=CODE&state=STATE", "tenant_mismatch", [true, true, true]],
+      ];
+
+      it.each(CASES)("%s", async (_label, armed, query, reason, [hasCode, hasState, hasCookie]) => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        if (armed) arm(armed[0], armed[1]);
+
+        const res = await run(query);
+
+        // Behaviour is unchanged: same redirect, nothing exchanged, nothing written.
+        expect(location(res).searchParams.get("error")).toBe("invalid_state");
+        expect(h.connector.exchangeCodeForToken).not.toHaveBeenCalled();
+        expect(db().ops).toHaveLength(0);
+        expect(h.jar.has(cookie)).toBe(false); // still consumed (single use)
+
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn.mock.calls[0]).toEqual([
+          "[oauth-callback] state rejected",
+          { platform, reason, has_code: hasCode, has_state: hasState, has_cookie: hasCookie },
+        ]);
+
+        // Categories and booleans only: no code, state, cookie, tenant id or query string.
+        const logged = JSON.stringify(warn.mock.calls);
+        for (const forbidden of ["CODE", "STATE", "OTHER", "t1", "t2", "code=", "state="]) {
+          expect(logged).not.toContain(forbidden);
+        }
+        warn.mockRestore();
+      });
+
+      it("does not log a rejection for a valid callback", async () => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        arm();
+        const res = await run();
+        expect(location(res).searchParams.get("connected")).toBe(platform);
+        expect(warn).not.toHaveBeenCalled();
+        warn.mockRestore();
+      });
+    });
+
     it("consumes the state cookie (single use), even on provider denial", async () => {
       arm();
       const res = await run("error=access_denied&state=STATE");
@@ -734,5 +788,70 @@ describe.each(PLATFORMS)("callback — $platform", ({ platform, cookie, callback
       expect(location(res).searchParams.get("error")).toBe("server_not_configured");
       expect(h.connector.exchangeCodeForToken).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe.each(PLATFORMS)("state cookie lifecycle — $platform", ({ platform, cookie, authorize, callback }) => {
+  function stateFrom(res: Response): string {
+    return location(res).searchParams.get("state") as string;
+  }
+
+  it("round trip: the state minted by authorize is accepted by the callback and the cookie is consumed", async () => {
+    const state = stateFrom(await authorize(req(`/api/connections/${platform}/authorize`)));
+
+    const res = await callback(callbackReq(platform, `code=CODE&state=${state}`));
+
+    expect(location(res).searchParams.get("connected")).toBe(platform);
+    expect(h.jar.has(cookie)).toBe(false);
+  });
+
+  it("a callback after the cookie expired (browser dropped it) is rejected as no_cookie", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const state = stateFrom(await authorize(req(`/api/connections/${platform}/authorize`)));
+    h.jar.delete(cookie); // what the browser does once Max-Age has elapsed
+
+    const res = await callback(callbackReq(platform, `code=CODE&state=${state}`));
+
+    expect(location(res).searchParams.get("error")).toBe("invalid_state");
+    expect(warn.mock.calls[0][1]).toMatchObject({ reason: "no_cookie", has_code: true, has_state: true, has_cookie: false });
+    expect(h.connector.exchangeCodeForToken).not.toHaveBeenCalled();
+    expect(db().ops).toHaveLength(0);
+    warn.mockRestore();
+  });
+
+  it("repeated authorization overwrites the cookie: only the latest state is accepted, the older one is a state_mismatch", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const first = stateFrom(await authorize(req(`/api/connections/${platform}/authorize`)));
+    const second = stateFrom(await authorize(req(`/api/connections/${platform}/authorize`)));
+    expect(second).not.toBe(first);
+    expect(h.cookieSets).toHaveLength(2);
+
+    const stale = await callback(callbackReq(platform, `code=CODE&state=${first}`));
+    expect(location(stale).searchParams.get("error")).toBe("invalid_state");
+    expect(warn.mock.calls[0][1]).toMatchObject({ reason: "state_mismatch" });
+    expect(h.connector.exchangeCodeForToken).not.toHaveBeenCalled();
+
+    // The stale attempt consumed the cookie too (single use), so the newer state now has nothing to match.
+    const latest = await callback(callbackReq(platform, `code=CODE&state=${second}`));
+    expect(location(latest).searchParams.get("error")).toBe("invalid_state");
+    expect(warn.mock.calls[1][1]).toMatchObject({ reason: "no_cookie" });
+    expect(db().ops).toHaveLength(0);
+    warn.mockRestore();
+  });
+
+  it("a state cookie of this connector is never accepted by another connector's callback", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const state = stateFrom(await authorize(req(`/api/connections/${platform}/authorize`)));
+
+    for (const other of PLATFORMS.filter((p) => p.platform !== platform)) {
+      const res = await other.callback(callbackReq(other.platform, `code=CODE&state=${state}`));
+      expect(location(res).searchParams.get("error")).toBe("invalid_state");
+    }
+
+    expect(warn.mock.calls.every((c) => (c[1] as { reason: string }).reason === "no_cookie")).toBe(true);
+    expect(h.jar.has(cookie)).toBe(true); // untouched by the other connectors' callbacks
+    expect(h.connector.exchangeCodeForToken).not.toHaveBeenCalled();
+    expect(db().ops).toHaveLength(0);
+    warn.mockRestore();
   });
 });

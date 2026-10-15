@@ -7,6 +7,7 @@ import { requireSessionContext } from "@/services/session";
 import { getConnector } from "@/lib/connectors/get-connector";
 import { ConnectorConfigError } from "@/lib/connectors/types";
 import { isTokenCipherConfigured } from "@/lib/crypto/token-cipher";
+import { resolveStateCookieMaxAge } from "@/lib/connectors/oauth-state";
 import type { ConnectorPlatform } from "@/types/database";
 
 /**
@@ -21,6 +22,7 @@ export async function handleConnectorOauthAuthorize(
   request: NextRequest,
   platform: ConnectorPlatform,
   stateCookieName: string,
+  options: { stateCookieMaxAgeSeconds?: number } = {},
 ): Promise<NextResponse> {
   const session = await requireSessionContext();
 
@@ -49,7 +51,9 @@ export async function handleConnectorOauthAuthorize(
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
-      maxAge: 300,
+      // 300 s unless the platform asks for longer (Meta: 900 s); never above
+      // the ceiling in oauth-state.ts.
+      maxAge: resolveStateCookieMaxAge(options.stateCookieMaxAgeSeconds),
       path: "/",
     });
 
