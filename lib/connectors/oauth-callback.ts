@@ -5,9 +5,13 @@ import { cookies } from "next/headers";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireSessionContext } from "@/services/session";
 import { getConnector } from "@/lib/connectors/get-connector";
-import { encryptToken } from "@/lib/crypto/token-cipher";
+import { encryptToken, isTokenCipherConfigured } from "@/lib/crypto/token-cipher";
 import { ConnectorConfigError } from "@/lib/connectors/types";
-import type { ConnectorPlatform } from "@/types/database";
+import type { ConnectorPlatform, Database, StoredConnectionStatus } from "@/types/database";
+
+type AccountInsert = Database["public"]["Tables"]["prompter_connected_accounts"]["Insert"];
+/** Per-connection fields (everything but identity and status). */
+type AccountFields = Omit<AccountInsert, "id" | "tenant_id" | "platform" | "status">;
 
 function redirectWith(request: NextRequest, params: Record<string, string>) {
   const target = new URL("/connections", request.url);
@@ -72,6 +76,12 @@ export async function handleConnectorOauthCallback(
     return redirectWith(request, { error: "server_not_configured" });
   }
 
+  // Refuse before the one-time authorization code is spent: with no usable
+  // encryption key there is nowhere safe to put the resulting token.
+  if (!isTokenCipherConfigured()) {
+    return redirectWith(request, { error: "encryption_not_configured" });
+  }
+
   try {
     const tokenResult = await connector.exchangeCodeForToken(code);
     const accounts = await connector.getAccounts(tokenResult.accessToken);
@@ -81,54 +91,181 @@ export async function handleConnectorOauthCallback(
       return redirectWith(request, { error: "no_ad_account" });
     }
 
-    const { data: connectedAccount, error: upsertError } = await admin
-      .from("prompter_connected_accounts")
-      .upsert(
-        {
-          tenant_id: session.tenantId,
-          platform,
-          external_account_id: primaryAccount.id,
-          external_account_name: primaryAccount.name,
-          status: "CONNECTED",
-          scopes: tokenResult.scopes,
-          expires_at: tokenResult.expiresAt?.toISOString() ?? null,
-          refreshable: true,
-          last_refreshed_at: new Date().toISOString(),
-          connected_by: session.userId,
-        },
-        { onConflict: "tenant_id,platform" },
-      )
-      .select("id")
-      .single();
+    // Encrypt everything BEFORE the first database write, so an encryption
+    // failure can never leave a half-written connection behind.
+    const encryptedAccessToken = encryptToken(tokenResult.accessToken);
+    const encryptedRefreshToken = tokenResult.refreshToken ? encryptToken(tokenResult.refreshToken) : null;
 
-    if (upsertError || !connectedAccount) {
+    const accountFields: AccountFields = {
+      external_account_id: primaryAccount.id,
+      external_account_name: primaryAccount.name,
+      scopes: tokenResult.scopes,
+      expires_at: tokenResult.expiresAt?.toISOString() ?? null,
+      refreshable: true,
+      last_refreshed_at: new Date().toISOString(),
+      connected_by: session.userId,
+    };
+
+    // Write order (no DB transaction is available, so the order itself is
+    // the safety mechanism). The invariant: status = 'CONNECTED' is written
+    // LAST, and only after the encrypted credentials were stored and that
+    // result was checked. Every earlier state is non-CONNECTED, so a crash
+    // or error between any two writes fails closed.
+    const { data: existing, error: lookupError } = await admin
+      .from("prompter_connected_accounts")
+      .select("id, status")
+      .eq("tenant_id", session.tenantId)
+      .eq("platform", platform)
+      .maybeSingle();
+
+    if (lookupError) {
       return redirectWith(request, { error: "save_failed" });
     }
 
-    await admin.from("prompter_oauth_credentials").upsert(
+    let accountId: string;
+    // True only when THIS request inserted the row. Only such a row may be
+    // deleted as compensation; a pre-existing (reconnect) row never is.
+    let createdByThisRequest = false;
+    let previousStatus: StoredConnectionStatus | null = null;
+
+    if (existing) {
+      // Reconnect. Take the live connection out of CONNECTED first, so
+      // that while credentials/metadata are being replaced, nothing can
+      // use a half-updated account. The row itself is never deleted.
+      accountId = existing.id;
+      previousStatus = existing.status as StoredConnectionStatus;
+      const demoted = await setStatus(admin, session.tenantId, accountId, "ACTION_REQUIRED");
+      if (!demoted) {
+        return redirectWith(request, { error: "save_failed" });
+      }
+    } else {
+      const { data: inserted, error: insertError } = await admin
+        .from("prompter_connected_accounts")
+        .insert({
+          tenant_id: session.tenantId,
+          platform,
+          ...accountFields,
+          // Not CONNECTED yet: credentials do not exist.
+          status: "ACTION_REQUIRED",
+        })
+        .select("id")
+        .single();
+
+      if (insertError || !inserted) {
+        // Includes a concurrent insert losing the (tenant_id, platform)
+        // unique race. Nothing of ours exists, so there is nothing to undo.
+        return redirectWith(request, { error: "save_failed" });
+      }
+      accountId = inserted.id;
+      createdByThisRequest = true;
+    }
+
+    const { error: credentialsError } = await admin.from("prompter_oauth_credentials").upsert(
       {
         tenant_id: session.tenantId,
-        connected_account_id: connectedAccount.id,
-        encrypted_access_token: encryptToken(tokenResult.accessToken),
-        encrypted_refresh_token: tokenResult.refreshToken
-          ? encryptToken(tokenResult.refreshToken)
-          : null,
+        connected_account_id: accountId,
+        encrypted_access_token: encryptedAccessToken,
+        encrypted_refresh_token: encryptedRefreshToken,
       },
       { onConflict: "connected_account_id" },
     );
 
-    await admin.from("prompter_audit_logs").insert({
+    if (credentialsError) {
+      // A single failed statement changed nothing, so the previous
+      // credentials (if any) are intact.
+      if (createdByThisRequest) {
+        await removeCreatedAccount(admin, session.tenantId, accountId);
+      } else if (previousStatus) {
+        await setStatus(admin, session.tenantId, accountId, previousStatus);
+      }
+      return redirectWith(request, { error: "save_failed" });
+    }
+
+    const promoted = await setAccountConnected(admin, session.tenantId, accountId, accountFields);
+    if (!promoted) {
+      // Credentials are stored but the account could not be activated.
+      // New row: remove it. Reconnect: leave ACTION_REQUIRED (credentials
+      // were replaced, so restoring the old status would be wrong).
+      if (createdByThisRequest) {
+        await removeCreatedAccount(admin, session.tenantId, accountId);
+      }
+      return redirectWith(request, { error: "save_failed" });
+    }
+
+    const { error: auditError } = await admin.from("prompter_audit_logs").insert({
       tenant_id: session.tenantId,
       actor_user_id: session.userId,
       action: "connection.connected",
       resource_type: "prompter_connected_accounts",
-      resource_id: connectedAccount.id,
+      resource_id: accountId,
       context: { platform, external_account_id: primaryAccount.id },
     });
+    if (auditError) {
+      // The connection itself is complete and valid; losing the audit row
+      // must not undo it, but it must not be silent either.
+      console.error("[oauth-callback] audit log insert failed", { platform, code: auditError.code });
+    }
 
     return redirectWith(request, { connected: platform });
   } catch (err) {
     const errorCode = err instanceof ConnectorConfigError ? "not_configured" : "connect_failed";
     return redirectWith(request, { error: errorCode });
+  }
+}
+
+type AdminClient = NonNullable<ReturnType<typeof createAdminClient>>;
+
+/** Updates one account's status; true only if exactly that row changed. */
+async function setStatus(
+  admin: AdminClient,
+  tenantId: string,
+  accountId: string,
+  status: StoredConnectionStatus,
+): Promise<boolean> {
+  const { data, error } = await admin
+    .from("prompter_connected_accounts")
+    .update({ status })
+    .eq("id", accountId)
+    .eq("tenant_id", tenantId)
+    .select("id");
+  if (error) {
+    console.error("[oauth-callback] status update failed", { status, code: error.code });
+    return false;
+  }
+  return data?.length === 1;
+}
+
+/** Final step: refresh metadata and flip to CONNECTED. True only if one row changed. */
+async function setAccountConnected(
+  admin: AdminClient,
+  tenantId: string,
+  accountId: string,
+  fields: AccountFields,
+): Promise<boolean> {
+  const { data, error } = await admin
+    .from("prompter_connected_accounts")
+    .update({ ...fields, status: "CONNECTED" })
+    .eq("id", accountId)
+    .eq("tenant_id", tenantId)
+    .select("id");
+  if (error) {
+    console.error("[oauth-callback] activation failed", { code: error.code });
+    return false;
+  }
+  return data?.length === 1;
+}
+
+/**
+ * Compensation for a row inserted by this very request. If the delete
+ * fails the row stays ACTION_REQUIRED (never CONNECTED), which is safe.
+ */
+async function removeCreatedAccount(admin: AdminClient, tenantId: string, accountId: string): Promise<void> {
+  const { error } = await admin
+    .from("prompter_connected_accounts")
+    .delete()
+    .eq("id", accountId)
+    .eq("tenant_id", tenantId);
+  if (error) {
+    console.error("[oauth-callback] cleanup of new account failed", { code: error.code });
   }
 }
