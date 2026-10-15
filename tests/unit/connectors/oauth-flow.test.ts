@@ -4,7 +4,7 @@ import { randomBytes } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { decryptToken } from "@/lib/crypto/token-cipher";
-import { ConnectorConfigError } from "@/lib/connectors/types";
+import { ConnectorApiError, ConnectorConfigError } from "@/lib/connectors/types";
 import { GET as metaCallback } from "@/app/api/connections/meta/callback/route";
 import { GET as tiktokCallback } from "@/app/api/connections/tiktok/callback/route";
 import { GET as xCallback } from "@/app/api/connections/x/callback/route";
@@ -99,7 +99,16 @@ function makeClient(db: FakeDb) {
         const op = st.op as string;
         db.beforeExec?.({ table, op });
         const injected = db.failWhen?.({ table, op, payload: st.payload, filters: st.filters });
-        if (injected) return { data: null, error: { code: injected } };
+        if (injected) // Like a real PostgREST error: carries row data in message/details/hint.
+        return {
+          data: null,
+          error: {
+            code: injected,
+            message: "ROW-DATA-MESSAGE tenant t1 SECRET-CIPHER",
+            details: "ROW-DATA-DETAILS SECRET-CIPHER",
+            hint: "ROW-DATA-HINT",
+          },
+        };
         db.ops.push({ table, op, payload: st.payload, filters: { ...st.filters } });
 
         if (table === "prompter_connected_accounts") {
@@ -666,6 +675,48 @@ describe.each(PLATFORMS)("callback — $platform", ({ platform, cookie, callback
       const res = await run();
       expect(location(res).searchParams.get("error")).toBe("connect_failed");
       expect(db().ops).toHaveLength(0);
+    });
+
+    it("logs only a sanitized summary when the exchange fails (no code, state, cookie, token or provider message)", async () => {
+      const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+      h.connector.exchangeCodeForToken = vi.fn(async () => {
+        throw new ConnectorApiError(platform, `Invalid code CODE for state STATE token ${ACCESS} ${REFRESH}`, {
+          status: 400,
+          code: 100,
+          type: "OAuthException",
+        });
+      });
+      arm();
+
+      const res = await run("code=CODE&state=STATE");
+
+      expect(location(res).searchParams.get("error")).toBe("connect_failed");
+      expect(spy).toHaveBeenCalledTimes(1);
+      const logged = JSON.stringify(spy.mock.calls);
+      expect(logged).toContain("callback_exception");
+      expect(logged).toContain(platform);
+      expect(logged).toContain("OAuthException");
+      for (const forbidden of ["CODE", "STATE", ACCESS, REFRESH, `STATE:t1`, "Invalid code"]) {
+        expect(logged).not.toContain(forbidden);
+      }
+      spy.mockRestore();
+    });
+
+    it("logs a database failure by code only, never row data or ciphertext", async () => {
+      const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+      db().failWhen = ({ table }) => (table === "prompter_oauth_credentials" ? "23503" : null);
+      arm();
+
+      const res = await run();
+
+      expect(location(res).searchParams.get("error")).toBe("save_failed");
+      const logged = JSON.stringify(spy.mock.calls);
+      expect(logged).toContain("credentials_upsert");
+      expect(logged).toContain("23503");
+      for (const forbidden of ["ROW-DATA", "SECRET-CIPHER", ACCESS, REFRESH]) {
+        expect(logged).not.toContain(forbidden);
+      }
+      spy.mockRestore();
     });
 
     it("writes nothing when the platform returns no ad account", async () => {

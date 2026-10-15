@@ -1,14 +1,23 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-vi.mock("@/lib/env", () => ({
-  serverEnv: {
-    meta: { appId: "app123", appSecret: "secret123", redirectUri: "https://app.example.com/callback" },
+// Mutable so individual tests can switch META_LOGIN_CONFIG_ID on and off.
+const { metaEnv } = vi.hoisted(() => ({
+  metaEnv: {
+    appId: "app123",
+    appSecret: "secret123",
+    redirectUri: "https://app.example.com/callback",
+    loginConfigId: undefined as string | undefined,
   },
+}));
+
+vi.mock("@/lib/env", () => ({
+  serverEnv: { meta: metaEnv },
   isConnectorConfigured: (credentials: Record<string, string | undefined>) =>
     Object.values(credentials).every((v) => !!v && v.length > 0),
 }));
 
 import { MetaConnector } from "@/lib/connectors/meta-connector";
+import { ConnectorApiError, ConnectorConfigError } from "@/lib/connectors/types";
 
 describe("MetaConnector#getPages — Track B", () => {
   let connector: MetaConnector;
@@ -57,5 +66,140 @@ describe("MetaConnector#getPages — Track B", () => {
     );
 
     await expect(connector.getPages("bad-token")).rejects.toThrow("Invalid OAuth access token.");
+  });
+});
+
+// A made-up numeric id. The real Configuration ID must never appear in the
+// repository — it is supplied only through the META_LOGIN_CONFIG_ID env var.
+const DUMMY_CONFIG_ID = "1234567890123456";
+
+describe("MetaConnector#getAuthorizationUrl", () => {
+  beforeEach(() => {
+    metaEnv.loginConfigId = undefined;
+  });
+
+  it("with a valid Configuration ID: sends config_id + code flow and NO scope", () => {
+    metaEnv.loginConfigId = DUMMY_CONFIG_ID;
+    const url = new URL(new MetaConnector().getAuthorizationUrl("state-xyz"));
+
+    expect(url.origin + url.pathname).toBe("https://www.facebook.com/v21.0/dialog/oauth");
+    expect(url.searchParams.get("config_id")).toBe(DUMMY_CONFIG_ID);
+    expect(url.searchParams.get("response_type")).toBe("code");
+    expect(url.searchParams.get("override_default_response_type")).toBe("true");
+    expect(url.searchParams.get("client_id")).toBe("app123");
+    expect(url.searchParams.get("redirect_uri")).toBe("https://app.example.com/callback");
+    expect(url.searchParams.get("state")).toBe("state-xyz");
+    expect(url.searchParams.has("scope")).toBe(false);
+  });
+
+  it("trims surrounding whitespace from the Configuration ID", () => {
+    metaEnv.loginConfigId = `  ${DUMMY_CONFIG_ID}\n`;
+    const url = new URL(new MetaConnector().getAuthorizationUrl("s"));
+    expect(url.searchParams.get("config_id")).toBe(DUMMY_CONFIG_ID);
+  });
+
+  it("without a Configuration ID: keeps the previous scope-based behaviour exactly", () => {
+    const url = new URL(new MetaConnector().getAuthorizationUrl("state-xyz"));
+
+    expect(url.searchParams.get("scope")).toBe("ads_management,ads_read,business_management,pages_show_list");
+    expect(url.searchParams.get("response_type")).toBe("code");
+    expect(url.searchParams.has("config_id")).toBe(false);
+    expect(url.searchParams.has("override_default_response_type")).toBe(false);
+  });
+
+  it.each([
+    ["letters", "abc"],
+    ["digits with a space inside", "123 456"],
+    ["digits and letters", "123abc"],
+    ["a pasted URL", "https://example.com/123"],
+    ["empty string", ""],
+    ["whitespace only", "   "],
+    ["negative number", "-123"],
+    ["scientific notation", "1e5"],
+    ["too long", "1".repeat(33)],
+    ["a quote injection attempt", `${DUMMY_CONFIG_ID}&scope=ads_management`],
+  ])("rejects an invalid Configuration ID (%s) with ConnectorConfigError", (_label, value) => {
+    metaEnv.loginConfigId = value;
+    expect(() => new MetaConnector().getAuthorizationUrl("s")).toThrow(ConnectorConfigError);
+  });
+
+  it("an invalid Configuration ID never silently falls back to the classic dialog", () => {
+    metaEnv.loginConfigId = "not-a-number";
+    let produced: string | undefined;
+    try {
+      produced = new MetaConnector().getAuthorizationUrl("s");
+    } catch {
+      /* expected */
+    }
+    expect(produced).toBeUndefined();
+  });
+
+  it("does not leak the Configuration ID into the error message", () => {
+    metaEnv.loginConfigId = "bad value 999";
+    try {
+      new MetaConnector().getAuthorizationUrl("s");
+      throw new Error("should have thrown");
+    } catch (err) {
+      expect((err as Error).message).not.toContain("bad value 999");
+    }
+  });
+});
+
+describe("MetaConnector#exchangeCodeForToken — unchanged by the Configuration ID", () => {
+  beforeEach(() => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        // One body that satisfies all three Graph calls (short-lived, long-lived, debug_token).
+        json: async () => ({ access_token: "tok", expires_in: 5184000, data: { scopes: ["ads_read"] } }),
+      })),
+    );
+  });
+
+  it.each([
+    ["with a Configuration ID", DUMMY_CONFIG_ID],
+    ["without a Configuration ID", undefined],
+  ])("sends the same redirect_uri as the dialog (%s)", async (_label, configId) => {
+    metaEnv.loginConfigId = configId;
+    const connector = new MetaConnector();
+    const dialogRedirect = new URL(connector.getAuthorizationUrl("s")).searchParams.get("redirect_uri");
+
+    await connector.exchangeCodeForToken("the-code");
+
+    const fetchMock = global.fetch as unknown as ReturnType<typeof vi.fn>;
+    const first = new URL(fetchMock.mock.calls[0][0] as string);
+    expect(first.pathname.endsWith("/oauth/access_token")).toBe(true);
+    expect(first.searchParams.get("redirect_uri")).toBe(dialogRedirect);
+    expect(first.searchParams.get("code")).toBe("the-code");
+    expect(first.searchParams.has("config_id")).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("MetaConnector Graph errors", () => {
+  it("throws ConnectorApiError with structured fields and the unchanged message", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        status: 400,
+        json: async () => ({
+          error: { message: "Invalid OAuth access token.", code: 190, error_subcode: 463, type: "OAuthException" },
+        }),
+      })),
+    );
+
+    const failure = await new MetaConnector().getPages("bad-token").catch((e: unknown) => e);
+    expect(failure).toBeInstanceOf(ConnectorApiError);
+    expect(failure).toMatchObject({
+      message: "Invalid OAuth access token.",
+      platform: "META",
+      status: 400,
+      code: 190,
+      subcode: 463,
+      type: "OAuthException",
+    });
   });
 });

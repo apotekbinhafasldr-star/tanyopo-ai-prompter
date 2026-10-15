@@ -16,6 +16,33 @@ export class ConnectorConfigError extends Error {
   }
 }
 
+/**
+ * A failed call to a platform's HTTP API. The human-readable `message` is the
+ * provider's own text and may echo request data, so it is for the caller to
+ * show or branch on and must NEVER be written to logs. Only the structured,
+ * non-sensitive fields below are safe to log (see
+ * lib/connectors/safe-error-log.ts).
+ */
+export class ConnectorApiError extends Error {
+  readonly status?: number;
+  readonly code?: number | string;
+  readonly subcode?: number | string;
+  readonly type?: string;
+
+  constructor(
+    public readonly platform: string,
+    message: string,
+    details: { status?: number; code?: number | string; subcode?: number | string; type?: string } = {},
+  ) {
+    super(message);
+    this.name = "ConnectorApiError";
+    this.status = details.status;
+    this.code = details.code;
+    this.subcode = details.subcode;
+    this.type = details.type;
+  }
+}
+
 export interface ConnectorAccount {
   id: string;
   name: string;

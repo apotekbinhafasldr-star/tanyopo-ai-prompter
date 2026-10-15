@@ -3,6 +3,7 @@ import "server-only";
 import { serverEnv } from "@/lib/env";
 import { isConnectorConfigured } from "@/lib/env";
 import {
+  ConnectorApiError,
   ConnectorConfigError,
   type AdInput,
   type AdSetInput,
@@ -37,8 +38,14 @@ const DIALOG_BASE_URL = `https://www.facebook.com/${GRAPH_API_VERSION}/dialog/oa
 
 const SCOPES = ["ads_management", "ads_read", "business_management", "pages_show_list"];
 
+/**
+ * Facebook Login for Business Configuration IDs are numeric. Anything else
+ * (typo, stray quote, a pasted URL) is rejected instead of being sent to Meta.
+ */
+const LOGIN_CONFIG_ID_PATTERN = /^\d{1,32}$/;
+
 interface GraphErrorBody {
-  error?: { message: string; type?: string; code?: number };
+  error?: { message: string; type?: string; code?: number; error_subcode?: number };
 }
 
 async function graphFetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -46,7 +53,14 @@ async function graphFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const body = (await response.json().catch(() => ({}))) as T & GraphErrorBody;
 
   if (!response.ok || body.error) {
-    throw new Error(body.error?.message ?? `Meta Graph API error (HTTP ${response.status}).`);
+    // Same message as before; the structured fields let callers log a safe
+    // summary without ever touching the (provider-supplied) message.
+    throw new ConnectorApiError("META", body.error?.message ?? `Meta Graph API error (HTTP ${response.status}).`, {
+      status: response.status,
+      code: body.error?.code,
+      subcode: body.error?.error_subcode,
+      type: body.error?.type,
+    });
   }
 
   return body;
@@ -83,8 +97,29 @@ export class MetaConnector implements PlatformConnector {
     url.searchParams.set("client_id", appId);
     url.searchParams.set("redirect_uri", redirectUri);
     url.searchParams.set("state", state);
-    url.searchParams.set("scope", SCOPES.join(","));
     url.searchParams.set("response_type", "code");
+
+    const rawConfigId = serverEnv.meta.loginConfigId;
+    if (rawConfigId === undefined) {
+      // Classic Facebook Login (previous behaviour): permissions via `scope`.
+      url.searchParams.set("scope", SCOPES.join(","));
+      return url.toString();
+    }
+
+    // Facebook Login for Business: the Configuration (created in the Meta
+    // App Dashboard) defines the permissions, so `scope` is deliberately NOT
+    // sent alongside it. response_type=code + override_default_response_type
+    // keeps the server-side authorization-code flow (the callback is a
+    // server route and cannot see a URL fragment).
+    const configId = rawConfigId.trim();
+    if (!LOGIN_CONFIG_ID_PATTERN.test(configId)) {
+      throw new ConnectorConfigError(
+        this.platform,
+        "META_LOGIN_CONFIG_ID tidak valid. Isi dengan Configuration ID numerik dari Meta App Dashboard, atau kosongkan.",
+      );
+    }
+    url.searchParams.set("config_id", configId);
+    url.searchParams.set("override_default_response_type", "true");
     return url.toString();
   }
 

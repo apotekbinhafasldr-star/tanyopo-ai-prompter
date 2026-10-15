@@ -82,6 +82,12 @@ export const serverEnv = {
     appId: readOptional("META_APP_ID"),
     appSecret: readOptional("META_APP_SECRET"),
     redirectUri: readOptional("META_REDIRECT_URI"),
+    // Facebook Login for Business "Configuration ID". Optional and NOT a
+    // secret (it appears in the login dialog URL), but it is still read
+    // server-side only: it is per-Meta-app / per-environment configuration,
+    // never hardcoded in the codebase and never a NEXT_PUBLIC_* value.
+    // Unset = the classic `scope`-based dialog is used (previous behaviour).
+    loginConfigId: readOptional("META_LOGIN_CONFIG_ID"),
   },
   tiktok: {
     appId: readOptional("TIKTOK_APP_ID"),

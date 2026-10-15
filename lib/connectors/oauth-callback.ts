@@ -7,6 +7,7 @@ import { requireSessionContext } from "@/services/session";
 import { getConnector } from "@/lib/connectors/get-connector";
 import { encryptToken, isTokenCipherConfigured } from "@/lib/crypto/token-cipher";
 import { ConnectorConfigError } from "@/lib/connectors/types";
+import { logOauthFailure } from "@/lib/connectors/safe-error-log";
 import type { ConnectorPlatform, Database, StoredConnectionStatus } from "@/types/database";
 
 type AccountInsert = Database["public"]["Tables"]["prompter_connected_accounts"]["Insert"];
@@ -119,6 +120,7 @@ export async function handleConnectorOauthCallback(
       .maybeSingle();
 
     if (lookupError) {
+      logOauthFailure("account_lookup", platform, lookupError);
       return redirectWith(request, { error: "save_failed" });
     }
 
@@ -152,6 +154,7 @@ export async function handleConnectorOauthCallback(
         .single();
 
       if (insertError || !inserted) {
+        logOauthFailure("account_insert", platform, insertError ?? undefined);
         // Includes a concurrent insert losing the (tenant_id, platform)
         // unique race. Nothing of ours exists, so there is nothing to undo.
         return redirectWith(request, { error: "save_failed" });
@@ -171,6 +174,7 @@ export async function handleConnectorOauthCallback(
     );
 
     if (credentialsError) {
+      logOauthFailure("credentials_upsert", platform, credentialsError);
       // A single failed statement changed nothing, so the previous
       // credentials (if any) are intact.
       if (createdByThisRequest) {
@@ -208,6 +212,9 @@ export async function handleConnectorOauthCallback(
 
     return redirectWith(request, { connected: platform });
   } catch (err) {
+    // Safe summary only (see safe-error-log.ts): never the error message,
+    // the authorization code, the state, a cookie, or any token.
+    logOauthFailure("callback_exception", platform, err);
     const errorCode = err instanceof ConnectorConfigError ? "not_configured" : "connect_failed";
     return redirectWith(request, { error: errorCode });
   }
