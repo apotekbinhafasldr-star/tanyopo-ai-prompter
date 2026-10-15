@@ -22,7 +22,8 @@ const ERROR_LABEL: Record<string, string> = {
   denied: "Anda membatalkan proses koneksi.",
   invalid_state: "Sesi koneksi kedaluwarsa atau tidak valid. Silakan coba lagi.",
   no_ad_account: "Tidak ditemukan akun iklan pada akun Anda.",
-  save_failed: "Berhasil terhubung tapi gagal menyimpan data. Silakan coba lagi.",
+  save_failed: "Gagal menyimpan koneksi dengan aman. Koneksi belum aktif; silakan coba lagi.",
+  encryption_not_configured: "Penyimpanan token belum dikonfigurasi di server (kunci enkripsi kosong atau tidak valid). Hubungi admin.",
   server_not_configured: "Server belum dikonfigurasi untuk menyimpan koneksi (SUPABASE_SECRET_KEY kosong).",
   connect_failed: "Gagal menghubungkan akun. Silakan coba lagi.",
 };

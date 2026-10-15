@@ -6,6 +6,7 @@ import { cookies } from "next/headers";
 import { requireSessionContext } from "@/services/session";
 import { getConnector } from "@/lib/connectors/get-connector";
 import { ConnectorConfigError } from "@/lib/connectors/types";
+import { isTokenCipherConfigured } from "@/lib/crypto/token-cipher";
 import type { ConnectorPlatform } from "@/types/database";
 
 /**
@@ -30,6 +31,13 @@ export async function handleConnectorOauthAuthorize(
   const connector = getConnector(platform);
   if (!connector) {
     return NextResponse.redirect(new URL("/connections?error=not_available", request.url));
+  }
+
+  // Fail before sending the owner to the platform: if tokens cannot be
+  // encrypted at rest, the one-time authorization code would be consumed
+  // by the callback with nowhere safe to store the result.
+  if (!isTokenCipherConfigured()) {
+    return NextResponse.redirect(new URL("/connections?error=encryption_not_configured", request.url));
   }
 
   try {
