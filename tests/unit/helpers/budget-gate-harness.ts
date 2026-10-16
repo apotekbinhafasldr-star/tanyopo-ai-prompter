@@ -156,7 +156,15 @@ export function buildApprovalHarness(options: ApprovalHarnessOptions) {
           select: () => ({ eq: () => ({ eq: () => ({ single: async () => ({ data: approvalRow, error: null }) }) }) }),
           update: (payload: Record<string, unknown>) => {
             approvalUpdates.push(payload);
-            return { eq: async () => ({ error: null }) };
+            // Chainable like PostgREST: .eq(...).eq(...).select("id") resolves to the
+            // decided row (the atomic PENDING claim, H1); awaiting .eq(...) directly
+            // (the later `reason` update) resolves to { error: null }.
+            const result = { data: [{ id: "ap1" }], error: null };
+            const builder: Record<string, unknown> = {};
+            builder.eq = () => builder;
+            builder.select = async () => result;
+            builder.then = (resolve: (value: typeof result) => unknown) => resolve(result);
+            return builder;
           },
         };
       case "prompter_automation_settings":

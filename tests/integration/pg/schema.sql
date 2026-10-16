@@ -18,7 +18,7 @@
 --     app.tenant_id / app.role instead of auth.uid() + user_profiles.
 -- ============================================================================
 
-drop table if exists prompter_audit_logs, prompter_automation_settings, prompter_channel_campaigns cascade;
+drop table if exists fixture_approvals, fixture_master_campaigns, prompter_audit_logs, prompter_automation_settings, prompter_channel_campaigns cascade;
 
 do $$
 begin
@@ -105,6 +105,27 @@ create policy "Lihat audit log tenant sendiri"
 create policy "Tulis audit log tenant sendiri"
   on prompter_audit_logs for insert
   with check (tenant_id = fn_current_tenant_id());
+
+-- H1 / PR #39 stand-ins for the approval + master-campaign flow. They use
+-- NON-production names on purpose (pg-env.ts refuses to run when the real
+-- prompter_master_campaigns / prompter_approvals exist) and carry only the
+-- columns and status values the H1 statements touch.
+create table fixture_master_campaigns (
+  id uuid primary key,
+  tenant_id uuid not null,
+  channels text[] not null default '{}',
+  status text not null default 'DRAFT' check (
+    status in ('DRAFT', 'AWAITING_APPROVAL', 'SCHEDULED', 'ACTIVE', 'PAUSED', 'COMPLETED', 'FAILED')
+  )
+);
+
+create table fixture_approvals (
+  id uuid primary key,
+  tenant_id uuid not null,
+  resource_id uuid not null,
+  status text not null default 'PENDING' check (status in ('PENDING', 'APPROVED', 'REJECTED', 'EXPIRED')),
+  decided_at timestamptz
+);
 
 grant usage on schema public to authenticated;
 grant select, insert, update, delete on all tables in schema public to authenticated;
