@@ -6,7 +6,10 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/services/session", () => ({
   requireSessionContext: vi.fn(async () => ({ tenantId: "t1", userId: "u1", role: "owner" })),
 }));
-vi.mock("@/services/channel-campaigns", () => ({ setChannelCampaignsStatus: vi.fn() }));
+vi.mock("@/services/channel-campaigns", () => ({
+  mirrorChannelCampaignStatus: vi.fn(async () => ({ ok: true, updated: 0 })),
+  transitionMasterCampaign: vi.fn(async () => true),
+}));
 
 const { decryptTokenMock } = vi.hoisted(() => ({ decryptTokenMock: vi.fn(() => "access-token-abc") }));
 vi.mock("@/lib/crypto/token-cipher", () => ({ decryptToken: decryptTokenMock }));

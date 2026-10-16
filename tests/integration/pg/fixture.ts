@@ -213,3 +213,148 @@ export async function openAsTenant(cfg: PgConfig, tenant: string, role: string, 
   if (r.error) throw new Error(`openAsTenant failed: ${r.error}`);
   return s;
 }
+
+// ---------------------------------------------------------------------------
+// H1 / PR #39 — approval decision + status mirror statements.
+// Statement-for-statement equivalents of services/channel-campaigns.ts
+// (transitionMasterCampaign, mirrorChannelCampaignStatus) and of the atomic
+// decision claim in features/approvals/actions.ts. A unit test
+// (tests/unit/integration/pg-h1-drift.test.ts) fails when they drift apart.
+// ---------------------------------------------------------------------------
+
+export const FIXTURE_MASTERS = "fixture_master_campaigns";
+export const FIXTURE_APPROVALS = "fixture_approvals";
+
+export type H1Transition = "SUBMIT" | "CANCEL" | "APPROVE" | "REJECT";
+/** Mirrors STATUS_TRANSITIONS in services/channel-campaigns.ts; a unit test pins equality. */
+export const H1_TRANSITIONS: Readonly<Record<H1Transition, { from: Status; to: Status }>> = {
+  SUBMIT: { from: "DRAFT", to: "AWAITING_APPROVAL" },
+  CANCEL: { from: "AWAITING_APPROVAL", to: "DRAFT" },
+  APPROVE: { from: "AWAITING_APPROVAL", to: "SCHEDULED" },
+  REJECT: { from: "AWAITING_APPROVAL", to: "DRAFT" },
+};
+export const LOCKED_STATUSES = ["FAILED", "ACTIVE", "PAUSED", "COMPLETED"] as const;
+
+export const h1 = {
+  /** mirrorChannelCampaignStatus: master id AND tenant AND source status. */
+  mirror: (master: string, tenant: string, t: H1Transition) =>
+    `update ${TABLE} set status = ${lit(H1_TRANSITIONS[t].to)} where master_campaign_id = ${lit(master)} and tenant_id = ${lit(tenant)} and status = ${lit(H1_TRANSITIONS[t].from)} returning id;`,
+
+  /** transitionMasterCampaign: id AND tenant AND source status. */
+  master: (master: string, tenant: string, t: H1Transition) =>
+    `update ${FIXTURE_MASTERS} set status = ${lit(H1_TRANSITIONS[t].to)} where id = ${lit(master)} and tenant_id = ${lit(tenant)} and status = ${lit(H1_TRANSITIONS[t].from)} returning id;`,
+
+  /** decideApprovalAction claim: id AND tenant AND status = PENDING. */
+  decide: (approval: string, tenant: string, decision: "APPROVED" | "REJECTED") =>
+    `update ${FIXTURE_APPROVALS} set status = ${lit(decision)}, decided_at = now() where id = ${lit(approval)} and tenant_id = ${lit(tenant)} and status = 'PENDING' returning id;`,
+
+  /**
+   * The whole decideApprovalAction CAMPAIGN_LAUNCH sequence with its fail-closed
+   * branching: claim (exactly 1) -> master (exactly 1) -> mirror -> audit.
+   * Written with psql \gset / \if so that EVERY statement is its own
+   * autocommit transaction, exactly like the separate PostgREST requests the
+   * application sends (a DO block would wrongly make the flow one transaction).
+   */
+  decideFlow: (approval: string, master: string, tenant: string, decision: "APPROVED" | "REJECTED") => {
+    const t: H1Transition = decision === "APPROVED" ? "APPROVE" : "REJECT";
+    const { from, to } = H1_TRANSITIONS[t];
+    return `with u as (update ${FIXTURE_APPROVALS} set status = ${lit(decision)}, decided_at = now() where id = ${lit(approval)} and tenant_id = ${lit(tenant)} and status = 'PENDING' returning 1) select count(*) = 1 as ok from u \\gset
+\\if :ok
+with u as (update ${FIXTURE_MASTERS} set status = ${lit(to)} where id = ${lit(master)} and tenant_id = ${lit(tenant)} and status = ${lit(from)} returning 1) select count(*) = 1 as ok from u \\gset
+\\if :ok
+update ${TABLE} set status = ${lit(to)} where master_campaign_id = ${lit(master)} and tenant_id = ${lit(tenant)} and status = ${lit(from)};
+insert into prompter_audit_logs (tenant_id, action, resource_type, resource_id) values (${lit(tenant)}, ${lit(decision === "APPROVED" ? "campaign.approved" : "campaign.launch_rejected")}, 'fixture_master_campaigns', ${lit(master)});
+\\endif
+\\endif`;
+  },
+
+  /** cancelSubmissionAction: master CANCEL (exactly 1) -> mirror CANCEL -> expire the pending approval (separate autocommit statements). */
+  cancelFlow: (master: string, tenant: string) => `with u as (update ${FIXTURE_MASTERS} set status = 'DRAFT' where id = ${lit(master)} and tenant_id = ${lit(tenant)} and status = 'AWAITING_APPROVAL' returning 1) select count(*) = 1 as ok from u \\gset
+\\if :ok
+update ${TABLE} set status = 'DRAFT' where master_campaign_id = ${lit(master)} and tenant_id = ${lit(tenant)} and status = 'AWAITING_APPROVAL';
+update ${FIXTURE_APPROVALS} set status = 'EXPIRED' where tenant_id = ${lit(tenant)} and resource_id = ${lit(master)} and status = 'PENDING';
+\\endif`,
+
+  // ---- NEGATIVE CONTROLS: the pre-H1 behaviour (never used by the app any more) ----
+
+  /** Old setChannelCampaignsStatus: by master id only — no tenant, no source status. */
+  unsafeMirror: (master: string, t: H1Transition) =>
+    `update ${TABLE} set status = ${lit(H1_TRANSITIONS[t].to)} where master_campaign_id = ${lit(master)} returning id;`,
+
+  /** Source status checked but the tenant predicate is missing. */
+  unsafeMirrorNoTenant: (master: string, t: H1Transition) =>
+    `update ${TABLE} set status = ${lit(H1_TRANSITIONS[t].to)} where master_campaign_id = ${lit(master)} and status = ${lit(H1_TRANSITIONS[t].from)} returning id;`,
+
+  /** Old master write: by id only. */
+  unsafeMaster: (master: string, t: H1Transition) =>
+    `update ${FIXTURE_MASTERS} set status = ${lit(H1_TRANSITIONS[t].to)} where id = ${lit(master)} returning id;`,
+
+  /** Old decision write: by id only — no PENDING predicate, no tenant. */
+  unsafeDecide: (approval: string, decision: "APPROVED" | "REJECTED") =>
+    `update ${FIXTURE_APPROVALS} set status = ${lit(decision)}, decided_at = now() where id = ${lit(approval)} returning id;`,
+};
+
+export async function seedMaster(admin: PsqlSession, opts: { tenant: string; id?: string; status?: Status }): Promise<string> {
+  const id = opts.id ?? randomUUID();
+  const r = await admin.exec(
+    `insert into ${FIXTURE_MASTERS} (id, tenant_id, status) values (${lit(id)}, ${lit(opts.tenant)}, ${lit(opts.status ?? "AWAITING_APPROVAL")});`,
+  );
+  if (r.error) throw new Error(`seedMaster failed: ${r.error}`);
+  return id;
+}
+
+export async function seedApproval(
+  admin: PsqlSession,
+  opts: { tenant: string; master: string; id?: string; status?: "PENDING" | "APPROVED" | "REJECTED" | "EXPIRED" },
+): Promise<string> {
+  const id = opts.id ?? randomUUID();
+  const r = await admin.exec(
+    `insert into ${FIXTURE_APPROVALS} (id, tenant_id, resource_id, status) values (${lit(id)}, ${lit(opts.tenant)}, ${lit(opts.master)}, ${lit(opts.status ?? "PENDING")});`,
+  );
+  if (r.error) throw new Error(`seedApproval failed: ${r.error}`);
+  return id;
+}
+
+export async function statusOf(admin: PsqlSession, table: string, id: string): Promise<string> {
+  const r = await admin.exec(`select status from ${table} where id = ${lit(id)};`);
+  if (r.error || r.rows.length !== 1) throw new Error(`statusOf failed: ${r.error ?? "no row"}`);
+  return r.rows[0];
+}
+
+export async function channelStatuses(admin: PsqlSession, master: string): Promise<Record<string, Status>> {
+  const r = await admin.exec(
+    `select coalesce(json_object_agg(channel, status), '{}'::json) from ${TABLE} where master_campaign_id = ${lit(master)};`,
+  );
+  if (r.error) throw new Error(`channelStatuses failed: ${r.error}`);
+  return JSON.parse(r.rows[0]) as Record<string, Status>;
+}
+
+export async function auditCount(admin: PsqlSession, master: string): Promise<number> {
+  const r = await admin.exec(`select count(*) from prompter_audit_logs where resource_id = ${lit(master)};`);
+  if (r.error) throw new Error(`auditCount failed: ${r.error}`);
+  return Number(r.rows[0]);
+}
+
+export const CHANNELS = ["FACEBOOK", "INSTAGRAM", "TIKTOK", "X", "SEO"] as const;
+
+/** Seeds one channel row per (channel, status) pair under `master`. */
+export async function seedChannels(
+  admin: PsqlSession,
+  opts: { tenant: string; master: string; statuses: Status[] },
+): Promise<string[]> {
+  if (opts.statuses.length > CHANNELS.length) throw new Error("at most 5 channels per master");
+  const ids: string[] = [];
+  for (const [i, status] of opts.statuses.entries()) {
+    ids.push(
+      await seedRow(admin, {
+        tenant: opts.tenant,
+        master: opts.master,
+        channel: CHANNELS[i],
+        status,
+        error: status === "FAILED" ? IN_PROGRESS_NOTE : null,
+        externalId: status === "ACTIVE" || status === "PAUSED" || status === "COMPLETED" ? `ext_${i}` : null,
+      }),
+    );
+  }
+  return ids;
+}

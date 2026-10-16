@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireSessionContext } from "@/services/session";
-import { setChannelCampaignsStatus } from "@/services/channel-campaigns";
+import { mirrorChannelCampaignStatus, transitionMasterCampaign } from "@/services/channel-campaigns";
 import { getConnector } from "@/lib/connectors/get-connector";
 import { CHANNEL_TO_CONNECTOR } from "@/lib/connectors/channel-map";
 import { decryptToken } from "@/lib/crypto/token-cipher";
@@ -52,7 +52,11 @@ export async function decideApprovalAction(
     return { error: "Approval ini sudah diputuskan sebelumnya." };
   }
 
-  const { error: updateApprovalError } = await supabase
+  // The decision is claimed ATOMICALLY: one UPDATE that only matches a still
+  // PENDING approval of this tenant. Two concurrent decisions (double click,
+  // two owners, a late reject after an approve) cannot both pass: the second
+  // matches zero rows and nothing else is written.
+  const { data: decidedRows, error: updateApprovalError } = await supabase
     .from("prompter_approvals")
     .update({
       status: decision,
@@ -60,20 +64,44 @@ export async function decideApprovalAction(
       decided_at: new Date().toISOString(),
       reason,
     })
-    .eq("id", approvalId);
+    .eq("id", approvalId)
+    .eq("tenant_id", session.tenantId)
+    .eq("status", "PENDING")
+    .select("id");
 
   if (updateApprovalError) {
     return { error: "Gagal menyimpan keputusan." };
   }
 
-  if (approval.approval_type === "CAMPAIGN_LAUNCH" && approval.resource_type === "prompter_master_campaigns") {
-    const newStatus = decision === "APPROVED" ? "SCHEDULED" : "DRAFT";
+  if (!Array.isArray(decidedRows) || decidedRows.length !== 1) {
+    return { error: "Approval ini sudah diputuskan sebelumnya." };
+  }
 
-    await supabase
-      .from("prompter_master_campaigns")
-      .update({ status: newStatus })
-      .eq("id", approval.resource_id);
-    await setChannelCampaignsStatus(supabase, approval.resource_id, newStatus);
+  if (approval.approval_type === "CAMPAIGN_LAUNCH" && approval.resource_type === "prompter_master_campaigns") {
+    const transition = decision === "APPROVED" ? "APPROVE" : "REJECT";
+
+    // Fail closed: the master only moves from AWAITING_APPROVAL, and exactly
+    // one row must change. If it does not (cancelled/changed meanwhile), the
+    // channels are NOT touched and the user is told to reload.
+    const masterMoved = await transitionMasterCampaign(supabase, session.tenantId, approval.resource_id, transition);
+    if (!masterMoved) {
+      revalidatePath(`/campaigns/${approval.resource_id}`);
+      revalidatePath("/approvals");
+      return {
+        error:
+          "Keputusan tersimpan, tetapi status campaign sudah berubah dan tidak diperbarui. Muat ulang halaman dan periksa status campaign.",
+      };
+    }
+
+    const mirrored = await mirrorChannelCampaignStatus(supabase, session.tenantId, approval.resource_id, transition);
+    if (!mirrored.ok) {
+      revalidatePath(`/campaigns/${approval.resource_id}`);
+      revalidatePath("/approvals");
+      return {
+        error:
+          "Status campaign diperbarui, tetapi status channel gagal diperbarui. Muat ulang halaman dan periksa status channel sebelum meluncurkan.",
+      };
+    }
 
     await supabase.from("prompter_audit_logs").insert({
       tenant_id: session.tenantId,

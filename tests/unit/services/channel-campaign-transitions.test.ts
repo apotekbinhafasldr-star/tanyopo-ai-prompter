@@ -1,0 +1,145 @@
+import { describe, expect, it } from "vitest";
+import {
+  STATUS_TRANSITIONS,
+  mirrorChannelCampaignStatus,
+  transitionMasterCampaign,
+  type StatusTransition,
+} from "@/services/channel-campaigns";
+import { createFakeDb, type Row } from "../helpers/stateful-fake-db";
+
+const ALL = ["DRAFT", "AWAITING_APPROVAL", "SCHEDULED", "ACTIVE", "PAUSED", "COMPLETED", "FAILED"] as const;
+const LOCKED = ["FAILED", "ACTIVE", "PAUSED", "COMPLETED"] as const;
+const TRANSITIONS = Object.keys(STATUS_TRANSITIONS) as StatusTransition[];
+const T1 = "11111111-1111-1111-1111-111111111111";
+const T2 = "22222222-2222-2222-2222-222222222222";
+const M = "m1";
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const asClient = (db: { from: unknown }) => db as any;
+
+describe("H1 transition table", () => {
+  it("is exactly the four legitimate ordinary transitions", () => {
+    expect(STATUS_TRANSITIONS).toEqual({
+      SUBMIT: { from: "DRAFT", to: "AWAITING_APPROVAL" },
+      CANCEL: { from: "AWAITING_APPROVAL", to: "DRAFT" },
+      APPROVE: { from: "AWAITING_APPROVAL", to: "SCHEDULED" },
+      REJECT: { from: "AWAITING_APPROVAL", to: "DRAFT" },
+    });
+  });
+
+  it("never uses FAILED/ACTIVE/PAUSED/COMPLETED as a source or a target", () => {
+    for (const { from, to } of Object.values(STATUS_TRANSITIONS)) {
+      expect(LOCKED).not.toContain(from);
+      expect(LOCKED).not.toContain(to);
+    }
+  });
+
+  it("is immutable", () => {
+    expect(Object.isFrozen(STATUS_TRANSITIONS)).toBe(true);
+    expect(Object.isFrozen(STATUS_TRANSITIONS.APPROVE)).toBe(true);
+  });
+});
+
+describe.each(TRANSITIONS)("%s — every source status", (transition) => {
+  const { from, to } = STATUS_TRANSITIONS[transition];
+
+  it.each(ALL)("channel row in %s", async (status) => {
+    const db = createFakeDb({
+      prompter_channel_campaigns: [{ id: "c1", tenant_id: T1, master_campaign_id: M, status }],
+    });
+    const result = await mirrorChannelCampaignStatus(asClient(db), T1, M, transition);
+    const expected = status === from ? to : status;
+    expect(db.tables.prompter_channel_campaigns[0].status).toBe(expected);
+    expect(result).toEqual({ ok: true, updated: status === from ? 1 : 0 });
+  });
+
+  it.each(ALL)("master row in %s", async (status) => {
+    const db = createFakeDb({ prompter_master_campaigns: [{ id: M, tenant_id: T1, status }] });
+    const moved = await transitionMasterCampaign(asClient(db), T1, M, transition);
+    expect(moved).toBe(status === from);
+    expect(db.tables.prompter_master_campaigns[0].status).toBe(status === from ? to : status);
+  });
+
+  it("a mixed set only moves the rows in the source status; locked rows are untouched", async () => {
+    const rows: Row[] = ALL.map((status, i) => ({ id: `c${i}`, tenant_id: T1, master_campaign_id: M, status }));
+    const db = createFakeDb({ prompter_channel_campaigns: rows });
+    await mirrorChannelCampaignStatus(asClient(db), T1, M, transition);
+    for (const r of db.tables.prompter_channel_campaigns) {
+      const original = ALL[Number(String(r.id).slice(1))];
+      expect(r.status).toBe(original === from ? to : original);
+      if ((LOCKED as readonly string[]).includes(original)) expect(r.status).toBe(original);
+    }
+  });
+
+  it("tenant isolation: another tenant's rows (same master id) are never changed", async () => {
+    const db = createFakeDb({
+      prompter_channel_campaigns: [{ id: "c1", tenant_id: T2, master_campaign_id: M, status: from }],
+      prompter_master_campaigns: [{ id: M, tenant_id: T2, status: from }],
+    });
+    expect(await transitionMasterCampaign(asClient(db), T1, M, transition)).toBe(false);
+    expect(await mirrorChannelCampaignStatus(asClient(db), T1, M, transition)).toEqual({ ok: true, updated: 0 });
+    expect(db.tables.prompter_channel_campaigns[0].status).toBe(from);
+    expect(db.tables.prompter_master_campaigns[0].status).toBe(from);
+  });
+
+  it("every statement carries the id/master filter, the tenant filter and the source-status filter", async () => {
+    const db = createFakeDb({ prompter_channel_campaigns: [], prompter_master_campaigns: [] });
+    await transitionMasterCampaign(asClient(db), T1, M, transition);
+    await mirrorChannelCampaignStatus(asClient(db), T1, M, transition);
+    expect(db.log).toHaveLength(2);
+    expect(db.log[0].filters).toEqual([["id", M], ["tenant_id", T1], ["status", from]]);
+    expect(db.log[1].filters).toEqual([["master_campaign_id", M], ["tenant_id", T1], ["status", from]]);
+    expect(db.log.every((s) => s.payload?.status === to)).toBe(true);
+  });
+
+  it("a database error or a throw reports failure and writes nothing", async () => {
+    for (const mode of ["error", "throw"] as const) {
+      const db = createFakeDb(
+        {
+          prompter_channel_campaigns: [{ id: "c1", tenant_id: T1, master_campaign_id: M, status: from }],
+          prompter_master_campaigns: [{ id: M, tenant_id: T1, status: from }],
+        },
+        mode === "error"
+          ? { failWhen: () => "boom secret" }
+          : { throwWhen: () => true },
+      );
+      expect(await transitionMasterCampaign(asClient(db), T1, M, transition)).toBe(false);
+      expect(await mirrorChannelCampaignStatus(asClient(db), T1, M, transition)).toEqual({ ok: false, updated: 0 });
+      expect(db.tables.prompter_channel_campaigns[0].status).toBe(from);
+      expect(db.tables.prompter_master_campaigns[0].status).toBe(from);
+    }
+  });
+});
+
+describe("master transition fails closed on an ambiguous result", () => {
+  it("two matching rows (should be impossible) is not success", async () => {
+    const db = createFakeDb({
+      prompter_master_campaigns: [
+        { id: M, tenant_id: T1, status: "AWAITING_APPROVAL" },
+        { id: M, tenant_id: T1, status: "AWAITING_APPROVAL" },
+      ],
+    });
+    expect(await transitionMasterCampaign(asClient(db), T1, M, "APPROVE")).toBe(false);
+  });
+});
+
+describe("the exact re-arm defect (negative control)", () => {
+  it("the OLD unfiltered mirror would rewrite a claimed FAILED channel back to SCHEDULED; the new one does not", async () => {
+    const seed = {
+      prompter_channel_campaigns: [
+        { id: "c1", tenant_id: T1, master_campaign_id: M, status: "FAILED" },
+        { id: "c2", tenant_id: T1, master_campaign_id: M, status: "ACTIVE" },
+      ],
+    };
+    const old = createFakeDb(seed);
+    // Old behaviour: update status by master id only (no tenant, no source status).
+    await (old.from("prompter_channel_campaigns") as { update: (p: Row) => { eq: (c: string, v: unknown) => Promise<unknown> } })
+      .update({ status: "SCHEDULED" })
+      .eq("master_campaign_id", M);
+    expect(old.tables.prompter_channel_campaigns.map((r) => r.status)).toEqual(["SCHEDULED", "SCHEDULED"]); // re-armed!
+
+    const fixed = createFakeDb(seed);
+    await mirrorChannelCampaignStatus(asClient(fixed), T1, M, "APPROVE");
+    expect(fixed.tables.prompter_channel_campaigns.map((r) => r.status)).toEqual(["FAILED", "ACTIVE"]);
+  });
+});
