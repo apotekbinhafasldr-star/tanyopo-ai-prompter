@@ -75,6 +75,12 @@ export interface AdSetInput {
   name: string;
   dailyBudgetMinorUnits: number;
   targetingCountries: string[];
+  /**
+   * Explicit optimization goal chosen by the launch preflight. Meta's
+   * connector refuses to create an ad set without one (and without a
+   * verified billing-event pairing) instead of defaulting.
+   */
+  optimizationGoal?: string;
 }
 
 export interface CreativeInput {

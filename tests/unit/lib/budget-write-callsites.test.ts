@@ -98,6 +98,27 @@ describe("external budget write call sites", () => {
     expect(text.indexOf("evaluateExternalBudgetWrite(")).toBeLessThan(text.indexOf("claimChannelCampaignLaunch(supabase"));
   });
 
+  it("PR #36: the Meta preflight runs after the S1 gate and the credentials, and before the claim", () => {
+    const text = sources.find((s) => s.file === "features/campaigns/launch-actions.ts")!.text;
+    const preflight = text.indexOf("await runMetaPreflight({");
+    expect(preflight).toBeGreaterThan(-1);
+    expect(text.indexOf("evaluateExternalBudgetWrite(")).toBeLessThan(preflight);
+    expect(text.indexOf("decryptToken(credentials")).toBeLessThan(preflight);
+    expect(preflight).toBeLessThan(text.indexOf("claimChannelCampaignLaunch(supabase"));
+    // the approval check also precedes every budget step
+    expect(text.indexOf('.from("prompter_approvals")')).toBeLessThan(text.indexOf("allocateDailyBudget("));
+  });
+
+  it("PR #36: the preflight modules make no network request and never name a Tanyopo fallback", () => {
+    for (const file of ["lib/campaigns/meta-launch-preflight.ts", "lib/campaigns/meta-objective-contracts.ts"]) {
+      const text = sources.find((s) => s.file === file)?.text ?? "";
+      expect(text, file).not.toMatch(/\bfetch\s*\(|XMLHttpRequest|axios/);
+    }
+    const connector = readFileSync(path.join(ROOT, "lib/connectors/meta-connector.ts"), "utf8");
+    expect(connector).not.toContain("tanyopo.ai");
+    expect(connector).not.toMatch(/\bimage_url\b\s*:/);
+  });
+
   it("the autopilot gate runs before the connected account and credentials are read", () => {
     const text = sources.find((s) => s.file === "features/approvals/actions.ts")!.text;
     const gate = text.indexOf("evaluateExternalBudgetWrite(");

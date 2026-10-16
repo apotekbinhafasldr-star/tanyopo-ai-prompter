@@ -65,6 +65,14 @@ export function buildLaunchHarness(options: LaunchHarnessOptions = {}) {
         };
       case "prompter_master_campaigns":
         return { select: () => ({ eq: () => ({ eq: () => ({ single: masterSingle }) }) }) };
+      case "prompter_approvals": {
+        // PR #36: the Meta launch reads the master's latest CAMPAIGN_LAUNCH approval.
+        const approved = { data: [{ status: "APPROVED", created_at: "2026-10-01T00:00:00Z" }], error: null };
+        const builder: Record<string, unknown> = {};
+        for (const method of ["select", "eq", "order", "limit"]) builder[method] = () => builder;
+        builder.then = (resolve: (value: typeof approved) => unknown) => resolve(approved);
+        return builder;
+      }
       case "prompter_budget_policies":
         return { select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: null }) }) }) };
       case "prompter_marketing_metrics":
