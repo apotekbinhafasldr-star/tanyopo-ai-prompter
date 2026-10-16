@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
+import { LegalLinks } from "@/features/legal/legal-links";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 const initialState: AuthActionState = { error: null };
@@ -96,7 +97,19 @@ export function RegisterForm() {
             Daftar Gratis
           </Button>
         </form>
-        <p className="mt-6 text-center text-sm text-muted-foreground">
+        <p className="mt-6 text-center text-xs text-muted-foreground">
+          Dengan mendaftar, Anda menyetujui{" "}
+          <Link href="/terms" className="font-medium hover:text-foreground hover:underline">
+            Syarat &amp; Ketentuan
+          </Link>{" "}
+          dan{" "}
+          <Link href="/privacy" className="font-medium hover:text-foreground hover:underline">
+            Kebijakan Privasi
+          </Link>
+          .
+        </p>
+        <LegalLinks className="mt-2 text-center text-xs text-muted-foreground [&_ul]:justify-center" />
+        <p className="mt-4 text-center text-sm text-muted-foreground">
           Sudah punya akun?{" "}
           <Link href="/login" className="font-medium text-brand hover:underline">
             Masuk
