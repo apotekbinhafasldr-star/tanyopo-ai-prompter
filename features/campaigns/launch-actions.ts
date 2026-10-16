@@ -35,6 +35,7 @@ import {
   preflightFail,
   resolveLandingUrl,
   resolveMetaObjectivePlan,
+  resolveOwnHosts,
   resolveTargetCountry,
   type Check,
   type ProductMediaRow,
@@ -113,15 +114,6 @@ interface MetaPreflightInput {
 const READ_FAILED = () =>
   preflightFail("PREFLIGHT_READ_FAILED", "Gagal membaca data pra-peluncuran. Peluncuran dibatalkan dan tidak ada yang dikirim ke Meta, coba lagi.");
 
-function hostOf(value: string | undefined): string[] {
-  if (!value) return [];
-  try {
-    return [new URL(value).hostname];
-  } catch {
-    return [];
-  }
-}
-
 /**
  * Meta preflight (PR #36). READ-ONLY and entirely before the exclusive
  * claim: it makes no write, no Meta call and no HTTP request to any
@@ -139,6 +131,14 @@ async function runMetaPreflight(input: MetaPreflightInput): Promise<Check<MetaLa
   if (!objective.ok) return objective;
   const country = resolveTargetCountry(master.target_country);
   if (!country.ok) return country;
+
+  // Application hosts from trusted config (no substring of the brand name); fail closed when unknown.
+  const ownHosts = resolveOwnHosts({
+    appUrl: process.env.NEXT_PUBLIC_APP_URL,
+    metaRedirectUri: process.env.META_REDIRECT_URI,
+    supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
+  });
+  if (!ownHosts.ok) return ownHosts;
 
   // Landing URL: product first, brand profile only when the product has none.
   let productUrl: string | null = null;
@@ -162,8 +162,7 @@ async function runMetaPreflight(input: MetaPreflightInput): Promise<Check<MetaLa
     if (error) return READ_FAILED();
     brandUrl = brand?.website_url ?? null;
   }
-  const ownHosts = [...hostOf(process.env.NEXT_PUBLIC_APP_URL), ...hostOf(process.env.NEXT_PUBLIC_SUPABASE_URL)];
-  const link = resolveLandingUrl({ productUrl, brandUrl }, ownHosts);
+  const link = resolveLandingUrl({ productUrl, brandUrl }, ownHosts.value);
   if (!link.ok) return link;
 
   // Creative image: only this tenant's own product media.

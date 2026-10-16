@@ -275,7 +275,20 @@ describe("MetaConnector#createAdSet — PR #36", () => {
     });
   });
 
-  it.each([undefined, "", "LINK_CLICKS", "OFFSITE_CONVERSIONS"])("refuses goal %j and calls nothing (no invented pairing)", async (goal) => {
+  it.each([
+    undefined,
+    "",
+    "LINK_CLICKS",
+    "OFFSITE_CONVERSIONS",
+    "constructor",
+    "__proto__",
+    "toString",
+    "hasOwnProperty",
+    "valueOf",
+    "reach",
+    " REACH",
+    "REACH ",
+  ])("refuses goal %j and calls nothing (no invented pairing)", async (goal) => {
     const fetchMock = stubFetchOk();
     const failure = await new MetaConnector()
       .createAdSet("tok", "act_1", { ...base, optimizationGoal: goal })
@@ -284,38 +297,158 @@ describe("MetaConnector#createAdSet — PR #36", () => {
     expect(failure).toBeInstanceOf(ConnectorConfigError);
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("refuses a non-string goal", async () => {
+    const fetchMock = stubFetchOk();
+    const failure = await new MetaConnector()
+      .createAdSet("tok", "act_1", { ...base, optimizationGoal: { REACH: 1 } as unknown as string })
+      .catch((e: unknown) => e);
+    expect(failure).toBeInstanceOf(ConnectorConfigError);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
 
-describe("MetaConnector timeout — PR #36", () => {
-  it("passes a timeout signal to every Graph call", async () => {
-    const fetchMock = stubFetchOk({ data: [] });
-    await new MetaConnector().getPages("tok");
+describe("MetaConnector create timeout — PR #36 (scoped to create calls only)", () => {
+  const TOKEN = "tok-SECRET-123";
+  const creates: [string, (c: MetaConnector) => Promise<unknown>][] = [
+    ["createCampaign", (c) => c.createCampaign(TOKEN, "act_1", { name: "N", objective: "OUTCOME_AWARENESS", dailyBudgetMinorUnits: 1 })],
+    [
+      "createAdSet",
+      (c) =>
+        c.createAdSet(TOKEN, "act_1", {
+          campaignId: "c1",
+          name: "AS",
+          dailyBudgetMinorUnits: 1,
+          targetingCountries: ["ID"],
+          optimizationGoal: "REACH",
+        }),
+    ],
+    [
+      "createCreative",
+      (c) =>
+        c.createCreative(TOKEN, "act_1", {
+          name: "C",
+          headline: "H",
+          primaryText: "P",
+          cta: "x",
+          pageId: "page_1",
+          linkUrl: "https://toko-saya.co.id/",
+          imageUrl: "https://proj.supabase.co/a.jpg",
+        }),
+    ],
+    ["createAd", (c) => c.createAd(TOKEN, "act_1", { name: "A", adSetId: "as1", creativeId: "cr1" })],
+  ];
+
+  it.each(creates)("%s passes a timeout signal to fetch", async (_name, run) => {
+    const fetchMock = stubFetchOk({ id: "x" });
+    await run(new MetaConnector());
     expect((fetchMock.mock.calls[0][1] as RequestInit).signal).toBeInstanceOf(AbortSignal);
   });
 
-  it("17. a timed-out create call becomes a status-less ConnectorApiError and is NOT retried", async () => {
-    const timeout = Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" });
+  it.each(creates)("17. %s: a timeout becomes a status-less ConnectorApiError, is NOT retried and leaks no token", async (_name, run) => {
+    const timeout = Object.assign(new Error(`aborted ${TOKEN}`), { name: "TimeoutError" });
     const fetchMock = vi.fn(async () => {
       throw timeout;
     });
     vi.stubGlobal("fetch", fetchMock);
+    const logs = [vi.spyOn(console, "log"), vi.spyOn(console, "error"), vi.spyOn(console, "warn")];
 
-    const failure = await new MetaConnector()
-      .createCampaign("tok", "act_1", { name: "N", objective: "OUTCOME_AWARENESS", dailyBudgetMinorUnits: 1 })
-      .catch((e: unknown) => e);
+    const failure = await run(new MetaConnector()).catch((e: unknown) => e);
 
     expect(failure).toBeInstanceOf(ConnectorApiError);
     expect((failure as ConnectorApiError).status).toBeUndefined();
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    // No status => the launch treats it as UNCERTAIN (Meta may have created it) and never retries.
+    expect(JSON.stringify([(failure as Error).message, failure])).not.toContain(TOKEN);
+    for (const spy of logs) expect(spy).not.toHaveBeenCalled();
     const { classifyCreateFailure } = await import("@/lib/campaigns/launch-reconciliation");
     expect(classifyCreateFailure(failure)).toBe("UNCERTAIN");
+    logs.forEach((spy) => spy.mockRestore());
+  });
+
+  it.each(creates)("%s: an unreadable response body is UNCERTAIN (no status), not a definitive rejection", async (_name, run) => {
+    for (const status of [200, 400, 500]) {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => ({
+          ok: status < 400,
+          status,
+          json: async () => {
+            throw new SyntaxError(`Unexpected token ${TOKEN}`);
+          },
+        })),
+      );
+      const failure = await run(new MetaConnector()).catch((e: unknown) => e);
+      expect(failure, String(status)).toBeInstanceOf(ConnectorApiError);
+      expect((failure as ConnectorApiError).status).toBeUndefined();
+      expect(JSON.stringify([(failure as Error).message, failure])).not.toContain(TOKEN);
+      const { classifyCreateFailure } = await import("@/lib/campaigns/launch-reconciliation");
+      expect(classifyCreateFailure(failure)).toBe("UNCERTAIN");
+    }
+  });
+
+  it("a definitive JSON rejection keeps its status and structured fields", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, status: 400, json: async () => ({ error: { message: "bad", code: 100 } }) })),
+    );
+    const failure = await creates[0][1](new MetaConnector()).catch((e: unknown) => e);
+    expect(failure).toMatchObject({ status: 400, code: 100 });
   });
 
   it("does not hide other network errors as timeouts", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => {
       throw new Error("ECONNRESET");
     }));
-    await expect(new MetaConnector().getPages("tok")).rejects.toThrow("ECONNRESET");
+    await expect(creates[0][1](new MetaConnector())).rejects.toThrow("ECONNRESET");
+  });
+});
+
+describe("MetaConnector OAuth / connection calls keep their previous behaviour — PR #36", () => {
+  it("getPages and getAccounts send NO timeout signal", async () => {
+    const fetchMock = stubFetchOk({ data: [] });
+    const connector = new MetaConnector();
+    await connector.getPages("tok");
+    await connector.getAccounts("tok");
+    for (const call of fetchMock.mock.calls) {
+      expect((call[1] as RequestInit | undefined)?.signal).toBeUndefined();
+    }
+  });
+
+  it("an abort/timeout-named error on a non-create call propagates UNCHANGED (not rewritten)", async () => {
+    const original = Object.assign(new Error("The operation was aborted"), { name: "TimeoutError" });
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      throw original;
+    }));
+    const failure = await new MetaConnector().getPages("tok").catch((e: unknown) => e);
+    expect(failure).toBe(original);
+    expect(failure).not.toBeInstanceOf(ConnectorApiError);
+  });
+
+  it("an unreadable body on a non-create call still yields the previous empty-object behaviour", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => {
+          throw new SyntaxError("bad json");
+        },
+      })),
+    );
+    await expect(new MetaConnector().getPages("tok")).rejects.toBeInstanceOf(Error);
+  });
+
+  it("the OAuth token exchange still reaches Graph without a signal", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ access_token: "short" }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ access_token: "long", expires_in: 100 }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ data: { scopes: ["ads_management"] } }) });
+    vi.stubGlobal("fetch", fetchMock);
+    await new MetaConnector().exchangeCodeForToken("code123");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    for (const call of fetchMock.mock.calls) {
+      expect((call[1] as RequestInit | undefined)?.signal).toBeUndefined();
+    }
   });
 });

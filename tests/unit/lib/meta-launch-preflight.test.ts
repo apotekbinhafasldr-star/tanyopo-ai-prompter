@@ -7,6 +7,7 @@ import {
   checkSelectedPageId,
   pickLaunchMedia,
   resolveLandingUrl,
+  resolveOwnHosts,
   resolveMetaObjectivePlan,
   resolveTargetCountry,
   validateLandingUrl,
@@ -119,15 +120,91 @@ describe("validateLandingUrl / resolveLandingUrl", () => {
     "https://toko.id\\@evil.com",
     "https://tanyopo.ai",
     "https://www.tanyopo.ai/x",
-    "https://tanyopo.com",
     `https://toko.id/${"a".repeat(2000)}`,
   ])("rejects %#: %s", (url) => {
     expect(validateLandingUrl(url).ok).toBe(false);
   });
-  it("blocks the app's own hosts", () => {
-    expect(validateLandingUrl("https://linoe.app/x", ["linoe.app"])).toMatchObject({ ok: false, code: "LANDING_URL_UNSAFE" });
-    expect(validateLandingUrl("https://a.linoe.app/x", ["linoe.app"]).ok).toBe(false);
-    expect(validateLandingUrl("https://notlinoe.app/x", ["linoe.app"]).ok).toBe(true);
+  describe("application host protection (configured hosts, no substring of the brand name)", () => {
+    const own = ["app.linoe.id", "proj.supabase.co"];
+    it("blocks the official host, its subdomains, case and trailing-dot variants", () => {
+      for (const url of [
+        "https://app.linoe.id/x",
+        "https://APP.LINOE.ID/x",
+        "https://app.linoe.id./x",
+        "https://a.b.app.linoe.id/x",
+        "https://proj.supabase.co/storage/v1/object/public/x.jpg",
+      ]) {
+        expect(validateLandingUrl(url, own), url).toMatchObject({ ok: false, code: "LANDING_URL_UNSAFE" });
+      }
+    });
+    it("blocks an official host that has no 'tanyopo' in its name (the P2-2 case)", () => {
+      expect(validateLandingUrl("https://app.linoe.id/promo", own).ok).toBe(false);
+      expect(validateLandingUrl("https://app.linoe.id/promo", []).ok).toBe(true); // proves the block comes from config, not a substring
+    });
+    it("allows a valid tenant host and look-alike hosts that are not ours", () => {
+      for (const url of [
+        "https://toko-saya.co.id/",
+        "https://linoe.id/",
+        "https://app.linoe.id.evil.com/",
+        "https://evil-app.linoe.id.com/",
+        "https://xapp.linoe.id/",
+        "https://tanyopo.com/",
+        "https://tanyopo-shop.id/",
+      ]) {
+        expect(validateLandingUrl(url, own).ok, url).toBe(true);
+      }
+    });
+    it("still blocks the removed legacy fallback host exactly (and its subdomains), with or without config", () => {
+      for (const url of ["https://tanyopo.ai", "https://www.tanyopo.ai/x", "https://TANYOPO.AI./x"]) {
+        expect(validateLandingUrl(url, own).ok, url).toBe(false);
+        expect(validateLandingUrl(url, []).ok, url).toBe(false);
+      }
+      expect(validateLandingUrl("https://tanyopo.ai.evil.com/", own).ok).toBe(true);
+    });
+    it.each([
+      "https://localhost/x",
+      "https://127.0.0.1/x",
+      "https://[::1]/x",
+      "https://user:pass@toko.id/",
+      "https://svc.internal/x",
+      "http://toko.id/",
+    ])("malicious URL %s stays rejected whatever the config", (url) => {
+      expect(validateLandingUrl(url, own).ok).toBe(false);
+      expect(validateLandingUrl(url, []).ok).toBe(false);
+    });
+  });
+
+  describe("resolveOwnHosts", () => {
+    it("takes hosts from NEXT_PUBLIC_APP_URL, META_REDIRECT_URI and Supabase", () => {
+      expect(
+        resolveOwnHosts({
+          appUrl: "https://app.linoe.id",
+          metaRedirectUri: "https://auth.linoe.id/api/connect/meta/callback",
+          supabaseUrl: "https://Proj.Supabase.co",
+        }),
+      ).toEqual({ ok: true, value: ["app.linoe.id", "auth.linoe.id", "proj.supabase.co"] });
+    });
+    it("works from META_REDIRECT_URI alone when NEXT_PUBLIC_APP_URL is unset", () => {
+      expect(resolveOwnHosts({ metaRedirectUri: "https://app.linoe.id/cb" })).toEqual({ ok: true, value: ["app.linoe.id"] });
+    });
+    it("deduplicates", () => {
+      expect(resolveOwnHosts({ appUrl: "https://app.linoe.id", metaRedirectUri: "https://app.linoe.id/cb" })).toEqual({
+        ok: true,
+        value: ["app.linoe.id"],
+      });
+    });
+    it.each([
+      ["nothing configured", {}],
+      ["empty strings", { appUrl: "", metaRedirectUri: "" }],
+      ["localhost default", { appUrl: "http://localhost:3000" }],
+      ["https localhost", { appUrl: "https://localhost" }],
+      ["an IP", { appUrl: "https://10.0.0.1" }],
+      ["http only", { appUrl: "http://app.linoe.id" }],
+      ["garbage", { appUrl: "not a url", metaRedirectUri: "::::" }],
+      ["only Supabase known", { supabaseUrl: "https://proj.supabase.co" }],
+    ])("fails closed with %s", (_name, config) => {
+      expect(resolveOwnHosts(config)).toMatchObject({ ok: false, code: "APP_HOST_UNCONFIGURED" });
+    });
   });
   it("product URL wins, brand URL is the only fallback, nothing else", () => {
     expect(resolveLandingUrl({ productUrl: "https://a.id/", brandUrl: "https://b.id/" })).toEqual({ ok: true, value: "https://a.id/" });

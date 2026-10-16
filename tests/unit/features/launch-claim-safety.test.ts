@@ -208,7 +208,8 @@ function metaCalls() {
 
 beforeEach(() => {
   vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://proj.supabase.co");
-  vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.tanyopo.ai");
+  vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.linoe.id");
+  vi.stubEnv("META_REDIRECT_URI", "");
   fx = makePreflightFixtures();
   masterOverrides = {};
   accountOverrides = {};
@@ -530,7 +531,8 @@ describe("Meta preflight (PR #36)", () => {
       "https://user:pass@toko-saya.co.id/",
       "https://intranet/x",
       "https://shop.internal/x",
-      "https://app.tanyopo.ai/x",
+      "https://app.linoe.id/x",
+      "https://sub.app.linoe.id/x",
       "https://tanyopo.ai",
       "https://proj.supabase.co/x",
       "https://toko-saya.co.id:8443/x",
@@ -538,6 +540,32 @@ describe("Meta preflight (PR #36)", () => {
     ])("6. unsafe URL %#: rejected", async (url) => {
       fx.product = { id: "p1", website_url: url };
       await expectRejectedBeforeClaim("URL landing");
+    });
+
+    it("P2-2: the official app host is blocked even though it has no 'tanyopo' in its name", async () => {
+      fx.product = { id: "p1", website_url: "https://app.linoe.id/promo" };
+      await expectRejectedBeforeClaim("domain aplikasi");
+    });
+
+    it("P2-2: a look-alike host that is not ours is accepted", async () => {
+      fx.product = { id: "p1", website_url: "https://app.linoe.id.toko-saya.co.id/" };
+      expect((await launchChannelCampaignAction("cc1")).error).toBeNull();
+    });
+
+    it("P2-2: the app host may come from META_REDIRECT_URI when NEXT_PUBLIC_APP_URL is unset", async () => {
+      vi.stubEnv("NEXT_PUBLIC_APP_URL", "");
+      vi.stubEnv("META_REDIRECT_URI", "https://official.example-app.id/api/connect/meta/callback");
+      fx.product = { id: "p1", website_url: "https://official.example-app.id/x" };
+      await expectRejectedBeforeClaim("domain aplikasi");
+    });
+
+    it.each([
+      ["both unset", "", ""],
+      ["localhost default", "http://localhost:3000", ""],
+    ])("P2-2: host configuration missing (%s) fails closed with a clear reason, before the claim", async (_name, appUrl, redirect) => {
+      vi.stubEnv("NEXT_PUBLIC_APP_URL", appUrl);
+      vi.stubEnv("META_REDIRECT_URI", redirect);
+      await expectRejectedBeforeClaim("Domain resmi aplikasi belum terkonfigurasi");
     });
 
     it("an unsafe product URL is never silently replaced by the brand URL", async () => {

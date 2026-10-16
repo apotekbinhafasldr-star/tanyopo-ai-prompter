@@ -206,7 +206,8 @@ let fx: PreflightFixtures;
 beforeEach(() => {
   fx = makePreflightFixtures();
   vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://proj.supabase.co");
-  vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.tanyopo.ai");
+  vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.linoe.id");
+  vi.stubEnv("META_REDIRECT_URI", "");
 });
 
 let harness: Harness;

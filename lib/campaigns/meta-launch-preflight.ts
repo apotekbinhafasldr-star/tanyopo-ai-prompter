@@ -23,6 +23,7 @@ export type PreflightFailureCode =
   | "TARGET_COUNTRY_INVALID"
   | "LANDING_URL_MISSING"
   | "LANDING_URL_UNSAFE"
+  | "APP_HOST_UNCONFIGURED"
   | "IMAGE_MISSING"
   | "IMAGE_INVALID"
   | "PREFLIGHT_READ_FAILED";
@@ -207,11 +208,62 @@ const RESERVED_SUFFIXES = [
   "onion",
 ];
 
+/** The host of the fallback link PR #36 removed from the Meta connector. Blocked exactly, never by substring. */
+const LEGACY_FALLBACK_HOST = "tanyopo.ai";
+
 const unsafeUrl = (reason: string) =>
   preflightFail("LANDING_URL_UNSAFE", `URL landing tidak dapat dipakai untuk iklan: ${reason}. Perbaiki URL pada produk atau profil brand.`);
 
 function hostMatches(hostname: string, domain: string): boolean {
   return hostname === domain || hostname.endsWith(`.${domain}`);
+}
+
+function publicHttpsHost(value: string | undefined | null): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:") return null;
+    const host = url.hostname.toLowerCase().replace(/\.$/, "");
+    if (!host.includes(".") || host.startsWith("[") || /^[0-9.]+$/.test(host)) return null;
+    const tld = host.split(".").pop() ?? "";
+    if (RESERVED_SUFFIXES.includes(tld)) return null;
+    return host;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The hosts that belong to this application, from trusted configuration only:
+ * `NEXT_PUBLIC_APP_URL` (the app's official URL) and the host of
+ * `META_REDIRECT_URI` (always the app's own domain once Meta is configured),
+ * plus the Supabase host. Nothing is hard-coded and no domain is guessed.
+ *
+ * Fails closed when NEITHER app source yields a public HTTPS host (for example
+ * `NEXT_PUBLIC_APP_URL` unset, which defaults to localhost): without knowing
+ * which domain is ours we cannot prove a tenant URL is not it.
+ */
+export function resolveOwnHosts(config: {
+  appUrl?: string | null;
+  metaRedirectUri?: string | null;
+  supabaseUrl?: string | null;
+}): Check<string[]> {
+  const appHosts = [publicHttpsHost(config.appUrl), publicHttpsHost(config.metaRedirectUri)].filter(
+    (host): host is string => host !== null,
+  );
+  if (appHosts.length === 0) {
+    return preflightFail(
+      "APP_HOST_UNCONFIGURED",
+      "Domain resmi aplikasi belum terkonfigurasi di server (NEXT_PUBLIC_APP_URL atau META_REDIRECT_URI), sehingga URL landing tidak dapat diverifikasi. Hubungi admin. Tidak ada yang dikirim ke Meta.",
+    );
+  }
+  let supabaseHost: string | null = null;
+  try {
+    supabaseHost = config.supabaseUrl ? new URL(config.supabaseUrl).hostname.toLowerCase() : null;
+  } catch {
+    supabaseHost = null;
+  }
+  return pass([...new Set([...appHosts, ...(supabaseHost ? [supabaseHost] : [])])]);
 }
 
 /**
@@ -245,9 +297,11 @@ export function validateLandingUrl(raw: string, ownHosts: readonly string[] = []
   if (!/^(?:[a-z]{2,63}|xn--[a-z0-9-]{1,59})$/.test(tld)) return unsafeUrl("domain tidak valid");
   if (RESERVED_SUFFIXES.includes(tld)) return unsafeUrl("host internal tidak diizinkan");
 
-  if (hostname.includes("tanyopo")) return unsafeUrl("domain Tanyopo tidak boleh dipakai sebagai tujuan iklan tenant");
-  for (const own of ownHosts) {
-    const normalized = own.toLowerCase();
+  // Own hosts come from trusted configuration (see resolveOwnHosts), never from a
+  // substring of the brand name. The removed legacy fallback host stays blocked
+  // as defence in depth (exact domain and its subdomains only).
+  for (const own of [...ownHosts, LEGACY_FALLBACK_HOST]) {
+    const normalized = own.toLowerCase().replace(/\.$/, "");
     if (normalized && hostMatches(hostname, normalized)) {
       return unsafeUrl("domain aplikasi ini tidak boleh dipakai sebagai tujuan iklan tenant");
     }
