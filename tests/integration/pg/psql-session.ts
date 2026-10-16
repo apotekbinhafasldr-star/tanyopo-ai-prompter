@@ -54,6 +54,7 @@ export class PsqlSession {
         PGCONNECT_TIMEOUT: "10",
         PGAPPNAME: `linoe_pg_test:${label}`,
         LC_ALL: "C",
+        NODE_ENV: "test", // Next.js augments ProcessEnv to require it; psql ignores it.
       },
       stdio: ["pipe", "pipe", "pipe"],
     };
