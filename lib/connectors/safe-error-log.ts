@@ -53,6 +53,20 @@ export function describeSafeError(err: unknown): SafeErrorSummary {
 }
 
 /**
+ * One short, allowlisted line for a user-visible note or an audit row:
+ * error name, HTTP status and numeric code/subcode only. Never the error
+ * MESSAGE (a provider message can echo request parameters or tokens).
+ */
+export function formatSafeErrorSummary(err: unknown): string {
+  const summary = describeSafeError(err);
+  const pieces = [summary.errorName];
+  if (summary.httpStatus !== undefined) pieces.push(`HTTP ${summary.httpStatus}`);
+  if (summary.code !== undefined) pieces.push(`kode ${summary.code}`);
+  if (summary.subcode !== undefined) pieces.push(`subkode ${summary.subcode}`);
+  return pieces.join(", ");
+}
+
+/**
  * One line per rejected callback state check: the platform, an allowlisted
  * reason, and which inputs were present (booleans). Never the values — a
  * `state`, cookie or code must not reach the logs, and neither does the query

@@ -674,7 +674,17 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
     action: "campaign.launched",
     resource_type: "prompter_channel_campaigns",
     resource_id: channelCampaignId,
-    context: { platform: connectorPlatform, external_campaign_id: created.campaignId ?? null, ...budgetAuditContext },
+    context: {
+      platform: connectorPlatform,
+      external_campaign_id: created.campaignId ?? null,
+      // The final ACTIVE write clears the row's progress note, so the ids of
+      // the ad set, creative and ad would otherwise be lost. Only ids the
+      // platform actually returned are recorded (same format as the
+      // failure audit). The audit write is best-effort and never repeats a
+      // platform call.
+      ...(describeCreatedObjects(created) ? { created_objects: describeCreatedObjects(created) } : {}),
+      ...budgetAuditContext,
+    },
   });
 
   revalidatePath(`/campaigns/${masterCampaign.id}`);

@@ -116,12 +116,16 @@ export interface ApprovalHarnessOptions {
   channel?: string;
   suggestedDailyBudget?: number | null;
   settings?: Result | "throw";
+  /** What the confirmed PAUSED write answers (default: exactly one row). */
+  pauseUpdate?: "ok" | "zero" | "two" | "error" | "throw";
 }
 
 export function buildApprovalHarness(options: ApprovalHarnessOptions) {
   const touched: string[] = [];
   const approvalUpdates: Record<string, unknown>[] = [];
   const channelUpdates: Record<string, unknown>[] = [];
+  /** The .eq() filters of each channel UPDATE, in call order. */
+  const channelUpdateFilters: [string, unknown][][] = [];
   const auditInsert = vi.fn(async (..._args: unknown[]) => ({ error: null }));
   const adminFrom = vi.fn((table: string) => {
     touched.push(`admin:${table}`);
@@ -185,7 +189,22 @@ export function buildApprovalHarness(options: ApprovalHarnessOptions) {
           }),
           update: (payload: Record<string, unknown>) => {
             channelUpdates.push(payload);
-            return { eq: async () => ({ error: null }) };
+            const filters: [string, unknown][] = [];
+            channelUpdateFilters.push(filters);
+            const builder = {
+              eq: (column: string, value: unknown) => {
+                filters.push([column, value]);
+                return builder;
+              },
+              select: async () => {
+                if (options.pauseUpdate === "throw") throw new Error("db exploded: secret-row-value");
+                if (options.pauseUpdate === "error") return { data: null, error: { message: "db error secret-detail" } };
+                if (options.pauseUpdate === "zero") return { data: [], error: null };
+                if (options.pauseUpdate === "two") return { data: [{ id: "cc1" }, { id: "cc2" }], error: null };
+                return { data: [{ id: "cc1" }], error: null };
+              },
+            };
+            return builder;
           },
         };
       case "prompter_connected_accounts":
@@ -208,5 +227,5 @@ export function buildApprovalHarness(options: ApprovalHarnessOptions) {
     }
   });
 
-  return { from, adminFrom, touched, approvalUpdates, channelUpdates, auditInsert };
+  return { from, adminFrom, touched, approvalUpdates, channelUpdates, channelUpdateFilters, auditInsert };
 }
