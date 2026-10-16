@@ -412,9 +412,9 @@ describe("launchChannelCampaignAction — PR #36 TikTok/X keep their existing fl
       "act_123",
       expect.objectContaining({ targetingCountries: ["ID"] }),
     );
-    const adSetInput = connectorMock.createAdSet.mock.calls[0][2] as Record<string, unknown>;
+    const adSetInput = (connectorMock.createAdSet.mock.calls[0] as unknown[])[2] as Record<string, unknown>;
     expect(adSetInput).not.toHaveProperty("optimizationGoal");
-    const creativeInput = connectorMock.createCreative.mock.calls[0][2] as Record<string, unknown>;
+    const creativeInput = (connectorMock.createCreative.mock.calls[0] as unknown[])[2] as Record<string, unknown>;
     expect(creativeInput).not.toHaveProperty("linkUrl");
     expect(creativeInput).not.toHaveProperty("imageUrl");
     expect(fx.reads).toEqual([]); // no approval / product / brand / media read for non-Meta
