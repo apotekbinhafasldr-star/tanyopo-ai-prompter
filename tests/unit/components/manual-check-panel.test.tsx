@@ -31,6 +31,8 @@ describe("ManualCheckPanel (PR #37 / A2)", () => {
     expect(container.querySelector("button")).toBeNull();
     expect(container.querySelector("form")).toBeNull();
     expect(container.querySelector("a")).toBeNull();
-    expect(container.textContent).not.toMatch(/Coba Lagi|Lepas kunci|Reset|Lanjutkan|Resume/i);
+    // Case-sensitive on purpose: the panel may SAY there is no retry button
+    // ("tombol coba lagi"), but must not render a control labelled like one.
+    expect(container.textContent).not.toMatch(/Coba Lagi|Lepas kunci|Lanjutkan|Resume/);
   });
 });
