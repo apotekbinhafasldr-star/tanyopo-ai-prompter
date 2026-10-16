@@ -249,21 +249,49 @@ export const h1 = {
     `update ${FIXTURE_APPROVALS} set status = ${lit(decision)}, decided_at = now() where id = ${lit(approval)} and tenant_id = ${lit(tenant)} and status = 'PENDING' returning id;`,
 
   /**
+   * checkChannelCampaignState (services/channel-campaigns.ts): TRUE only when the
+   * master exists for this tenant, every channel row is in an accepted status
+   * (phase "before": source or target; phase "after": target) or a locked one,
+   * and every channel the master selected has a row.
+   */
+  consistent: (master: string, tenant: string, t: H1Transition, phase: "before" | "after") => {
+    const { from, to } = H1_TRANSITIONS[t];
+    const accepted = (phase === "before" ? [from, to] : [to]).concat(LOCKED_STATUSES as unknown as Status[]);
+    const list = accepted.map((x) => lit(x)).join(", ");
+    return `select (
+  exists (select 1 from ${FIXTURE_MASTERS} where id = ${lit(master)} and tenant_id = ${lit(tenant)})
+  and not exists (select 1 from ${TABLE} where master_campaign_id = ${lit(master)} and tenant_id = ${lit(tenant)} and status <> all (array[${list}]))
+  and not exists (
+    select 1 from unnest((select channels from ${FIXTURE_MASTERS} where id = ${lit(master)} and tenant_id = ${lit(tenant)})) as c
+    where c not in (select channel from ${TABLE} where master_campaign_id = ${lit(master)} and tenant_id = ${lit(tenant)})
+  )
+) as ok`;
+  },
+
+  /**
    * The whole decideApprovalAction CAMPAIGN_LAUNCH sequence with its fail-closed
-   * branching: claim (exactly 1) -> master (exactly 1) -> mirror -> audit.
-   * Written with psql \gset / \if so that EVERY statement is its own
-   * autocommit transaction, exactly like the separate PostgREST requests the
-   * application sends (a DO block would wrongly make the flow one transaction).
+   * branching: pre-flight -> claim (exactly 1) -> master (exactly 1) -> mirror ->
+   * post-verification -> audit. Written with psql \\gset / \\if so that EVERY
+   * statement is its own autocommit transaction, exactly like the separate
+   * PostgREST requests the application sends (a DO block would wrongly make the
+   * flow one transaction). A mirror UPDATE that errors is not checked here, just
+   * as a failed request is only noticed through the verification read.
    */
   decideFlow: (approval: string, master: string, tenant: string, decision: "APPROVED" | "REJECTED") => {
     const t: H1Transition = decision === "APPROVED" ? "APPROVE" : "REJECT";
     const { from, to } = H1_TRANSITIONS[t];
-    return `with u as (update ${FIXTURE_APPROVALS} set status = ${lit(decision)}, decided_at = now() where id = ${lit(approval)} and tenant_id = ${lit(tenant)} and status = 'PENDING' returning 1) select count(*) = 1 as ok from u \\gset
+    return `${h1.consistent(master, tenant, t, "before")} \\gset
+\\if :ok
+with u as (update ${FIXTURE_APPROVALS} set status = ${lit(decision)}, decided_at = now() where id = ${lit(approval)} and tenant_id = ${lit(tenant)} and status = 'PENDING' returning 1) select count(*) = 1 as ok from u \\gset
 \\if :ok
 with u as (update ${FIXTURE_MASTERS} set status = ${lit(to)} where id = ${lit(master)} and tenant_id = ${lit(tenant)} and status = ${lit(from)} returning 1) select count(*) = 1 as ok from u \\gset
 \\if :ok
 update ${TABLE} set status = ${lit(to)} where master_campaign_id = ${lit(master)} and tenant_id = ${lit(tenant)} and status = ${lit(from)};
+${h1.consistent(master, tenant, t, "after")} \\gset
+\\if :ok
 insert into prompter_audit_logs (tenant_id, action, resource_type, resource_id) values (${lit(tenant)}, ${lit(decision === "APPROVED" ? "campaign.approved" : "campaign.launch_rejected")}, 'fixture_master_campaigns', ${lit(master)});
+\\endif
+\\endif
 \\endif
 \\endif`;
   },
@@ -284,6 +312,20 @@ update ${FIXTURE_APPROVALS} set status = 'EXPIRED' where tenant_id = ${lit(tenan
   /** Source status checked but the tenant predicate is missing. */
   unsafeMirrorNoTenant: (master: string, t: H1Transition) =>
     `update ${TABLE} set status = ${lit(H1_TRANSITIONS[t].to)} where master_campaign_id = ${lit(master)} and status = ${lit(H1_TRANSITIONS[t].from)} returning id;`,
+
+  /** The b783c8a flow: no pre-flight, no post-verification; a zero-row mirror counts as success (F1 defect). */
+  unsafeDecideFlowNoVerify: (approval: string, master: string, tenant: string, decision: "APPROVED" | "REJECTED") => {
+    const t: H1Transition = decision === "APPROVED" ? "APPROVE" : "REJECT";
+    const { from, to } = H1_TRANSITIONS[t];
+    return `with u as (update ${FIXTURE_APPROVALS} set status = ${lit(decision)}, decided_at = now() where id = ${lit(approval)} and tenant_id = ${lit(tenant)} and status = 'PENDING' returning 1) select count(*) = 1 as ok from u \\gset
+\\if :ok
+with u as (update ${FIXTURE_MASTERS} set status = ${lit(to)} where id = ${lit(master)} and tenant_id = ${lit(tenant)} and status = ${lit(from)} returning 1) select count(*) = 1 as ok from u \\gset
+\\if :ok
+update ${TABLE} set status = ${lit(to)} where master_campaign_id = ${lit(master)} and tenant_id = ${lit(tenant)} and status = ${lit(from)};
+insert into prompter_audit_logs (tenant_id, action, resource_type, resource_id) values (${lit(tenant)}, 'campaign.approved', 'fixture_master_campaigns', ${lit(master)});
+\\endif
+\\endif`;
+  },
 
   /** Old master write: by id only. */
   unsafeMaster: (master: string, t: H1Transition) =>
@@ -356,5 +398,20 @@ export async function seedChannels(
       }),
     );
   }
+  // The stand-in master lists the channels it selected (master.channels), like the real one.
+  await admin.exec(
+    `update ${FIXTURE_MASTERS} set channels = (select coalesce(array_agg(channel), '{}') from ${TABLE} where master_campaign_id = ${lit(opts.master)}) where id = ${lit(opts.master)};`,
+  );
   return ids;
+}
+
+export async function setMasterChannels(admin: PsqlSession, master: string, channels: string[]): Promise<void> {
+  const r = await admin.exec(`update ${FIXTURE_MASTERS} set channels = array[${channels.map((c) => lit(c)).join(", ")}]::text[] where id = ${lit(master)};`);
+  if (r.error) throw new Error(`setMasterChannels failed: ${r.error}`);
+}
+
+export async function isConsistent(admin: PsqlSession, sql: string): Promise<boolean> {
+  const r = await admin.exec(`${sql};`);
+  if (r.error) throw new Error(`isConsistent failed: ${r.error}`);
+  return r.rows[0] === "t";
 }

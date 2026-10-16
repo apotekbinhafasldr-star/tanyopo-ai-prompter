@@ -4,7 +4,12 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireSessionContext } from "@/services/session";
-import { mirrorChannelCampaignStatus, transitionMasterCampaign } from "@/services/channel-campaigns";
+import {
+  checkChannelCampaignState,
+  isMirrorConfirmed,
+  mirrorChannelCampaignStatus,
+  transitionMasterCampaign,
+} from "@/services/channel-campaigns";
 import { getConnector } from "@/lib/connectors/get-connector";
 import { CHANNEL_TO_CONNECTOR } from "@/lib/connectors/channel-map";
 import { decryptToken } from "@/lib/crypto/token-cipher";
@@ -52,6 +57,30 @@ export async function decideApprovalAction(
     return { error: "Approval ini sudah diputuskan sebelumnya." };
   }
 
+  const isCampaignLaunch =
+    approval.approval_type === "CAMPAIGN_LAUNCH" && approval.resource_type === "prompter_master_campaigns";
+  const transition = decision === "APPROVED" ? "APPROVE" : "REJECT";
+
+  // Read-only pre-flight BEFORE anything is written: if the channel rows do not
+  // agree with this decision (e.g. a DRAFT row under an AWAITING_APPROVAL
+  // master, or a selected channel with no row) the approval is NOT consumed, so
+  // the owner can still cancel the submission and resubmit. Locked statuses
+  // (FAILED/ACTIVE/PAUSED/COMPLETED) are acceptable and never touched.
+  if (isCampaignLaunch) {
+    const before = await checkChannelCampaignState(supabase, session.tenantId, approval.resource_id, transition, "before");
+    if (!before.ok) {
+      return {
+        error: "Status channel campaign tidak dapat diperiksa. Tidak ada perubahan yang disimpan. Muat ulang halaman dan coba lagi.",
+      };
+    }
+    if (!before.consistent) {
+      return {
+        error:
+          "Status channel campaign tidak konsisten dengan pengajuan ini. Tidak ada perubahan yang disimpan. Batalkan pengajuan lalu ajukan ulang, atau hubungi admin.",
+      };
+    }
+  }
+
   // The decision is claimed ATOMICALLY: one UPDATE that only matches a still
   // PENDING approval of this tenant. Two concurrent decisions (double click,
   // two owners, a late reject after an approve) cannot both pass: the second
@@ -70,36 +99,38 @@ export async function decideApprovalAction(
     .select("id");
 
   if (updateApprovalError) {
-    return { error: "Gagal menyimpan keputusan." };
+    // The write may or may not have been applied: never report success, and do
+    // not touch the campaign.
+    return { error: "Gagal menyimpan keputusan. Muat ulang halaman dan periksa status approval sebelum mencoba lagi." };
   }
 
   if (!Array.isArray(decidedRows) || decidedRows.length !== 1) {
     return { error: "Approval ini sudah diputuskan sebelumnya." };
   }
 
-  if (approval.approval_type === "CAMPAIGN_LAUNCH" && approval.resource_type === "prompter_master_campaigns") {
-    const transition = decision === "APPROVED" ? "APPROVE" : "REJECT";
-
-    // Fail closed: the master only moves from AWAITING_APPROVAL, and exactly
-    // one row must change. If it does not (cancelled/changed meanwhile), the
-    // channels are NOT touched and the user is told to reload.
-    const masterMoved = await transitionMasterCampaign(supabase, session.tenantId, approval.resource_id, transition);
-    if (!masterMoved) {
+  if (isCampaignLaunch) {
+    // Fail closed, three distinct outcomes, no retry, no rollback. The decision
+    // is already recorded; nothing below may report success unless the master
+    // AND the channels are confirmed.
+    const masterOutcome = await transitionMasterCampaign(supabase, session.tenantId, approval.resource_id, transition);
+    if (masterOutcome !== "moved") {
       revalidatePath(`/campaigns/${approval.resource_id}`);
       revalidatePath("/approvals");
       return {
         error:
-          "Keputusan tersimpan, tetapi status campaign sudah berubah dan tidak diperbarui. Muat ulang halaman dan periksa status campaign.",
+          masterOutcome === "conflict"
+            ? "Keputusan tersimpan, tetapi status campaign sudah berubah sehingga tidak diperbarui dan persetujuan BELUM selesai. Muat ulang halaman dan periksa status campaign. Jangan menyetujui ulang atau meluncurkan."
+            : "Keputusan tersimpan, tetapi status campaign tidak dapat dipastikan karena kesalahan database dan persetujuan BELUM selesai. Muat ulang halaman dan periksa status campaign. Jangan menyetujui ulang atau meluncurkan.",
       };
     }
 
     const mirrored = await mirrorChannelCampaignStatus(supabase, session.tenantId, approval.resource_id, transition);
-    if (!mirrored.ok) {
+    if (!isMirrorConfirmed(mirrored)) {
       revalidatePath(`/campaigns/${approval.resource_id}`);
       revalidatePath("/approvals");
       return {
         error:
-          "Status campaign diperbarui, tetapi status channel gagal diperbarui. Muat ulang halaman dan periksa status channel sebelum meluncurkan.",
+          "Status campaign sudah berubah, tetapi status channel tidak terkonfirmasi sinkron sehingga persetujuan BELUM selesai. Jangan menyetujui ulang atau meluncurkan. Hubungi admin untuk pemulihan manual.",
       };
     }
 

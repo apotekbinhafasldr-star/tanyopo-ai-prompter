@@ -20,8 +20,10 @@ vi.mock("@/services/session", () => ({
   requireSessionContext: vi.fn(async () => ({ tenantId: "t1", userId: "u1", role: "owner" })),
 }));
 vi.mock("@/services/channel-campaigns", () => ({
-  mirrorChannelCampaignStatus: vi.fn(async () => ({ ok: true, updated: 0 })),
-  transitionMasterCampaign: vi.fn(async () => true),
+  mirrorChannelCampaignStatus: vi.fn(async () => ({ ok: true, updated: 0, consistent: true })),
+  transitionMasterCampaign: vi.fn(async () => "moved"),
+  checkChannelCampaignState: vi.fn(async () => ({ ok: true, consistent: true })),
+  isMirrorConfirmed: vi.fn(() => true),
 }));
 const { decryptTokenMock } = vi.hoisted(() => ({ decryptTokenMock: vi.fn(() => "access-token-abc") }));
 vi.mock("@/lib/crypto/token-cipher", () => ({ decryptToken: decryptTokenMock }));

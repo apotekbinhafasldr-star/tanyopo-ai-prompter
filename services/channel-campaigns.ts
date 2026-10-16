@@ -63,18 +63,30 @@ export const STATUS_TRANSITIONS: Readonly<Record<StatusTransition, { readonly fr
     REJECT: Object.freeze({ from: "AWAITING_APPROVAL", to: "DRAFT" }),
   });
 
+/** Statuses owned by the launch/pause flows: never a source or a target of an ordinary transition. */
+export const LOCKED_CHANNEL_STATUSES: readonly CampaignStatus[] = Object.freeze(["FAILED", "ACTIVE", "PAUSED", "COMPLETED"] as const);
+
+/**
+ * Outcome of a master transition. The three cases are deliberately distinct:
+ *  - "moved":    the database confirmed exactly one row changed;
+ *  - "conflict": the database answered and NO row matched (another request
+ *                changed the master first, or it is not in the source status);
+ *  - "error":    a database error, an exception, or an ambiguous row count.
+ *                Whether the write happened is UNKNOWN: callers must not
+ *                continue and must not report success.
+ */
+export type MasterTransitionOutcome = "moved" | "conflict" | "error";
+
 /**
  * Moves the master campaign along one ordinary transition. ONE conditional
- * UPDATE, scoped by id AND tenant AND the allowed source status; true only when
- * the database confirms that exactly one row changed. False (lost a race,
- * wrong state, other tenant, database error) means: change nothing else.
+ * UPDATE, scoped by id AND tenant AND the allowed source status.
  */
 export async function transitionMasterCampaign(
   supabase: SupabaseClient<Database>,
   tenantId: string,
   masterCampaignId: string,
   transition: StatusTransition,
-): Promise<boolean> {
+): Promise<MasterTransitionOutcome> {
   const { from, to } = STATUS_TRANSITIONS[transition];
   try {
     const { data, error } = await supabase
@@ -84,24 +96,92 @@ export async function transitionMasterCampaign(
       .eq("tenant_id", tenantId)
       .eq("status", from)
       .select("id");
-    return !error && Array.isArray(data) && data.length === 1;
+    if (error || !Array.isArray(data)) return "error";
+    if (data.length === 1) return "moved";
+    return data.length === 0 ? "conflict" : "error";
   } catch {
-    return false;
+    return "error";
+  }
+}
+
+export interface ChannelStateCheck {
+  /** The database answered every read. False means the state is unknown: treat as not confirmed. */
+  ok: boolean;
+  /** Every channel row is in an acceptable or locked status AND every channel the master selected has a row. */
+  consistent: boolean;
+}
+
+/**
+ * Read-only check that the channel rows of a master agree with a transition.
+ *
+ *  phase "before": rows may still be in the source status or already in the
+ *                  target status (a pre-flight before anything is written);
+ *  phase "after":  rows must be in the target status.
+ *
+ * Locked statuses (FAILED/ACTIVE/PAUSED/COMPLETED) are always acceptable: they
+ * are left alone on purpose. Anything else (e.g. a DRAFT row under an approved
+ * master) is inconsistent, and so is a selected channel with no row at all.
+ * "Zero rows updated" is therefore only fine when this check agrees.
+ */
+export async function checkChannelCampaignState(
+  supabase: SupabaseClient<Database>,
+  tenantId: string,
+  masterCampaignId: string,
+  transition: StatusTransition,
+  phase: "before" | "after",
+): Promise<ChannelStateCheck> {
+  const { from, to } = STATUS_TRANSITIONS[transition];
+  const accepted: readonly string[] = phase === "before" ? [from, to] : [to];
+  try {
+    const [master, rows] = await Promise.all([
+      supabase
+        .from("prompter_master_campaigns")
+        .select("channels")
+        .eq("id", masterCampaignId)
+        .eq("tenant_id", tenantId)
+        .single(),
+      supabase
+        .from("prompter_channel_campaigns")
+        .select("channel, status")
+        .eq("master_campaign_id", masterCampaignId)
+        .eq("tenant_id", tenantId),
+    ]);
+    if (master.error || !master.data || rows.error || !Array.isArray(rows.data)) {
+      return { ok: false, consistent: false };
+    }
+    const channelRows: ReadonlyArray<{ channel: string; status: string }> = rows.data;
+    const locked: readonly string[] = LOCKED_CHANNEL_STATUSES;
+    const present = new Set(channelRows.map((r) => r.channel));
+    const expected: readonly string[] = Array.isArray(master.data.channels) ? master.data.channels : [];
+    const missing = expected.some((c) => !present.has(c));
+    const badStatus = channelRows.some((r) => !accepted.includes(r.status) && !locked.includes(r.status));
+    return { ok: true, consistent: !missing && !badStatus };
+  } catch {
+    return { ok: false, consistent: false };
   }
 }
 
 export interface MirrorResult {
-  /** The database answered. False means the outcome is unknown: treat as not applied. */
+  /** The update AND the verification read both got a database answer. False means the outcome is unknown. */
   ok: boolean;
   /** Number of channel rows actually moved. */
   updated: number;
+  /** After the update every channel row agrees with the transition (see checkChannelCampaignState). */
+  consistent: boolean;
+}
+
+/** A mirror is only confirmed when the database answered AND the resulting state is consistent. */
+export function isMirrorConfirmed(result: MirrorResult): boolean {
+  return result.ok && result.consistent;
 }
 
 /**
  * Mirrors a master transition onto its channel rows. Tenant-scoped and limited
  * to rows still in the transition's source status: a channel that is FAILED
  * (claimed/failed launch), ACTIVE, PAUSED or COMPLETED is simply not matched
- * and stays exactly as it is. Never retried.
+ * and stays exactly as it is. The number of rows moved is NOT taken as proof:
+ * a read-back (checkChannelCampaignState, phase "after") must agree. Never
+ * retried, never rolled back.
  */
 export async function mirrorChannelCampaignStatus(
   supabase: SupabaseClient<Database>,
@@ -110,6 +190,7 @@ export async function mirrorChannelCampaignStatus(
   transition: StatusTransition,
 ): Promise<MirrorResult> {
   const { from, to } = STATUS_TRANSITIONS[transition];
+  let updated = 0;
   try {
     const { data, error } = await supabase
       .from("prompter_channel_campaigns")
@@ -118,9 +199,11 @@ export async function mirrorChannelCampaignStatus(
       .eq("tenant_id", tenantId)
       .eq("status", from)
       .select("id");
-    if (error || !Array.isArray(data)) return { ok: false, updated: 0 };
-    return { ok: true, updated: data.length };
+    if (error || !Array.isArray(data)) return { ok: false, updated: 0, consistent: false };
+    updated = data.length;
   } catch {
-    return { ok: false, updated: 0 };
+    return { ok: false, updated: 0, consistent: false };
   }
+  const check = await checkChannelCampaignState(supabase, tenantId, masterCampaignId, transition, "after");
+  return { ok: check.ok, updated, consistent: check.consistent };
 }

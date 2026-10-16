@@ -113,6 +113,7 @@ create policy "Tulis audit log tenant sendiri"
 create table fixture_master_campaigns (
   id uuid primary key,
   tenant_id uuid not null,
+  channels text[] not null default '{}',
   status text not null default 'DRAFT' check (
     status in ('DRAFT', 'AWAITING_APPROVAL', 'SCHEDULED', 'ACTIVE', 'PAUSED', 'COMPLETED', 'FAILED')
   )

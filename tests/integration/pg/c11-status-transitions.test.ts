@@ -15,6 +15,9 @@ import {
   getRow,
   h1,
   interpretClaim,
+  isConsistent,
+  setMasterChannels,
+  waitForLockWaiters,
   openAsTenant,
   openPool,
   openSessions,
@@ -298,6 +301,165 @@ describe.skipIf(!pgEnabled)("C11 status transitions (H1)", () => {
         const status = (await getRow(pool.admin, ch)).status;
         expect(status).toBe("FAILED");
       }
+    });
+  });
+
+  describe("F1–F3 remediation: verified mirror, pre-flight, partial failure", () => {
+    const sessionsFor = (n: number, label: string) => openSessions(pool.cfg, n, label);
+
+    it.each(["before", "after"] as const)("consistency check truth table (APPROVE, phase %s) for one channel in every status", async (phase) => {
+      for (const status of ALL_STATUSES) {
+        const tenant = randomUUID();
+        const master = await seedMaster(pool.admin, { tenant });
+        await seedChannels(pool.admin, { tenant, master, statuses: [status] });
+        const accepted: string[] = (phase === "before" ? ["AWAITING_APPROVAL", "SCHEDULED"] : ["SCHEDULED"]).concat([...LOCKED_STATUSES]);
+        expect(await isConsistent(pool.admin, h1.consistent(master, tenant, "APPROVE", phase))).toBe(accepted.includes(status));
+      }
+    });
+
+    it("zero rows moved is only fine when the state agrees: a DRAFT row under an approved master is NOT consistent, and is never re-armed", async () => {
+      const tenant = randomUUID();
+      const master = await seedMaster(pool.admin, { tenant, status: "SCHEDULED" });
+      const [draft] = await seedChannels(pool.admin, { tenant, master, statuses: ["DRAFT"] });
+      expect(returnedIds(await pool.admin.exec(h1.mirror(master, tenant, "APPROVE")))).toHaveLength(0);
+      expect(await isConsistent(pool.admin, h1.consistent(master, tenant, "APPROVE", "after"))).toBe(false);
+      expect((await getRow(pool.admin, draft)).status).toBe("DRAFT");
+    });
+
+    it("a legitimate zero (all rows already SCHEDULED or locked) IS consistent; an empty channel set too", async () => {
+      const tenant = randomUUID();
+      const master = await seedMaster(pool.admin, { tenant, status: "SCHEDULED" });
+      await seedChannels(pool.admin, { tenant, master, statuses: ["SCHEDULED", "FAILED", "ACTIVE"] });
+      expect(await isConsistent(pool.admin, h1.consistent(master, tenant, "APPROVE", "after"))).toBe(true);
+      const empty = await seedMaster(pool.admin, { tenant, status: "SCHEDULED" });
+      expect(await isConsistent(pool.admin, h1.consistent(empty, tenant, "APPROVE", "after"))).toBe(true);
+    });
+
+    it("a selected channel without a row (missing expected row) is NOT consistent", async () => {
+      const tenant = randomUUID();
+      const master = await seedMaster(pool.admin, { tenant, status: "SCHEDULED" });
+      await seedChannels(pool.admin, { tenant, master, statuses: ["SCHEDULED"] });
+      await setMasterChannels(pool.admin, master, ["FACEBOOK", "TIKTOK"]);
+      expect(await isConsistent(pool.admin, h1.consistent(master, tenant, "APPROVE", "after"))).toBe(false);
+    });
+
+    it("the check is tenant-scoped: another tenant's master is invisible (not consistent)", async () => {
+      const owner = randomUUID();
+      const master = await seedMaster(pool.admin, { tenant: owner, status: "SCHEDULED" });
+      await seedChannels(pool.admin, { tenant: owner, master, statuses: ["SCHEDULED"] });
+      expect(await isConsistent(pool.admin, h1.consistent(master, owner, "APPROVE", "after"))).toBe(true);
+      expect(await isConsistent(pool.admin, h1.consistent(master, randomUUID(), "APPROVE", "after"))).toBe(false);
+    });
+
+    it("F1 flow: DRAFT channels under an AWAITING_APPROVAL master block APPROVE before anything is written", async () => {
+      const tenant = randomUUID();
+      const master = await seedMaster(pool.admin, { tenant });
+      const approval = await seedApproval(pool.admin, { tenant, master });
+      const ids = await seedChannels(pool.admin, { tenant, master, statuses: ["DRAFT", "DRAFT"] });
+      await pool.admin.exec(h1.decideFlow(approval, master, tenant, "APPROVED"));
+      expect(await statusOf(pool.admin, FIXTURE_APPROVALS, approval)).toBe("PENDING");
+      expect(await statusOf(pool.admin, FIXTURE_MASTERS, master)).toBe("AWAITING_APPROVAL");
+      expect(await Promise.all(ids.map(async (id) => (await getRow(pool.admin, id)).status))).toEqual(["DRAFT", "DRAFT"]);
+      expect(await auditCount(pool.admin, master)).toBe(0);
+    });
+
+    it("F1 flow raced 8 ways on that inconsistent state: still nothing written", async () => {
+      const tenant = randomUUID();
+      const master = await seedMaster(pool.admin, { tenant });
+      const approval = await seedApproval(pool.admin, { tenant, master });
+      await seedChannels(pool.admin, { tenant, master, statuses: ["DRAFT"] });
+      const sessions = await sessionsFor(8, "c11-f1-race-");
+      try {
+        await raceStatements(pool, sessions, sessions.map(() => h1.decideFlow(approval, master, tenant, "APPROVED")));
+      } finally {
+        await Promise.all(sessions.map((x) => x.close()));
+      }
+      expect(await statusOf(pool.admin, FIXTURE_APPROVALS, approval)).toBe("PENDING");
+      expect(await auditCount(pool.admin, master)).toBe(0);
+    });
+
+    it("F1 flow: locked channels next to an AWAITING one do not block and are untouched; success is audited once", async () => {
+      const tenant = randomUUID();
+      const master = await seedMaster(pool.admin, { tenant });
+      const approval = await seedApproval(pool.admin, { tenant, master });
+      const ids = await seedChannels(pool.admin, { tenant, master, statuses: ["AWAITING_APPROVAL", ...LOCKED_STATUSES] });
+      const before = await Promise.all(ids.map((id) => getRow(pool.admin, id)));
+      await pool.admin.exec(h1.decideFlow(approval, master, tenant, "APPROVED"));
+      const after = await Promise.all(ids.map((id) => getRow(pool.admin, id)));
+      expect(after[0].status).toBe("SCHEDULED");
+      for (let i = 1; i < ids.length; i++) expect(after[i]).toEqual(before[i]);
+      expect(await auditCount(pool.admin, master)).toBe(1);
+    });
+
+    it("F2 flow: the mirror UPDATE fails (lock timeout) after the master moved -> NOT success (no audit), no rollback, no retry, no re-approval", async () => {
+      const tenant = randomUUID();
+      const master = await seedMaster(pool.admin, { tenant });
+      const approval = await seedApproval(pool.admin, { tenant, master });
+      const [first, second] = await seedChannels(pool.admin, { tenant, master, statuses: ["AWAITING_APPROVAL", "AWAITING_APPROVAL"] });
+      const [holder, worker] = await sessionsFor(2, "c11-f2-");
+      try {
+        const workerPid = await worker.backendPid();
+        await holder.exec("begin;");
+        await holder.exec(`select 1 from prompter_channel_campaigns where id = '${second}' for update;`);
+        expect((await worker.exec("set lock_timeout = '300ms';")).error).toBeNull();
+        const running = worker.exec(h1.decideFlow(approval, master, tenant, "APPROVED"));
+        await waitForLockWaiters(pool.admin, [workerPid]);
+        const result = await running;
+        expect(result.error).toMatch(/lock timeout/i);
+        await holder.exec("rollback;");
+      } finally {
+        await Promise.all([holder.close(), worker.close()]);
+      }
+      // Partial state, exactly as the application reports it: decision recorded, master moved, channels NOT moved.
+      expect(await statusOf(pool.admin, FIXTURE_APPROVALS, approval)).toBe("APPROVED");
+      expect(await statusOf(pool.admin, FIXTURE_MASTERS, master)).toBe("SCHEDULED");
+      expect((await getRow(pool.admin, first)).status).toBe("AWAITING_APPROVAL");
+      expect((await getRow(pool.admin, second)).status).toBe("AWAITING_APPROVAL");
+      expect(await auditCount(pool.admin, master)).toBe(0);
+      expect(await isConsistent(pool.admin, h1.consistent(master, tenant, "APPROVE", "after"))).toBe(false);
+      // Nothing heals or repeats automatically; a second decision is refused and changes nothing.
+      await pool.admin.exec(h1.decideFlow(approval, master, tenant, "APPROVED"));
+      await pool.admin.exec(h1.decideFlow(approval, master, tenant, "REJECTED"));
+      expect(await statusOf(pool.admin, FIXTURE_MASTERS, master)).toBe("SCHEDULED");
+      expect((await getRow(pool.admin, first)).status).toBe("AWAITING_APPROVAL");
+      expect(await auditCount(pool.admin, master)).toBe(0);
+      // And the stuck channel cannot be launched: the launch claim needs SCHEDULED.
+      expect(interpretClaim(await pool.admin.exec(stmt.claim(first, tenant)))).toBe(false);
+    });
+
+    it("approve / reject / cancel raced (20 rounds): master and channels always agree, at most one decision, at most one audit", async () => {
+      for (let round = 0; round < 20; round++) {
+        const tenant = randomUUID();
+        const master = await seedMaster(pool.admin, { tenant });
+        const approval = await seedApproval(pool.admin, { tenant, master });
+        await seedChannels(pool.admin, { tenant, master, statuses: ["AWAITING_APPROVAL", "AWAITING_APPROVAL"] });
+        const sessions = await sessionsFor(3, `c11-3way-${round}-`);
+        try {
+          await raceStatements(pool, sessions, [
+            h1.decideFlow(approval, master, tenant, "APPROVED"),
+            h1.decideFlow(approval, master, tenant, "REJECTED"),
+            h1.cancelFlow(master, tenant),
+          ]);
+        } finally {
+          await Promise.all(sessions.map((x) => x.close()));
+        }
+        const masterStatus = await statusOf(pool.admin, FIXTURE_MASTERS, master);
+        expect(["SCHEDULED", "DRAFT"]).toContain(masterStatus);
+        expect(new Set(Object.values(await channelStatuses(pool.admin, master)))).toEqual(new Set([masterStatus]));
+        expect(await auditCount(pool.admin, master)).toBeLessThanOrEqual(1);
+      }
+    });
+
+    it("no cross-tenant change: the flow run with another tenant's id changes nothing", async () => {
+      const owner = randomUUID();
+      const other = randomUUID();
+      const master = await seedMaster(pool.admin, { tenant: owner });
+      const approval = await seedApproval(pool.admin, { tenant: owner, master });
+      const [ch] = await seedChannels(pool.admin, { tenant: owner, master, statuses: ["AWAITING_APPROVAL"] });
+      await pool.admin.exec(h1.decideFlow(approval, master, other, "APPROVED"));
+      expect(await statusOf(pool.admin, FIXTURE_APPROVALS, approval)).toBe("PENDING");
+      expect(await statusOf(pool.admin, FIXTURE_MASTERS, master)).toBe("AWAITING_APPROVAL");
+      expect((await getRow(pool.admin, ch)).status).toBe("AWAITING_APPROVAL");
     });
   });
 

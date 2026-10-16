@@ -4,6 +4,7 @@ import { closeAllSessions } from "./psql-session";
 import { resolvePgConfig } from "./pg-env";
 import {
   FIXTURE_APPROVALS,
+  auditCount,
   FIXTURE_MASTERS,
   LOCKED_STATUSES,
   getRow,
@@ -128,5 +129,22 @@ describe.skipIf(!pgEnabled)("C11 negative controls (H1)", () => {
       await Promise.all(safe.map((s) => s.close()));
     }
     expect(["APPROVED", "REJECTED"]).toContain(await statusOf(pool.admin, FIXTURE_APPROVALS, approval2));
+  });
+
+  it("F1 control: the b783c8a flow (no pre-flight / verification) reports success on DRAFT channels -> detected; the F1 flow does not", async () => {
+    const tenant = randomUUID();
+    const unsafeMaster = await seedMaster(pool.admin, { tenant });
+    const unsafeApproval = await seedApproval(pool.admin, { tenant, master: unsafeMaster });
+    await seedChannels(pool.admin, { tenant, master: unsafeMaster, statuses: ["DRAFT"] });
+    await pool.admin.exec(h1.unsafeDecideFlowNoVerify(unsafeApproval, unsafeMaster, tenant, "APPROVED"));
+    expect(await auditCount(pool.admin, unsafeMaster)).toBe(1); // "approved" audited...
+    expect(await statusOf(pool.admin, FIXTURE_MASTERS, unsafeMaster)).toBe("SCHEDULED"); // ...with channels still DRAFT: the defect
+
+    const master = await seedMaster(pool.admin, { tenant });
+    const approval = await seedApproval(pool.admin, { tenant, master });
+    await seedChannels(pool.admin, { tenant, master, statuses: ["DRAFT"] });
+    await pool.admin.exec(h1.decideFlow(approval, master, tenant, "APPROVED"));
+    expect(await auditCount(pool.admin, master)).toBe(0);
+    expect(await statusOf(pool.admin, FIXTURE_APPROVALS, approval)).toBe("PENDING");
   });
 });

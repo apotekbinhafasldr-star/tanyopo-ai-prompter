@@ -13,12 +13,13 @@ vi.mock("@/services/budget-guard", () => ({
 }));
 
 const { mirrorChannelCampaignStatusMock } = vi.hoisted(() => ({
-  mirrorChannelCampaignStatusMock: vi.fn(async () => ({ ok: true, updated: 1 })),
+  mirrorChannelCampaignStatusMock: vi.fn(async () => ({ ok: true, updated: 1, consistent: true })),
 }));
 vi.mock("@/services/channel-campaigns", () => ({
   syncChannelCampaigns: vi.fn(async () => undefined),
   mirrorChannelCampaignStatus: mirrorChannelCampaignStatusMock,
-  transitionMasterCampaign: vi.fn(async () => true),
+  transitionMasterCampaign: vi.fn(async () => "moved"),
+  isMirrorConfirmed: (r: { ok: boolean; consistent: boolean }) => r.ok && r.consistent,
 }));
 
 /**
@@ -88,16 +89,29 @@ describe("submitForApprovalAction — Batch B9 P0-1/P2-2", () => {
     expect(currentSupabase.auditInsert).toHaveBeenCalled();
   });
 
+  it("a mirror that updated rows but is NOT consistent (e.g. zero rows moved, rows still DRAFT) is not success", async () => {
+    currentSupabase = buildSupabase({
+      campaign: draftCampaign,
+      rpcResult: { data: [{ allowed: true, reason: null }], error: null },
+    });
+    mirrorChannelCampaignStatusMock.mockResolvedValueOnce({ ok: true, updated: 0, consistent: false });
+
+    const result = await submitForApprovalAction("c1");
+
+    expect(result.error).toMatch(/BELUM selesai/);
+    expect(currentSupabase.auditInsert).not.toHaveBeenCalled();
+  });
+
   it("a failed channel mirror is reported (no success, no audit), not retried and not hidden", async () => {
     currentSupabase = buildSupabase({
       campaign: draftCampaign,
       rpcResult: { data: [{ allowed: true, reason: null }], error: null },
     });
-    mirrorChannelCampaignStatusMock.mockResolvedValueOnce({ ok: false, updated: 0 });
+    mirrorChannelCampaignStatusMock.mockResolvedValueOnce({ ok: false, updated: 0, consistent: false });
 
     const result = await submitForApprovalAction("c1");
 
-    expect(result.error).toMatch(/status channel gagal diperbarui/i);
+    expect(result.error).toMatch(/BELUM selesai.*status channel tidak terkonfirmasi/);
     expect(mirrorChannelCampaignStatusMock).toHaveBeenCalledTimes(1);
     expect(currentSupabase.auditInsert).not.toHaveBeenCalled();
   });

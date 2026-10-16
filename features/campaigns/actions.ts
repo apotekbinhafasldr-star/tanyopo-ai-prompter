@@ -13,7 +13,12 @@ import {
 } from "@/schemas/ai/campaign-proposal";
 import { buildSystemPreamble, buildCampaignProposalPrompt } from "@/lib/ai/prompts";
 import { runAiJob } from "@/services/ai-jobs";
-import { syncChannelCampaigns, mirrorChannelCampaignStatus, transitionMasterCampaign } from "@/services/channel-campaigns";
+import {
+  syncChannelCampaigns,
+  isMirrorConfirmed,
+  mirrorChannelCampaignStatus,
+  transitionMasterCampaign,
+} from "@/services/channel-campaigns";
 import { getTenantChannelPerformance } from "@/services/channel-performance";
 import { getOrCreateBudgetPolicy, getMonthToDateSpend, checkBudgetGuard } from "@/services/budget-guard";
 import { parseLocalDateTimeInZone } from "@/lib/scheduling/recommend-time";
@@ -471,11 +476,11 @@ export async function submitForApprovalAction(campaignId: string): Promise<Campa
   // Mirror onto the channel rows: tenant-scoped and only DRAFT -> AWAITING_APPROVAL.
   // A channel in any other state (e.g. a claimed/launched one) is never rewritten.
   const mirrored = await mirrorChannelCampaignStatus(supabase, session.tenantId, campaignId, "SUBMIT");
-  if (!mirrored.ok) {
+  if (!isMirrorConfirmed(mirrored)) {
     revalidatePath(`/campaigns/${campaignId}`);
     return {
       error:
-        "Pengajuan tersimpan, tetapi status channel gagal diperbarui. Muat ulang halaman dan periksa status channel sebelum melanjutkan.",
+        "Pengajuan BELUM selesai: status campaign sudah berubah tetapi status channel tidak terkonfirmasi sinkron. Gunakan Batalkan Pengajuan lalu ajukan ulang, atau hubungi admin.",
     };
   }
 
@@ -516,7 +521,7 @@ export async function cancelSubmissionAction(formData: FormData): Promise<void> 
   // Conditional on AWAITING_APPROVAL and exactly one row. Losing a race (the
   // campaign was approved or changed meanwhile) changes NOTHING else.
   const reverted = await transitionMasterCampaign(supabase, session.tenantId, campaignId, "CANCEL");
-  if (!reverted) {
+  if (reverted !== "moved") {
     revalidatePath(`/campaigns/${campaignId}`);
     return;
   }

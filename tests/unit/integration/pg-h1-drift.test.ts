@@ -40,17 +40,30 @@ describe("C11 SQL mirrors the application (H1)", () => {
     expect(squash(h1.decide("a", "t", "APPROVED"))).toContain("where id = 'a' and tenant_id = 't' and status = 'PENDING'");
   });
 
-  it("flow order in the application: claim -> master -> mirror -> audit, each fail-closed", () => {
+  it("flow order in the application: pre-flight -> claim -> master -> mirror+verify -> audit, each fail-closed", () => {
+    const pre = approvals.indexOf('checkChannelCampaignState(supabase, session.tenantId, approval.resource_id, transition, "before")');
     const claim = approvals.indexOf('.eq("status", "PENDING")');
     const master = approvals.indexOf("transitionMasterCampaign(supabase");
     const mirror = approvals.indexOf("mirrorChannelCampaignStatus(supabase");
     const audit = approvals.indexOf('action: decision === "APPROVED" ? "campaign.approved"');
-    expect(claim).toBeGreaterThan(-1);
+    expect(pre).toBeGreaterThan(-1);
+    expect(claim).toBeGreaterThan(pre);
     expect(master).toBeGreaterThan(claim);
     expect(mirror).toBeGreaterThan(master);
     expect(audit).toBeGreaterThan(mirror);
-    expect(approvals).toContain("if (!masterMoved) {");
-    expect(approvals).toContain("if (!mirrored.ok) {");
+    expect(approvals).toContain('if (masterOutcome !== "moved") {');
+    expect(approvals).toContain("if (!isMirrorConfirmed(mirrored)) {");
+    expect(approvals).toContain("if (!before.consistent) {");
+  });
+
+  it("the post-mirror verification and the pre-flight accept exactly: target (after) / source or target (before) plus locked statuses", () => {
+    expect(service).toContain('const accepted: readonly string[] = phase === "before" ? [from, to] : [to];');
+    expect(service).toContain('["FAILED", "ACTIVE", "PAUSED", "COMPLETED"]');
+    expect(service).toContain("!accepted.includes(r.status) && !locked.includes(r.status)");
+    expect(service).toContain('const check = await checkChannelCampaignState(supabase, tenantId, masterCampaignId, transition, "after");');
+    // tenant-scoped reads
+    expect(service).toContain('.from("prompter_channel_campaigns") .select("channel, status") .eq("master_campaign_id", masterCampaignId) .eq("tenant_id", tenantId)');
+    expect(service).toContain('.from("prompter_master_campaigns") .select("channels") .eq("id", masterCampaignId) .eq("tenant_id", tenantId)');
   });
 
   it("the fixture flow has the same order and exactly-one gates (and is not one transaction)", () => {
