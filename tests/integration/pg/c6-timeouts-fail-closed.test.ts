@@ -70,10 +70,27 @@ describe.skipIf(!pgEnabled)("C6 timeouts fail closed", () => {
       const blocked = waiter.exec(stmt.claim(id, tenant));
       await waitForLockWaiters(pool.admin, [waiterPid]);
       expect((await blocked).error).toMatch(/lock timeout/i);
-      const commit = await waiter.exec("commit;");
-      expect(commit.rows.join(" ")).not.toMatch(/UPDATE/);
+
+      // The timeout aborted the waiter's transaction: nothing more can run in it.
+      const afterTimeout = await waiter.exec(stmt.readStatus(id));
+      expect(afterTimeout.error).toMatch(/current transaction is aborted/i);
+
+      // COMMIT of an aborted transaction is a ROLLBACK (psql -q prints no command tag,
+      // so we assert on state, not on output). The waiter session must be idle again.
+      expect((await waiter.exec("commit;")).error).toBeNull();
+      const state = await pool.admin.exec(`select state from pg_stat_activity where pid = ${waiterPid};`);
+      expect(state.rows[0]).toBe("idle");
+
+      // Holder gives the row up. Only now is the outcome decisive: if the timed-out
+      // request had acquired a claim, the row would be FAILED (or the claim below would lose).
       await holder.exec("rollback;");
-      expect((await getRow(pool.admin, id)).status).toBe("SCHEDULED");
+      expect(await getRow(pool.admin, id)).toMatchObject({
+        status: "SCHEDULED",
+        error: null,
+        external_campaign_id: null,
+      });
+      expect(interpretClaim(await pool.admin.exec(stmt.claim(id, tenant)))).toBe(true); // still claimable, exactly once
+      expect(interpretClaim(await pool.admin.exec(stmt.claim(id, tenant)))).toBe(false);
     } finally {
       await Promise.all([holder.close(), waiter.close()]);
     }
