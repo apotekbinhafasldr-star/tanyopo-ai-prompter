@@ -48,8 +48,31 @@ interface GraphErrorBody {
   error?: { message: string; type?: string; code?: number; error_subcode?: number };
 }
 
+/**
+ * Per-call timeout. Netlify's synchronous function limit is 60s (not
+ * configurable here), and a launch makes up to four sequential Meta calls
+ * plus database work, so each call gets 10s. A timeout surfaces as a
+ * ConnectorApiError WITHOUT an HTTP status, which `classifyCreateFailure`
+ * treats as UNCERTAIN (Meta may have created the object). There is no
+ * automatic retry anywhere on this path.
+ */
+const GRAPH_TIMEOUT_MS = 10_000;
+
+function withTimeout(signal: AbortSignal | null | undefined): AbortSignal {
+  const timeout = AbortSignal.timeout(GRAPH_TIMEOUT_MS);
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
+}
+
 async function graphFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${GRAPH_BASE_URL}${path}`, init);
+  let response: Response;
+  try {
+    response = await fetch(`${GRAPH_BASE_URL}${path}`, { ...init, signal: withTimeout(init?.signal) });
+  } catch (error) {
+    if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
+      throw new ConnectorApiError("META", "Meta Graph API tidak merespons tepat waktu.", {});
+    }
+    throw error;
+  }
   const body = (await response.json().catch(() => ({}))) as T & GraphErrorBody;
 
   if (!response.ok || body.error) {
@@ -65,6 +88,9 @@ async function graphFetch<T>(path: string, init?: RequestInit): Promise<T> {
 
   return body;
 }
+
+/** optimization_goal -> billing_event pairs verified in Meta's docs. REACH only supports IMPRESSIONS. */
+const VERIFIED_BILLING_EVENTS: Readonly<Record<string, string>> = Object.freeze({ REACH: "IMPRESSIONS" });
 
 export class MetaConnector implements PlatformConnector {
   readonly platform = "META" as const;
@@ -218,6 +244,15 @@ export class MetaConnector implements PlatformConnector {
     input: AdSetInput,
   ): Promise<{ id: string }> {
     this.requireConfig();
+    // No default: the goal must be chosen explicitly by the launch preflight
+    // and must have a billing event verified against Meta's documentation.
+    const billingEvent = input.optimizationGoal ? VERIFIED_BILLING_EVENTS[input.optimizationGoal] : undefined;
+    if (!input.optimizationGoal || !billingEvent) {
+      throw new ConnectorConfigError(
+        this.platform,
+        "Optimization goal Meta belum ditentukan atau belum terverifikasi. Ad set tidak dibuat.",
+      );
+    }
     return graphFetch(`/${adAccountId}/adsets`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -225,8 +260,8 @@ export class MetaConnector implements PlatformConnector {
         name: input.name,
         campaign_id: input.campaignId,
         daily_budget: input.dailyBudgetMinorUnits,
-        billing_event: "IMPRESSIONS",
-        optimization_goal: "REACH",
+        billing_event: billingEvent,
+        optimization_goal: input.optimizationGoal,
         bid_strategy: "LOWEST_COST_WITHOUT_CAP",
         targeting: { geo_locations: { countries: input.targetingCountries } },
         status: "PAUSED",
@@ -236,11 +271,10 @@ export class MetaConnector implements PlatformConnector {
   }
 
   /**
-   * Requires a Facebook Page to run the creative "as". Page selection
-   * (its own OAuth step + picker UI) isn't built yet, so `input.pageId`
-   * is never populated by any caller today — this throws a config error
-   * rather than guessing a page ID, but the connector call itself is
-   * otherwise a real, complete Graph API request.
+   * Requires a Facebook Page, a landing link and an image URL. Nothing is
+   * defaulted: no Tanyopo fallback link, no empty image. `picture` (a URL)
+   * is the documented link_data image field; `image_url` is not one.
+   * The link must equal the call-to-action link.
    */
   async createCreative(
     accessToken: string,
@@ -251,8 +285,14 @@ export class MetaConnector implements PlatformConnector {
     if (!input.pageId) {
       throw new ConnectorConfigError(
         this.platform,
-        `Belum ada Facebook Page terhubung untuk membuat creative "${input.name}". Pemilihan Page akan tersedia pada iterasi berikutnya.`,
+        `Belum ada Facebook Page yang dipilih untuk membuat creative "${input.name}".`,
       );
+    }
+    if (!input.linkUrl) {
+      throw new ConnectorConfigError(this.platform, `URL landing belum tersedia untuk creative "${input.name}".`);
+    }
+    if (!input.imageUrl) {
+      throw new ConnectorConfigError(this.platform, `Gambar belum tersedia untuk creative "${input.name}".`);
     }
 
     return graphFetch(`/${adAccountId}/adcreatives`, {
@@ -265,11 +305,9 @@ export class MetaConnector implements PlatformConnector {
           link_data: {
             message: input.primaryText,
             name: input.headline,
-            link: input.linkUrl ?? "https://tanyopo.ai",
-            image_url: input.imageUrl,
-            call_to_action: input.linkUrl
-              ? { type: "LEARN_MORE", value: { link: input.linkUrl } }
-              : undefined,
+            link: input.linkUrl,
+            picture: input.imageUrl,
+            call_to_action: { type: "LEARN_MORE", value: { link: input.linkUrl } },
           },
         },
         access_token: accessToken,

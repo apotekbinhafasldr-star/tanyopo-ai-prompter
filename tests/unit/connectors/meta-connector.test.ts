@@ -203,3 +203,115 @@ describe("MetaConnector Graph errors", () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// PR #36 — creative / ad set contracts and the per-call timeout.
+// No real network: fetch is always a stub.
+// ---------------------------------------------------------------------------
+
+function stubFetchOk(body: unknown = { id: "new_1" }) {
+  const fetchMock = vi.fn(async (..._args: unknown[]) => ({ ok: true, status: 200, json: async () => body }));
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+function sentBody(fetchMock: ReturnType<typeof vi.fn>): Record<string, any> {
+  return JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+}
+
+describe("MetaConnector#createCreative — PR #36", () => {
+  const base = {
+    name: "C",
+    headline: "H",
+    primaryText: "P",
+    cta: "Pelajari",
+    pageId: "page_1",
+    linkUrl: "https://toko-saya.co.id/produk",
+    imageUrl: "https://proj.supabase.co/storage/v1/object/public/product-media/t1/p1/a.jpg",
+  };
+
+  it("sends `picture` (never image_url), the tenant link, and the same link in the CTA", async () => {
+    const fetchMock = stubFetchOk();
+    await new MetaConnector().createCreative("tok", "act_1", base);
+
+    const linkData = sentBody(fetchMock).object_story_spec.link_data;
+    expect(linkData.picture).toBe(base.imageUrl);
+    expect(linkData).not.toHaveProperty("image_url");
+    expect(linkData.link).toBe(base.linkUrl);
+    expect(linkData.call_to_action).toEqual({ type: "LEARN_MORE", value: { link: base.linkUrl } });
+    expect(JSON.stringify(sentBody(fetchMock))).not.toContain("tanyopo");
+  });
+
+  it.each([
+    ["linkUrl", { linkUrl: undefined }],
+    ["imageUrl", { imageUrl: undefined }],
+    ["pageId", { pageId: undefined }],
+    ["empty linkUrl", { linkUrl: "" }],
+    ["empty imageUrl", { imageUrl: "" }],
+  ])("refuses to call Meta without %s (no tanyopo.ai fallback, no empty image)", async (_label, patch) => {
+    const fetchMock = stubFetchOk();
+    const failure = await new MetaConnector().createCreative("tok", "act_1", { ...base, ...patch }).catch((e: unknown) => e);
+
+    expect(failure).toBeInstanceOf(ConnectorConfigError);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("MetaConnector#createAdSet — PR #36", () => {
+  const base = { campaignId: "c1", name: "AS", dailyBudgetMinorUnits: 50000, targetingCountries: ["ID"] };
+
+  it("uses the explicit goal with its verified billing event", async () => {
+    const fetchMock = stubFetchOk();
+    await new MetaConnector().createAdSet("tok", "act_1", { ...base, optimizationGoal: "REACH" });
+
+    expect(sentBody(fetchMock)).toMatchObject({
+      optimization_goal: "REACH",
+      billing_event: "IMPRESSIONS",
+      status: "PAUSED",
+      targeting: { geo_locations: { countries: ["ID"] } },
+    });
+  });
+
+  it.each([undefined, "", "LINK_CLICKS", "OFFSITE_CONVERSIONS"])("refuses goal %j and calls nothing (no invented pairing)", async (goal) => {
+    const fetchMock = stubFetchOk();
+    const failure = await new MetaConnector()
+      .createAdSet("tok", "act_1", { ...base, optimizationGoal: goal })
+      .catch((e: unknown) => e);
+
+    expect(failure).toBeInstanceOf(ConnectorConfigError);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("MetaConnector timeout — PR #36", () => {
+  it("passes a timeout signal to every Graph call", async () => {
+    const fetchMock = stubFetchOk({ data: [] });
+    await new MetaConnector().getPages("tok");
+    expect((fetchMock.mock.calls[0][1] as RequestInit).signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("17. a timed-out create call becomes a status-less ConnectorApiError and is NOT retried", async () => {
+    const timeout = Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" });
+    const fetchMock = vi.fn(async (..._args: unknown[]) => {
+      throw timeout;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const failure = await new MetaConnector()
+      .createCampaign("tok", "act_1", { name: "N", objective: "OUTCOME_AWARENESS", dailyBudgetMinorUnits: 1 })
+      .catch((e: unknown) => e);
+
+    expect(failure).toBeInstanceOf(ConnectorApiError);
+    expect((failure as ConnectorApiError).status).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // No status => the launch treats it as UNCERTAIN (Meta may have created it) and never retries.
+    const { classifyCreateFailure } = await import("@/lib/campaigns/launch-reconciliation");
+    expect(classifyCreateFailure(failure)).toBe("UNCERTAIN");
+  });
+
+  it("does not hide other network errors as timeouts", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      throw new Error("ECONNRESET");
+    }));
+    await expect(new MetaConnector().getPages("tok")).rejects.toThrow("ECONNRESET");
+  });
+});

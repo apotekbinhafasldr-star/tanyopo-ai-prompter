@@ -25,6 +25,20 @@ import {
   type CreatedPlatformObjects,
   type LaunchStep,
 } from "@/lib/campaigns/launch-reconciliation";
+import {
+  PRODUCT_MEDIA_BUCKET,
+  checkAdAccountId,
+  checkCreativeImage,
+  checkLaunchApproval,
+  checkSelectedPageId,
+  pickLaunchMedia,
+  preflightFail,
+  resolveLandingUrl,
+  resolveMetaObjectivePlan,
+  resolveTargetCountry,
+  type Check,
+  type ProductMediaRow,
+} from "@/lib/campaigns/meta-launch-preflight";
 import type { CampaignProposal } from "@/schemas/ai/campaign-proposal";
 import type { ConnectorPlatform, Database } from "@/types/database";
 
@@ -38,15 +52,7 @@ export interface LaunchActionState {
  * `PrimaryGoal` per connector platform rather than assuming one
  * platform's names apply everywhere.
  */
-const OBJECTIVE_MAP: Record<ConnectorPlatform, Record<string, string>> = {
-  META: {
-    INCREASE_SALES: "OUTCOME_SALES",
-    GET_LEADS: "OUTCOME_LEADS",
-    INCREASE_FOLLOWERS: "OUTCOME_ENGAGEMENT",
-    BRAND_AWARENESS: "OUTCOME_AWARENESS",
-    WEBSITE_TRAFFIC: "OUTCOME_TRAFFIC",
-    PROMOTE_APP: "OUTCOME_APP_PROMOTION",
-  },
+const OBJECTIVE_MAP: Record<Exclude<ConnectorPlatform, "META">, Record<string, string>> = {
   TIKTOK: {
     INCREASE_SALES: "CONVERSIONS",
     GET_LEADS: "LEAD_GENERATION",
@@ -65,11 +71,158 @@ const OBJECTIVE_MAP: Record<ConnectorPlatform, Record<string, string>> = {
   },
 };
 
-const DEFAULT_OBJECTIVE: Record<ConnectorPlatform, string> = {
-  META: "OUTCOME_AWARENESS",
+const DEFAULT_OBJECTIVE: Record<Exclude<ConnectorPlatform, "META">, string> = {
   TIKTOK: "REACH",
   X: "AWARENESS",
 };
+
+/**
+ * TikTok / X keep their existing objective mapping unchanged. META is NOT
+ * here: its objective comes only from the verified contracts in
+ * lib/campaigns/meta-objective-contracts.ts via the preflight (no default).
+ */
+function legacyObjective(platform: Exclude<ConnectorPlatform, "META">, objective: string): string {
+  return OBJECTIVE_MAP[platform][objective] ?? DEFAULT_OBJECTIVE[platform];
+}
+
+/** Everything the Meta calls need, produced only by a fully passing preflight. */
+interface MetaLaunchPlan {
+  campaignObjective: string;
+  optimizationGoal: string;
+  targetingCountries: string[];
+  pageId: string;
+  linkUrl: string;
+  imageUrl: string;
+}
+
+interface MetaPreflightInput {
+  supabase: LaunchSupabase;
+  admin: NonNullable<ReturnType<typeof createAdminClient>>;
+  tenantId: string;
+  master: {
+    id: string;
+    objective: string;
+    product_id: string | null;
+    target_country: string | null;
+    selected_media_id: string | null;
+  };
+  adAccountId: string;
+  selectedPageId: string | undefined;
+}
+
+const READ_FAILED = () =>
+  preflightFail("PREFLIGHT_READ_FAILED", "Gagal membaca data pra-peluncuran. Peluncuran dibatalkan dan tidak ada yang dikirim ke Meta, coba lagi.");
+
+function hostOf(value: string | undefined): string[] {
+  if (!value) return [];
+  try {
+    return [new URL(value).hostname];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Meta preflight (PR #36). READ-ONLY and entirely before the exclusive
+ * claim: it makes no write, no Meta call and no HTTP request to any
+ * user-supplied URL. The image is judged from our own database row plus
+ * Supabase Storage's object metadata (no HEAD/GET on a URL).
+ */
+async function runMetaPreflight(input: MetaPreflightInput): Promise<Check<MetaLaunchPlan>> {
+  const { supabase, admin, tenantId, master, adAccountId, selectedPageId } = input;
+
+  const account = checkAdAccountId(adAccountId);
+  if (!account.ok) return account;
+  const page = checkSelectedPageId(selectedPageId);
+  if (!page.ok) return page;
+  const objective = resolveMetaObjectivePlan(master.objective);
+  if (!objective.ok) return objective;
+  const country = resolveTargetCountry(master.target_country);
+  if (!country.ok) return country;
+
+  // Landing URL: product first, brand profile only when the product has none.
+  let productUrl: string | null = null;
+  if (master.product_id) {
+    const { data: product, error } = await supabase
+      .from("prompter_products")
+      .select("id, website_url")
+      .eq("id", master.product_id)
+      .eq("tenant_id", tenantId)
+      .maybeSingle();
+    if (error) return READ_FAILED();
+    productUrl = product?.website_url ?? null;
+  }
+  let brandUrl: string | null = null;
+  if (!productUrl || productUrl.trim().length === 0) {
+    const { data: brand, error } = await supabase
+      .from("prompter_brand_profiles")
+      .select("website_url")
+      .eq("tenant_id", tenantId)
+      .maybeSingle();
+    if (error) return READ_FAILED();
+    brandUrl = brand?.website_url ?? null;
+  }
+  const ownHosts = [...hostOf(process.env.NEXT_PUBLIC_APP_URL), ...hostOf(process.env.NEXT_PUBLIC_SUPABASE_URL)];
+  const link = resolveLandingUrl({ productUrl, brandUrl }, ownHosts);
+  if (!link.ok) return link;
+
+  // Creative image: only this tenant's own product media.
+  if (!master.product_id) {
+    return resolveImageMissing();
+  }
+  const { data: mediaRows, error: mediaError } = await supabase
+    .from("prompter_product_media")
+    .select("id, tenant_id, product_id, storage_path, media_type, position")
+    .eq("tenant_id", tenantId)
+    .eq("product_id", master.product_id)
+    .order("position", { ascending: true });
+  if (mediaError || !mediaRows) return READ_FAILED();
+
+  const media = pickLaunchMedia(mediaRows as (ProductMediaRow & { position?: number })[], master.selected_media_id);
+  if (!media.ok) return media;
+
+  const lastSlash = media.value.storage_path.lastIndexOf("/");
+  const directory = lastSlash > 0 ? media.value.storage_path.slice(0, lastSlash) : "";
+  const fileName = media.value.storage_path.slice(lastSlash + 1);
+  let metadata: { mimetype?: unknown; size?: unknown } | null = null;
+  // Directory must be this tenant's own product folder before Storage is even asked.
+  if (directory === `${tenantId}/${master.product_id}` && fileName) {
+    const { data: objects, error: listError } = await admin.storage
+      .from(PRODUCT_MEDIA_BUCKET)
+      .list(directory, { limit: 100, search: fileName });
+    if (listError) return READ_FAILED();
+    const match = (objects ?? []).find((object) => object.name === fileName);
+    metadata = (match?.metadata as { mimetype?: unknown; size?: unknown } | null | undefined) ?? null;
+  }
+
+  const image = checkCreativeImage({
+    media: media.value,
+    tenantId,
+    productId: master.product_id,
+    supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
+    metadata,
+  });
+  if (!image.ok) return image;
+
+  return {
+    ok: true,
+    value: {
+      campaignObjective: objective.value.campaignObjective,
+      optimizationGoal: objective.value.optimizationGoal,
+      targetingCountries: [country.value],
+      pageId: page.value,
+      linkUrl: link.value,
+      imageUrl: image.value.imageUrl,
+    },
+  };
+}
+
+function resolveImageMissing(): Check<never> {
+  return preflightFail(
+    "IMAGE_MISSING",
+    "Campaign belum terhubung ke produk yang memiliki gambar untuk iklan. Tidak ada yang dikirim ke Meta.",
+  );
+}
 
 /**
  * Launches one channel of an approved (SCHEDULED) campaign to its connected
@@ -131,7 +284,9 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
 
   const { data: masterCampaign, error: masterError } = await supabase
     .from("prompter_master_campaigns")
-    .select("id, status, name, objective, currency, daily_budget, total_budget, ai_proposal")
+    .select(
+      "id, status, name, objective, currency, daily_budget, total_budget, ai_proposal, product_id, target_country, selected_media_id",
+    )
     .eq("id", channelCampaign.master_campaign_id)
     .eq("tenant_id", session.tenantId)
     .single();
@@ -142,6 +297,26 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
 
   if (masterCampaign.status !== "SCHEDULED") {
     return { error: "Campaign harus berstatus Terjadwal (sudah disetujui) sebelum diluncurkan." };
+  }
+
+  // Meta preflight, approval part (PR #36): the master's latest CAMPAIGN_LAUNCH
+  // approval must be APPROVED. Read-only, before budget checks, the claim and
+  // any Meta call. TikTok/X are untouched.
+  if (connectorPlatform === "META") {
+    const { data: approvalRows, error: approvalError } = await supabase
+      .from("prompter_approvals")
+      .select("status, created_at")
+      .eq("tenant_id", session.tenantId)
+      .eq("approval_type", "CAMPAIGN_LAUNCH")
+      .eq("resource_type", "prompter_master_campaigns")
+      .eq("resource_id", masterCampaign.id)
+      .order("created_at", { ascending: false })
+      .limit(1);
+    if (approvalError) {
+      return { error: "Gagal memeriksa persetujuan campaign. Peluncuran dibatalkan, coba lagi." };
+    }
+    const approval = checkLaunchApproval(approvalRows);
+    if (!approval.ok) return { error: approval.message };
   }
 
   // P0 budget launch safety — ALL budget validation completes here, BEFORE
@@ -303,8 +478,8 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
           "Pilihan Page Facebook tidak dapat dibaca. Peluncuran dibatalkan dan tidak ada yang dibuat di platform iklan.",
       };
     }
-    // null (no Page chosen yet) stays undefined: connector.createCreative()
-    // already throws its existing error for that case, unchanged.
+    // null (no Page chosen yet) stays undefined: the Meta preflight below
+    // rejects it before the claim (it is never replaced by another Page).
     selectedPageId = pageRow.selected_page_id ?? undefined;
   }
 
@@ -336,6 +511,25 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
     accessToken = decryptToken(credentials.encrypted_access_token);
   } catch {
     return { error: "Gagal membaca kredensial. Coba hubungkan ulang akun." };
+  }
+
+  // Meta preflight (PR #36): every remaining prerequisite is validated here,
+  // read-only, BEFORE the exclusive claim. A failure claims nothing, creates
+  // nothing on Meta and leaves every status untouched.
+  let metaPlan: MetaLaunchPlan | null = null;
+  if (connectorPlatform === "META") {
+    const preflight = await runMetaPreflight({
+      supabase,
+      admin,
+      tenantId: session.tenantId,
+      master: masterCampaign,
+      adAccountId: connectedAccount.external_account_id,
+      selectedPageId,
+    });
+    if (!preflight.ok) {
+      return { error: preflight.message };
+    }
+    metaPlan = preflight.value;
   }
 
   // Exclusive claim (launch safety remediation). ONE conditional UPDATE moves
@@ -372,8 +566,9 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
   try {
     const campaign = await connector.createCampaign(accessToken, adAccountId, {
       name: masterCampaign.name,
-      objective:
-        OBJECTIVE_MAP[connectorPlatform][masterCampaign.objective] ?? DEFAULT_OBJECTIVE[connectorPlatform],
+      objective: metaPlan
+        ? metaPlan.campaignObjective
+        : legacyObjective(connectorPlatform as Exclude<ConnectorPlatform, "META">, masterCampaign.objective),
       dailyBudgetMinorUnits,
     });
     const campaignId = requireCreatedId(campaign, "createCampaign");
@@ -392,8 +587,10 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
       campaignId,
       name: `${masterCampaign.name} — Ad Set`,
       dailyBudgetMinorUnits,
-      // No location picker/geocoding yet — defaults to Indonesia.
-      targetingCountries: ["ID"],
+      // META: the master's validated target country and the preflight's
+      // explicit optimization goal. TikTok/X keep their existing behaviour.
+      targetingCountries: metaPlan ? metaPlan.targetingCountries : ["ID"],
+      ...(metaPlan ? { optimizationGoal: metaPlan.optimizationGoal } : {}),
     });
     const adSetId = requireCreatedId(adSet, "createAdSet");
     created.adSetId = adSetId;
@@ -414,7 +611,8 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
       // account that hasn't picked a Page yet — connector.createCreative()
       // already throws its existing, unchanged error in that case.
       // A Page that could not be READ never reaches this point (see above).
-      pageId: selectedPageId,
+      pageId: metaPlan ? metaPlan.pageId : selectedPageId,
+      ...(metaPlan ? { linkUrl: metaPlan.linkUrl, imageUrl: metaPlan.imageUrl } : {}),
     });
     const creativeId = requireCreatedId(creative, "createCreative");
     created.creativeId = creativeId;
