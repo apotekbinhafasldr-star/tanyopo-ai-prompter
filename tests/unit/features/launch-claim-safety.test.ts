@@ -61,6 +61,7 @@ interface Db {
 
 let db: Db;
 let fx: PreflightFixtures;
+let auditMode: "ok" | "error" | "throw" = "ok";
 let masterOverrides: Record<string, unknown> = {};
 let accountOverrides: Record<string, unknown> = {};
 
@@ -169,6 +170,8 @@ const from = vi.fn((table: string) => {
     case "prompter_audit_logs":
       return {
         insert: async (row: Record<string, unknown>) => {
+          if (auditMode === "throw") throw new Error("audit write exploded");
+          if (auditMode === "error") return { error: { code: "XX000" } };
           db.audits.push(row);
           return { error: null };
         },
@@ -213,6 +216,7 @@ beforeEach(() => {
   fx = makePreflightFixtures();
   masterOverrides = {};
   accountOverrides = {};
+  auditMode = "ok";
   db = freshDb();
   sessionRef.current = { tenantId: "t1", userId: "u1", role: "owner" };
   connectorMock.createCampaign.mockReset().mockResolvedValue({ id: "ext_campaign_1" });
@@ -704,4 +708,108 @@ describe("Meta preflight (PR #36)", () => {
       expect(db.updates.filter((u) => u.patch.status === "FAILED" && u.applied)).toHaveLength(1);
     });
   });
+});
+
+// ---------------------------------------------------------------------------
+// PR #37 / A3 — audit trail of the Meta object ids. The final ACTIVE write
+// clears the row's progress note, so the audit row is the only place that
+// keeps the ad set, creative and ad ids of a successful launch.
+// ---------------------------------------------------------------------------
+
+describe("audit trail of created Meta objects (PR #37 / A3)", () => {
+  it("a successful launch records every id Meta returned in the launched audit", async () => {
+    const result = await launchChannelCampaignAction("cc1");
+
+    expect(result.error).toBeNull();
+    const launched = db.audits.filter((a) => a.action === "campaign.launched");
+    expect(launched).toHaveLength(1);
+    expect(launched[0]).toMatchObject({
+      tenant_id: "t1",
+      actor_user_id: "u1",
+      resource_type: "prompter_channel_campaigns",
+      resource_id: "cc1",
+      context: {
+        platform: "META",
+        external_campaign_id: "ext_campaign_1",
+        created_objects: "campaign=ext_campaign_1, adset=ext_adset_1, creative=ext_creative_1, ad=ext_ad_1",
+      },
+    });
+    // The row itself still ends ACTIVE with the note cleared (unchanged).
+    expect(db.row).toMatchObject({ status: "ACTIVE", error: null, external_campaign_id: "ext_campaign_1" });
+  });
+
+  it("the launched audit is written for the session's own tenant", async () => {
+    await launchChannelCampaignAction("cc1");
+    expect(db.audits.every((a) => a.tenant_id === "t1")).toBe(true);
+  });
+
+  it("the launched audit never contains the token or any provider text", async () => {
+    await launchChannelCampaignAction("cc1");
+    const stored = JSON.stringify(db.audits);
+    expect(stored).not.toContain("access-token-abc");
+    expect(stored).not.toContain("cipher");
+  });
+
+  it("a partial failure keeps the ids received so far in the failure audit", async () => {
+    connectorMock.createCreative.mockRejectedValue(new ConnectorApiError("META", "x", { status: 400, code: 100 }));
+    await launchChannelCampaignAction("cc1");
+
+    const failed = db.audits.find((a) => a.action === "campaign.launch_failed");
+    expect(failed?.context).toMatchObject({
+      failed_step: "createCreative",
+      created_objects: "campaign=ext_campaign_1, adset=ext_adset_1",
+    });
+    expect(db.audits.some((a) => a.action === "campaign.launched")).toBe(false);
+  });
+
+  it("an uncertain createAd keeps the three earlier ids and invents no ad id", async () => {
+    connectorMock.createAd.mockResolvedValue({});
+    await launchChannelCampaignAction("cc1");
+
+    const failed = db.audits.find((a) => a.action === "campaign.launch_failed");
+    expect((failed?.context as { created_objects: string }).created_objects).toBe(
+      "campaign=ext_campaign_1, adset=ext_adset_1, creative=ext_creative_1",
+    );
+  });
+
+  it("when no id was received the failure audit claims no objects", async () => {
+    connectorMock.createCampaign.mockRejectedValue(new Error("socket hang up"));
+    await launchChannelCampaignAction("cc1");
+
+    const failed = db.audits.find((a) => a.action === "campaign.launch_failed");
+    expect(failed?.context).not.toHaveProperty("created_objects");
+  });
+
+  it.each(["error", "throw"] as const)(
+    "a failing audit write (%s) after success neither changes the outcome nor repeats a Meta create",
+    async (mode) => {
+      auditMode = mode;
+      const result = await launchChannelCampaignAction("cc1");
+
+      expect(result.error).toBeNull();
+      expect(db.row.status).toBe("ACTIVE");
+      expect(connectorMock.createCampaign).toHaveBeenCalledTimes(1);
+      expect(connectorMock.createAdSet).toHaveBeenCalledTimes(1);
+      expect(connectorMock.createCreative).toHaveBeenCalledTimes(1);
+      expect(connectorMock.createAd).toHaveBeenCalledTimes(1);
+      // The row cannot be claimed again, so no later request can create again.
+      expect(await launchChannelCampaignAction("cc1")).toEqual({ error: ALREADY });
+      expect(connectorMock.createCampaign).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each(["error", "throw"] as const)(
+    "a failing audit write (%s) on the failure path still reports the failure and creates nothing more",
+    async (mode) => {
+      auditMode = mode;
+      connectorMock.createAdSet.mockRejectedValue(new ConnectorApiError("META", "x", { status: 400 }));
+      const result = await launchChannelCampaignAction("cc1");
+
+      expect(result.error).toContain("campaign=ext_campaign_1");
+      expect(db.row.status).toBe("FAILED");
+      expect(connectorMock.createCampaign).toHaveBeenCalledTimes(1);
+      expect(connectorMock.createCreative).not.toHaveBeenCalled();
+      expect(connectorMock.createAd).not.toHaveBeenCalled();
+    },
+  );
 });

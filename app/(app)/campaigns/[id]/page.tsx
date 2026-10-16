@@ -31,6 +31,12 @@ import {
   scheduleChannelCampaignAction,
 } from "@/features/campaigns/actions";
 import { LaunchChannelButton } from "@/features/campaigns/launch-button";
+import { ManualCheckPanel } from "@/features/campaigns/manual-check-panel";
+import {
+  canOfferLaunch,
+  channelCampaignStatusDisplay,
+  requiresManualCheck,
+} from "@/lib/campaigns/channel-status-display";
 import { SyncInsightsButton } from "@/features/campaigns/sync-insights-button";
 import { GenerateOptimizationButton } from "@/features/campaigns/generate-optimization-button";
 import { SubmitRecommendationButton } from "@/features/campaigns/submit-recommendation-button";
@@ -428,31 +434,42 @@ export default async function CampaignDetailPage({
                   createAdEnabledPlatforms,
                   connectedPlatforms,
                 );
-                const showLaunchControl = campaign.status === "SCHEDULED" && cc.status !== "ACTIVE";
+                // PR #37: a Meta FAILED row is never offered a launch/retry
+                // control (the exclusive claim only accepts SCHEDULED, so it
+                // could never succeed); it gets the manual-check panel instead.
+                const showLaunchControl = canOfferLaunch(campaign.status, cc.channel, cc.status);
+                const manualCheck = requiresManualCheck(cc.channel, cc.status);
+                const statusDisplay = channelCampaignStatusDisplay(cc.channel, cc.status);
 
                 return (
-                  <div key={cc.id} className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="flex flex-wrap items-center gap-3">
-                      <span className="text-sm font-medium text-foreground">{channelLabel(cc.channel)}</span>
-                      <span className="text-sm text-muted-foreground">
-                        {cc.budget_percentage !== null ? `${cc.budget_percentage}%` : "—"}
-                      </span>
-                      <Badge variant={campaignStatusVariant(cc.status)}>
-                        {campaignStatusLabel(cc.status)}
-                      </Badge>
-                      <span className="text-xs text-muted-foreground">
-                        {cc.external_campaign_id ?? "Belum terhubung ke platform"}
-                      </span>
+                  <div key={cc.id} className="flex flex-col gap-2 py-3">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex flex-wrap items-center gap-3">
+                        <span className="text-sm font-medium text-foreground">{channelLabel(cc.channel)}</span>
+                        <span className="text-sm text-muted-foreground">
+                          {cc.budget_percentage !== null ? `${cc.budget_percentage}%` : "—"}
+                        </span>
+                        <Badge variant={statusDisplay.variant}>{statusDisplay.label}</Badge>
+                        <span className="text-xs text-muted-foreground">
+                          {cc.external_campaign_id ?? "Belum terhubung ke platform"}
+                        </span>
+                      </div>
+                      {cc.error && !manualCheck ? <p className="max-w-md text-xs text-danger">{cc.error}</p> : null}
+                      {showLaunchControl ? (
+                        launchable ? (
+                          <LaunchChannelButton channelCampaignId={cc.id} retry={cc.status === "FAILED"} />
+                        ) : reason ? (
+                          <p className="max-w-xs text-right text-xs text-muted-foreground">{reason}</p>
+                        ) : null
+                      ) : cc.status === "ACTIVE" ? (
+                        <SyncInsightsButton channelCampaignId={cc.id} />
+                      ) : null}
                     </div>
-                    {cc.error ? <p className="max-w-md text-xs text-danger">{cc.error}</p> : null}
-                    {showLaunchControl ? (
-                      launchable ? (
-                        <LaunchChannelButton channelCampaignId={cc.id} retry={cc.status === "FAILED"} />
-                      ) : reason ? (
-                        <p className="max-w-xs text-right text-xs text-muted-foreground">{reason}</p>
-                      ) : null
-                    ) : cc.status === "ACTIVE" ? (
-                      <SyncInsightsButton channelCampaignId={cc.id} />
+                    {statusDisplay.note ? (
+                      <p className="text-xs text-muted-foreground">{statusDisplay.note}</p>
+                    ) : null}
+                    {manualCheck ? (
+                      <ManualCheckPanel externalCampaignId={cc.external_campaign_id} note={cc.error} />
                     ) : null}
                   </div>
                 );

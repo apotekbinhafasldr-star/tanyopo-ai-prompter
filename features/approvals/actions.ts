@@ -8,9 +8,10 @@ import { setChannelCampaignsStatus } from "@/services/channel-campaigns";
 import { getConnector } from "@/lib/connectors/get-connector";
 import { CHANNEL_TO_CONNECTOR } from "@/lib/connectors/channel-map";
 import { decryptToken } from "@/lib/crypto/token-cipher";
+import { formatSafeErrorSummary } from "@/lib/connectors/safe-error-log";
 import { evaluateExternalBudgetWrite } from "@/lib/campaigns/external-budget-guard";
 import { readEmergencyStopStrict } from "@/services/automation-settings";
-import type { ConnectorPlatform, OptimizationActionType } from "@/types/database";
+import type { ConnectorPlatform, Database, OptimizationActionType } from "@/types/database";
 
 export interface ApprovalActionState {
   error: string | null;
@@ -250,7 +251,27 @@ async function executeAutopilotAction(
   try {
     if (actionType === "PAUSE_CHANNEL") {
       await connector.pauseCampaign(accessToken, connectedAccount.external_account_id, channelCampaign.external_campaign_id);
-      await supabase.from("prompter_channel_campaigns").update({ status: "PAUSED" }).eq("id", channelCampaignId);
+      // The platform call succeeded; LINOE's own record must now follow. The
+      // write is tenant-scoped and must confirm exactly one row. If it does
+      // not, the two sides disagree: say so (never "success"), leave a safe
+      // audit row, and do NOT retry — nothing here calls the platform again.
+      const recorded = await markChannelCampaignPaused(supabase, tenantId, channelCampaignId);
+      if (!recorded) {
+        await insertAuditBestEffort(supabase, {
+          tenant_id: tenantId,
+          actor_user_id: actorUserId,
+          action: "autopilot_action.status_mismatch",
+          resource_type: "prompter_channel_campaigns",
+          resource_id: channelCampaignId,
+          context: {
+            platform: connectorPlatform,
+            action_type: actionType,
+            platform_paused: true,
+            status_recorded: false,
+          },
+        });
+        return "Channel sudah dijeda di platform, tetapi status di LINOE GAGAL diperbarui dan mungkin masih tampil Aktif. Periksa Ads Manager dan sesuaikan manual. Tidak ada percobaan ulang otomatis.";
+      }
     } else if (
       (actionType === "INCREASE_BUDGET" || actionType === "DECREASE_BUDGET") &&
       typeof ctx?.suggested_daily_budget === "number"
@@ -276,17 +297,56 @@ async function executeAutopilotAction(
 
     return null;
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Gagal mengeksekusi tindakan di platform.";
+    // Allowlisted summary only (error name, HTTP status, numeric code): a
+    // provider message can echo request parameters, so it is never stored in
+    // the audit log or in the approval's reason.
+    const detail = formatSafeErrorSummary(err);
 
-    await supabase.from("prompter_audit_logs").insert({
+    await insertAuditBestEffort(supabase, {
       tenant_id: tenantId,
       actor_user_id: actorUserId,
       action: "autopilot_action.execution_failed",
       resource_type: "prompter_channel_campaigns",
       resource_id: channelCampaignId,
-      context: { platform: connectorPlatform, action_type: actionType, error: message },
+      context: { platform: connectorPlatform, action_type: actionType, error: detail },
     });
 
-    return `Eksekusi gagal: ${message}`;
+    return `Eksekusi gagal (${detail}). Hasil di platform tidak dipastikan; periksa Ads Manager. Tidak ada percobaan ulang otomatis.`;
+  }
+}
+
+/**
+ * Marks the channel PAUSED in LINOE after the platform confirmed the pause.
+ * Scoped by id AND tenant, and only from ACTIVE; true only when the database
+ * confirms that exactly one row changed.
+ */
+async function markChannelCampaignPaused(
+  supabase: SupabaseServerClient,
+  tenantId: string,
+  channelCampaignId: string,
+): Promise<boolean> {
+  try {
+    const { data, error } = await supabase
+      .from("prompter_channel_campaigns")
+      .update({ status: "PAUSED" })
+      .eq("id", channelCampaignId)
+      .eq("tenant_id", tenantId)
+      .eq("status", "ACTIVE")
+      .select("id");
+    return !error && Array.isArray(data) && data.length === 1;
+  } catch {
+    return false;
+  }
+}
+
+/** An audit write must never turn an already-decided outcome into a thrown error. */
+async function insertAuditBestEffort(
+  supabase: SupabaseServerClient,
+  row: Database["public"]["Tables"]["prompter_audit_logs"]["Insert"],
+): Promise<void> {
+  try {
+    await supabase.from("prompter_audit_logs").insert(row);
+  } catch {
+    // intentionally ignored
   }
 }
