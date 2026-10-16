@@ -1,4 +1,5 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, type ChildProcessByStdio, type SpawnOptionsWithStdioTuple, type StdioPipe } from "node:child_process";
+import type { Readable, Writable } from "node:stream";
 import type { PgConfig } from "./pg-env";
 
 /**
@@ -32,7 +33,7 @@ interface Pending {
 const open = new Set<PsqlSession>();
 
 export class PsqlSession {
-  private readonly proc: ChildProcessWithoutNullStreams;
+  private readonly proc: ChildProcessByStdio<Writable, Readable, Readable>;
   private outBuf = "";
   private errBuf = "";
   private seq = 0;
@@ -44,7 +45,8 @@ export class PsqlSession {
     readonly label: string,
     cfg: PgConfig,
   ) {
-    this.proc = spawn("psql", ["-X", "-q", "-t", "-A", "-h", cfg.host, "-p", cfg.port, "-U", cfg.user, "-d", cfg.database], {
+    const args: string[] = ["-X", "-q", "-t", "-A", "-h", cfg.host, "-p", cfg.port, "-U", cfg.user, "-d", cfg.database];
+    const options: SpawnOptionsWithStdioTuple<StdioPipe, StdioPipe, StdioPipe> = {
       // A minimal environment: nothing from the caller's env leaks into psql.
       env: {
         PATH: process.env.PATH ?? "",
@@ -54,7 +56,8 @@ export class PsqlSession {
         LC_ALL: "C",
       },
       stdio: ["pipe", "pipe", "pipe"],
-    });
+    };
+    this.proc = spawn("psql", args, options);
     this.proc.stdout.setEncoding("utf8");
     this.proc.stderr.setEncoding("utf8");
     this.proc.stdout.on("data", (chunk: string) => {
