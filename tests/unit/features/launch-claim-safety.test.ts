@@ -258,6 +258,11 @@ describe("exclusive launch claim", () => {
 
   it("4. a claim from another tenant matches nothing and calls no platform API", async () => {
     sessionRef.current = { tenantId: "t2", userId: "u9", role: "owner" };
+    // This fake does not filter reads by tenant, so give t2 its own ready
+    // product media: the preflight passes and the CLAIM is what must refuse.
+    fx.media = [
+      { id: "m1", tenant_id: "t2", product_id: "p1", storage_path: "t2/p1/1700-foto.jpg", media_type: "IMAGE", position: 0 },
+    ];
     const result = await launchChannelCampaignAction("cc1");
 
     expect(result.error).toBe(ALREADY);

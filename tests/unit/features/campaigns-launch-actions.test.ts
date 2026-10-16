@@ -230,6 +230,7 @@ function expectNoSideEffects(h: Harness) {
 describe("launchChannelCampaignAction — Track B pageId threading", () => {
   beforeEach(() => {
     requireSessionContextMock.mockClear();
+    connectorMock.createCampaign.mockClear();
     connectorMock.createCreative.mockClear();
   });
 
