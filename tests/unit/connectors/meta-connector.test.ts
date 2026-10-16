@@ -210,12 +210,16 @@ describe("MetaConnector Graph errors", () => {
 // ---------------------------------------------------------------------------
 
 function stubFetchOk(body: unknown = { id: "new_1" }) {
-  const fetchMock = vi.fn(async (..._args: unknown[]) => ({ ok: true, status: 200, json: async () => body }));
+  const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => ({ ok: true, status: 200, json: async () => body }));
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
 }
-function sentBody(fetchMock: ReturnType<typeof vi.fn>): Record<string, any> {
-  return JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+interface SentBody {
+  object_story_spec: { link_data: Record<string, unknown> };
+  [key: string]: unknown;
+}
+function sentBody(fetchMock: { mock: { calls: unknown[][] } }): SentBody {
+  return JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string) as SentBody;
 }
 
 describe("MetaConnector#createCreative — PR #36", () => {
@@ -291,7 +295,7 @@ describe("MetaConnector timeout — PR #36", () => {
 
   it("17. a timed-out create call becomes a status-less ConnectorApiError and is NOT retried", async () => {
     const timeout = Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" });
-    const fetchMock = vi.fn(async (..._args: unknown[]) => {
+    const fetchMock = vi.fn(async () => {
       throw timeout;
     });
     vi.stubGlobal("fetch", fetchMock);
