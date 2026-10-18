@@ -141,7 +141,7 @@ describe.skipIf(!pgEnabled)("C13 manual ad metrics (Winning Ads Phase 2B)", () =
   });
 
   describe("role gating", () => {
-    for (const role of ["viewer", "finance", "support", ""]) {
+    for (const role of ["apoteker", "kasir", "hr", "admin_gudang", ""]) {
       it(`role "${role || "(none)"}" cannot insert`, async () => {
         const t = await tenantWithChannel();
         const s = await openAs(pool.cfg, t.tenant, role, t.user, "c13-role");
@@ -154,10 +154,10 @@ describe.skipIf(!pgEnabled)("C13 manual ad metrics (Winning Ads Phase 2B)", () =
       });
     }
 
-    it("a viewer can read own-tenant rows but cannot update or delete them", async () => {
+    it("a non-writer role can read own-tenant rows but cannot update or delete them", async () => {
       const t = await tenantWithChannel();
       await pool.admin.exec(insertSql(t));
-      const s = await openAs(pool.cfg, t.tenant, "viewer", t.user, "c13-viewer");
+      const s = await openAs(pool.cfg, t.tenant, "apoteker", t.user, "c13-viewer");
       try {
         expect((await s.exec(`select count(*) from ${TABLE};`)).rows[0]).toBe("1");
         await s.exec(`update ${TABLE} set spend = 1;`);

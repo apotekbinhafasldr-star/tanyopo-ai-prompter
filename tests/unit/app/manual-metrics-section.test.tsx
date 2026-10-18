@@ -82,9 +82,9 @@ describe("ManualMetricsSection", () => {
     expect(screen.getByText("Estimasi Break-even ROAS (berdasarkan HPP)")).toBeInTheDocument();
   });
 
-  it("a viewer sees history and verdict but no form, edit or delete controls", async () => {
+  it("a non-writer role sees history and verdict but no form, edit or delete controls", async () => {
     currentClient = client({ rows: [day(1)], product });
-    render(await ManualMetricsSection({ ...base, role: "viewer" }));
+    render(await ManualMetricsSection({ ...base, role: "apoteker" }));
     expect(screen.queryByRole("button", { name: /Simpan Data Harian/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Hapus" })).not.toBeInTheDocument();
     expect(screen.getByText(/Hanya Owner atau Marketing/)).toBeInTheDocument();

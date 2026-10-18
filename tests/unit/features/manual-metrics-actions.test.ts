@@ -81,7 +81,18 @@ const CC_ID = "8f1c3a52-6a3e-4b8e-9a3b-2f7d6f6f2c11";
 const ROW_ID = "11111111-2222-3333-4444-555555555555";
 const MASTER_ID = "99999999-aaaa-bbbb-cccc-dddddddddddd";
 
-const channelCampaign = { id: CC_ID, channel: "FACEBOOK", master_campaign_id: MASTER_ID, external_campaign_id: null };
+interface ChannelCampaignRow {
+  id: string;
+  channel: string;
+  master_campaign_id: string;
+  external_campaign_id: string | null;
+}
+const channelCampaign: ChannelCampaignRow = {
+  id: CC_ID,
+  channel: "FACEBOOK",
+  master_campaign_id: MASTER_ID,
+  external_campaign_id: null,
+};
 const existingRow = {
   id: ROW_ID,
   tenant_id: "tenant-A",
@@ -98,7 +109,7 @@ const existingRow = {
 };
 
 interface World {
-  channelCampaign: typeof channelCampaign | null;
+  channelCampaign: ChannelCampaignRow | null;
   master: { id: string; currency: string } | null;
   existing: unknown;
   row: typeof existingRow | null;
@@ -216,7 +227,7 @@ describe("addManualMetricAction", () => {
     expect(calls.filter((c) => c.table === "prompter_master_campaigns").every((c) => c.op === "select")).toBe(true);
   });
 
-  it.each(["viewer", "finance", "support", "member", ""])("role %s is refused before any database access", async (role) => {
+  it.each(["apoteker", "kasir", "admin_gudang", "hr", ""])("role %s is refused before any database access", async (role) => {
     session.current = { ...session.current, role };
     const r = await addManualMetricAction(prev, form(addFields));
     expect(r.error).toMatch(/tidak memiliki izin/);
@@ -356,8 +367,8 @@ describe("updateManualMetricAction", () => {
     expect(calls.some((c) => c.op === "update")).toBe(false);
   });
 
-  it("viewer is refused, invalid values are refused, malformed ids are refused — all without database access", async () => {
-    session.current = { ...session.current, role: "viewer" };
+  it("a non-writer role is refused, invalid values are refused, malformed ids are refused — all without database access", async () => {
+    session.current = { ...session.current, role: "apoteker" };
     expect((await updateManualMetricAction(prev, form(editFields))).error).toMatch(/izin/);
     session.current = { ...session.current, role: "owner" };
     expect((await updateManualMetricAction(prev, form({ ...editFields, spend: "-5" }))).error).not.toBeNull();
@@ -394,8 +405,8 @@ describe("deleteManualMetricAction", () => {
     expect((await deleteManualMetricAction(prev, form({ id: ROW_ID }))).error).toBeNull();
   });
 
-  it("refuses viewers, other tenants, and a failed audit write", async () => {
-    session.current = { ...session.current, role: "viewer" };
+  it("refuses non-writer roles, other tenants, and a failed audit write", async () => {
+    session.current = { ...session.current, role: "apoteker" };
     expect((await deleteManualMetricAction(prev, form({ id: ROW_ID }))).error).toMatch(/izin/);
     expect(calls).toHaveLength(0);
 
