@@ -1,4 +1,10 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import {
+  makeAdminStorage,
+  makePreflightFixtures,
+  preflightTable,
+  type PreflightFixtures,
+} from "../helpers/meta-preflight-fixtures";
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
@@ -15,6 +21,13 @@ vi.mock("@/lib/campaigns/external-budget-guard", async (importOriginal) => {
     isBudgetWritePlatformEnabled: () => true,
     evaluateExternalBudgetWrite: () => ({ allowed: true as const }),
   };
+});
+// PR #36: the BRAND_AWARENESS contract is flipped to verified here so the
+// launch flow can be exercised past the Meta preflight. The shipped contract
+// is unverified (fail closed) — see meta-launch-preflight.test.ts.
+vi.mock("@/lib/campaigns/meta-objective-contracts", async (importOriginal) => {
+  const helpers = await import("../helpers/meta-preflight-fixtures");
+  return helpers.verifiedContracts(importOriginal as () => Promise<typeof import("@/lib/campaigns/meta-objective-contracts")>);
 });
 vi.mock("@/services/automation-settings", () => ({ readEmergencyStopStrict: vi.fn(async () => false) }));
 
@@ -93,7 +106,10 @@ function buildHarness(
       id: "mc1",
       status: "SCHEDULED",
       name: "Promo Akhir Tahun",
-      objective: "INCREASE_SALES",
+      objective: "BRAND_AWARENESS",
+      product_id: "p1",
+      target_country: "Indonesia",
+      selected_media_id: null,
       currency: "IDR",
       daily_budget: 100000,
       total_budget: null,
@@ -171,6 +187,8 @@ function buildHarness(
     if (table === "prompter_audit_logs") {
       return { insert: auditInsert };
     }
+    const preflight = preflightTable(table, fx);
+    if (preflight) return preflight;
     throw new Error(`Unexpected table on regular client: ${table}`);
   });
 
@@ -184,11 +202,21 @@ function buildHarness(
   return { regularFrom, adminFrom, claimUpdate, auditInsert, connectedAccountSelects };
 }
 
+let fx: PreflightFixtures;
+beforeEach(() => {
+  fx = makePreflightFixtures();
+  vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://proj.supabase.co");
+  vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.linoe.id");
+  vi.stubEnv("META_REDIRECT_URI", "");
+});
+
 let harness: Harness;
 let metricsGte: ReturnType<typeof vi.fn> | null = null;
 
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn(async () => ({ from: harness.regularFrom })) }));
-vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: vi.fn(() => ({ from: harness.adminFrom })) }));
+vi.mock("@/lib/supabase/admin", () => ({
+  createAdminClient: vi.fn(() => ({ from: harness.adminFrom, storage: makeAdminStorage(fx) })),
+}));
 
 import { launchChannelCampaignAction } from "@/features/campaigns/launch-actions";
 
@@ -203,6 +231,7 @@ function expectNoSideEffects(h: Harness) {
 describe("launchChannelCampaignAction — Track B pageId threading", () => {
   beforeEach(() => {
     requireSessionContextMock.mockClear();
+    connectorMock.createCampaign.mockClear();
     connectorMock.createCreative.mockClear();
   });
 
@@ -219,7 +248,7 @@ describe("launchChannelCampaignAction — Track B pageId threading", () => {
     );
   });
 
-  it("passes pageId: undefined (not null, not a fabricated value) when no Page has been selected yet — backward compatible with pre-Track-B behavior", async () => {
+  it("PR #36: with no Page selected the Meta launch is rejected BEFORE the claim and no other Page is picked", async () => {
     harness = buildHarness({
       connectedAccount: {
         data: { id: "acct1", external_account_id: "act_123", status: "CONNECTED", selected_page_id: null },
@@ -229,12 +258,11 @@ describe("launchChannelCampaignAction — Track B pageId threading", () => {
 
     const result = await launchChannelCampaignAction("cc1");
 
-    expect(result.error).toBeNull();
-    expect(connectorMock.createCreative).toHaveBeenCalledWith(
-      "access-token-abc",
-      "act_123",
-      expect.objectContaining({ pageId: undefined }),
-    );
+    expect(result.error).toMatch(/Facebook Page/);
+    expect(harness.claimUpdate).not.toHaveBeenCalled();
+    expect(harness.auditInsert).not.toHaveBeenCalled();
+    expect(connectorMock.createCampaign).not.toHaveBeenCalled();
+    expect(connectorMock.createCreative).not.toHaveBeenCalled();
   });
 });
 
@@ -344,17 +372,54 @@ describe("launchChannelCampaignAction — schema without Track B columns / faile
     expectNothingHappened(harness);
   });
 
-  it("still reaches the existing 'no Page selected' behaviour when the column is readable and null", async () => {
+  it("PR #36: a readable but null selected_page_id is now rejected before the claim (no Meta call)", async () => {
     harness = buildHarness({ pageRead: { data: { selected_page_id: null }, error: null } });
 
     const result = await launchChannelCampaignAction("cc1");
 
+    expect(result.error).toMatch(/Facebook Page/);
+    expect(harness.claimUpdate).not.toHaveBeenCalled();
+    expect(connectorMock.createCampaign).not.toHaveBeenCalled();
+    expect(connectorMock.createCreative).not.toHaveBeenCalled();
+  });
+});
+
+describe("launchChannelCampaignAction — PR #36 TikTok/X keep their existing flow", () => {
+  beforeEach(() => {
+    connectorMock.createCampaign.mockClear();
+    connectorMock.createAdSet.mockClear();
+    connectorMock.createCreative.mockClear();
+  });
+
+  it.each([
+    ["TIKTOK", "CONVERSIONS"],
+    ["X", "WEBSITE_CONVERSIONS"],
+  ])("16. %s: same objective mapping, ID targeting, no Meta preflight reads", async (channel, objective) => {
+    harness = buildHarness({
+      channel,
+      rows: [{ id: "cc1", channel, budget_percentage: 100 }],
+      master: { objective: "INCREASE_SALES", product_id: null, target_country: null },
+    });
+
+    const result = await launchChannelCampaignAction("cc1");
+
     expect(result.error).toBeNull();
-    expect(connectorMock.createCreative).toHaveBeenCalledWith(
+    expect(connectorMock.createCampaign).toHaveBeenCalledWith(
       "access-token-abc",
       "act_123",
-      expect.objectContaining({ pageId: undefined }),
+      expect.objectContaining({ objective }),
     );
+    expect(connectorMock.createAdSet).toHaveBeenCalledWith(
+      "access-token-abc",
+      "act_123",
+      expect.objectContaining({ targetingCountries: ["ID"] }),
+    );
+    const adSetInput = (connectorMock.createAdSet.mock.calls[0] as unknown[])[2] as Record<string, unknown>;
+    expect(adSetInput).not.toHaveProperty("optimizationGoal");
+    const creativeInput = (connectorMock.createCreative.mock.calls[0] as unknown[])[2] as Record<string, unknown>;
+    expect(creativeInput).not.toHaveProperty("linkUrl");
+    expect(creativeInput).not.toHaveProperty("imageUrl");
+    expect(fx.reads).toEqual([]); // no approval / product / brand / media read for non-Meta
   });
 });
 

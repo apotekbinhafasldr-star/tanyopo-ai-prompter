@@ -65,6 +65,14 @@ export function buildLaunchHarness(options: LaunchHarnessOptions = {}) {
         };
       case "prompter_master_campaigns":
         return { select: () => ({ eq: () => ({ eq: () => ({ single: masterSingle }) }) }) };
+      case "prompter_approvals": {
+        // PR #36: the Meta launch reads the master's latest CAMPAIGN_LAUNCH approval.
+        const approved = { data: [{ status: "APPROVED", created_at: "2026-10-01T00:00:00Z" }], error: null };
+        const builder: Record<string, unknown> = {};
+        for (const method of ["select", "eq", "order", "limit"]) builder[method] = () => builder;
+        builder.then = (resolve: (value: typeof approved) => unknown) => resolve(approved);
+        return builder;
+      }
       case "prompter_budget_policies":
         return { select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: null }) }) }) };
       case "prompter_marketing_metrics":
@@ -108,12 +116,16 @@ export interface ApprovalHarnessOptions {
   channel?: string;
   suggestedDailyBudget?: number | null;
   settings?: Result | "throw";
+  /** What the confirmed PAUSED write answers (default: exactly one row). */
+  pauseUpdate?: "ok" | "zero" | "two" | "error" | "throw";
 }
 
 export function buildApprovalHarness(options: ApprovalHarnessOptions) {
   const touched: string[] = [];
   const approvalUpdates: Record<string, unknown>[] = [];
   const channelUpdates: Record<string, unknown>[] = [];
+  /** The .eq() filters of each channel UPDATE, in call order. */
+  const channelUpdateFilters: [string, unknown][][] = [];
   const auditInsert = vi.fn(async (..._args: unknown[]) => ({ error: null }));
   const adminFrom = vi.fn((table: string) => {
     touched.push(`admin:${table}`);
@@ -144,7 +156,15 @@ export function buildApprovalHarness(options: ApprovalHarnessOptions) {
           select: () => ({ eq: () => ({ eq: () => ({ single: async () => ({ data: approvalRow, error: null }) }) }) }),
           update: (payload: Record<string, unknown>) => {
             approvalUpdates.push(payload);
-            return { eq: async () => ({ error: null }) };
+            // Chainable like PostgREST: .eq(...).eq(...).select("id") resolves to the
+            // decided row (the atomic PENDING claim, H1); awaiting .eq(...) directly
+            // (the later `reason` update) resolves to { error: null }.
+            const result = { data: [{ id: "ap1" }], error: null };
+            const builder: Record<string, unknown> = {};
+            builder.eq = () => builder;
+            builder.select = async () => result;
+            builder.then = (resolve: (value: typeof result) => unknown) => resolve(result);
+            return builder;
           },
         };
       case "prompter_automation_settings":
@@ -177,7 +197,22 @@ export function buildApprovalHarness(options: ApprovalHarnessOptions) {
           }),
           update: (payload: Record<string, unknown>) => {
             channelUpdates.push(payload);
-            return { eq: async () => ({ error: null }) };
+            const filters: [string, unknown][] = [];
+            channelUpdateFilters.push(filters);
+            const builder = {
+              eq: (column: string, value: unknown) => {
+                filters.push([column, value]);
+                return builder;
+              },
+              select: async () => {
+                if (options.pauseUpdate === "throw") throw new Error("db exploded: secret-row-value");
+                if (options.pauseUpdate === "error") return { data: null, error: { message: "db error secret-detail" } };
+                if (options.pauseUpdate === "zero") return { data: [], error: null };
+                if (options.pauseUpdate === "two") return { data: [{ id: "cc1" }, { id: "cc2" }], error: null };
+                return { data: [{ id: "cc1" }], error: null };
+              },
+            };
+            return builder;
           },
         };
       case "prompter_connected_accounts":
@@ -200,5 +235,5 @@ export function buildApprovalHarness(options: ApprovalHarnessOptions) {
     }
   });
 
-  return { from, adminFrom, touched, approvalUpdates, channelUpdates, auditInsert };
+  return { from, adminFrom, touched, approvalUpdates, channelUpdates, channelUpdateFilters, auditInsert };
 }
