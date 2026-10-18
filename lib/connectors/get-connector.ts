@@ -1,13 +1,15 @@
 import "server-only";
 
 import { MetaConnector } from "@/lib/connectors/meta-connector";
-import { TikTokConnector } from "@/lib/connectors/tiktok-connector";
+import { TikTokLoginKitConnector } from "@/lib/connectors/tiktok-login-kit-connector";
 import { XConnector } from "@/lib/connectors/x-connector";
 import type { PlatformConnector } from "@/lib/connectors/types";
 import type { ConnectorPlatform } from "@/types/database";
 
 const metaConnector = new MetaConnector();
-const tiktokConnector = new TikTokConnector();
+// TIKTOK is the Login Kit (identity) connector. The Marketing API connector
+// (tiktok-connector.ts) is intentionally unregistered/dormant.
+const tiktokConnector = new TikTokLoginKitConnector();
 const xConnector = new XConnector();
 
 /**
