@@ -11,11 +11,7 @@ import type { Metadata } from "next";
  */
 export const LEGAL = {
   operator: "PT Tanyopo Future Technology",
-  /**
-   * CANDIDATE address. It must be confirmed by the Founder before the pages
-   * are published; remove this field (and its use in LegalDocument) if the
-   * address should not be shown.
-   */
+  /** Public company location, approved by the Founder. */
   location: "Ladang Rimba, Aceh Selatan, Indonesia",
   contactEmail: "tanyopofuturetechnology@gmail.com",
   product: "LINOE by Tanyopo",

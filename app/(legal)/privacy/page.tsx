@@ -42,16 +42,30 @@ export default function PrivacyPage() {
         <LegalList
           items={[
             <>
-              <strong>Akun:</strong> email, nama, peran (misalnya Owner), dan pengenal workspace.
+              <strong>Akun:</strong> email, nama, peran (misalnya Owner), dan pengenal workspace. Akun login dikelola pada
+              infrastruktur autentikasi yang sama dengan produk Tanyopo lainnya (lihat bagian 6).
             </>,
             <>
               <strong>Sesi dan keamanan:</strong> sistem autentikasi mencatat sesi login, termasuk alamat IP dan
               informasi perangkat atau peramban. Penyedia hosting dan infrastruktur juga dapat mencatat alamat IP pada
-              log teknis mereka.
+              log teknis mereka. Saat pendaftaran, aplikasi LINOE memakai alamat IP hanya untuk membatasi jumlah
+              percobaan pendaftaran dari satu jaringan; pembatas itu berjalan di memori server dan alamat IP tidak
+              kami simpan pada tabel data LINOE.
+            </>,
+            <>
+              <strong>Sesi demo:</strong> mode demo memakai cookie sesi bertanda tangan dan mencatat pemakaian AI demo
+              per sesi (pengenal sesi dan jumlah pemakaian). Data demo berupa data simulasi dan tidak terhubung ke
+              akun, iklan, atau pembayaran nyata.
             </>,
             <>
               <strong>Data yang Anda masukkan:</strong> informasi produk, media atau gambar, brief, kampanye, konten,
-              dan pengaturan.
+              dan pengaturan, termasuk data bisnis dan pemasaran seperti produk, promosi, kampanye, dan
+              materi kreatif. Konten bebas yang Anda tulis dapat memuat data pribadi apa pun yang Anda masukkan.
+            </>,
+            <>
+              <strong>Data dari UMKMpro AI:</strong> bila akun Anda juga dipakai di UMKMpro AI, data produk, promosi,
+              dan konversi yang tersinkron dari UMKMpro AI dapat muncul di LINOE. Catatan konversi atau pengikut yang
+              Anda masukkan secara manual juga kami simpan.
             </>,
             <>
               <strong>Masukan dan hasil AI:</strong> teks yang Anda kirim ke fitur AI, hasilnya, dan catatan
@@ -62,11 +76,13 @@ export default function PrivacyPage() {
               yang diberikan, token akses (disimpan dalam bentuk terenkripsi), dan data kinerja iklan yang diizinkan.
             </>,
             <>
-              <strong>Langganan dan transaksi:</strong> status trial atau langganan, serta catatan transaksi bila ada.
+              <strong>Langganan, transaksi, dan invoice:</strong> status trial atau langganan, serta catatan transaksi dan
+              invoice bila ada.
             </>,
             <>
-              <strong>Catatan aktivitas:</strong> catatan tindakan penting di workspace, misalnya menghubungkan atau
-              memutus akun.
+              <strong>Catatan aktivitas dan keamanan:</strong> catatan tindakan penting di workspace, misalnya
+              menghubungkan atau memutus akun, persetujuan, dan kejadian keamanan. Catatan ini dapat memuat teks
+              konteks bebas.
             </>,
             <>
               <strong>Cookie:</strong> cookie yang diperlukan untuk menjaga sesi login dan alur keamanan penyambungan
@@ -114,6 +130,11 @@ export default function PrivacyPage() {
           fitur LINOE yang Anda jalankan.
         </p>
         <p>
+          Saat ini LINOE membantu Anda menyiapkan rencana pemasaran, materi kreatif, dan kampanye. Penayangan iklan
+          berbayar otomatis ke platform iklan belum tersedia, dan LINOE tidak membelanjakan anggaran iklan atas nama
+          Anda. Bila fitur itu nanti tersedia, kebijakan ini akan diperbarui sebelum dipakai.
+        </p>
+        <p>
           Saat koneksi diputus, kami menghapus token dari sistem kami dan mencoba mencabutnya di platform. Jika
           pencabutan gagal, cabut izin aplikasi dari pengaturan akun platform Anda. Data kinerja yang sudah diimpor
           sebelumnya tidak otomatis terhapus saat koneksi diputus. Lihat{" "}
@@ -145,8 +166,10 @@ export default function PrivacyPage() {
       <LegalSection id="penyimpanan" title="8. Penyimpanan data">
         <p>
           Kami belum menetapkan jangka retensi tetap. Saat ini data disimpan selama workspace aktif dan sampai ada
-          permintaan penghapusan yang kami proses. Setelah penghapusan, sebagian catatan (misalnya transaksi, jejak
-          keamanan, atau catatan pemakaian) dapat dipertahankan atau dianonimkan bila ada alasan teknis atau hukum. Bila
+          permintaan penghapusan yang kami proses. Setelah penghapusan, sebagian catatan (misalnya transaksi, invoice, jejak
+          keamanan, atau catatan pemakaian) dapat dipertahankan bila diperlukan untuk kewajiban hukum, keuangan, atau
+          keamanan yang sah. Kami tidak menjanjikan bahwa semua data dapat dihapus atau dianonimkan secara otomatis;
+          penghapusan dilakukan secara manual. Bila
           kami membuat cadangan, cadangan itu dapat masih memuat data yang sudah dihapus sampai cadangan tersebut
           diganti.
         </p>

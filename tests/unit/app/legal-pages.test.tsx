@@ -18,6 +18,7 @@ import { RegisterForm } from "@/features/auth/register-form";
 import { LegalLinks } from "@/features/legal/legal-links";
 import { LegalHeader } from "@/features/legal/legal-header";
 import LegalLayout from "@/app/(legal)/layout";
+import DemoLayout from "@/app/demo/layout";
 import { LEGAL } from "@/features/legal/legal-meta";
 import { PLAN_TIERS } from "@/lib/billing/plans";
 
@@ -181,14 +182,37 @@ describe("legal links", () => {
     }
   });
 
-  it("the registration form shows consent text and links, and adds NO consent checkbox", () => {
+  it("the registration form has an unchecked, required consent checkbox with Terms/Privacy links", () => {
     render(<RegisterForm />);
-    expect(screen.getByText(/Dengan mendaftar, Anda menyetujui/)).toBeInTheDocument();
+    const boxes = screen.getAllByRole("checkbox");
+    expect(boxes).toHaveLength(1);
+    const box = boxes[0] as HTMLInputElement;
+    expect(box.name).toBe("acceptLegal");
+    expect(box.checked).toBe(false);
+    expect(box.required).toBe(true);
+    // Label is associated with the checkbox and carries the legal links.
+    const label = document.querySelector('label[for="acceptLegal"]')!;
+    expect(label).not.toBeNull();
+    expect(label.querySelector('a[href="/terms"]')).not.toBeNull();
+    expect(label.querySelector('a[href="/privacy"]')).not.toBeNull();
     for (const href of ["/privacy", "/terms", "/data-deletion"]) {
       expect(document.querySelector(`a[href="${href}"]`)).not.toBeNull();
     }
-    expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
     expect(screen.getByRole("button", { name: /Daftar Gratis/ })).toBeInTheDocument();
+  });
+
+  it("the demo banner layout links to all three legal pages", () => {
+    const src = readFileSync("app/demo/layout.tsx", "utf8");
+    expect(src).toContain("LegalLinks");
+    const { container } = render(<DemoLayout>{null}</DemoLayout>);
+    for (const href of ["/privacy", "/terms", "/data-deletion"]) {
+      expect(container.querySelector(`a[href="${href}"]`)).not.toBeNull();
+    }
+  });
+
+  it("the landing footer links to all three legal pages", () => {
+    const src = readFileSync("app/(marketing)/layout.tsx", "utf8");
+    expect(src).toContain("<LegalLinks");
   });
 
   it("proxy.ts lists the legal paths as public (readable without login)", () => {
@@ -241,5 +265,77 @@ describe("legal layout (scoped header, landing untouched)", () => {
       expect(() => readFileSync(`app/(legal)/${name}/page.tsx`, "utf8")).not.toThrow();
       expect(() => readFileSync(`app/(marketing)/${name}/page.tsx`, "utf8")).toThrow();
     }
+  });
+});
+
+describe("remediation guards", () => {
+  const ALL = [PrivacyPage, TermsPage, DataDeletionPage];
+
+  it("publishes no effective date until the Founder confirms one", () => {
+    expect(LEGAL.effectiveDate).toBeUndefined();
+    for (const Page of ALL) {
+      const text = pageText(Page);
+      expect(text).not.toMatch(/Berlaku sejak/);
+      expect(text).not.toMatch(/(Januari|Februari|Maret|April|Mei|Juni|Juli|Agustus|September|Oktober|November|Desember)\s+\d{4}|\d{1,2}\/\d{1,2}\/\d{4}/i);
+    }
+  });
+
+  it("shows the Founder-approved location", () => {
+    expect(LEGAL.location).toBe("Ladang Rimba, Aceh Selatan, Indonesia");
+  });
+
+  it("no legal page promises a deletion SLA or an automatic deletion/anonymisation capability", () => {
+    for (const Page of ALL) {
+      const text = pageText(Page);
+      expect(text).not.toMatch(/dalam\s+\d+\s*(hari|jam|minggu)/i);
+      expect(text).not.toMatch(/otomatis\s+(dihapus|dianonimkan)/i);
+    }
+    expect(pageText(DataDeletionPage)).toMatch(/belum memiliki alat anonimisasi otomatis/);
+  });
+
+  it("states that automatic paid-ad publishing is not available and nothing is spent on the user's behalf", () => {
+    for (const Page of [PrivacyPage, TermsPage]) {
+      const text = pageText(Page);
+      expect(text).toMatch(/Penayangan iklan\s+berbayar otomatis belum tersedia/);
+      expect(text).toMatch(/tidak membelanjakan anggaran iklan atas nama\s+Anda/);
+    }
+  });
+
+  it("privacy covers demo data, UMKMpro-synced data, invoices and the real IP / rate-limit handling", () => {
+    const text = pageText(PrivacyPage);
+    expect(text).toMatch(/Sesi demo/);
+    expect(text).toMatch(/Data dari UMKMpro AI/);
+    expect(text).toMatch(/invoice/);
+    expect(text).toMatch(/membatasi jumlah\s+percobaan pendaftaran/);
+    expect(text).toMatch(/tidak\s+kami simpan pada tabel data LINOE/);
+  });
+
+  it("deletion scope is LINOE-only and never claims shared accounts or other products are deleted", () => {
+    const text = pageText(DataDeletionPage);
+    expect(text).toMatch(/tidak menghapus workspace atau data produk Tanyopo lain/);
+    expect(text).toMatch(/tidak otomatis menghapusnya/);
+  });
+
+  it("the paid-subscription cancellation line is conditional on paid plans existing", () => {
+    expect(pageText(TermsPage)).toMatch(/Bila langganan berbayar tersedia, pembatalan/);
+  });
+
+  it("landing copy no longer claims automatic campaign execution or publication", () => {
+    const files = [
+      "features/marketing/sections/ide-ke-hasil.tsx",
+      "features/marketing/sections/how-it-works.tsx",
+      "features/marketing/sections/ai-team.tsx",
+      "features/marketing/sections/trust.tsx",
+      "app/(marketing)/page.tsx",
+      "app/layout.tsx",
+    ];
+    for (const f of files) {
+      const src = readFileSync(f, "utf8");
+      expect(src, f).not.toMatch(/dieksekusi otomatis|Buat & Jalankan|"Luncurkan"|jalankan iklan di|menjalankan campaign|peluncuran campaign/);
+    }
+    const hero = readFileSync("features/marketing/sections/hero.tsx", "utf8");
+    expect(hero).toContain("menyiapkan campaign");
+    expect(hero).toContain("sebelum dijalankan");
+    expect(hero).not.toContain("sebelum tayang");
   });
 });

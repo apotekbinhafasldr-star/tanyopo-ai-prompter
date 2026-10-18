@@ -104,7 +104,7 @@ export function Hero() {
 
             <p className="max-w-md text-balance text-sm leading-relaxed text-white/70 sm:text-base">
               LINOE membantu Anda menganalisis produk, menyusun strategi, membuat konten,
-              menjalankan campaign, memantau hasil, dan mengoptimasi pertumbuhan — semua dengan
+              menyiapkan campaign, memantau hasil, dan mengoptimasi pertumbuhan — semua dengan
               AI dalam satu platform.
             </p>
 
@@ -133,7 +133,7 @@ export function Hero() {
             </div>
 
             <p className="text-xs text-white/50">
-              Tidak perlu kartu kredit · Anda menyetujui setiap campaign sebelum tayang
+              Tidak perlu kartu kredit · Anda menyetujui setiap campaign sebelum dijalankan
             </p>
           </div>
 

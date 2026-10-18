@@ -34,11 +34,11 @@ export const metadata: Metadata = {
     template: "%s",
   },
   description:
-    "LINOE membantu Anda menganalisis produk, menyusun strategi, membuat konten, menjalankan campaign, memantau hasil, dan mengoptimasi pertumbuhan — semua dengan AI dalam satu platform.",
+    "LINOE membantu Anda menganalisis produk, menyusun strategi, membuat konten, menyiapkan campaign, memantau hasil, dan mengoptimasi pertumbuhan — semua dengan AI dalam satu platform.",
   openGraph: {
     title: "LINOE — AI Marketing & Growth Platform by Tanyopo",
     description:
-      "LINOE membantu Anda menganalisis produk, menyusun strategi, membuat konten, menjalankan campaign, memantau hasil, dan mengoptimasi pertumbuhan — semua dengan AI dalam satu platform.",
+      "LINOE membantu Anda menganalisis produk, menyusun strategi, membuat konten, menyiapkan campaign, memantau hasil, dan mengoptimasi pertumbuhan — semua dengan AI dalam satu platform.",
     siteName: "LINOE",
     locale: "id_ID",
     type: "website",
@@ -47,7 +47,7 @@ export const metadata: Metadata = {
     card: "summary",
     title: "LINOE — AI Marketing & Growth Platform by Tanyopo",
     description:
-      "LINOE membantu Anda menganalisis produk, menyusun strategi, membuat konten, menjalankan campaign, memantau hasil, dan mengoptimasi pertumbuhan — semua dengan AI dalam satu platform.",
+      "LINOE membantu Anda menganalisis produk, menyusun strategi, membuat konten, menyiapkan campaign, memantau hasil, dan mengoptimasi pertumbuhan — semua dengan AI dalam satu platform.",
   },
 };
 

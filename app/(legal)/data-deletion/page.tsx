@@ -66,15 +66,20 @@ export default function DataDeletionPage() {
         <LegalList
           items={[
             <>
-              <strong>Dapat dihapus:</strong> produk, media, kampanye, konten, SEO, analitik, pengaturan, dan koneksi
-              platform beserta tokennya.
+              <strong>Dapat dihapus:</strong> data LINOE di workspace Anda, yaitu produk, media, kampanye, konten,
+              SEO, analitik, pengaturan, dan koneksi platform beserta tokennya. Penghapusan dilakukan per data LINOE
+              dan tidak menghapus workspace atau data produk Tanyopo lain (misalnya UMKMpro AI) yang memakai akun yang
+              sama.
             </>,
             <>
-              <strong>Dapat dianonimkan:</strong> pengenal pribadi pada catatan aktivitas dan catatan pemakaian AI.
+              <strong>Dapat dihapus atau dianonimkan secara manual bila memungkinkan:</strong> pengenal pribadi pada
+              catatan aktivitas dan catatan pemakaian AI. Kami belum memiliki alat anonimisasi otomatis, dan kolom teks
+              bebas (misalnya konteks catatan aktivitas atau masukan AI) perlu ditinjau satu per satu sehingga tidak
+              semuanya dapat dijamin dapat dianonimkan.
             </>,
             <>
-              <strong>Dapat dipertahankan:</strong> catatan transaksi dan penagihan bila ada, serta catatan yang wajib
-              disimpan menurut hukum. Alasannya kami jelaskan dalam jawaban atas permintaan Anda.
+              <strong>Dapat dipertahankan:</strong> catatan transaksi, invoice, dan penagihan bila ada, catatan
+              keamanan, serta catatan yang diperlukan untuk kewajiban hukum, keuangan, atau keamanan yang sah. Alasannya kami jelaskan dalam jawaban atas permintaan Anda.
             </>,
             <>
               <strong>Akun login bersama:</strong> akun login (email dan profil dasar) dipakai bersama oleh produk

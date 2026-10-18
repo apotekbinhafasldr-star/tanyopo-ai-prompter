@@ -50,8 +50,10 @@ export default function TermsPage() {
       <LegalSection id="layanan" title="2. Layanan">
         <p>
           LINOE adalah alat bantu pemasaran berbasis AI untuk membuat brief, konten, perencanaan kampanye, SEO, dan
-          analitik, serta menghubungkan akun platform iklan atas izin Anda. Fitur dapat berubah, dibatasi, atau
-          dinonaktifkan, termasuk batas anggaran dan fitur peluncuran iklan.
+          analitik, serta menghubungkan akun platform iklan atas izin Anda. Saat ini LINOE membantu Anda menyiapkan
+          rencana pemasaran, materi kreatif, dan kampanye. Penayangan iklan berbayar otomatis belum tersedia, dan LINOE
+          tidak membelanjakan anggaran iklan atas nama Anda. Fitur dapat berubah, dibatasi, atau dinonaktifkan,
+          termasuk batas anggaran dan fitur peluncuran iklan.
         </p>
       </LegalSection>
 
@@ -89,7 +91,10 @@ export default function TermsPage() {
               pembayaran riil melalui LINOE. Ketentuan pembayaran akan diperbarui sebelum pembayaran riil diaktifkan.
             </>,
             <>Paket dan harga ditampilkan pada halaman Harga dan di dalam aplikasi, serta dapat berubah.</>,
-            <>Pembatalan langganan menghentikan perpanjangan, dan akses berlaku sampai akhir periode berjalan.</>,
+            <>
+              Bila langganan berbayar tersedia, pembatalan menghentikan perpanjangan, dan akses berlaku sampai akhir
+              periode berjalan.
+            </>,
             <>
               Kebijakan pembatalan dan pengembalian dana ditetapkan terpisah dan diumumkan sebelum berlaku bagi Anda.
               Sampai diumumkan, Syarat ini tidak menjanjikan pengembalian dana.
@@ -101,7 +106,7 @@ export default function TermsPage() {
       <LegalSection id="iklan" title="5. Iklan dan platform pihak ketiga">
         <p>
           Anda memberi izin kepada LINOE untuk bertindak atas akun Meta, TikTok, atau X yang Anda hubungkan, sebatas
-          izin yang Anda berikan dan fitur yang Anda jalankan. Biaya iklan ditagih platform kepada Anda. Anda
+          izin yang Anda berikan dan fitur yang tersedia dan Anda jalankan. Biaya iklan ditagih platform kepada Anda. Anda
           bertanggung jawab atas anggaran, kebijakan platform, dan persetujuan atas setiap kampanye. Kami tidak
           menjamin hasil iklan (jangkauan, penjualan, konversi). Platform dapat berubah, membatasi, atau menolak akun
           atau iklan tanpa tanggung jawab kami. Hanya Owner yang dapat menghubungkan dan memutus koneksi.

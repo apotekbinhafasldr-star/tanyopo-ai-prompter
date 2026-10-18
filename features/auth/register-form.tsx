@@ -88,6 +88,27 @@ export function RegisterForm() {
             <PasswordInput id="password" name="password" autoComplete="new-password" minLength={8} required />
             <p className="text-xs text-muted-foreground">Minimal 8 karakter.</p>
           </div>
+          <div className="flex items-start gap-2.5">
+            <input
+              id="acceptLegal"
+              name="acceptLegal"
+              type="checkbox"
+              required
+              defaultChecked={false}
+              className="mt-0.5 size-4 shrink-0 rounded border-border accent-[var(--color-brand,currentColor)]"
+            />
+            <Label htmlFor="acceptLegal" className="text-xs font-normal leading-relaxed text-muted-foreground">
+              Saya telah membaca dan menyetujui{" "}
+              <Link href="/terms" target="_blank" className="font-medium text-foreground hover:underline">
+                Syarat &amp; Ketentuan
+              </Link>{" "}
+              dan{" "}
+              <Link href="/privacy" target="_blank" className="font-medium text-foreground hover:underline">
+                Kebijakan Privasi
+              </Link>
+              .
+            </Label>
+          </div>
           {state.error ? (
             <p role="alert" className="text-sm text-danger">
               {state.error}
@@ -97,17 +118,6 @@ export function RegisterForm() {
             Daftar Gratis
           </Button>
         </form>
-        <p className="mt-6 text-center text-xs text-muted-foreground">
-          Dengan mendaftar, Anda menyetujui{" "}
-          <Link href="/terms" className="font-medium hover:text-foreground hover:underline">
-            Syarat &amp; Ketentuan
-          </Link>{" "}
-          dan{" "}
-          <Link href="/privacy" className="font-medium hover:text-foreground hover:underline">
-            Kebijakan Privasi
-          </Link>
-          .
-        </p>
         <LegalLinks className="mt-2 text-center text-xs text-muted-foreground [&_ul]:justify-center" />
         <p className="mt-4 text-center text-sm text-muted-foreground">
           Sudah punya akun?{" "}
