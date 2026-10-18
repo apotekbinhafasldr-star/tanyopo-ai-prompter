@@ -4,11 +4,24 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { requireDemoSession } from "@/lib/demo/is-demo-request";
-import { DEMO_METRICS, DEMO_PRODUCTS, demoProfit, demoRoas } from "@/lib/demo/dataset";
+import { DEMO_CAMPAIGN, DEMO_METRICS, DEMO_PRODUCTS, DEMO_VERDICT_SCENARIOS, demoProfit, demoRoas } from "@/lib/demo/dataset";
+import { evaluateAdPerformance } from "@/lib/ad-performance-verdict";
+import { AdVerdictCard, AdVerdictDisclaimer } from "@/features/demo/ad-verdict-card";
 
 export default async function DemoAnalyticsPage() {
   await requireDemoSession();
   const product = DEMO_PRODUCTS[0];
+  const verdictFor = (m: { adSpend: number; impressions: number; clicks: number; conversions: number; revenue: number }, days: number) =>
+    evaluateAdPerformance({
+      spend: m.adSpend,
+      impressions: m.impressions,
+      clicks: m.clicks,
+      conversions: m.conversions,
+      revenue: m.revenue,
+      hpp: product.hpp,
+      unitPrice: product.price,
+      daysObserved: days,
+    });
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 p-8">
@@ -53,6 +66,37 @@ export default async function DemoAnalyticsPage() {
           );
         })}
       </div>
+
+      <section aria-labelledby="verdict-heading" className="flex flex-col gap-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 id="verdict-heading" className="text-lg font-semibold tracking-tight text-foreground">
+            Ad Performance Verdict
+          </h2>
+          <Badge variant="outline">DATA SIMULASI / DEMO</Badge>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          LINOE membaca ROAS, CPA, CTR, dan break-even dari HPP produk, lalu memberi saran: lanjut uji, kandidat
+          pemenang, risiko stop-loss, atau kandidat scaling. Ini hanya saran untuk ditinjau, tidak ada iklan yang
+          diubah otomatis.
+        </p>
+        {DEMO_METRICS.map((metric) => (
+          <AdVerdictCard
+            key={`verdict-${metric.channel}`}
+            title={`${metric.channel} — ${DEMO_CAMPAIGN.name}`}
+            result={verdictFor({ ...metric, conversions: metric.orders }, DEMO_CAMPAIGN.durationDays)}
+          />
+        ))}
+        <p className="text-sm font-medium text-foreground">Contoh skenario simulasi lainnya</p>
+        {DEMO_VERDICT_SCENARIOS.map((scenario) => (
+          <AdVerdictCard
+            key={scenario.id}
+            title={scenario.title}
+            description={scenario.description}
+            result={verdictFor(scenario.metrics, scenario.daysObserved)}
+          />
+        ))}
+        <AdVerdictDisclaimer />
+      </section>
 
       <Card>
         <CardContent className="flex flex-col gap-2 p-5">
