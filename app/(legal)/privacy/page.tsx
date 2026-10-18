@@ -131,7 +131,7 @@ export default function PrivacyPage() {
         </p>
         <p>
           Saat ini LINOE membantu Anda menyiapkan rencana pemasaran, materi kreatif, dan kampanye. Penayangan iklan
-          berbayar otomatis ke platform iklan belum tersedia, dan LINOE tidak membelanjakan anggaran iklan atas nama
+          berbayar otomatis belum tersedia, dan LINOE tidak membelanjakan anggaran iklan atas nama
           Anda. Bila fitur itu nanti tersedia, kebijakan ini akan diperbarui sebelum dipakai.
         </p>
         <p>

@@ -34,7 +34,8 @@ describe("registerSchema", () => {
     expect(registerSchema.safeParse({ ...valid, acceptLegal: false }).success).toBe(false);
     expect(registerSchema.safeParse({ ...valid, acceptLegal: "on" }).success).toBe(false);
     expect(registerSchema.safeParse({ ...valid, acceptLegal: undefined }).success).toBe(false);
-    const { acceptLegal: _omit, ...without } = valid;
+    const without: Record<string, unknown> = { ...valid };
+    delete without.acceptLegal;
     expect(registerSchema.safeParse(without).success).toBe(false);
   });
 
