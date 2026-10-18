@@ -282,7 +282,7 @@ describe.skipIf(!pgEnabled)("C11 status transitions (H1)", () => {
     it("the legitimate release (FAILED -> SCHEDULED by the launch itself) still works", async () => {
       const tenant = randomUUID();
       const [ch] = await seedChannels(pool.admin, { tenant, master: randomUUID(), statuses: ["FAILED"] });
-      expect(interpretClaim(await pool.admin.exec(stmt.release(ch, tenant)))).toBe(true);
+      expect(interpretClaim(await pool.admin.exec(stmt.release(ch, tenant, IN_PROGRESS_NOTE)))).toBe(true);
       expect((await getRow(pool.admin, ch)).status).toBe("SCHEDULED");
     });
 

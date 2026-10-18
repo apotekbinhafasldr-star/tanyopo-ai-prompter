@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { closeAllSessions } from "./psql-session";
 import { resolvePgConfig } from "./pg-env";
 import {
+  IN_PROGRESS_NOTE,
   getRow,
   interpretClaim,
   openPool,
@@ -63,8 +64,8 @@ describe.skipIf(!pgEnabled)("C8 channel independence", () => {
     const ig = await seedRow(pool.admin, { tenant, master, channel: "INSTAGRAM" });
     await pool.admin.exec(stmt.claim(fb, tenant));
     await pool.admin.exec(stmt.claim(ig, tenant));
-    await pool.admin.exec(stmt.fail(fb, tenant, "Facebook gagal", "fb-camp"));
-    await pool.admin.exec(stmt.progress(ig, tenant, { status: "ACTIVE", error: null }));
+    await pool.admin.exec(stmt.fail(fb, tenant, "Facebook gagal", "fb-camp", IN_PROGRESS_NOTE));
+    await pool.admin.exec(stmt.progress(ig, tenant, { status: "ACTIVE", error: null }, IN_PROGRESS_NOTE));
     expect(await getRow(pool.admin, fb)).toMatchObject({ status: "FAILED", error: "Facebook gagal", external_campaign_id: "fb-camp" });
     expect(await getRow(pool.admin, ig)).toMatchObject({ status: "ACTIVE", error: null });
   });

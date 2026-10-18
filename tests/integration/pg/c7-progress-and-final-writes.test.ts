@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { closeAllSessions } from "./psql-session";
 import { resolvePgConfig } from "./pg-env";
 import {
+  IN_PROGRESS_NOTE,
   ALL_STATUSES,
   getRow,
   interpretClaim,
@@ -30,10 +31,10 @@ describe.skipIf(!pgEnabled)("C7 progress and final writes", () => {
       const tenant = randomUUID();
       const id = await seedRow(pool.admin, { tenant, status, error: "keep", externalId: null });
       const writes = [
-        stmt.progress(id, tenant, { external_campaign_id: "camp-1", error: "x" }),
-        stmt.progress(id, tenant, { status: "ACTIVE", error: null }),
-        stmt.fail(id, tenant, "boom", "camp-1"),
-        stmt.release(id, tenant),
+        stmt.progress(id, tenant, { external_campaign_id: "camp-1", error: "x" }, "keep"),
+        stmt.progress(id, tenant, { status: "ACTIVE", error: null }, "keep"),
+        stmt.fail(id, tenant, "boom", "camp-1", "keep"),
+        stmt.release(id, tenant, "keep"),
       ];
       for (const sql of writes) {
         const r = await exec(sql);
@@ -48,12 +49,12 @@ describe.skipIf(!pgEnabled)("C7 progress and final writes", () => {
     const tenant = randomUUID();
     const id = await seedRow(pool.admin, { tenant });
     expect(interpretClaim(await exec(stmt.claim(id, tenant)))).toBe(true);
-    expect(interpretClaim(await exec(stmt.progress(id, tenant, { external_campaign_id: "camp-1", error: "p1" })))).toBe(true);
+    expect(interpretClaim(await exec(stmt.progress(id, tenant, { external_campaign_id: "camp-1", error: "p1" }, IN_PROGRESS_NOTE)))).toBe(true);
 
     await exec(`update prompter_channel_campaigns set status = 'PAUSED' where id = '${id}';`);
 
-    expect(interpretClaim(await exec(stmt.progress(id, tenant, { error: "p2" })))).toBe(false);
-    expect(interpretClaim(await exec(stmt.progress(id, tenant, { status: "ACTIVE", error: null })))).toBe(false);
+    expect(interpretClaim(await exec(stmt.progress(id, tenant, { error: "p2" }, "p1")))).toBe(false);
+    expect(interpretClaim(await exec(stmt.progress(id, tenant, { status: "ACTIVE", error: null }, "p1")))).toBe(false);
     expect((await getRow(pool.admin, id)).status).toBe("PAUSED");
   });
 
@@ -61,12 +62,12 @@ describe.skipIf(!pgEnabled)("C7 progress and final writes", () => {
     const tenant = randomUUID();
     const id = await seedRow(pool.admin, { tenant });
     expect(interpretClaim(await exec(stmt.claim(id, tenant)))).toBe(true);
-    expect(interpretClaim(await exec(stmt.progress(id, tenant, { external_campaign_id: "camp-9", error: "step" })))).toBe(true);
-    expect(interpretClaim(await exec(stmt.progress(id, tenant, { status: "ACTIVE", error: null })))).toBe(true);
+    expect(interpretClaim(await exec(stmt.progress(id, tenant, { external_campaign_id: "camp-9", error: "step" }, IN_PROGRESS_NOTE)))).toBe(true);
+    expect(interpretClaim(await exec(stmt.progress(id, tenant, { status: "ACTIVE", error: null }, "step")))).toBe(true);
     expect(await getRow(pool.admin, id)).toMatchObject({ status: "ACTIVE", error: null, external_campaign_id: "camp-9" });
 
-    expect(interpretClaim(await exec(stmt.progress(id, tenant, { error: "late" })))).toBe(false);
-    expect(interpretClaim(await exec(stmt.release(id, tenant)))).toBe(false);
+    expect(interpretClaim(await exec(stmt.progress(id, tenant, { error: "late" }, "step")))).toBe(false);
+    expect(interpretClaim(await exec(stmt.release(id, tenant, "step")))).toBe(false);
     expect((await getRow(pool.admin, id)).status).toBe("ACTIVE");
   });
 
@@ -74,7 +75,7 @@ describe.skipIf(!pgEnabled)("C7 progress and final writes", () => {
     const tenant = randomUUID();
     const id = await seedRow(pool.admin, { tenant });
     expect(interpretClaim(await exec(stmt.claim(id, tenant)))).toBe(true);
-    expect(interpretClaim(await exec(stmt.release(id, tenant)))).toBe(true);
+    expect(interpretClaim(await exec(stmt.release(id, tenant, IN_PROGRESS_NOTE)))).toBe(true);
     expect((await getRow(pool.admin, id)).status).toBe("SCHEDULED");
     expect(interpretClaim(await exec(stmt.claim(id, tenant)))).toBe(true);
     expect(interpretClaim(await exec(stmt.claim(id, tenant)))).toBe(false);
@@ -84,7 +85,7 @@ describe.skipIf(!pgEnabled)("C7 progress and final writes", () => {
     const tenant = randomUUID();
     const id = await seedRow(pool.admin, { tenant });
     await exec(stmt.claim(id, tenant));
-    expect(interpretClaim(await exec(stmt.progress(id, randomUUID(), { status: "ACTIVE", error: null })))).toBe(false);
+    expect(interpretClaim(await exec(stmt.progress(id, randomUUID(), { status: "ACTIVE", error: null }, IN_PROGRESS_NOTE)))).toBe(false);
     expect((await getRow(pool.admin, id)).status).toBe("FAILED");
   });
 });

@@ -28,9 +28,9 @@ describe("PG test SQL mirrors the application", () => {
     expect(IN_PROGRESS_NOTE).toBe(LAUNCH_IN_PROGRESS_NOTE);
   });
 
-  it("claim: status SCHEDULED -> FAILED(+note), filtered by id, tenant and status, exactly one row", () => {
+  it("claim: status SCHEDULED -> FAILED(+nonce note), filtered by id, tenant and status, exactly one row", () => {
     const body = functionBody(launch, "claimChannelCampaignLaunch");
-    expect(body).toContain('.update({ status: "FAILED", error: LAUNCH_IN_PROGRESS_NOTE })');
+    expect(body).toContain('.update({ status: "FAILED", error: claimNote })');
     expect(body).toContain('.eq("id", channelCampaignId)');
     expect(body).toContain('.eq("tenant_id", tenantId)');
     expect(body).toContain('.eq("status", "SCHEDULED")');
@@ -41,28 +41,53 @@ describe("PG test SQL mirrors the application", () => {
     expect(sql).toContain("where id = 'i' and tenant_id = 't' and status = 'SCHEDULED'");
   });
 
-  it("progress and final writes: only while the row is still FAILED, by id and tenant, exactly one row", () => {
-    const body = functionBody(launch, "persistLaunchProgress");
+  it("every post-claim write is ONE conditional update: id, tenant, status FAILED and the attempt's own note, exactly one row", () => {
+    const body = functionBody(launch, "writeFenced");
     expect(body).toContain('.eq("id", channelCampaignId)');
     expect(body).toContain('.eq("tenant_id", tenantId)');
     expect(body).toContain('.eq("status", "FAILED")');
-    expect(body).toContain("data.length !== 1");
-    expect(squash(stmt.progress("i", "t", { error: "e" }))).toContain("where id = 'i' and tenant_id = 't' and status = 'FAILED'");
-  });
-
-  it("failure write: only while FAILED; releasable branch returns to SCHEDULED with a cleared id", () => {
-    const body = functionBody(launch, "recordLaunchFailure");
-    expect(body).toContain('{ status: "SCHEDULED" as const, error: null, external_campaign_id: null }');
-    expect(body).toContain('.eq("status", "FAILED")');
-    expect(squash(stmt.release("i", "t"))).toContain("set status = 'SCHEDULED', error = null, external_campaign_id = null");
-    expect(squash(stmt.release("i", "t"))).toContain("and status = 'FAILED'");
-    expect(squash(stmt.fail("i", "t", "m", null))).toContain("and status = 'FAILED'");
-  });
-
-  it("the final ACTIVE write goes through the guarded progress helper", () => {
-    expect(squash(launch)).toContain(
-      'await persistLaunchProgress(supabase, session.tenantId, channelCampaignId, { status: "ACTIVE", error: null, });',
+    expect(body).toContain('.eq("error", fence.note)');
+    expect(body).toContain("data.length === 1");
+    expect(body).not.toContain("updated_at");
+    expect(squash(stmt.progress("i", "t", { error: "e" }, "n"))).toContain(
+      "where id = 'i' and tenant_id = 't' and status = 'FAILED' and error = 'n'",
     );
+    // progress and failure writes cannot bypass the fence
+    expect(functionBody(launch, "persistLaunchProgress")).toContain("writeFenced(");
+    expect(functionBody(launch, "recordLaunchFailure")).toContain("writeFenced(");
+  });
+
+  it("no update on prompter_channel_campaigns after the claim bypasses writeFenced", () => {
+    const afterClaim = launch.slice(launch.indexOf("const claim = await claimChannelCampaignLaunch"));
+    const updates = afterClaim.match(/\.update\(/g) ?? [];
+    // the claim helper, and the single update inside writeFenced
+    expect(updates.length).toBe(2);
+  });
+
+  it("failure write: fenced; releasable branch returns to SCHEDULED with a cleared id; other failures never null an existing id", () => {
+    const body = functionBody(launch, "recordLaunchFailure");
+    expect(body).toContain('{ status: "SCHEDULED", error: null, external_campaign_id: null }');
+    expect(body).toContain("...(outcome.externalCampaignId ? { external_campaign_id: outcome.externalCampaignId } : {})");
+    expect(squash(stmt.release("i", "t", "n"))).toContain("set status = 'SCHEDULED', error = null, external_campaign_id = null");
+    expect(squash(stmt.release("i", "t", "n"))).toContain("and status = 'FAILED' and error = 'n'");
+    expect(squash(stmt.fail("i", "t", "m", null, "n"))).toContain("and status = 'FAILED' and error = 'n'");
+    expect(squash(stmt.fail("i", "t", "m", null, "n"))).not.toContain("external_campaign_id");
+  });
+
+  it("the final ACTIVE write goes through the fenced progress helper", () => {
+    expect(squash(launch)).toContain(
+      'await persistLaunchProgress( supabase, session.tenantId, channelCampaignId, fence, { status: "ACTIVE", error: null }, "result", );',
+    );
+  });
+
+  it("no fixture statement uses updated_at", () => {
+    const all = [
+      stmt.claim("i", "t"),
+      stmt.progress("i", "t", { error: "e" }, "n"),
+      stmt.release("i", "t", "n"),
+      stmt.fail("i", "t", "m", "x", "n"),
+    ].join(" ");
+    expect(all).not.toMatch(/updated_at/i);
   });
 });
 
