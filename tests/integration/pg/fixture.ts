@@ -9,9 +9,14 @@ export const pgEnabled = pgTestEnabled();
  *
  * The SQL below is the statement-for-statement equivalent of the PostgREST
  * requests the application issues in features/campaigns/launch-actions.ts
- * (claimChannelCampaignLaunch, persistLaunchProgress, recordLaunchFailure).
- * tests/unit/integration/claim-sql-drift.test.ts fails when the application's
- * predicates and the ones used here stop matching.
+ * (claimChannelCampaignLaunch, writeFenced via persistLaunchProgress and
+ * recordLaunchFailure). tests/unit/integration/pg-claim-drift.test.ts fails
+ * when the application's predicates and the ones used here stop matching.
+ *
+ * H2 (claim fencing): after the claim, EVERY write is conditional on
+ * `status = 'FAILED'` AND `error = <the note the same attempt wrote last>`;
+ * the note carries the attempt's nonce. The equality semantics of that filter
+ * through a real PostgREST are demonstrated separately in the H2 PR.
  */
 
 /** Mirrors LAUNCH_IN_PROGRESS_NOTE (lib/campaigns/launch-reconciliation.ts); a unit test pins equality. */
@@ -35,26 +40,33 @@ export interface ProgressPatch {
 }
 
 export const stmt = {
-  /** claimChannelCampaignLaunch: SCHEDULED -> FAILED(+note), id AND tenant AND status. */
-  claim: (id: string, tenant: string) =>
-    `update ${TABLE} set status = 'FAILED', error = ${lit(IN_PROGRESS_NOTE)} where id = ${lit(id)} and tenant_id = ${lit(tenant)} and status = 'SCHEDULED' returning id;`,
+  /** claimChannelCampaignLaunch: SCHEDULED -> FAILED(+nonce note), id AND tenant AND status. */
+  claim: (id: string, tenant: string, note: string = IN_PROGRESS_NOTE) =>
+    `update ${TABLE} set status = 'FAILED', error = ${lit(note)} where id = ${lit(id)} and tenant_id = ${lit(tenant)} and status = 'SCHEDULED' returning id;`,
 
-  /** persistLaunchProgress: only while the row is still FAILED (claimed). */
-  progress: (id: string, tenant: string, patch: ProgressPatch) => {
+  /**
+   * writeFenced via persistLaunchProgress: only while the row is still FAILED
+   * AND still carries the exact note this attempt wrote last (`expected`).
+   */
+  progress: (id: string, tenant: string, patch: ProgressPatch, expected: string) => {
     const sets: string[] = [];
     if (patch.status !== undefined) sets.push(`status = ${lit(patch.status)}`);
     if (patch.external_campaign_id !== undefined) sets.push(`external_campaign_id = ${lit(patch.external_campaign_id)}`);
     if (patch.error !== undefined) sets.push(`error = ${lit(patch.error)}`);
-    return `update ${TABLE} set ${sets.join(", ")} where id = ${lit(id)} and tenant_id = ${lit(tenant)} and status = 'FAILED' returning id;`;
+    return `update ${TABLE} set ${sets.join(", ")} where id = ${lit(id)} and tenant_id = ${lit(tenant)} and status = 'FAILED' and error = ${lit(expected)} returning id;`;
   },
 
-  /** recordLaunchFailure, releasable branch: back to SCHEDULED only from FAILED. */
-  release: (id: string, tenant: string) =>
-    `update ${TABLE} set status = 'SCHEDULED', error = null, external_campaign_id = null where id = ${lit(id)} and tenant_id = ${lit(tenant)} and status = 'FAILED' returning id;`,
+  /** recordLaunchFailure, releasable branch: back to SCHEDULED only from FAILED + own note. */
+  release: (id: string, tenant: string, expected: string) =>
+    `update ${TABLE} set status = 'SCHEDULED', error = null, external_campaign_id = null where id = ${lit(id)} and tenant_id = ${lit(tenant)} and status = 'FAILED' and error = ${lit(expected)} returning id;`,
 
-  /** recordLaunchFailure, non-releasable branch: keep the claim, record the outcome. */
-  fail: (id: string, tenant: string, message: string, externalId: string | null) =>
-    `update ${TABLE} set status = 'FAILED', error = ${lit(message)}, external_campaign_id = ${lit(externalId)} where id = ${lit(id)} and tenant_id = ${lit(tenant)} and status = 'FAILED' returning id;`,
+  /**
+   * recordLaunchFailure, non-releasable branch: keep the claim, record the
+   * outcome. external_campaign_id is only written when this attempt received
+   * one: an existing id is never overwritten with null.
+   */
+  fail: (id: string, tenant: string, message: string, externalId: string | null, expected: string) =>
+    `update ${TABLE} set status = 'FAILED', error = ${lit(message)}${externalId ? `, external_campaign_id = ${lit(externalId)}` : ""} where id = ${lit(id)} and tenant_id = ${lit(tenant)} and status = 'FAILED' and error = ${lit(expected)} returning id;`,
 
   // ---- NEGATIVE CONTROLS: deliberately unsafe claims (never used by the app) ----
 
@@ -69,6 +81,18 @@ export const stmt = {
   /** Missing tenant predicate. */
   unsafeNoTenantClaim: (id: string) =>
     `update ${TABLE} set status = 'FAILED', error = ${lit(IN_PROGRESS_NOTE)} where id = ${lit(id)} and status = 'SCHEDULED' returning id;`,
+
+  /** The pre-H2 progress write: status-only predicate, no ownership. A stale launcher still matches. */
+  unsafeProgressStatusOnly: (id: string, tenant: string, patch: ProgressPatch) => {
+    const sets: string[] = [];
+    if (patch.external_campaign_id !== undefined) sets.push(`external_campaign_id = ${lit(patch.external_campaign_id)}`);
+    if (patch.error !== undefined) sets.push(`error = ${lit(patch.error)}`);
+    return `update ${TABLE} set ${sets.join(", ")} where id = ${lit(id)} and tenant_id = ${lit(tenant)} and status = 'FAILED' returning id;`;
+  },
+
+  /** The pre-H2 release: a stale launcher could un-claim a newer attempt. */
+  unsafeReleaseStatusOnly: (id: string, tenant: string) =>
+    `update ${TABLE} set status = 'SCHEDULED', error = null, external_campaign_id = null where id = ${lit(id)} and tenant_id = ${lit(tenant)} and status = 'FAILED' returning id;`,
 
   readStatus: (id: string) => `select status from ${TABLE} where id = ${lit(id)};`,
 };

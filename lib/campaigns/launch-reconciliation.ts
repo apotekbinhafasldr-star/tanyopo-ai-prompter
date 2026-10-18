@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { ConnectorApiError, ConnectorConfigError } from "@/lib/connectors/types";
 import { describeSafeError } from "@/lib/connectors/safe-error-log";
 
@@ -32,14 +33,42 @@ export interface CreatedPlatformObjects {
  *   failure, timeout, 5xx, a response without an id). Never retried.
  * - DATABASE: the platform call may have succeeded but we could not record
  *   its result.
+ * - NOT_ATTEMPTED (H2): this request never made the create call of the step,
+ *   because Emergency Stop was active/unreadable or the create INTENT could not
+ *   be stored. Never releasable: the row stays claimed (fail-closed).
+ * - FENCE_LOST (H2): a conditional write matched no row, i.e. this request no
+ *   longer owns the claim (another attempt or a manual change). It writes
+ *   nothing more and creates nothing more.
  */
-export type FailureCertainty = "NOT_CREATED" | "UNCERTAIN" | "DATABASE";
+export type FailureCertainty = "NOT_CREATED" | "UNCERTAIN" | "DATABASE" | "NOT_ATTEMPTED" | "FENCE_LOST";
 
-/** Our own database could not store (or confirm) a launch result. */
+/**
+ * Our own database could not store (or confirm) a launch write. `beforeCreate`
+ * is true for the create INTENT write: no create call was made for that step.
+ */
 export class LaunchDatabaseError extends Error {
-  constructor(public readonly what: string) {
+  constructor(
+    public readonly what: string,
+    public readonly beforeCreate = false,
+  ) {
     super(`launch database write failed: ${what}`);
     this.name = "LaunchDatabaseError";
+  }
+}
+
+/** A conditional (fenced) write matched no row: this request does not own the claim any more. */
+export class LaunchFenceLostError extends Error {
+  constructor(public readonly what: string) {
+    super(`launch claim ownership lost: ${what}`);
+    this.name = "LaunchFenceLostError";
+  }
+}
+
+/** Emergency Stop is active, or its state could not be read: no further create. */
+export class LaunchStopError extends Error {
+  constructor(public readonly reason: "ACTIVE" | "UNREADABLE") {
+    super(`launch stopped before create: emergency stop ${reason}`);
+    this.name = "LaunchStopError";
   }
 }
 
@@ -99,12 +128,100 @@ export function describeCreatedObjects(created: CreatedPlatformObjects): string 
 export const LAUNCH_IN_PROGRESS_NOTE =
   "Peluncuran sedang diproses. Jika status ini tidak berubah, periksa Meta Ads Manager sebelum meluncurkan ulang (rekonsiliasi manual).";
 
-/** Progress note written after each created object, so a crash still leaves the ids behind. */
-export function buildProgressNote(created: CreatedPlatformObjects): string {
+/** Matches the machine-readable ownership marker that ends every note written by a launch attempt. */
+const NONCE_MARKER_PATTERN = /\[LNE:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\]/;
+const NONCE_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** A fresh, unguessable id for ONE launch attempt (cryptographically secure). */
+export function newLaunchNonce(): string {
+  return randomUUID();
+}
+
+function requireNonce(nonce: string): string {
+  if (!NONCE_PATTERN.test(nonce)) throw new Error("invalid launch nonce");
+  return nonce;
+}
+
+/** `[LNE:<nonce>]`: the ownership marker. Every fenced write is conditional on the exact previous note. */
+export function nonceMarker(nonce: string): string {
+  return `[LNE:${requireNonce(nonce)}]`;
+}
+
+/** The nonce stored in a note, or null. */
+export function extractLaunchNonce(note: string | null | undefined): string | null {
+  return typeof note === "string" ? (NONCE_MARKER_PATTERN.exec(note)?.[1] ?? null) : null;
+}
+
+export type CorrelationObject = "campaign" | "adSet" | "creative" | "ad";
+const CORRELATION_LETTER: Readonly<Record<CorrelationObject, string>> = Object.freeze({
+  campaign: "C",
+  adSet: "S",
+  creative: "R",
+  ad: "A",
+});
+
+/** Short attempt tag: the first 8 hex digits of the nonce, upper case. */
+export function launchAttemptTag(nonce: string): string {
+  return requireNonce(nonce).slice(0, 8).toUpperCase();
+}
+
+/** `LNE-<attempt>-<C|S|R|A>`: stable per attempt and object type. Searchable in Ads Manager. */
+export function correlationToken(nonce: string, object: CorrelationObject): string {
+  return `LNE-${launchAttemptTag(nonce)}-${CORRELATION_LETTER[object]}`;
+}
+
+/**
+ * Conservative cap on a Meta object name. Meta's exact limits are NOT verified
+ * here, so the visible part is cut well below any plausible limit; the token
+ * is always kept whole at the end.
+ */
+export const MAX_OBJECT_NAME_LENGTH = 200;
+
+/** `<base>[ — <label>] [LNE-XXXXXXXX-C]`, the base shortened (by code points) so the token always fits. */
+export function withCorrelationToken(base: string, object: CorrelationObject, nonce: string, label?: string): string {
+  const tail = `${label ? ` — ${label}` : ""} [${correlationToken(nonce, object)}]`;
+  const room = Math.max(1, MAX_OBJECT_NAME_LENGTH - Array.from(tail).length);
+  const chars = Array.from(base);
+  const visible = chars.length > room ? `${chars.slice(0, Math.max(1, room - 1)).join("")}…` : base;
+  return `${visible}${tail}`;
+}
+
+/** The note written by the exclusive claim: the in-progress text plus the ownership marker. */
+export function buildClaimNote(nonce: string): string {
+  return `${LAUNCH_IN_PROGRESS_NOTE} ${nonceMarker(nonce)}`;
+}
+
+/**
+ * Progress note written after each created object, so a crash still leaves the
+ * ids behind. With a nonce it also carries the ownership marker.
+ */
+export function buildProgressNote(created: CreatedPlatformObjects, nonce?: string): string {
   const objects = describeCreatedObjects(created);
-  return objects
+  const base = objects
     ? `Peluncuran sedang diproses. Objek di Meta (semua PAUSED): ${objects}. Jika status ini tidak berubah, periksa Meta Ads Manager sebelum meluncurkan ulang (rekonsiliasi manual).`
     : LAUNCH_IN_PROGRESS_NOTE;
+  return nonce ? `${base} ${nonceMarker(nonce)}` : base;
+}
+
+export type CreateStep = Exclude<LaunchStep, "saveResult">;
+
+/**
+ * Write-ahead INTENT note, stored BEFORE the create call of a step. If the
+ * process dies after Meta created the object but before its id was stored, the
+ * row says exactly which step was in flight, which token to search for, and
+ * which ids are already known. It is evidence for a human, not a guarantee.
+ */
+export function buildIntentNote(step: CreateStep, created: CreatedPlatformObjects, nonce: string, token?: string): string {
+  const objects = describeCreatedObjects(created);
+  const label = STEP_LABEL[step];
+  return [
+    `Peluncuran sedang diproses. Langkah ${label} akan/sedang dikirim ke platform iklan${token ? ` (token ${token})` : ""}; hasilnya TIDAK PASTI sampai id tercatat.`,
+    objects ? `Objek di Meta (semua PAUSED): ${objects}.` : null,
+    `Jika status ini tidak berubah, periksa Meta Ads Manager${token ? ` (cari ${token})` : ""} sebelum meluncurkan ulang (rekonsiliasi manual).`,
+    nonceMarker(nonce),
+  ]
+    .filter((part): part is string => part !== null)
+    .join(" ");
 }
 
 function safeDetail(err: unknown): string {
@@ -113,6 +230,8 @@ function safeDetail(err: unknown): string {
     return err.message;
   }
   if (err instanceof LaunchDatabaseError) return `database: ${err.what}`;
+  if (err instanceof LaunchFenceLostError) return `kepemilikan claim: ${err.what}`;
+  if (err instanceof LaunchStopError) return err.reason === "ACTIVE" ? "Emergency Stop aktif" : "status Emergency Stop tidak dapat dipastikan";
   if (err instanceof LaunchUncertainResultError) return "respons Meta tanpa id";
 
   const summary = describeSafeError(err);
@@ -136,22 +255,43 @@ export interface LaunchFailure {
   releasable: boolean;
 }
 
+export interface LaunchAttemptContext {
+  nonce: string;
+  /** True when the object names carry the correlation token (Meta only). */
+  tokenInNames: boolean;
+}
+
 export function describeLaunchFailure(
   step: LaunchStep,
   err: unknown,
   created: CreatedPlatformObjects,
+  attempt?: LaunchAttemptContext,
 ): LaunchFailure {
   const certainty: FailureCertainty =
-    err instanceof LaunchDatabaseError
-      ? "DATABASE"
-      : err instanceof LaunchUncertainResultError
-        ? "UNCERTAIN"
-        : classifyCreateFailure(err);
+    err instanceof LaunchFenceLostError
+      ? "FENCE_LOST"
+      : err instanceof LaunchStopError
+        ? "NOT_ATTEMPTED"
+        : err instanceof LaunchDatabaseError
+          ? err.beforeCreate
+            ? "NOT_ATTEMPTED"
+            : "DATABASE"
+          : err instanceof LaunchUncertainResultError
+            ? "UNCERTAIN"
+            : classifyCreateFailure(err);
 
   const objects = describeCreatedObjects(created);
+  // Only a definitive rejection of the very first create call, with nothing
+  // created, may be released. NOT_ATTEMPTED and FENCE_LOST are never released.
   const releasable = step === "createCampaign" && certainty === "NOT_CREATED" && objects === null;
 
-  const parts: string[] = [`Peluncuran berhenti pada ${STEP_LABEL[step]} (${safeDetail(err)}).`];
+  const parts: string[] = [
+    certainty === "NOT_ATTEMPTED"
+      ? `Peluncuran dihentikan sebelum ${STEP_LABEL[step]} (${safeDetail(err)}).`
+      : certainty === "FENCE_LOST"
+        ? `Peluncuran dihentikan pada ${STEP_LABEL[step]} (${safeDetail(err)}).`
+        : `Peluncuran berhenti pada ${STEP_LABEL[step]} (${safeDetail(err)}).`,
+  ];
 
   if (objects) {
     parts.push(`Objek di Meta (semua PAUSED): ${objects}.`);
@@ -165,10 +305,21 @@ export function describeLaunchFailure(
     parts.push("Hasil di Meta tidak dapat disimpan ke database. Periksa Meta Ads Manager; tidak ada percobaan ulang otomatis.");
   } else if (certainty === "NOT_CREATED") {
     parts.push("Meta menolak permintaan ini, objek langkah ini tidak dibuat.");
+  } else if (certainty === "NOT_ATTEMPTED") {
+    parts.push("Permintaan ini tidak memanggil Meta untuk langkah ini. Tidak ada percobaan ulang otomatis dan tidak ada objek yang dihapus.");
+  } else {
+    parts.push(
+      "Claim atas baris ini sudah berpindah atau diubah (permintaan lain atau intervensi manual). Permintaan ini tidak menulis apa pun lagi dan tidak membuat objek berikutnya; periksa Meta Ads Manager.",
+    );
   }
 
-  if (!releasable) {
+  if (certainty !== "FENCE_LOST" && !releasable) {
     parts.push("Peluncuran ulang diblokir sampai direkonsiliasi manual.");
+  }
+
+  if (attempt) {
+    if (attempt.tokenInNames) parts.push(`Token pencarian di Meta: LNE-${launchAttemptTag(attempt.nonce)}-*.`);
+    parts.push(nonceMarker(attempt.nonce));
   }
 
   return { message: parts.join(" "), certainty, step, releasable };

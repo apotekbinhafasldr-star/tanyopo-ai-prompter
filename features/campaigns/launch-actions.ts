@@ -16,12 +16,21 @@ import {
 import { readEmergencyStopStrict } from "@/services/automation-settings";
 import { decryptToken } from "@/lib/crypto/token-cipher";
 import {
-  LAUNCH_IN_PROGRESS_NOTE,
   LaunchDatabaseError,
+  LaunchFenceLostError,
+  LaunchStopError,
+  buildClaimNote,
+  buildIntentNote,
   buildProgressNote,
+  correlationToken,
   describeCreatedObjects,
   describeLaunchFailure,
+  launchAttemptTag,
+  newLaunchNonce,
   requireCreatedId,
+  withCorrelationToken,
+  type CorrelationObject,
+  type CreateStep,
   type CreatedPlatformObjects,
   type LaunchStep,
 } from "@/lib/campaigns/launch-reconciliation";
@@ -541,7 +550,14 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
   // FAILED is deliberately the fail-closed holding state: if this request
   // dies mid-launch the row can never be launched again by accident, and the
   // note tells the operator to reconcile in Meta Ads Manager first.
-  const claim = await claimChannelCampaignLaunch(supabase, session.tenantId, channelCampaignId);
+  //
+  // H2-C: the claim also stamps a fresh, unguessable nonce into the row's
+  // `error` note. Every later write of this attempt is conditional on the
+  // EXACT note the attempt wrote last (see LaunchFence), so a stale worker, a
+  // second attempt or a manual change can never be overwritten by this one.
+  const nonce = newLaunchNonce();
+  const fence: LaunchFence = { nonce, note: buildClaimNote(nonce) };
+  const claim = await claimChannelCampaignLaunch(supabase, session.tenantId, channelCampaignId, fence.note);
   if (!claim.claimed) {
     return { error: claim.error };
   }
@@ -562,9 +578,40 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
   const created: CreatedPlatformObjects = {};
   let step: LaunchStep = "createCampaign";
 
+  // H2-A: Meta object names carry a short correlation token (attempt + object
+  // type) so an object whose id we never received can be found in Ads Manager.
+  // TikTok/X names are left exactly as before. The token is a human aid, not an
+  // idempotency key: Meta is NOT known to offer one.
+  const tokenInNames = metaPlan !== null;
+  const objectName = (object: CorrelationObject, label?: string): string =>
+    tokenInNames
+      ? withCorrelationToken(masterCampaign.name, object, nonce, label)
+      : label
+        ? `${masterCampaign.name} — ${label}`
+        : masterCampaign.name;
+  const tokenFor = (object: CorrelationObject): string | undefined => (tokenInNames ? correlationToken(nonce, object) : undefined);
+
+  /**
+   * Before EVERY create: (1) store the INTENT durably (fenced; no create if it
+   * cannot be stored), then (2) read Emergency Stop strictly, immediately
+   * before the external call. Anything but a confirmed `false` stops here.
+   */
+  const beforeCreate = async (createStep: CreateStep, object: CorrelationObject): Promise<void> => {
+    await persistLaunchProgress(
+      supabase,
+      session.tenantId,
+      channelCampaignId,
+      fence,
+      { error: buildIntentNote(createStep, created, nonce, tokenFor(object)) },
+      "intent",
+    );
+    await assertEmergencyStopClear(supabase, session.tenantId);
+  };
+
   try {
+    await beforeCreate("createCampaign", "campaign");
     const campaign = await connector.createCampaign(accessToken, adAccountId, {
-      name: masterCampaign.name,
+      name: objectName("campaign"),
       objective: metaPlan
         ? metaPlan.campaignObjective
         : legacyObjective(connectorPlatform as Exclude<ConnectorPlatform, "META">, masterCampaign.objective),
@@ -576,15 +623,20 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
     // Record the id at once. If this write fails we stop BEFORE the next
     // object: continuing would build more objects that we cannot trace.
     step = "saveResult";
-    await persistLaunchProgress(supabase, session.tenantId, channelCampaignId, {
-      external_campaign_id: campaignId,
-      error: buildProgressNote(created),
-    });
+    await persistLaunchProgress(
+      supabase,
+      session.tenantId,
+      channelCampaignId,
+      fence,
+      { external_campaign_id: campaignId, error: buildProgressNote(created, nonce) },
+      "result",
+    );
 
     step = "createAdSet";
+    await beforeCreate("createAdSet", "adSet");
     const adSet = await connector.createAdSet(accessToken, adAccountId, {
       campaignId,
-      name: `${masterCampaign.name} — Ad Set`,
+      name: objectName("adSet", "Ad Set"),
       dailyBudgetMinorUnits,
       // META: the master's validated target country and the preflight's
       // explicit optimization goal. TikTok/X keep their existing behaviour.
@@ -594,13 +646,19 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
     const adSetId = requireCreatedId(adSet, "createAdSet");
     created.adSetId = adSetId;
     step = "saveResult";
-    await persistLaunchProgress(supabase, session.tenantId, channelCampaignId, {
-      error: buildProgressNote(created),
-    });
+    await persistLaunchProgress(
+      supabase,
+      session.tenantId,
+      channelCampaignId,
+      fence,
+      { error: buildProgressNote(created, nonce) },
+      "result",
+    );
 
     step = "createCreative";
+    await beforeCreate("createCreative", "creative");
     const creative = await connector.createCreative(accessToken, adAccountId, {
-      name: `${masterCampaign.name} — Creative`,
+      name: objectName("creative", "Creative"),
       headline: proposal?.headline ?? masterCampaign.name,
       primaryText: proposal?.primary_text ?? "",
       cta: proposal?.cta ?? "Pelajari Lebih Lanjut",
@@ -616,13 +674,19 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
     const creativeId = requireCreatedId(creative, "createCreative");
     created.creativeId = creativeId;
     step = "saveResult";
-    await persistLaunchProgress(supabase, session.tenantId, channelCampaignId, {
-      error: buildProgressNote(created),
-    });
+    await persistLaunchProgress(
+      supabase,
+      session.tenantId,
+      channelCampaignId,
+      fence,
+      { error: buildProgressNote(created, nonce) },
+      "result",
+    );
 
     step = "createAd";
+    await beforeCreate("createAd", "ad");
     const ad = await connector.createAd(accessToken, adAccountId, {
-      name: `${masterCampaign.name} — Ad`,
+      name: objectName("ad", "Ad"),
       adSetId,
       creativeId,
     });
@@ -630,21 +694,29 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
 
     // Final write: only a CONFIRMED update to ACTIVE counts as success.
     step = "saveResult";
-    await persistLaunchProgress(supabase, session.tenantId, channelCampaignId, {
-      status: "ACTIVE",
-      error: null,
-    });
+    await persistLaunchProgress(
+      supabase,
+      session.tenantId,
+      channelCampaignId,
+      fence,
+      { status: "ACTIVE", error: null },
+      "result",
+    );
   } catch (err) {
-    const failure = describeLaunchFailure(step, err, created);
+    const failure = describeLaunchFailure(step, err, created, { nonce, tokenInNames });
 
     // Only a definitive rejection of the very first call (nothing exists on
     // the platform) returns the row to SCHEDULED. Every other failure stays
     // FAILED with the ids and a reconciliation note, which blocks a relaunch.
-    const recorded = await recordLaunchFailure(supabase, session.tenantId, channelCampaignId, {
-      releasable: failure.releasable,
-      message: failure.message,
-      externalCampaignId: created.campaignId ?? null,
-    });
+    // A request that no longer owns the claim writes NOTHING.
+    const ownershipLost = failure.certainty === "FENCE_LOST";
+    const recorded = ownershipLost
+      ? false
+      : await recordLaunchFailure(supabase, session.tenantId, channelCampaignId, fence, {
+          releasable: failure.releasable,
+          message: failure.message,
+          externalCampaignId: created.campaignId ?? null,
+        });
 
     await writeLaunchAudit(supabase, {
       tenant_id: session.tenantId,
@@ -659,6 +731,9 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
         certainty: failure.certainty,
         released_for_retry: failure.releasable && recorded,
         status_recorded: recorded,
+        ownership_lost: ownershipLost,
+        launch_attempt: launchAttemptTag(nonce),
+        ...(tokenInNames ? { correlation_token: `LNE-${launchAttemptTag(nonce)}-*` } : {}),
         ...(describeCreatedObjects(created) ? { created_objects: describeCreatedObjects(created) } : {}),
         ...budgetAuditContext,
       },
@@ -677,6 +752,8 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
     context: {
       platform: connectorPlatform,
       external_campaign_id: created.campaignId ?? null,
+      launch_attempt: launchAttemptTag(nonce),
+      ...(tokenInNames ? { correlation_token: `LNE-${launchAttemptTag(nonce)}-*` } : {}),
       // The final ACTIVE write clears the row's progress note, so the ids of
       // the ad set, creative and ad would otherwise be lost. Only ids the
       // platform actually returned are recorded (same format as the
@@ -696,20 +773,36 @@ type LaunchSupabase = Awaited<ReturnType<typeof createClient>>;
 type ClaimResult = { claimed: true } | { claimed: false; error: string };
 
 /**
+ * Ownership of the claim for ONE launch attempt. `note` is the exact `error`
+ * text this attempt wrote last; the next write is conditional on it, so the
+ * row's own text acts as a compare-and-swap token (it carries the nonce).
+ * Semantics of the PostgREST equality filter on this column are demonstrated
+ * against a real PostgREST + PostgreSQL in the H2 PR (special characters,
+ * 25-way races, stale writers).
+ */
+interface LaunchFence {
+  readonly nonce: string;
+  note: string;
+}
+
+type FencedPatch = Database["public"]["Tables"]["prompter_channel_campaigns"]["Update"];
+
+/**
  * The exclusive launch claim: a single conditional UPDATE, filtered by id,
  * tenant and `status = 'SCHEDULED'`, that changes the status in the same
- * statement. Exactly one row must come back; zero (someone else claimed it,
- * wrong tenant, not SCHEDULED) or an error means the caller stops and calls
- * no platform API.
+ * statement (and stamps the attempt's nonce note). Exactly one row must come
+ * back; zero (someone else claimed it, wrong tenant, not SCHEDULED) or an
+ * error means the caller stops and calls no platform API.
  */
 async function claimChannelCampaignLaunch(
   supabase: LaunchSupabase,
   tenantId: string,
   channelCampaignId: string,
+  claimNote: string,
 ): Promise<ClaimResult> {
   const { data, error } = await supabase
     .from("prompter_channel_campaigns")
-    .update({ status: "FAILED", error: LAUNCH_IN_PROGRESS_NOTE })
+    .update({ status: "FAILED", error: claimNote })
     .eq("id", channelCampaignId)
     .eq("tenant_id", tenantId)
     .eq("status", "SCHEDULED")
@@ -721,41 +814,22 @@ async function claimChannelCampaignLaunch(
   return { claimed: true };
 }
 
+type FencedWrite = "written" | "lost" | "error";
+
 /**
- * A progress write made while this request holds the claim. It must hit
- * exactly the claimed row (still FAILED + in progress); anything else is a
- * LaunchDatabaseError, which stops the launch before the next object.
+ * The ONLY way this attempt writes after the claim: one conditional UPDATE
+ * filtered by id AND tenant AND status = 'FAILED' AND error = <the note this
+ * attempt wrote last>. "written" means exactly one row changed; "lost" means
+ * no row matched (ownership gone); "error" means the database failed or the
+ * answer was ambiguous (the write may or may not have happened).
  */
-async function persistLaunchProgress(
+async function writeFenced(
   supabase: LaunchSupabase,
   tenantId: string,
   channelCampaignId: string,
-  patch: { status?: "ACTIVE"; external_campaign_id?: string; error: string | null },
-): Promise<void> {
-  const { data, error } = await supabase
-    .from("prompter_channel_campaigns")
-    .update(patch)
-    .eq("id", channelCampaignId)
-    .eq("tenant_id", tenantId)
-    .eq("status", "FAILED")
-    .select("id");
-
-  if (error || !data || data.length !== 1) {
-    throw new LaunchDatabaseError(patch.status === "ACTIVE" ? "status akhir" : "progres peluncuran");
-  }
-}
-
-/** Writes the failure outcome; returns whether the database confirmed it. */
-async function recordLaunchFailure(
-  supabase: LaunchSupabase,
-  tenantId: string,
-  channelCampaignId: string,
-  outcome: { releasable: boolean; message: string; externalCampaignId: string | null },
-): Promise<boolean> {
-  const patch = outcome.releasable
-    ? { status: "SCHEDULED" as const, error: null, external_campaign_id: null }
-    : { status: "FAILED" as const, error: outcome.message, external_campaign_id: outcome.externalCampaignId };
-
+  fence: LaunchFence,
+  patch: FencedPatch,
+): Promise<FencedWrite> {
   try {
     const { data, error } = await supabase
       .from("prompter_channel_campaigns")
@@ -763,12 +837,77 @@ async function recordLaunchFailure(
       .eq("id", channelCampaignId)
       .eq("tenant_id", tenantId)
       .eq("status", "FAILED")
+      .eq("error", fence.note)
       .select("id");
-    return !error && Array.isArray(data) && data.length === 1;
+    if (error || !Array.isArray(data)) return "error";
+    if (data.length === 1) {
+      if (typeof patch.error === "string") fence.note = patch.error;
+      return "written";
+    }
+    return data.length === 0 ? "lost" : "error";
   } catch {
-    // The row keeps the claim state (FAILED + in-progress note): fail closed.
-    return false;
+    return "error";
   }
+}
+
+/**
+ * A progress write made while this request holds the claim. It must hit
+ * exactly the claimed row with this attempt's note; anything else stops the
+ * launch before the next object: a LaunchFenceLostError when the row is no
+ * longer ours, a LaunchDatabaseError otherwise.
+ */
+async function persistLaunchProgress(
+  supabase: LaunchSupabase,
+  tenantId: string,
+  channelCampaignId: string,
+  fence: LaunchFence,
+  patch: { status?: "ACTIVE"; external_campaign_id?: string; error: string | null },
+  phase: "intent" | "result",
+): Promise<void> {
+  const outcome = await writeFenced(supabase, tenantId, channelCampaignId, fence, patch);
+  if (outcome === "written") return;
+  const what = phase === "intent" ? "niat pembuatan" : patch.status === "ACTIVE" ? "status akhir" : "progres peluncuran";
+  if (outcome === "lost") throw new LaunchFenceLostError(what);
+  throw new LaunchDatabaseError(what, phase === "intent");
+}
+
+/**
+ * Writes the failure outcome (fenced); returns whether the database confirmed
+ * it. An existing external id is never overwritten with null: it is only
+ * written when this attempt actually received one.
+ */
+async function recordLaunchFailure(
+  supabase: LaunchSupabase,
+  tenantId: string,
+  channelCampaignId: string,
+  fence: LaunchFence,
+  outcome: { releasable: boolean; message: string; externalCampaignId: string | null },
+): Promise<boolean> {
+  const patch: FencedPatch = outcome.releasable
+    ? { status: "SCHEDULED", error: null, external_campaign_id: null }
+    : {
+        status: "FAILED",
+        error: outcome.message,
+        ...(outcome.externalCampaignId ? { external_campaign_id: outcome.externalCampaignId } : {}),
+      };
+  // On any non-"written" result the row keeps whatever state it has: fail closed.
+  return (await writeFenced(supabase, tenantId, channelCampaignId, fence, patch)) === "written";
+}
+
+/**
+ * Fresh, STRICT Emergency Stop read immediately before an external create.
+ * Only a confirmed `false` lets the create proceed: `true`, `null` (read
+ * error), or anything unexpected stops the launch. No release, no retry.
+ */
+async function assertEmergencyStopClear(supabase: LaunchSupabase, tenantId: string): Promise<void> {
+  let state: unknown;
+  try {
+    state = await readEmergencyStopStrict(supabase, tenantId);
+  } catch {
+    state = null;
+  }
+  if (state === false) return;
+  throw new LaunchStopError(state === true ? "ACTIVE" : "UNREADABLE");
 }
 
 /** Audit rows are best-effort: a failed audit write never changes the launch outcome. */
