@@ -107,11 +107,11 @@ describe("manual ad metrics — no launch, approval, connector or budget capabil
     expect(src).not.toMatch(/emergency/i);
   });
 
-  it("the actions write only the manual table and the audit log, never upsert, never update campaign status", () => {
+  it("the actions write only the manual table (audit is a database trigger), never upsert, never update campaign status", () => {
     const src = code(read("features/campaigns/manual-metrics-actions.ts"));
     const tables = [...src.matchAll(/\.from\("([a-z_]+)"\)/g)].map((m) => m[1]);
     expect(new Set(tables)).toEqual(
-      new Set(["prompter_audit_logs", "prompter_channel_campaigns", "prompter_manual_ad_metrics", "prompter_master_campaigns"]),
+      new Set(["prompter_channel_campaigns", "prompter_manual_ad_metrics", "prompter_master_campaigns"]),
     );
     expect(src).not.toMatch(/\.upsert\(/);
     // prompter_channel_campaigns and prompter_master_campaigns are read-only here

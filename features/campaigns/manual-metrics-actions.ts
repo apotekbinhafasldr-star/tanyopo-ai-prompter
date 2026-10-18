@@ -1,6 +1,5 @@
 "use server";
 
-import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { requireSessionContext } from "@/services/session";
@@ -14,13 +13,12 @@ import {
   firstIssueMessage,
   manualMetricValuesSchema,
 } from "@/schemas/manual-ad-metrics";
-import type { Json } from "@/types/database";
 
 /**
  * Winning Ads Phase 2B — add / edit / delete manually typed ad metrics.
  *
  * Deliberately self-contained and narrow:
- *   - writes ONLY `prompter_manual_ad_metrics` and `prompter_audit_logs`;
+ *   - writes ONLY `prompter_manual_ad_metrics` (it reads channel and master campaigns);
  *   - never touches `prompter_marketing_metrics` (connector data), campaign or
  *     channel status, connectors, Budget Guard, the Approval Center or any
  *     launch/H2 code — a structural test pins these imports;
@@ -29,9 +27,13 @@ import type { Json } from "@/types/database";
  *
  * Authorization is layered: owner/marketing role here, tenant-scoped lookups
  * here, then the table's RLS + guard trigger (which still hold if a client
- * bypasses this file). Audit is written BEFORE the mutation and the action
- * fails closed if the audit row cannot be written, so no change exists
- * without a log entry.
+ * bypasses this file).
+ *
+ * Audit is NOT written here. A database trigger on the table writes the
+ * `prompter_audit_logs` row in the same transaction as the change, so a failed
+ * audit rolls the change back, a failed change leaves no audit row, and writes
+ * made straight through the database API are logged too. Writing audit rows
+ * from this file as well would duplicate them.
  */
 
 export interface ManualMetricsActionState {
@@ -41,8 +43,6 @@ export interface ManualMetricsActionState {
 
 const OK = (success: string): ManualMetricsActionState => ({ error: null, success });
 const FAIL = (error: string): ManualMetricsActionState => ({ error, success: null });
-
-const AUDIT_RESOURCE = "prompter_manual_ad_metrics";
 
 function text(formData: FormData, key: string): string | undefined {
   const value = formData.get(key);
@@ -72,50 +72,6 @@ async function authorize(): Promise<{ session: Session } | { error: string }> {
     return { error: "Anda tidak memiliki izin untuk mengubah metrik iklan manual." };
   }
   return { session };
-}
-type Supabase = Awaited<ReturnType<typeof createClient>>;
-
-/** Audit BEFORE the change. Returns false when the audit row could not be written (caller must stop). */
-async function writeAudit(
-  supabase: Supabase,
-  session: Session,
-  entry: {
-    action: string;
-    resourceId: string;
-    before?: Json | null;
-    after?: Json | null;
-    context: Record<string, Json>;
-  },
-): Promise<boolean> {
-  const { error } = await supabase.from("prompter_audit_logs").insert({
-    tenant_id: session.tenantId,
-    actor_user_id: session.userId,
-    action: entry.action,
-    resource_type: AUDIT_RESOURCE,
-    resource_id: entry.resourceId,
-    before_data: entry.before ?? null,
-    after_data: entry.after ?? null,
-    context: { source: "manual", verified_by_platform: false, ...entry.context },
-  });
-  return !error;
-}
-
-/** Best-effort marker that an audited intent did not complete. Never blocks the response. */
-async function writeFailureAudit(supabase: Supabase, session: Session, action: string, resourceId: string, code?: string | null) {
-  await supabase
-    .from("prompter_audit_logs")
-    .insert({
-      tenant_id: session.tenantId,
-      actor_user_id: session.userId,
-      action: `${action}_failed`,
-      resource_type: AUDIT_RESOURCE,
-      resource_id: resourceId,
-      context: { source: "manual", db_error_code: code ?? null },
-    })
-    .then(
-      () => undefined,
-      () => undefined,
-    );
 }
 
 export async function addManualMetricAction(
@@ -176,9 +132,7 @@ export async function addManualMetricAction(
   if (existingError) return FAIL(mapDbError(existingError));
   if (existing) return FAIL("Data untuk tanggal ini sudah ada. Gunakan Edit pada entri yang sudah ada.");
 
-  const id = randomUUID();
   const row = {
-    id,
     tenant_id: session.tenantId,
     master_campaign_id: channelCampaign.master_campaign_id,
     channel_campaign_id: channelCampaign.id,
@@ -193,19 +147,8 @@ export async function addManualMetricAction(
     entered_by: session.userId,
   };
 
-  const audited = await writeAudit(supabase, session, {
-    action: "manual_metrics.create",
-    resourceId: id,
-    after: row as unknown as Json,
-    context: { channel_campaign_id: channelCampaign.id, metric_date: input.metricDate },
-  });
-  if (!audited) return FAIL("Gagal mencatat audit log, data tidak disimpan. Silakan coba lagi.");
-
   const { error: insertError } = await supabase.from("prompter_manual_ad_metrics").insert(row);
-  if (insertError) {
-    await writeFailureAudit(supabase, session, "manual_metrics.create", id, insertError.code);
-    return FAIL(mapDbError(insertError));
-  }
+  if (insertError) return FAIL(mapDbError(insertError));
 
   revalidatePath(`/campaigns/${channelCampaign.master_campaign_id}`);
   return OK("Data tersimpan.");
@@ -254,27 +197,14 @@ export async function updateManualMetricAction(
     return FAIL("Channel ini sudah terhubung ke platform, entri manual tidak bisa diubah. Anda masih bisa menghapusnya.");
   }
 
-  const audited = await writeAudit(supabase, session, {
-    action: "manual_metrics.update",
-    resourceId: current.id,
-    before: current as unknown as Json,
-    after: { ...current, ...values } as unknown as Json,
-    context: { channel_campaign_id: current.channel_campaign_id, metric_date: current.metric_date },
-  });
-  if (!audited) return FAIL("Gagal mencatat audit log, perubahan tidak disimpan. Silakan coba lagi.");
-
   const { data: updated, error: updateError } = await supabase
     .from("prompter_manual_ad_metrics")
     .update(values)
     .eq("id", current.id)
     .eq("tenant_id", session.tenantId)
     .select("id");
-  if (updateError) {
-    await writeFailureAudit(supabase, session, "manual_metrics.update", current.id, updateError.code);
-    return FAIL(mapDbError(updateError));
-  }
+  if (updateError) return FAIL(mapDbError(updateError));
   if (!updated || updated.length !== 1) {
-    await writeFailureAudit(supabase, session, "manual_metrics.update", current.id, "no_row");
     return FAIL("Entri tidak ditemukan atau tidak bisa diubah.");
   }
 
@@ -304,26 +234,14 @@ export async function deleteManualMetricAction(
   if (readError) return FAIL(mapDbError(readError));
   if (!current) return FAIL("Entri tidak ditemukan.");
 
-  const audited = await writeAudit(supabase, session, {
-    action: "manual_metrics.delete",
-    resourceId: current.id,
-    before: current as unknown as Json,
-    context: { channel_campaign_id: current.channel_campaign_id, metric_date: current.metric_date },
-  });
-  if (!audited) return FAIL("Gagal mencatat audit log, data tidak dihapus. Silakan coba lagi.");
-
   const { data: deleted, error: deleteError } = await supabase
     .from("prompter_manual_ad_metrics")
     .delete()
     .eq("id", current.id)
     .eq("tenant_id", session.tenantId)
     .select("id");
-  if (deleteError) {
-    await writeFailureAudit(supabase, session, "manual_metrics.delete", current.id, deleteError.code);
-    return FAIL(mapDbError(deleteError));
-  }
+  if (deleteError) return FAIL(mapDbError(deleteError));
   if (!deleted || deleted.length !== 1) {
-    await writeFailureAudit(supabase, session, "manual_metrics.delete", current.id, "no_row");
     return FAIL("Entri tidak ditemukan atau tidak bisa dihapus.");
   }
 

@@ -113,7 +113,6 @@ interface World {
   master: { id: string; currency: string } | null;
   existing: unknown;
   row: typeof existingRow | null;
-  auditError?: { code?: string; message?: string } | null;
   insertError?: { code?: string; message?: string } | null;
   updateRows?: unknown[];
   deleteRows?: unknown[];
@@ -146,8 +145,8 @@ function installWorld(w: World) {
         if (c.op === "insert") return { data: null, error: w.insertError ?? null };
         if (c.op === "update") return ok(w.updateRows ?? [{ id: ROW_ID }]);
         return ok(w.deleteRows ?? [{ id: ROW_ID }]);
-      case "prompter_audit_logs":
-        return { data: null, error: w.auditError ?? null };
+      // prompter_audit_logs is deliberately NOT handled: audit is written by a database
+      // trigger, so any application call to it must throw here and fail the test.
       default:
         throw new Error(`unexpected table ${c.table}`);
     }
@@ -182,17 +181,16 @@ beforeEach(() => {
 });
 
 describe("addManualMetricAction", () => {
-  it("saves a valid entry: audit is written BEFORE the row, values come from the server, never the client", async () => {
+  it("saves a valid entry: values come from the server, never the client, and no audit row is written by the app", async () => {
     const r = await addManualMetricAction(
       prev,
       form({ ...addFields, currency: "USD", tenantId: "tenant-B", channel: "TIKTOK", enteredBy: "attacker" }),
     );
     expect(r).toEqual({ error: null, success: "Data tersimpan." });
 
-    const audit = idx("prompter_audit_logs", "insert");
     const insert = idx("prompter_manual_ad_metrics", "insert");
-    expect(audit).toBeGreaterThan(-1);
-    expect(insert).toBeGreaterThan(audit);
+    expect(insert).toBeGreaterThan(-1);
+    expect(calls.some((c) => c.table === "prompter_audit_logs")).toBe(false);
 
     const payload = calls[insert].payload as Record<string, unknown>;
     expect(payload).toMatchObject({
@@ -208,17 +206,12 @@ describe("addManualMetricAction", () => {
       conversions: 12,
       revenue: 480000,
     });
-
-    const auditPayload = calls[audit].payload as Record<string, unknown>;
-    expect(auditPayload).toMatchObject({ tenant_id: "tenant-A", actor_user_id: "user-1", action: "manual_metrics.create" });
-    expect(auditPayload.resource_id).toBe(payload.id);
-    expect(auditPayload.context).toMatchObject({ source: "manual", verified_by_platform: false });
+    expect(payload).not.toHaveProperty("id");
   });
 
-  it("only ever touches the four allowed tables — never connector metrics, approvals, or campaign status", async () => {
+  it("only ever touches the three allowed tables — never connector metrics, approvals, audit logs, or campaign status", async () => {
     await addManualMetricAction(prev, form(addFields));
     expect(tablesTouched()).toEqual([
-      "prompter_audit_logs",
       "prompter_channel_campaigns",
       "prompter_manual_ad_metrics",
       "prompter_master_campaigns",
@@ -277,27 +270,24 @@ describe("addManualMetricAction", () => {
     expect(select?.op).toBe("select");
   });
 
-  it("a duplicate date is rejected up front, with no audit entry", async () => {
+  it("a duplicate date is rejected up front", async () => {
     installWorld(defaultWorld({ existing: { id: "other" } }));
     const r = await addManualMetricAction(prev, form(addFields));
     expect(r.error).toMatch(/sudah ada/);
-    expect(calls.some((c) => c.table === "prompter_audit_logs")).toBe(false);
     expect(calls.some((c) => c.op === "insert")).toBe(false);
   });
 
-  it("a duplicate that slips past the probe (race) is mapped from the unique violation and leaves a failure audit", async () => {
+  it("a duplicate that slips past the probe (race) is mapped from the unique violation (the transaction rolled back, so no audit row exists)", async () => {
     installWorld(defaultWorld({ insertError: { code: "23505", message: "duplicate key" } }));
     const r = await addManualMetricAction(prev, form(addFields));
     expect(r.error).toMatch(/sudah ada/);
-    const audits = calls.filter((c) => c.table === "prompter_audit_logs").map((c) => (c.payload as { action: string }).action);
-    expect(audits).toEqual(["manual_metrics.create", "manual_metrics.create_failed"]);
   });
 
-  it("fails closed when the audit row cannot be written: nothing is saved", async () => {
-    installWorld(defaultWorld({ auditError: { message: "boom" } }));
+  it("an audit failure inside the database surfaces as a failed save, never as success", async () => {
+    installWorld(defaultWorld({ insertError: { code: "XX000", message: "audit insert failed" } }));
     const r = await addManualMetricAction(prev, form(addFields));
-    expect(r.error).toMatch(/audit log/);
-    expect(calls.some((c) => c.table === "prompter_manual_ad_metrics" && c.op === "insert")).toBe(false);
+    expect(r.success).toBeNull();
+    expect(r.error).toMatch(/Gagal menyimpan/);
   });
 
   it("fails closed with a clear message when the table does not exist (migration not applied)", async () => {
@@ -328,20 +318,15 @@ describe("addManualMetricAction", () => {
 });
 
 describe("updateManualMetricAction", () => {
-  it("updates metrics only, tenant-scoped, with before/after audit written first", async () => {
+  it("updates metrics only, tenant-scoped (before/after audit is recorded by the database trigger)", async () => {
     const r = await updateManualMetricAction(prev, form(editFields));
     expect(r).toEqual({ error: null, success: "Perubahan tersimpan." });
 
-    const audit = calls.find((c) => c.table === "prompter_audit_logs");
     const update = calls.find((c) => c.table === "prompter_manual_ad_metrics" && c.op === "update");
-    expect(idx("prompter_audit_logs", "insert")).toBeLessThan(idx("prompter_manual_ad_metrics", "update"));
     expect(Object.keys(update?.payload ?? {}).sort()).toEqual(["clicks", "conversions", "impressions", "revenue", "spend"]);
     expect(update?.filters).toContainEqual(["tenant_id", "tenant-A"]);
     expect(update?.filters).toContainEqual(["id", ROW_ID]);
-    const a = audit?.payload as { action: string; before_data: { spend: number }; after_data: { spend: number } };
-    expect(a.action).toBe("manual_metrics.update");
-    expect(a.before_data.spend).toBe(100000);
-    expect(a.after_data.spend).toBe(120000);
+    expect((update?.payload as { spend: number }).spend).toBe(120000);
   });
 
   it("cannot be used to change identity: date/channel/currency/tenant in the form are ignored", async () => {
@@ -357,7 +342,7 @@ describe("updateManualMetricAction", () => {
     session.current = { ...session.current, tenantId: "tenant-B" };
     const r = await updateManualMetricAction(prev, form(editFields));
     expect(r.error).toBe("Entri tidak ditemukan.");
-    expect(calls.some((c) => c.op === "update" || c.table === "prompter_audit_logs")).toBe(false);
+    expect(calls.some((c) => c.op === "update")).toBe(false);
   });
 
   it("refuses to edit once the channel is linked to a platform campaign", async () => {
@@ -376,10 +361,10 @@ describe("updateManualMetricAction", () => {
     expect(calls).toHaveLength(0);
   });
 
-  it("fails closed when audit cannot be written, and reports a zero-row update instead of claiming success", async () => {
-    installWorld(defaultWorld({ auditError: { message: "x" } }));
-    expect((await updateManualMetricAction(prev, form(editFields))).error).toMatch(/audit log/);
-    expect(calls.some((c) => c.op === "update")).toBe(false);
+  it("reports a database error and a zero-row update instead of claiming success", async () => {
+    installWorld(defaultWorld({ updateRows: [] }));
+    const r0 = await updateManualMetricAction(prev, form(editFields));
+    expect(r0.success).toBeNull();
 
     calls = [];
     installWorld(defaultWorld({ updateRows: [] }));
@@ -390,14 +375,12 @@ describe("updateManualMetricAction", () => {
 });
 
 describe("deleteManualMetricAction", () => {
-  it("deletes tenant-scoped with the full previous row captured in the audit first", async () => {
+  it("deletes tenant-scoped (the previous row is captured in the audit by the database trigger)", async () => {
     const r = await deleteManualMetricAction(prev, form({ id: ROW_ID }));
     expect(r).toEqual({ error: null, success: "Entri dihapus." });
-    expect(idx("prompter_audit_logs", "insert")).toBeLessThan(idx("prompter_manual_ad_metrics", "delete"));
     const del = calls.find((c) => c.op === "delete");
     expect(del?.filters).toContainEqual(["tenant_id", "tenant-A"]);
-    const audit = calls.find((c) => c.table === "prompter_audit_logs");
-    expect((audit?.payload as { before_data: { id: string } }).before_data.id).toBe(ROW_ID);
+    expect(calls.some((c) => c.table === "prompter_audit_logs")).toBe(false);
   });
 
   it("is still allowed after the channel was linked to a platform campaign (stale-data cleanup)", async () => {
@@ -405,19 +388,13 @@ describe("deleteManualMetricAction", () => {
     expect((await deleteManualMetricAction(prev, form({ id: ROW_ID }))).error).toBeNull();
   });
 
-  it("refuses non-writer roles, other tenants, and a failed audit write", async () => {
+  it("refuses non-writer roles and other tenants", async () => {
     session.current = { ...session.current, role: "apoteker" };
     expect((await deleteManualMetricAction(prev, form({ id: ROW_ID }))).error).toMatch(/izin/);
     expect(calls).toHaveLength(0);
 
     session.current = { ...session.current, role: "owner", tenantId: "tenant-B" };
     expect((await deleteManualMetricAction(prev, form({ id: ROW_ID }))).error).toBe("Entri tidak ditemukan.");
-    expect(calls.some((c) => c.op === "delete")).toBe(false);
-
-    session.current = { ...session.current, tenantId: "tenant-A" };
-    calls = [];
-    installWorld(defaultWorld({ auditError: { message: "x" } }));
-    expect((await deleteManualMetricAction(prev, form({ id: ROW_ID }))).error).toMatch(/audit log/);
     expect(calls.some((c) => c.op === "delete")).toBe(false);
   });
 

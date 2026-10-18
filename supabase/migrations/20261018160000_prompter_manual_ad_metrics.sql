@@ -9,7 +9,7 @@
 -- The application fails closed (feature shows "belum aktif") while the table
 -- does not exist.
 --
--- ADDITIVE ONLY: one new table, two new functions, one new trigger. It does
+-- ADDITIVE ONLY: one new table, two new functions, two new triggers. It does
 -- not alter public.prompter_marketing_metrics (the connector-written table that
 -- Budget Guard, Optimization and Analytics read), public.prompter_channel_campaigns,
 -- or any other existing object. Nothing reads this table except the Phase 2B
@@ -27,6 +27,13 @@
 --   2. A BEFORE INSERT/UPDATE trigger (SECURITY DEFINER, pinned search_path)
 --      re-checks the same facts without depending on the caller's RLS view,
 --      rejects a future date, and freezes identity columns on update.
+--
+-- Audit (atomic): an AFTER INSERT/UPDATE/DELETE row trigger writes the
+-- prompter_audit_logs row in the SAME transaction as the change. If the audit
+-- insert fails the data change rolls back; if the data change fails (CHECK,
+-- unique, RLS, guard) no audit row survives. It also covers writes made
+-- straight through the database API (PostgREST), which no server action sees.
+-- The application therefore writes NO audit rows for this table itself.
 -- The older prompter_marketing_metrics policy does NOT do this; that finding is
 -- documented in docs/DATABASE.md and is remediated separately, not in this PR.
 
@@ -138,9 +145,88 @@ create trigger trg_prompter_manual_ad_metrics_guard
   before insert or update on public.prompter_manual_ad_metrics
   for each row execute function public.fn_prompter_manual_ad_metrics_guard();
 
+-- Atomic audit trail. SECURITY DEFINER so the audit row is written regardless of
+-- the caller's RLS on prompter_audit_logs (the table owner is not subject to RLS
+-- there; FORCE RLS is off). The tenant comes from the audited row itself (which
+-- RLS/guard already tied to the caller's tenant), the actor from auth.uid()
+-- (NULL for service_role/SQL sessions), never from client input. Trigger-only:
+-- execute is revoked from every client role.
+create or replace function public.fn_prompter_manual_ad_metrics_audit()
+returns trigger
+language plpgsql
+security definer
+set search_path = pg_catalog, public
+as $$
+declare
+  v_row public.prompter_manual_ad_metrics;
+  v_action text;
+  v_before jsonb := null;
+  v_after jsonb := null;
+  v_constraint text;
+begin
+  if tg_op = 'INSERT' then
+    v_row := new;
+    v_action := 'manual_metrics.create';
+    v_after := to_jsonb(new);
+  elsif tg_op = 'UPDATE' then
+    v_row := new;
+    v_action := 'manual_metrics.update';
+    v_before := to_jsonb(old);
+    v_after := to_jsonb(new);
+  else
+    v_row := old;
+    v_action := 'manual_metrics.delete';
+    v_before := to_jsonb(old);
+  end if;
+
+  begin
+    insert into public.prompter_audit_logs
+      (tenant_id, actor_user_id, action, resource_type, resource_id, before_data, after_data, context)
+    values (
+      v_row.tenant_id,
+      auth.uid(),
+      v_action,
+      'prompter_manual_ad_metrics',
+      v_row.id,
+      v_before,
+      v_after,
+      jsonb_build_object(
+        'source', 'manual',
+        'verified_by_platform', false,
+        'recorded_by', 'db_trigger',
+        'channel_campaign_id', v_row.channel_campaign_id,
+        'metric_date', v_row.metric_date
+      )
+    );
+  exception when foreign_key_violation then
+    get stacked diagnostics v_constraint = constraint_name;
+    -- The ONLY tolerated failure: the tenant itself is being deleted and this row
+    -- is going away through ON DELETE CASCADE, so its audit parent is already
+    -- gone. Any other audit failure (including a missing actor) aborts the change.
+    if tg_op = 'DELETE' and v_constraint = 'prompter_audit_logs_tenant_id_fkey' then
+      return old;
+    end if;
+    raise;
+  end;
+
+  return null;
+end;
+$$;
+
+revoke all on function public.fn_prompter_manual_ad_metrics_audit() from public, anon, authenticated;
+
+drop trigger if exists trg_prompter_manual_ad_metrics_audit on public.prompter_manual_ad_metrics;
+create trigger trg_prompter_manual_ad_metrics_audit
+  after insert or update or delete on public.prompter_manual_ad_metrics
+  for each row execute function public.fn_prompter_manual_ad_metrics_audit();
+
 alter table public.prompter_manual_ad_metrics enable row level security;
 
-revoke all on public.prompter_manual_ad_metrics from anon;
+-- Supabase default privileges grant ALL (incl. TRUNCATE, REFERENCES, TRIGGER) to
+-- anon and authenticated on every new public table. Drop them all, then grant
+-- back only what the RLS policies below are written for. service_role keeps its
+-- default access (server-side admin client; bypasses RLS by design).
+revoke all on public.prompter_manual_ad_metrics from public, anon, authenticated;
 grant select, insert, update, delete on public.prompter_manual_ad_metrics to authenticated;
 
 drop policy if exists "Lihat metrik iklan manual tenant sendiri" on public.prompter_manual_ad_metrics;

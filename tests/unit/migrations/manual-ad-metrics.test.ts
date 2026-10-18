@@ -38,18 +38,24 @@ describe("manual ad metrics migration — additive-only", () => {
     expect(flat).not.toMatch(/cron\./);
   });
 
-  it("adds exactly one function (the guard) and one trigger", () => {
+  it("adds exactly two functions (guard, audit) and two triggers", () => {
     expect([...flat.matchAll(/create or replace function ([a-z_.]+)/g)].map((m) => m[1])).toEqual([
       "public.fn_prompter_manual_ad_metrics_guard",
+      "public.fn_prompter_manual_ad_metrics_audit",
     ]);
-    expect([...flat.matchAll(/create trigger ([a-z_]+)/g)].map((m) => m[1])).toEqual(["trg_prompter_manual_ad_metrics_guard"]);
+    expect([...flat.matchAll(/create trigger ([a-z_]+)/g)].map((m) => m[1])).toEqual([
+      "trg_prompter_manual_ad_metrics_guard",
+      "trg_prompter_manual_ad_metrics_audit",
+    ]);
   });
 });
 
 describe("manual ad metrics migration — tenant integrity and access", () => {
   it("enables RLS, removes anon access, and defines no FOR ALL policy", () => {
     expect(flat).toContain("alter table public.prompter_manual_ad_metrics enable row level security");
-    expect(flat).toContain("revoke all on public.prompter_manual_ad_metrics from anon");
+    expect(flat).toContain("revoke all on public.prompter_manual_ad_metrics from public, anon, authenticated");
+    expect(flat).toContain("grant select, insert, update, delete on public.prompter_manual_ad_metrics to authenticated");
+    expect(flat).not.toMatch(/grant [^;]*(truncate|references|trigger|all)[^;]* to (public|anon|authenticated)/);
     expect(flat).not.toMatch(/create policy [^;]* for all/);
     const ops = [...flat.matchAll(/create policy "[^"]+" on public\.prompter_manual_ad_metrics for (select|insert|update|delete)/g)].map((m) => m[1]);
     expect(ops.sort()).toEqual(["delete", "insert", "select", "update"]);
@@ -82,6 +88,16 @@ describe("manual ad metrics migration — tenant integrity and access", () => {
     expect(flat).toContain("security definer");
     expect(flat).toContain("set search_path = public");
     expect(flat).toContain("revoke all on function public.fn_prompter_manual_ad_metrics_guard() from public, anon, authenticated");
+  });
+
+  it("the audit trigger is atomic (AFTER row trigger), SECURITY DEFINER with a pinned search_path, trigger-only, and tolerates only tenant-cascade deletes", () => {
+    expect(flat).toContain("after insert or update or delete on public.prompter_manual_ad_metrics for each row execute function public.fn_prompter_manual_ad_metrics_audit()");
+    expect(flat).toMatch(/fn_prompter_manual_ad_metrics_audit\(\) returns trigger language plpgsql security definer set search_path = pg_catalog, public/);
+    expect(flat).toContain("revoke all on function public.fn_prompter_manual_ad_metrics_audit() from public, anon, authenticated");
+    expect(flat).toContain("auth.uid()");
+    expect(flat).toContain("tg_op = 'DELETE' and v_constraint = 'prompter_audit_logs_tenant_id_fkey'");
+    // no blanket exception swallowing
+    expect(flat).not.toMatch(/when others/);
   });
 
   it("the guard re-checks tenant, master, channel, platform link and future date, and freezes identity on update", () => {
