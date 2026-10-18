@@ -21,8 +21,10 @@ function fmt(n: number | null, suffix = "", digits = 2): string {
   return n === null ? "—" : `${n.toFixed(digits)}${suffix}`;
 }
 
-function fmtRp(n: number | null): string {
-  return n === null ? "—" : `Rp${Math.round(n).toLocaleString("id-ID")}`;
+function fmtMoney(n: number | null, currency: string): string {
+  if (n === null) return "—";
+  const rounded = Math.round(n).toLocaleString("id-ID");
+  return currency === "IDR" ? `Rp${rounded}` : `${currency} ${rounded}`;
 }
 
 /**
@@ -35,11 +37,17 @@ export function AdVerdictCard({
   description,
   result,
   simulated = true,
+  sourceLabel,
+  currency = "IDR",
 }: {
   title: string;
   description?: string;
   result: AdPerformanceVerdict;
   simulated?: boolean;
+  /** Replaces the demo badge for non-demo data (e.g. manually typed metrics). */
+  sourceLabel?: string;
+  /** ISO currency used to format CPA; IDR renders as "Rp". */
+  currency?: string;
 }) {
   const { metrics } = result;
   return (
@@ -49,6 +57,7 @@ export function AdVerdictCard({
           <p className="text-sm font-semibold text-foreground">{title}</p>
           <div className="flex items-center gap-2">
             {simulated ? <Badge variant="outline">DATA SIMULASI / DEMO</Badge> : null}
+            {!simulated && sourceLabel ? <Badge variant="outline">{sourceLabel}</Badge> : null}
             <Badge variant={VERDICT_BADGE[result.verdict]}>{result.label}</Badge>
           </div>
         </div>
@@ -65,7 +74,7 @@ export function AdVerdictCard({
           </div>
           <div>
             <dt>CPA</dt>
-            <dd className="font-medium text-foreground">{fmtRp(metrics.cpa)}</dd>
+            <dd className="font-medium text-foreground">{fmtMoney(metrics.cpa, currency)}</dd>
           </div>
           <div>
             <dt>CTR</dt>

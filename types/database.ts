@@ -905,6 +905,49 @@ export interface Database {
         >;
         Relationships: [];
       };
+      prompter_manual_ad_metrics: {
+        Row: {
+          id: string;
+          tenant_id: string;
+          master_campaign_id: string;
+          channel_campaign_id: string;
+          channel: Exclude<Channel, "SEO">;
+          metric_date: string;
+          spend: number;
+          impressions: number;
+          clicks: number;
+          conversions: number;
+          revenue: number;
+          currency: string;
+          entered_by: string | null;
+          updated_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          tenant_id: string;
+          master_campaign_id: string;
+          channel_campaign_id: string;
+          channel: Exclude<Channel, "SEO">;
+          metric_date: string;
+          spend: number;
+          impressions: number;
+          clicks: number;
+          conversions: number;
+          revenue: number;
+          currency: string;
+          entered_by?: string | null;
+        };
+        Update: {
+          spend?: number;
+          impressions?: number;
+          clicks?: number;
+          conversions?: number;
+          revenue?: number;
+        };
+        Relationships: [];
+      };
       prompter_conversions: {
         Row: {
           id: string;
