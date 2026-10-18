@@ -326,16 +326,21 @@ describe("remediation guards", () => {
       "features/marketing/sections/how-it-works.tsx",
       "features/marketing/sections/ai-team.tsx",
       "features/marketing/sections/trust.tsx",
+      "features/marketing/sections/device-showcase.tsx",
+      "features/marketing/sections/faq.tsx",
+      "features/marketing/components/tanyopo-intelligence-diagram.tsx",
       "app/(marketing)/page.tsx",
       "app/layout.tsx",
     ];
     for (const f of files) {
       const src = readFileSync(f, "utf8");
-      expect(src, f).not.toMatch(/dieksekusi otomatis|Buat & Jalankan|"Luncurkan"|jalankan iklan di|menjalankan campaign|peluncuran campaign/);
+      expect(src, f).not.toMatch(/dieksekusi otomatis|Buat & Jalankan|"Luncurkan"|jalankan iklan di|menjalankan campaign|peluncuran campaign|Eksekusi campaign|sebelum tayang/);
     }
     const hero = readFileSync("features/marketing/sections/hero.tsx", "utf8");
     expect(hero).toContain("menyiapkan campaign");
     expect(hero).toContain("sebelum dijalankan");
     expect(hero).not.toContain("sebelum tayang");
+    // The hero image alt text must not claim automatic campaign execution either.
+    expect(hero).not.toContain("menjalankan campaign");
   });
 });

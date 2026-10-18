@@ -116,7 +116,7 @@ const KONTEN: Capability = {
   title: "Konten & Copywriting",
   description: "Ide, caption, materi iklan, dan visual yang menarik.",
 };
-const CAMPAIGN: Capability = { icon: Rocket, title: "Campaign", description: "Eksekusi campaign ke channel yang relevan." };
+const CAMPAIGN: Capability = { icon: Rocket, title: "Campaign", description: "Rencana campaign disiapkan untuk channel yang relevan." };
 const OPTIMASI: Capability = { icon: Sliders, title: "Optimasi", description: "Rekomendasi AI untuk hasil yang lebih baik." };
 
 const LEFT_CAPABILITIES: Capability[] = [PRODUK, STRATEGI, ANALITIK];

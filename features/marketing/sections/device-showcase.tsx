@@ -7,7 +7,7 @@ import { DeviceShowcaseStack } from "@/features/marketing/components/device-show
 const FEATURES = [
   "AI analisis produk & target market",
   "Pembuatan konten & materi iklan",
-  "Eksekusi campaign multi-channel",
+  "Perencanaan campaign multi-channel",
   "Analitik real-time & rekomendasi",
   "Mudah digunakan, tidak perlu keahlian teknis",
 ];
