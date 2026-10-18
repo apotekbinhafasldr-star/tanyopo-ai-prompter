@@ -143,7 +143,8 @@ describe("ManualMetricsSection", () => {
   it("warns when HPP is missing and does not show a winner", async () => {
     currentClient = client({ rows: [day(1), day(2), day(3)], product: { ...product, hpp: null } });
     render(await ManualMetricsSection(base));
-    expect(screen.getByText(/HPP produk belum diisi/)).toBeInTheDocument();
+    // shown both as our own warning and as the engine's reason
+    expect(screen.getAllByText(/HPP produk belum diisi/).length).toBeGreaterThan(0);
     expect(screen.queryByText("Kandidat scaling")).not.toBeInTheDocument();
     expect(screen.queryByText("Kandidat pemenang awal")).not.toBeInTheDocument();
   });
