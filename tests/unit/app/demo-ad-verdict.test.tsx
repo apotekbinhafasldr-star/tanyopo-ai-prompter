@@ -24,33 +24,52 @@ describe("demo analytics — Ad Performance Verdict", () => {
     expect(screen.getAllByText("DATA SIMULASI / DEMO").length).toBeGreaterThanOrEqual(
       DEMO_METRICS.length + DEMO_VERDICT_SCENARIOS.length + 1,
     );
-    for (const label of ["Kandidat pemenang awal", "Kandidat scaling", "Data belum cukup", "Lanjut uji", "Risiko stop-loss"]) {
+    for (const label of [
+      "Kandidat pemenang awal",
+      "Kandidat scaling",
+      "Data belum cukup",
+      "Lanjut uji",
+      "Risiko stop-loss",
+      "Margin tidak sehat",
+    ]) {
       expect(screen.getAllByText(label).length).toBeGreaterThan(0);
     }
+    // Every card uses the HPP-based wording and carries the limitation note.
+    const cards = DEMO_METRICS.length + DEMO_VERDICT_SCENARIOS.length;
+    expect(screen.getAllByText("Estimasi Break-even ROAS (berdasarkan HPP)")).toHaveLength(cards);
+    expect(screen.getAllByText(/bukan titik impas laba bersih/)).toHaveLength(cards);
+    expect(screen.queryByText("Break-even ROAS")).toBeNull();
+    // Every scenario card is labelled as simulated.
+    expect(screen.getAllByText("DATA SIMULASI / DEMO").length).toBeGreaterThanOrEqual(cards + 1);
     expect(screen.getByText(/bukan jaminan hasil iklan/)).toBeInTheDocument();
   });
 
   it("the seeded demo data yields the expected verdicts", () => {
     const product = DEMO_PRODUCTS[0];
-    const verdict = (m: { adSpend: number; impressions: number; clicks: number; conversions: number; revenue: number }, d: number) =>
+    const verdict = (
+      m: { adSpend: number; impressions: number; clicks: number; conversions: number; revenue: number },
+      d: number,
+      o?: { unitPrice?: number; hpp?: number },
+    ) =>
       evaluateAdPerformance({
         spend: m.adSpend,
         impressions: m.impressions,
         clicks: m.clicks,
         conversions: m.conversions,
         revenue: m.revenue,
-        hpp: product.hpp,
-        unitPrice: product.price,
+        hpp: o?.hpp ?? product.hpp,
+        unitPrice: o?.unitPrice ?? product.price,
         daysObserved: d,
       }).verdict;
     const byChannel = Object.fromEntries(
       DEMO_METRICS.map((m) => [m.channel, verdict({ ...m, conversions: m.orders }, DEMO_CAMPAIGN.durationDays)]),
     );
     expect(byChannel).toEqual({ INSTAGRAM: "PEMENANG_AWAL", TIKTOK: "KANDIDAT_SCALING" });
-    expect(DEMO_VERDICT_SCENARIOS.map((s) => verdict(s.metrics, s.daysObserved))).toEqual([
+    expect(DEMO_VERDICT_SCENARIOS.map((s) => verdict(s.metrics, s.daysObserved, s))).toEqual([
       "DATA_BELUM_CUKUP",
       "LANJUT_UJI",
       "STOP_LOSS",
+      "MARGIN_TIDAK_SEHAT",
     ]);
   });
 

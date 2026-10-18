@@ -11,15 +11,19 @@ import { AdVerdictCard, AdVerdictDisclaimer } from "@/features/demo/ad-verdict-c
 export default async function DemoAnalyticsPage() {
   await requireDemoSession();
   const product = DEMO_PRODUCTS[0];
-  const verdictFor = (m: { adSpend: number; impressions: number; clicks: number; conversions: number; revenue: number }, days: number) =>
+  const verdictFor = (
+    m: { adSpend: number; impressions: number; clicks: number; conversions: number; revenue: number },
+    days: number,
+    override?: { unitPrice?: number; hpp?: number },
+  ) =>
     evaluateAdPerformance({
       spend: m.adSpend,
       impressions: m.impressions,
       clicks: m.clicks,
       conversions: m.conversions,
       revenue: m.revenue,
-      hpp: product.hpp,
-      unitPrice: product.price,
+      hpp: override?.hpp ?? product.hpp,
+      unitPrice: override?.unitPrice ?? product.price,
       daysObserved: days,
     });
 
@@ -92,7 +96,7 @@ export default async function DemoAnalyticsPage() {
             key={scenario.id}
             title={scenario.title}
             description={scenario.description}
-            result={verdictFor(scenario.metrics, scenario.daysObserved)}
+            result={verdictFor(scenario.metrics, scenario.daysObserved, scenario)}
           />
         ))}
         <AdVerdictDisclaimer />

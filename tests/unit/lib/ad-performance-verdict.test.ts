@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  BREAK_EVEN_LABEL,
+  BREAK_EVEN_NOTE,
   evaluateAdPerformance,
   VERDICT_DISCLAIMER,
   VERDICT_LABELS,
@@ -138,18 +140,92 @@ describe("invalid or missing HPP / margin", () => {
     expect(r.verdict).toBe("LANJUT_UJI");
   });
 
-  it("HPP at or above the price is a stop-loss (no ROAS can be profitable)", () => {
-    for (const hpp of [22_000, 30_000]) {
-      const r = evaluateAdPerformance(with_({ hpp }));
-      expect(r.verdict).toBe("STOP_LOSS");
-      expect(r.metrics.breakEvenRoas).toBeNull();
-    }
-  });
-
   it("unavailable revenue means ROAS is null and the verdict stays LANJUT_UJI", () => {
     const r = evaluateAdPerformance(with_({ revenue: null }));
     expect(r.metrics.roas).toBeNull();
     expect(r.verdict).toBe("LANJUT_UJI");
+  });
+});
+
+describe("unhealthy margin (HPP >= price) is a margin warning, not an ad failure", () => {
+  it.each([22_000, 22_001, 30_000])("HPP %s against a 22_000 price → MARGIN_TIDAK_SEHAT", (hpp) => {
+    const r = evaluateAdPerformance(with_({ hpp }));
+    expect(r.verdict).toBe("MARGIN_TIDAK_SEHAT");
+    expect(r.label).toBe("Margin tidak sehat");
+    expect(r.metrics.breakEvenRoas).toBeNull();
+    expect(r.metrics.price).toBe(22_000);
+  });
+
+  it("says it is not proof that the ad failed and does not recommend pausing or scaling", () => {
+    const r = evaluateAdPerformance(with_({ hpp: 30_000 }));
+    expect(r.reasons.join(" ")).toMatch(/bukan bukti bahwa iklannya gagal/);
+    expect(r.recommendation).toMatch(/bukan bukti iklannya gagal/);
+    expect(r.recommendation).not.toMatch(/menjeda|scaling|menaikkan|hentikan/i);
+  });
+
+  it("is never hidden by the data-sufficiency gate (tiny sample)", () => {
+    const r = evaluateAdPerformance(
+      with_({ hpp: 30_000, impressions: 50, clicks: 2, conversions: 0, spend: 1_000, revenue: 0 }),
+    );
+    expect(r.verdict).toBe("MARGIN_TIDAK_SEHAT");
+  });
+
+  it("is never hidden by invalid or missing ad data", () => {
+    for (const bad of [
+      { spend: null, impressions: null, clicks: null, conversions: null, revenue: null },
+      { spend: Number.NaN },
+      { clicks: 99_999 },
+    ]) {
+      const r = evaluateAdPerformance(with_({ hpp: 30_000, ...bad }));
+      expect(r.verdict).toBe("MARGIN_TIDAK_SEHAT");
+    }
+  });
+
+  it("blocks winner and scaling verdicts however strong the ROAS looks", () => {
+    const r = evaluateAdPerformance(
+      with_({ hpp: 30_000, spend: 100_000, conversions: 100, revenue: 5_000_000, clicks: 900, daysObserved: 14 }),
+    );
+    expect(r.verdict).toBe("MARGIN_TIDAK_SEHAT");
+    expect(["PEMENANG_AWAL", "KANDIDAT_SCALING"]).not.toContain(r.verdict);
+  });
+
+  it("also detects it when the price comes from average order value", () => {
+    const r = evaluateAdPerformance(with_({ unitPrice: undefined, hpp: 25_000 })); // AOV 22_000
+    expect(r.verdict).toBe("MARGIN_TIDAK_SEHAT");
+  });
+
+  it("does not guess a margin problem when HPP or price is missing or invalid", () => {
+    expect(evaluateAdPerformance(with_({ hpp: null })).verdict).not.toBe("MARGIN_TIDAK_SEHAT");
+    expect(evaluateAdPerformance(with_({ hpp: Number.NaN })).verdict).not.toBe("MARGIN_TIDAK_SEHAT");
+    expect(evaluateAdPerformance(with_({ hpp: -5 })).verdict).not.toBe("MARGIN_TIDAK_SEHAT");
+    expect(
+      evaluateAdPerformance(with_({ unitPrice: null, conversions: 0, revenue: 0, hpp: 30_000 })).verdict,
+    ).not.toBe("MARGIN_TIDAK_SEHAT");
+  });
+
+  it("a healthy margin leaves the normal rules in charge (a real ad stop-loss stays STOP_LOSS)", () => {
+    const r = evaluateAdPerformance(
+      with_({ spend: 520_000, conversions: 6, revenue: 132_000, impressions: 30_000, clicks: 640 }),
+    );
+    expect(r.verdict).toBe("STOP_LOSS");
+  });
+});
+
+describe("break-even wording", () => {
+  it("uses the HPP-based estimate label and states what it leaves out", () => {
+    expect(BREAK_EVEN_LABEL).toBe("Estimasi Break-even ROAS (berdasarkan HPP)");
+    for (const cost of ["biaya operasional", "biaya platform", "biaya pembayaran", "biaya variabel lainnya"]) {
+      expect(BREAK_EVEN_NOTE).toContain(cost);
+    }
+    expect(BREAK_EVEN_NOTE).toMatch(/bukan titik impas laba bersih/);
+    const r = evaluateAdPerformance(BASE);
+    expect(r.assumptions.join(" ")).toContain(BREAK_EVEN_LABEL);
+    expect(r.reasons.join(" ")).not.toMatch(/laba bersih|net profit/i);
+  });
+
+  it("reasons call it an estimate", () => {
+    const r = evaluateAdPerformance(with_({ spend: 140_000 }));
+    expect(r.reasons.join(" ")).toMatch(/estimasi break-even/);
   });
 });
 
@@ -235,22 +311,25 @@ describe("output contract", () => {
   });
 
   it("recommendations never describe an automatic action and never promise results", () => {
-    const all = (["DATA_BELUM_CUKUP", "LANJUT_UJI", "PEMENANG_AWAL", "STOP_LOSS", "KANDIDAT_SCALING"] as const).map(
+    const all = (["MARGIN_TIDAK_SEHAT", "DATA_BELUM_CUKUP", "LANJUT_UJI", "PEMENANG_AWAL", "STOP_LOSS", "KANDIDAT_SCALING"] as const).map(
       (v) => {
         const sample: Record<string, Partial<AdPerformanceInput>> = {
+          MARGIN_TIDAK_SEHAT: { hpp: 30_000 },
           DATA_BELUM_CUKUP: { spend: 0 },
           LANJUT_UJI: {},
           PEMENANG_AWAL: { spend: 140_000 },
-          STOP_LOSS: { hpp: 30_000 },
+          STOP_LOSS: { spend: 520_000, conversions: 6, revenue: 132_000, impressions: 30_000, clicks: 640 },
           KANDIDAT_SCALING: { spend: 200_000, conversions: 40, revenue: 880_000, clicks: 600 },
         };
         return evaluateAdPerformance(with_(sample[v]));
       },
     );
-    expect(new Set(all.map((r) => r.verdict)).size).toBe(5);
+    expect(new Set(all.map((r) => r.verdict)).size).toBe(6);
     for (const r of all) {
       expect(r.recommendation).not.toMatch(/pasti (menang|untung)|dijamin|tanpa risiko/i);
       expect(r.recommendation).not.toMatch(/otomatis (menaikkan|dijeda|dihentikan|diajukan)/i);
+      expect(r.recommendation).not.toMatch(/\b(sudah|telah) (dijeda|dihentikan|dinaikkan)\b/i);
+      expect(r.reasons.join(" ")).not.toMatch(/confidence|tingkat keyakinan|\d+\s?%\s*(yakin|percaya)/i);
     }
   });
 

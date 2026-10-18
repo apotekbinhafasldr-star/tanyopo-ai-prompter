@@ -1,12 +1,15 @@
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import {
+  BREAK_EVEN_LABEL,
+  BREAK_EVEN_NOTE,
   VERDICT_DISCLAIMER,
   type AdPerformanceVerdict,
   type AdVerdict,
 } from "@/lib/ad-performance-verdict";
 
-const VERDICT_BADGE: Record<AdVerdict, "neutral" | "info" | "success" | "danger" | "brand"> = {
+const VERDICT_BADGE: Record<AdVerdict, "neutral" | "info" | "success" | "danger" | "brand" | "warning"> = {
+  MARGIN_TIDAK_SEHAT: "warning",
   DATA_BELUM_CUKUP: "neutral",
   LANJUT_UJI: "info",
   PEMENANG_AWAL: "success",
@@ -57,7 +60,7 @@ export function AdVerdictCard({
             <dd className="font-medium text-foreground">{fmt(metrics.roas, "x")}</dd>
           </div>
           <div>
-            <dt>Break-even ROAS</dt>
+            <dt>{BREAK_EVEN_LABEL}</dt>
             <dd className="font-medium text-foreground">{fmt(metrics.breakEvenRoas, "x")}</dd>
           </div>
           <div>
@@ -71,6 +74,8 @@ export function AdVerdictCard({
             </dd>
           </div>
         </dl>
+
+        <p className="text-xs text-muted-foreground">{BREAK_EVEN_NOTE}</p>
 
         <ul className="list-disc space-y-1 pl-5 text-sm text-foreground">
           {result.reasons.map((reason) => (

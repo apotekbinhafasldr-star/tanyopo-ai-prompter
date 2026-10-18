@@ -119,6 +119,9 @@ export interface DemoVerdictScenario {
   description: string;
   metrics: Omit<DemoCampaignMetrics, "channel" | "leads" | "orders"> & { conversions: number };
   daysObserved: number;
+  /** Overrides the demo product's price / HPP for this scenario only. */
+  unitPrice?: number;
+  hpp?: number;
 }
 
 export const DEMO_VERDICT_SCENARIOS: DemoVerdictScenario[] = [
@@ -142,6 +145,15 @@ export const DEMO_VERDICT_SCENARIOS: DemoVerdictScenario[] = [
     description: "Biaya sudah besar, tetapi hampir tidak ada penjualan.",
     metrics: { impressions: 30000, clicks: 640, conversions: 6, adSpend: 520000, revenue: 132000 },
     daysObserved: 5,
+  },
+  {
+    id: "scenario-margin",
+    title: "Produk paket hemat (HPP tinggi)",
+    description: "Penjualan ada, tetapi HPP lebih tinggi dari harga jual.",
+    metrics: { impressions: 20000, clicks: 500, conversions: 40, adSpend: 300000, revenue: 880000 },
+    daysObserved: 7,
+    unitPrice: 22000,
+    hpp: 24000,
   },
 ];
 

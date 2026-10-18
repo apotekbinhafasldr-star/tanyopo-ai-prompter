@@ -22,10 +22,12 @@
  *   (revenue / conversions) when conversions > 0.
  * - contribution per order = price − hpp.
  * - margin ratio = contribution per order / price.
- * - break-even ROAS = 1 / margin ratio = price / contribution per order:
- *   the ROAS at which revenue after product cost exactly pays for ad
- *   spend (a contribution of zero; other operating costs are not known
- *   to the app, same limitation as lib/profit-estimate.ts).
+ * - Estimasi break-even ROAS (based on HPP) = 1 / margin ratio = price /
+ *   contribution per order: the ROAS at which revenue after product cost
+ *   exactly pays for ad spend. It is an ESTIMATE from price and HPP only:
+ *   operating, platform, payment and other variable costs are not known to
+ *   the app (same limitation as lib/profit-estimate.ts), so it is NOT a
+ *   net-profit break-even and must never be presented as one.
  * - break-even CPA = contribution per order.
  *
  * ## Thresholds (all in VERDICT_THRESHOLDS, covered by unit tests)
@@ -34,21 +36,24 @@
  *   impressions >= 1000, clicks >= 100, spend > 0.
  *
  * After the gate, rules run in this order (first match wins):
- *  1. Margin not positive (hpp >= price) → `STOP_LOSS`: no ROAS can be
- *     profitable.
- *  2. Zero conversions → `STOP_LOSS` only when clicks >= 200 and (the
+ *  0. Margin not positive (hpp >= price) → `MARGIN_TIDAK_SEHAT`. Checked
+ *     FIRST, before input validation and the sufficiency gate, so it is
+ *     never hidden by a small sample. It is a product pricing/cost
+ *     warning, deliberately NOT a statement that the ad failed, and it
+ *     blocks every winner / scaling verdict.
+ *  1. Zero conversions → `STOP_LOSS` only when clicks >= 200 and (the
  *     spend is >= 3 × break-even CPA, or break-even CPA is unknown);
  *     otherwise `LANJUT_UJI`.
- *  3. Profitability not assessable (no/invalid hpp, no price, no revenue)
+ *  2. Profitability not assessable (no/invalid hpp, no price, no revenue)
  *     → `LANJUT_UJI`. Without a break-even there is never a winner or a
  *     scaling verdict.
- *  4. ROAS < 0.7 × break-even ROAS and spend >= 3 × break-even CPA →
+ *  3. ROAS < 0.7 × break-even ROAS and spend >= 3 × break-even CPA →
  *     `STOP_LOSS`. (The spend floor keeps one unlucky day from condemning
  *     an ad.)
- *  5. ROAS >= 1.5 × break-even, conversions >= 30 and daysObserved >= 3 →
+ *  4. ROAS >= 1.5 × break-even, conversions >= 30 and daysObserved >= 3 →
  *     `KANDIDAT_SCALING`. daysObserved missing counts as "not enough".
- *  6. ROAS >= 1.2 × break-even and conversions >= 10 → `PEMENANG_AWAL`.
- *  7. Everything else → `LANJUT_UJI`.
+ *  5. ROAS >= 1.2 × break-even and conversions >= 10 → `PEMENANG_AWAL`.
+ *  6. Everything else → `LANJUT_UJI`.
  *
  * The multipliers (0.7 / 1.2 / 1.5 / 3 / 10 / 30 / 200 / 1000 / 100 / 3
  * days) are conservative product heuristics chosen for this phase, not
@@ -57,6 +62,7 @@
  */
 
 export type AdVerdict =
+  | "MARGIN_TIDAK_SEHAT"
   | "DATA_BELUM_CUKUP"
   | "LANJUT_UJI"
   | "PEMENANG_AWAL"
@@ -79,7 +85,12 @@ export const VERDICT_THRESHOLDS = Object.freeze({
   SCALING_MIN_DAYS: 3,
 });
 
+export const BREAK_EVEN_LABEL = "Estimasi Break-even ROAS (berdasarkan HPP)";
+export const BREAK_EVEN_NOTE =
+  "Belum memasukkan biaya operasional, biaya platform, biaya pembayaran, dan biaya variabel lainnya. Ini bukan titik impas laba bersih bisnis.";
+
 export const VERDICT_LABELS: Record<AdVerdict, string> = {
+  MARGIN_TIDAK_SEHAT: "Margin tidak sehat",
   DATA_BELUM_CUKUP: "Data belum cukup",
   LANJUT_UJI: "Lanjut uji",
   PEMENANG_AWAL: "Kandidat pemenang awal",
@@ -152,6 +163,8 @@ const EMPTY_METRICS: AdPerformanceMetrics = {
 };
 
 const RECOMMENDATIONS: Record<AdVerdict, string> = {
+  MARGIN_TIDAK_SEHAT:
+    "Tinjau harga jual atau HPP produk lebih dulu. Selama margin tidak positif, performa iklan tidak dapat dinilai dari ROAS, dan ini bukan bukti iklannya gagal. Tidak ada tindakan yang dijalankan otomatis.",
   DATA_BELUM_CUKUP: "Biarkan iklan terkumpul datanya dulu sebelum menilai. Jangan menyimpulkan menang atau kalah dari angka sekecil ini.",
   LANJUT_UJI: "Lanjutkan pengujian dan kumpulkan lebih banyak data sebelum mengubah budget.",
   PEMENANG_AWAL:
@@ -165,7 +178,7 @@ const RECOMMENDATIONS: Record<AdVerdict, string> = {
 export function evaluateAdPerformance(input: AdPerformanceInput): AdPerformanceVerdict {
   const assumptions: string[] = [
     "ROAS = pendapatan ÷ biaya iklan; CPA = biaya iklan ÷ konversi; CTR = klik ÷ tayangan.",
-    "Break-even ROAS dihitung dari harga dan HPP per unit; biaya operasional lain tidak diperhitungkan.",
+    `${BREAK_EVEN_LABEL} dihitung dari harga jual dan HPP per unit saja. ${BREAK_EVEN_NOTE}`,
   ];
 
   const finish = (
@@ -182,6 +195,22 @@ export function evaluateAdPerformance(input: AdPerformanceInput): AdPerformanceV
     disclaimer: VERDICT_DISCLAIMER,
   });
 
+  // A product-level margin problem is independent of how much ad data
+  // exists, so it is checked before the data validation / sufficiency gates
+  // and can never be hidden by them.
+  const hppOk = isValidAmount(input.hpp);
+  const unitPriceOk = isValidAmount(input.unitPrice) && input.unitPrice > 0;
+  const marginWarning = (price: number, metrics: AdPerformanceMetrics) =>
+    finish(
+      "MARGIN_TIDAK_SEHAT",
+      [
+        `HPP (${input.hpp}) sama dengan atau lebih tinggi dari harga jual (${price}), sehingga setiap penjualan tidak menyisakan kontribusi sebelum biaya iklan. Ini masalah margin produk, bukan bukti bahwa iklannya gagal.`,
+      ],
+      { ...metrics, price },
+    );
+  const unitPriceMarginBad =
+    hppOk && unitPriceOk && (input.hpp as number) >= (input.unitPrice as number);
+
   // --- Input validation: required numbers must be present, finite, >= 0. ---
   const required = {
     "biaya iklan": input.spend,
@@ -193,6 +222,7 @@ export function evaluateAdPerformance(input: AdPerformanceInput): AdPerformanceV
     .filter(([, v]) => !isValidAmount(v))
     .map(([k]) => k);
   if (missing.length > 0) {
+    if (unitPriceMarginBad) return marginWarning(input.unitPrice as number, EMPTY_METRICS);
     return finish(
       "DATA_BELUM_CUKUP",
       [`Data tidak tersedia atau tidak valid: ${missing.join(", ")}.`],
@@ -204,6 +234,7 @@ export function evaluateAdPerformance(input: AdPerformanceInput): AdPerformanceV
   const clicks = input.clicks as number;
   const conversions = input.conversions as number;
   if (clicks > impressions) {
+    if (unitPriceMarginBad) return marginWarning(input.unitPrice as number, EMPTY_METRICS);
     return finish("DATA_BELUM_CUKUP", ["Data tidak konsisten: jumlah klik melebihi tayangan."], EMPTY_METRICS);
   }
 
@@ -216,7 +247,7 @@ export function evaluateAdPerformance(input: AdPerformanceInput): AdPerformanceV
   const roas = revenue !== null ? safeDiv(revenue, spend) : null;
 
   // --- Margin / break-even. ---
-  const hppValid = isValidAmount(input.hpp);
+  const hppValid = hppOk;
   let price: number | null = null;
   if (isValidAmount(input.unitPrice) && input.unitPrice > 0) {
     price = input.unitPrice;
@@ -233,10 +264,10 @@ export function evaluateAdPerformance(input: AdPerformanceInput): AdPerformanceV
   if (!hppValid) {
     marginNote =
       input.hpp === null || input.hpp === undefined
-        ? "HPP produk belum diisi, jadi break-even tidak dapat dihitung."
-        : "HPP tidak valid, jadi break-even tidak dapat dihitung.";
+        ? "HPP produk belum diisi, jadi estimasi break-even tidak dapat dihitung."
+        : "HPP tidak valid, jadi estimasi break-even tidak dapat dihitung.";
   } else if (price === null || price <= 0) {
-    marginNote = "Harga jual per unit tidak diketahui, jadi break-even tidak dapat dihitung.";
+    marginNote = "Harga jual per unit tidak diketahui, jadi estimasi break-even tidak dapat dihitung.";
   } else {
     const contribution = price - (input.hpp as number);
     if (contribution <= 0) {
@@ -249,6 +280,9 @@ export function evaluateAdPerformance(input: AdPerformanceInput): AdPerformanceV
   }
 
   const metrics: AdPerformanceMetrics = { roas, cpa, ctr, price, marginRatio, breakEvenRoas, breakEvenCpa };
+
+  // Margin warning outranks the sufficiency gate and every performance rule.
+  if (nonPositiveMargin) return marginWarning(price as number, metrics);
 
   // --- Sufficiency gate. ---
   const shortfalls: string[] = [];
@@ -265,15 +299,6 @@ export function evaluateAdPerformance(input: AdPerformanceInput): AdPerformanceV
 
   const spendFloor = breakEvenCpa !== null ? T.STOP_LOSS_SPEND_MULTIPLE * breakEvenCpa : null;
   const spendReachedFloor = spendFloor !== null && spend >= spendFloor;
-
-  // 1. Margin not positive.
-  if (nonPositiveMargin) {
-    return finish(
-      "STOP_LOSS",
-      ["HPP sama dengan atau lebih tinggi dari harga jual, sehingga setiap penjualan tidak menghasilkan kontribusi sebelum biaya iklan."],
-      metrics,
-    );
-  }
 
   // 2. Zero conversions.
   if (conversions === 0) {
@@ -296,7 +321,7 @@ export function evaluateAdPerformance(input: AdPerformanceInput): AdPerformanceV
     const why = marginNote ?? "Pendapatan tidak tersedia, jadi ROAS tidak dapat dihitung.";
     return finish(
       "LANJUT_UJI",
-      [`${why} Tanpa break-even, iklan tidak dapat dinilai menang atau kalah.`],
+      [`${why} Tanpa estimasi break-even, iklan tidak dapat dinilai menang atau kalah.`],
       metrics,
     );
   }
@@ -307,7 +332,7 @@ export function evaluateAdPerformance(input: AdPerformanceInput): AdPerformanceV
   if (ratio < T.STOP_LOSS_ROAS_RATIO && spendReachedFloor) {
     return finish(
       "STOP_LOSS",
-      [`ROAS ${roas.toFixed(2)}x jauh di bawah break-even ${breakEvenRoas.toFixed(2)}x setelah biaya iklan cukup besar.`],
+      [`ROAS ${roas.toFixed(2)}x jauh di bawah estimasi break-even ${breakEvenRoas.toFixed(2)}x setelah biaya iklan cukup besar.`],
       metrics,
     );
   }
@@ -318,7 +343,7 @@ export function evaluateAdPerformance(input: AdPerformanceInput): AdPerformanceV
     return finish(
       "KANDIDAT_SCALING",
       [
-        `ROAS ${roas.toFixed(2)}x, ${ratio.toFixed(2)} kali break-even ${breakEvenRoas.toFixed(2)}x.`,
+        `ROAS ${roas.toFixed(2)}x, ${ratio.toFixed(2)} kali estimasi break-even ${breakEvenRoas.toFixed(2)}x.`,
         `${conversions} konversi selama ${days} hari. Ini kandidat, belum terbukti.`,
       ],
       metrics,
@@ -328,7 +353,7 @@ export function evaluateAdPerformance(input: AdPerformanceInput): AdPerformanceV
   // 6. Early winner.
   if (ratio >= T.EARLY_WINNER_ROAS_RATIO && conversions >= T.EARLY_WINNER_MIN_CONVERSIONS) {
     const reasons = [
-      `ROAS ${roas.toFixed(2)}x, ${ratio.toFixed(2)} kali break-even ${breakEvenRoas.toFixed(2)}x, dari ${conversions} konversi.`,
+      `ROAS ${roas.toFixed(2)}x, ${ratio.toFixed(2)} kali estimasi break-even ${breakEvenRoas.toFixed(2)}x, dari ${conversions} konversi.`,
     ];
     if (ratio >= T.SCALING_ROAS_RATIO && (days === null || days < T.SCALING_MIN_DAYS)) {
       reasons.push(`Hasil kuat, tetapi belum teramati minimal ${T.SCALING_MIN_DAYS} hari, jadi belum menjadi kandidat scaling.`);
@@ -341,11 +366,11 @@ export function evaluateAdPerformance(input: AdPerformanceInput): AdPerformanceV
   // 7. Keep testing.
   let reason: string;
   if (ratio >= 1) {
-    reason = `ROAS ${roas.toFixed(2)}x sudah di atas break-even ${breakEvenRoas.toFixed(2)}x, tetapi selisihnya tipis atau konversinya (${conversions}) masih sedikit.`;
+    reason = `ROAS ${roas.toFixed(2)}x sudah di atas estimasi break-even ${breakEvenRoas.toFixed(2)}x, tetapi selisihnya tipis atau konversinya (${conversions}) masih sedikit.`;
   } else if (ratio >= T.STOP_LOSS_ROAS_RATIO) {
-    reason = `ROAS ${roas.toFixed(2)}x di bawah break-even ${breakEvenRoas.toFixed(2)}x, tetapi masih mendekati; belum cukup untuk menyimpulkan rugi.`;
+    reason = `ROAS ${roas.toFixed(2)}x di bawah estimasi break-even ${breakEvenRoas.toFixed(2)}x, tetapi masih mendekati; belum cukup untuk menyimpulkan rugi.`;
   } else {
-    reason = `ROAS ${roas.toFixed(2)}x di bawah break-even ${breakEvenRoas.toFixed(2)}x, tetapi biaya iklan belum cukup besar untuk menyimpulkan rugi.`;
+    reason = `ROAS ${roas.toFixed(2)}x di bawah estimasi break-even ${breakEvenRoas.toFixed(2)}x, tetapi biaya iklan belum cukup besar untuk menyimpulkan rugi.`;
   }
   return finish("LANJUT_UJI", [reason], metrics);
 }
