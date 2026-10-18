@@ -38,6 +38,7 @@ import {
   requiresManualCheck,
 } from "@/lib/campaigns/channel-status-display";
 import { SyncInsightsButton } from "@/features/campaigns/sync-insights-button";
+import { ManualMetricsSection } from "@/features/campaigns/manual-metrics-section";
 import { GenerateOptimizationButton } from "@/features/campaigns/generate-optimization-button";
 import { SubmitRecommendationButton } from "@/features/campaigns/submit-recommendation-button";
 import { CHANNEL_TO_CONNECTOR } from "@/lib/connectors/channel-map";
@@ -477,6 +478,24 @@ export default async function CampaignDetailPage({
             </div>
           </CardContent>
         </Card>
+      ) : null}
+
+      {/* Winning Ads Phase 2B: manual ad metrics + verdict. Self-contained and
+          read-only toward everything else on this page (no launch, approval,
+          Budget Guard or connector data). Renders nothing without an ad channel. */}
+      {hasChannelData ? (
+        <ManualMetricsSection
+          masterCampaignId={id}
+          tenantId={session.tenantId}
+          role={session.role}
+          campaignCurrency={campaign.currency}
+          productId={campaign.product_id}
+          channelCampaigns={(channelCampaigns ?? []).map((cc) => ({
+            id: cc.id,
+            channel: cc.channel,
+            external_campaign_id: cc.external_campaign_id,
+          }))}
+        />
       ) : null}
 
       {hasChannelData && activeChannels.size > 0 ? (
