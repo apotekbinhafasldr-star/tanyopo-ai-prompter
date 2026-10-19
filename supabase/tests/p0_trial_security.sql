@@ -14,7 +14,9 @@ insert into tenants(id,nama_usaha) values
 insert into user_profiles values
   ('00000000-0000-0000-0000-0000000000a2','00000000-0000-0000-0000-0000000000a1','owner A','owner'),
   ('00000000-0000-0000-0000-0000000000a3','00000000-0000-0000-0000-0000000000a1','mkt A','marketing'),
-  ('00000000-0000-0000-0000-0000000000b2','00000000-0000-0000-0000-0000000000b1','owner B','owner');
+  ('00000000-0000-0000-0000-0000000000b2','00000000-0000-0000-0000-0000000000b1','owner B','owner'),
+  ('00000000-0000-0000-0000-0000000000a4','00000000-0000-0000-0000-0000000000a1','kasir A','kasir'),
+  ('00000000-0000-0000-0000-0000000000b3','00000000-0000-0000-0000-0000000000b1','mkt B','marketing');
 
 create or replace function pg_temp.as_user(uid text) returns void language plpgsql as $$
 begin
@@ -27,6 +29,13 @@ begin
   execute stmt; return 'ok';
 exception when others then return sqlerrm;
 end $$;
+-- helper: number of rows a statement touched, or -1 if it raised (permission/RLS error)
+create or replace function pg_temp.affected(stmt text) returns int language plpgsql as $$
+declare n int;
+begin
+  execute stmt; get diagnostics n = row_count; return n;
+exception when others then return -1;
+end $$;
 -- call the RPC n times in separate invocations (a lateral call without
 -- parameters would be hoisted by the planner and evaluated only once)
 create or replace function pg_temp.grant_count(n int) returns int language plpgsql as $$
@@ -38,7 +47,7 @@ begin
   end loop;
   return granted;
 end $$;
-grant execute on function pg_temp.try(text), pg_temp.as_user(text), pg_temp.grant_count(int) to public;
+grant execute on function pg_temp.try(text), pg_temp.as_user(text), pg_temp.grant_count(int), pg_temp.affected(text) to public;
 
 \echo === phase :phase ===
 
@@ -182,5 +191,113 @@ delete from prompter_ai_jobs where id=(select id from jid);
 reset role;
 insert into results select 'SVC service_role can still DELETE ai job', not exists (select 1 from prompter_ai_jobs where id=(select id from jid));
 
+
+-- ===== P0-2c: no way to re-create / extend a trial by DELETE + INSERT, and no cross-tenant TRUNCATE =====
+-- Capture tenant A's real trial window, then try to wipe and re-create it as A's owner.
+select current_period_start as a_start, current_period_end as a_end into temp table a_trial
+  from prompter_subscriptions where tenant_id='00000000-0000-0000-0000-0000000000a1';
+set role authenticated;
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000a2');
+select pg_temp.affected($q$delete from prompter_subscriptions where tenant_id='00000000-0000-0000-0000-0000000000a1'$q$) as d into temp table r_del;
+select pg_temp.affected($q$insert into prompter_subscriptions(tenant_id,status,plan) values ('00000000-0000-0000-0000-0000000000a1','TRIALING','FREE')$q$) as i into temp table r_reins;
+reset role;
+insert into results select 'P0-2c delete + re-insert cannot reset A''s trial window',
+  (select count(*) from prompter_subscriptions s, a_trial t where s.tenant_id='00000000-0000-0000-0000-0000000000a1'
+     and s.current_period_start = t.a_start and s.current_period_end = t.a_end)=1;
+insert into results select 'P0-2c a second subscription row for the same tenant is refused', (select i from r_reins)<=0;
+\if :phase_after
+  insert into results select 'P0-2c DELETE is rejected outright (privilege revoked)', (select d from r_del)=-1;
+\endif
+
+-- Cross-tenant / wrong-tenant attempts must never touch the other tenant (both phases)
+set role authenticated;
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000b2');
+select pg_temp.affected($q$insert into prompter_subscriptions(tenant_id,status,plan) values ('00000000-0000-0000-0000-0000000000c9','TRIALING','FREE')$q$) as x1 into temp table iso1;
+select pg_temp.affected($q$update prompter_subscriptions set plan='STARTER' where tenant_id='00000000-0000-0000-0000-0000000000a1'$q$) as x2 into temp table iso2;
+select pg_temp.affected($q$update prompter_ai_jobs set status='FAILED' where tenant_id='00000000-0000-0000-0000-0000000000a1'$q$) as x3 into temp table iso3;
+reset role;
+insert into results select 'ISO owner B cannot insert a subscription for another tenant id', (select x1 from iso1)<=0;
+insert into results select 'ISO owner B cannot change tenant A''s plan', (select x2 from iso2)<=0;
+insert into results select 'ISO owner B cannot update tenant A''s ai jobs', (select x3 from iso3)<=0;
+
+-- Staff roles (kasir A, marketing B) may not rewrite the quota ledger or subscription of anyone
+set role authenticated;
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000a4');
+select pg_temp.affected($q$update prompter_subscriptions set plan='FREE' where tenant_id='00000000-0000-0000-0000-0000000000a1'$q$) as k1 into temp table st1;
+select pg_temp.affected($q$update prompter_ai_jobs set status='FAILED'$q$) as k2 into temp table st2;
+select pg_temp.affected($q$delete from prompter_ai_jobs$q$) as k3 into temp table st3;
+select pg_temp.affected($q$insert into prompter_ai_jobs(tenant_id,job_type) values ('00000000-0000-0000-0000-0000000000a1','CONTENT_GENERATION')$q$) as k4 into temp table st4;
+reset role;
+insert into results select 'STAFF kasir cannot update subscription / ai jobs / delete / insert',
+  (select k1 from st1)<=0 and (select k2 from st2)<=0 and (select k3 from st3)<=0 and (select k4 from st4)<=0;
+set role authenticated;
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000b3');
+select pg_temp.affected($q$delete from prompter_ai_jobs$q$) as m1 into temp table st5;
+select pg_temp.affected($q$update prompter_ai_jobs set created_at = now() - interval '90 days'$q$) as m2 into temp table st6;
+reset role;
+\if :phase_after
+  insert into results select 'STAFF marketing B cannot delete or backdate its own ai jobs', (select m1 from st5)<=0 and (select m2 from st6)<=0;
+\endif
+
+-- anon (no JWT) has no write path at all
+set role anon;
+select pg_temp.affected($q$insert into prompter_subscriptions(tenant_id) values ('00000000-0000-0000-0000-0000000000b1')$q$) as n1 into temp table an1;
+select pg_temp.affected($q$update prompter_subscriptions set plan='FREE'$q$) as n2 into temp table an2;
+select pg_temp.affected($q$delete from prompter_subscriptions$q$) as n3 into temp table an3;
+select pg_temp.affected($q$insert into prompter_ai_jobs(tenant_id,job_type) values ('00000000-0000-0000-0000-0000000000a1','X')$q$) as n4 into temp table an4;
+select pg_temp.affected($q$delete from prompter_ai_jobs$q$) as n5 into temp table an5;
+reset role;
+insert into results select 'ANON cannot write subscriptions or ai jobs',
+  (select n1 from an1)<=0 and (select n2 from an2)<=0 and (select n3 from an3)<=0 and (select n4 from an4)<=0 and (select n5 from an5)<=0;
+
+-- Legitimate users keep working after the attacks above (bookkeeping UPDATE on own job, own reads)
+set role authenticated;
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000b2');
+select pg_temp.affected($q$update prompter_ai_jobs set status='COMPLETED', completed_at=now()
+  where id=(select id from prompter_ai_jobs order by created_at limit 1)$q$) as lb into temp table legit_b;
+select (select count(*) from prompter_subscriptions) as subs_seen into temp table legit_b2;
+reset role;
+\if :phase_after
+  insert into results select 'LEGIT owner B can still finish its own ai job (bookkeeping UPDATE) after the attacks', (select lb from legit_b)=1;
+  insert into results select 'LEGIT owner B still sees exactly its own subscription', (select subs_seen from legit_b2)=1;
+\endif
+
+-- Service/backend paths: cascade delete from tenants and service_role deletes still work
+set role service_role;
+delete from prompter_subscriptions where tenant_id='00000000-0000-0000-0000-0000000000c1';
+reset role;
+insert into results select 'SVC service_role can still DELETE a subscription row (admin path)',
+  not exists (select 1 from prompter_subscriptions where tenant_id='00000000-0000-0000-0000-0000000000c1');
+delete from tenants where id='00000000-0000-0000-0000-0000000000d1';
+insert into results select 'SVC ON DELETE CASCADE from tenants still removes subscription rows',
+  not exists (select 1 from prompter_subscriptions where tenant_id='00000000-0000-0000-0000-0000000000d1');
+
+-- ===== TRUNCATE (ignores RLS: would wipe EVERY tenant's rows). Last, because in the "before" phase it succeeds. =====
+select count(*) as subs_before into temp table cnt_subs from prompter_subscriptions;
+select count(*) as jobs_before into temp table cnt_jobs from prompter_ai_jobs;
+set role authenticated;
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000a2');
+select pg_temp.try($q$truncate prompter_subscriptions$q$) as ts into temp table tr_s;
+reset role;
+set role anon;
+select pg_temp.try($q$truncate prompter_subscriptions$q$) as ts into temp table tr_sa;
+select pg_temp.try($q$truncate prompter_ai_jobs$q$) as tj into temp table tr_ja;
+reset role;
+\if :phase_after
+  insert into results select 'P0-2c TRUNCATE of prompter_subscriptions denied for authenticated and anon; all rows intact',
+    (select ts from tr_s)<>'ok' and (select ts from tr_sa)<>'ok' and (select count(*) from prompter_subscriptions)=(select subs_before from cnt_subs);
+  insert into results select 'P0-1 anon TRUNCATE of prompter_ai_jobs denied; all rows intact',
+    (select tj from tr_ja)<>'ok' and (select count(*) from prompter_ai_jobs)=(select jobs_before from cnt_jobs);
+\else
+  insert into results select 'P0-2c VULNERABLE before: authenticated TRUNCATE of subscriptions wipes every tenant',
+    (select ts from tr_s)='ok' and (select count(*) from prompter_subscriptions)=0;
+\endif
+
 select name, case when ok then 'PASS' else 'FAIL' end as result from results order by name;
 select case when bool_and(coalesce(ok,false)) then 'ALL PASS' else 'FAILURES PRESENT' end as summary from results;
+-- make the script's exit status reflect the result (psql ON_ERROR_STOP -> non-zero)
+do $$ begin
+  if exists (select 1 from results where not coalesce(ok,false)) then
+    raise exception 'P0 trial security: FAILURES PRESENT';
+  end if;
+end $$;

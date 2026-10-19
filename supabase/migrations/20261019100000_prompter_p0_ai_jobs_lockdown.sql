@@ -23,7 +23,7 @@
 --     or re-assigned.
 --
 -- service_role is not touched (it keeps its grants). No data is changed.
--- Rollback: supabase/rollback/20261010110000_prompter_p0_ai_jobs_lockdown.down.sql
+-- Rollback: supabase/rollback/20261019100000_prompter_p0_ai_jobs_lockdown.down.sql
 
 revoke insert, delete, truncate on public.prompter_ai_jobs from authenticated, anon;
 

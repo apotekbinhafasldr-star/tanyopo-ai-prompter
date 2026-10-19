@@ -112,7 +112,7 @@ export async function runAiJob<T>(params: RunAiJobParams<T>): Promise<RunAiJobRe
 
   // P0 trial-security: AI configuration is checked BEFORE a job is created.
   // A job row consumes quota and clients can no longer delete rows from
-  // prompter_ai_jobs (see migration 20261010110000), so an unconfigured
+  // prompter_ai_jobs (see migration 20261019100000), so an unconfigured
   // deployment must never create one in the first place.
   if (!isAiRoutingConfigured()) {
     return { ok: false, error: AI_NOT_CONFIGURED_MESSAGE, jobId: null };

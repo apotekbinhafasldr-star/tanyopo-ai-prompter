@@ -16,10 +16,10 @@ const executable = (sql: string) =>
     .map((l) => l.replace(/--.*$/, ""))
     .join("\n");
 
-const AI_JOBS = "supabase/migrations/20261010110000_prompter_p0_ai_jobs_lockdown.sql";
-const SUBS = "supabase/migrations/20261010110100_prompter_p0_subscription_trial_insert_guard.sql";
-const AI_JOBS_DOWN = "supabase/rollback/20261010110000_prompter_p0_ai_jobs_lockdown.down.sql";
-const SUBS_DOWN = "supabase/rollback/20261010110100_prompter_p0_subscription_trial_insert_guard.down.sql";
+const AI_JOBS = "supabase/migrations/20261019100000_prompter_p0_ai_jobs_lockdown.sql";
+const SUBS = "supabase/migrations/20261019100100_prompter_p0_subscription_trial_insert_guard.sql";
+const AI_JOBS_DOWN = "supabase/rollback/20261019100000_prompter_p0_ai_jobs_lockdown.down.sql";
+const SUBS_DOWN = "supabase/rollback/20261019100100_prompter_p0_subscription_trial_insert_guard.down.sql";
 
 /** Columns services/ai-jobs.ts writes after the model call. */
 const APP_WRITTEN_COLUMNS = [
@@ -64,7 +64,18 @@ describe("P0-2/P0-2b subscription trial-insert guard migration", () => {
   it("is a BEFORE INSERT trigger only (UPDATE paths, payment and cancellation are untouched)", () => {
     expect(sql).toMatch(/create trigger trg_prompter_subscriptions_enforce_trial_insert\s+before insert on public\.prompter_subscriptions/);
     expect(sql).not.toMatch(/before (insert or )?update/i);
-    expect(sql).not.toMatch(/create policy|drop policy|revoke|grant /i);
+    expect(sql).not.toMatch(/create policy|drop policy|alter policy/i);
+    expect(sql).not.toMatch(/\bgrant\b/i);
+  });
+
+  it("revokes DELETE and TRUNCATE (trial re-creation, cross-tenant wipe) and anon INSERT, nothing broader", () => {
+    expect(sql).toMatch(/revoke delete, truncate on public\.prompter_subscriptions from authenticated, anon;/);
+    expect(sql).toMatch(/revoke insert on public\.prompter_subscriptions from anon;/);
+    const revokes = sql.match(/\brevoke\b[^;]*;/gi) ?? [];
+    expect(revokes).toHaveLength(2);
+    // the first-trial INSERT and the column-level UPDATE (plan) of authenticated stay as they are
+    for (const r of revokes) expect(r).not.toMatch(/\bselect\b|\bupdate\b/i);
+    expect(sql).not.toMatch(/revoke[^;]*\binsert\b[^;]*from[^;]*authenticated/i);
   });
 
   it("is SECURITY INVOKER and only acts for anon/authenticated callers", () => {
@@ -107,11 +118,47 @@ describe("rollback scripts", () => {
     expect(sql).toMatch(/grant delete, insert, references, select, trigger, truncate, update\s+on public\.prompter_ai_jobs to anon, authenticated;/);
   });
 
-  it("subscription rollback removes the trigger and function and nothing else", () => {
+  it("subscription rollback removes the trigger and function and restores exactly the grants it revoked", () => {
     const sql = executable(read(SUBS_DOWN));
     expect(sql).toMatch(/drop trigger if exists trg_prompter_subscriptions_enforce_trial_insert/);
     expect(sql).toMatch(/drop function if exists public\.fn_enforce_trial_subscription_insert\(\)/);
-    expect(sql).not.toMatch(/\b(delete|update|insert|truncate|grant|revoke)\b/i);
+    expect(sql).toMatch(/grant delete, truncate on public\.prompter_subscriptions to authenticated, anon;/);
+    expect(sql).toMatch(/grant insert on public\.prompter_subscriptions to anon;/);
+    expect(sql).not.toMatch(/\b(delete from|update public|insert into|truncate table|revoke)\b/i);
+  });
+
+  it("migration versions sort after every migration already recorded on production (no out-of-order push)", () => {
+    const latestRecorded = "20261015144639"; // prompter_track_b_meta_page_picker, last version on production
+    for (const f of [AI_JOBS, SUBS]) {
+      const version = path.basename(f).split("_")[0];
+      expect(version > latestRecorded, f).toBe(true);
+    }
+  });
+});
+
+describe("the app never deletes or truncates subscription rows", () => {
+  const SKIP = new Set(["node_modules", ".next", ".git", "tests", "docs", "public", "supabase", ".netlify", "types"]);
+  const walk = (dir: string, out: string[] = []): string[] => {
+    for (const e of readdirSync(dir)) {
+      if (SKIP.has(e)) continue;
+      const full = path.join(dir, e);
+      if (statSync(full).isDirectory()) walk(full, out);
+      else if (/\.(ts|tsx)$/.test(e)) out.push(full);
+    }
+    return out;
+  };
+
+  it("no .from(\"prompter_subscriptions\") chain ends in delete()", () => {
+    const offenders = walk(root).filter((f) => {
+      const text = readFileSync(f, "utf-8");
+      let i = text.indexOf('.from("prompter_subscriptions")');
+      while (i !== -1) {
+        if (/^[\s\S]{0,160}?\.delete\(/.test(text.slice(i, i + 200))) return true;
+        i = text.indexOf('.from("prompter_subscriptions")', i + 1);
+      }
+      return false;
+    });
+    expect(offenders.map((f) => path.relative(root, f))).toEqual([]);
   });
 });
 
