@@ -1,0 +1,15 @@
+-- ROLLBACK for 20261019100100_prompter_p0_subscription_trial_insert_guard.sql
+-- NOT a migration: lives outside supabase/migrations and is never applied automatically.
+-- Production had no trigger of this name before; rollback simply removes it.
+-- Existing rows are not modified by the migration, so there is no data to restore.
+-- It also restores the grants observed on production before the migration
+-- (read-only catalog check, 2026-10-19): authenticated held DELETE and TRUNCATE,
+-- anon held DELETE, INSERT and TRUNCATE on prompter_subscriptions.
+-- WARNING: rolling back REOPENS P0-2/P0-2b (client-chosen trial period, trial
+-- re-creation by delete + insert, cross-tenant TRUNCATE).
+
+drop trigger if exists trg_prompter_subscriptions_enforce_trial_insert on public.prompter_subscriptions;
+drop function if exists public.fn_enforce_trial_subscription_insert();
+
+grant delete, truncate on public.prompter_subscriptions to authenticated, anon;
+grant insert on public.prompter_subscriptions to anon;

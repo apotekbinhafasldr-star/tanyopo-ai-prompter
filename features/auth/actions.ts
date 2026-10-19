@@ -1,13 +1,24 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { loginSchema, registerSchema, forgotPasswordSchema, resetPasswordSchema } from "@/schemas/auth";
 import { publicEnv } from "@/lib/env";
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
 import { isExistingAccountSignUp } from "@/lib/auth/existing-account";
 import { mapSignupError } from "@/lib/auth/signup-error";
+import { isCollectionEnabled, readTrialAbuseConfig } from "@/lib/trial-abuse/config";
+import {
+  DEVICE_COOKIE,
+  DEVICE_COOKIE_MAX_AGE_SECONDS,
+  REVIEW_INFO,
+  blockedMessage,
+  finalizeTrialAttempt,
+  isValidDeviceCookie,
+  newDeviceCookieValue,
+  runTrialGate,
+} from "@/lib/trial-abuse/gate";
 
 /**
  * Best-effort brake on trial-farming (repeated signups to get fresh
@@ -91,7 +102,8 @@ export async function registerAction(
   // Runs only after validation succeeds, so a typo retry never counts
   // against the limit — and before signUp(), so a blocked attempt never
   // reaches Supabase Auth at all.
-  const clientIp = getClientIp(await headers());
+  const requestHeaders = await headers();
+  const clientIp = getClientIp(requestHeaders);
   const rateLimit = checkRateLimit(`register:${clientIp}`, REGISTER_RATE_LIMIT, REGISTER_RATE_LIMIT_WINDOW_MS);
   if (!rateLimit.allowed) {
     return {
@@ -101,6 +113,38 @@ export async function registerAction(
 
   const supabase = await createClient();
   const { nama, namaUsaha, email, password } = parsed.data;
+
+  // Trial anti-abuse (TRIAL_ABUSE_MODE: off by default). Persistent, atomic and pseudonymous; see
+  // lib/trial-abuse/*. In "off" this block does nothing: no cookie, no signal, no database call.
+  const abuseConfig = readTrialAbuseConfig();
+  let deviceCookie: string | undefined;
+  if (isCollectionEnabled(abuseConfig)) {
+    const cookieStore = await cookies();
+    const existing = cookieStore.get(DEVICE_COOKIE)?.value;
+    deviceCookie = isValidDeviceCookie(existing) ? existing : newDeviceCookieValue();
+    if (deviceCookie !== existing) {
+      cookieStore.set(DEVICE_COOKIE, deviceCookie, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        path: "/",
+        maxAge: DEVICE_COOKIE_MAX_AGE_SECONDS,
+      });
+    }
+  }
+  const gate = await runTrialGate(
+    {
+      email,
+      clientIp,
+      userAgent: requestHeaders.get("user-agent"),
+      rawSignals: formData.get("deviceSignals"),
+      cookieValue: deviceCookie,
+    },
+    { config: abuseConfig },
+  );
+  if (gate.action === "block") {
+    return { error: blockedMessage(gate) };
+  }
 
   const { data, error } = await supabase.auth.signUp({
     email,
@@ -140,6 +184,7 @@ export async function registerAction(
   // anywhere for an existing account (signUp() itself already guarantees
   // that), and the user is pointed at the existing sign-in paths instead.
   if (isExistingAccountSignUp(error, data)) {
+    await finalizeTrialAttempt(gate.attemptId, null, false);
     return {
       error: null,
       info: "Email ini sudah terdaftar. Silakan masuk menggunakan akun Anda.",
@@ -148,15 +193,21 @@ export async function registerAction(
   }
 
   if (error) {
+    await finalizeTrialAttempt(gate.attemptId, null, false);
     return { error: mapSignupError(error) };
   }
+
+  // Links the attempt to the new auth user so a REVIEW hold can follow the account (no-op when off).
+  await finalizeTrialAttempt(gate.attemptId, data.user?.id ?? null, Boolean(data.user?.id));
 
   // If the project requires email confirmation, signUp succeeds but no
   // session is issued yet — there's nothing to redirect into.
   if (!data.session) {
     return {
       error: null,
-      info: "Akun berhasil dibuat. Silakan cek email Anda untuk konfirmasi sebelum masuk.",
+      info: gate.review
+        ? `Akun berhasil dibuat. Silakan cek email Anda untuk konfirmasi. ${REVIEW_INFO}`
+        : "Akun berhasil dibuat. Silakan cek email Anda untuk konfirmasi sebelum masuk.",
     };
   }
 

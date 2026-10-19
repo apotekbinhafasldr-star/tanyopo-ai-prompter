@@ -82,3 +82,47 @@ jobs:
 
       - name: PostgreSQL concurrency tests (C1-C8, C10, negative controls)
         run: npx vitest run -c vitest.pg.config.ts
+
+  # PR #31: behavioural proof of the P0 trial-security migrations (AI quota and
+  # trial-period tampering) on a throw-away postgres:16 service container.
+  # Phases: "before" proves the holes exist on a reconstruction of the production
+  # catalog, "after" proves the fix, tenant isolation and legitimate-user
+  # regression, "rollback" proves the rollback scripts restore the old state.
+  # No secret, no Supabase, no shared database; supabase/tests/run-local.sh
+  # refuses any non-local host and any production credential in the environment.
+  p0-trial-security-sql:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: linoe_ci
+          POSTGRES_PASSWORD: linoe_ci_password
+          POSTGRES_DB: linoe_p0_sql
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U linoe_ci -d linoe_p0_sql"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: linoe_ci
+      PGPASSWORD: linoe_ci_password
+      PGDATABASE: linoe_p0_sql
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ensure psql client
+        run: command -v psql && command -v createdb || (sudo apt-get update && sudo apt-get install -y postgresql-client)
+
+      - name: P0 trial security + trial anti-abuse - before (holes exist), after (fixed), rollback, abuse (decisions, races), abuse-rollback
+        run: |
+          set -euo pipefail
+          for phase in before after rollback abuse abuse-rollback shared-before shared-after shared-rollback; do
+            echo "::group::p0 trial security: $phase"
+            supabase/tests/run-local.sh "$phase"
+            echo "::endgroup::"
+          done

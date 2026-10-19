@@ -1,0 +1,255 @@
+import { describe, expect, it } from "vitest";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import path from "node:path";
+
+/**
+ * Static safety-invariant checks for the P0 trial-security migrations, in the
+ * same style as b9-entitlement-enforcement.test.ts (this repository has no
+ * live-Postgres harness in CI). The behavioural proof lives in
+ * supabase/tests/p0_trial_security.sql (local throwaway Postgres only).
+ */
+const root = path.resolve(__dirname, "../../..");
+const read = (rel: string) => readFileSync(path.join(root, rel), "utf-8");
+const executable = (sql: string) =>
+  sql
+    .split("\n")
+    .map((l) => l.replace(/--.*$/, ""))
+    .join("\n");
+
+const AI_JOBS = "supabase/migrations/20261019100000_prompter_p0_ai_jobs_lockdown.sql";
+const SUBS = "supabase/migrations/20261019100100_prompter_p0_subscription_trial_insert_guard.sql";
+const AI_JOBS_DOWN = "supabase/rollback/20261019100000_prompter_p0_ai_jobs_lockdown.down.sql";
+const SUBS_DOWN = "supabase/rollback/20261019100100_prompter_p0_subscription_trial_insert_guard.down.sql";
+
+/** Columns services/ai-jobs.ts writes after the model call. */
+const APP_WRITTEN_COLUMNS = [
+  "status", "provider", "model", "tokens_input", "tokens_output", "fallback_provider",
+  "output_reference", "error", "error_category", "completed_at",
+];
+const IMMUTABLE_COLUMNS = ["id", "tenant_id", "job_type", "input_reference", "estimated_cost", "created_at", "actor_user_id"];
+
+describe("P0-1 prompter_ai_jobs lockdown migration", () => {
+  const sql = executable(read(AI_JOBS));
+
+  it("revokes INSERT, DELETE and TRUNCATE from authenticated and anon", () => {
+    expect(sql).toMatch(/revoke insert, delete, truncate on public\.prompter_ai_jobs from authenticated, anon;/);
+  });
+
+  it("revokes table-level UPDATE, then grants UPDATE only on bookkeeping columns", () => {
+    expect(sql).toMatch(/revoke update on public\.prompter_ai_jobs from authenticated, anon;/);
+    const grant = sql.match(/grant update \(([^)]*)\) on public\.prompter_ai_jobs to authenticated;/);
+    expect(grant).not.toBeNull();
+    const cols = grant![1].split(",").map((c) => c.trim()).filter(Boolean);
+    expect(cols.sort()).toEqual([...APP_WRITTEN_COLUMNS].sort());
+    for (const c of IMMUTABLE_COLUMNS) expect(cols, c).not.toContain(c);
+  });
+
+  it("does not touch policies, service_role, the RPC, or any data", () => {
+    expect(sql).not.toMatch(/create policy|drop policy|alter policy/i);
+    expect(sql).not.toMatch(/service_role/i);
+    expect(sql).not.toMatch(/fn_create_ai_job_if_entitled/);
+    expect(sql).not.toMatch(/\b(insert into|delete from|update public\.)\b/i);
+    expect(sql).not.toMatch(/security definer/i);
+  });
+
+  it("every column the app writes is still granted (app keeps working)", () => {
+    const service = read("services/ai-jobs.ts");
+    for (const c of APP_WRITTEN_COLUMNS) expect(service, c).toContain(c);
+  });
+});
+
+describe("P0-2/P0-2b subscription trial-insert guard migration", () => {
+  const sql = executable(read(SUBS));
+
+  it("is a BEFORE INSERT trigger only (UPDATE paths, payment and cancellation are untouched)", () => {
+    expect(sql).toMatch(/create trigger trg_prompter_subscriptions_enforce_trial_insert\s+before insert on public\.prompter_subscriptions/);
+    expect(sql).not.toMatch(/before (insert or )?update/i);
+    expect(sql).not.toMatch(/create policy|drop policy|alter policy/i);
+    expect(sql).not.toMatch(/\bgrant\b/i);
+  });
+
+  it("revokes DELETE and TRUNCATE (trial re-creation, cross-tenant wipe) and anon INSERT, nothing broader", () => {
+    expect(sql).toMatch(/revoke delete, truncate on public\.prompter_subscriptions from authenticated, anon;/);
+    expect(sql).toMatch(/revoke insert on public\.prompter_subscriptions from anon;/);
+    const revokes = sql.match(/\brevoke\b[^;]*;/gi) ?? [];
+    expect(revokes).toHaveLength(2);
+    // the first-trial INSERT and the column-level UPDATE (plan) of authenticated stay as they are
+    for (const r of revokes) expect(r).not.toMatch(/\bselect\b|\bupdate\b/i);
+    expect(sql).not.toMatch(/revoke[^;]*\binsert\b[^;]*from[^;]*authenticated/i);
+  });
+
+  it("is SECURITY INVOKER and only acts for anon/authenticated callers", () => {
+    expect(sql).toMatch(/security invoker/);
+    expect(sql).not.toMatch(/security definer/);
+    expect(sql).toMatch(/current_user in \('anon', 'authenticated'\)/);
+  });
+
+  it("forces server-time, 14-day trial values and resets commercial fields", () => {
+    for (const stmt of [
+      "new.status := 'TRIALING';",
+      "new.plan := 'FREE';",
+      "new.created_at := now();",
+      "new.current_period_start := now();",
+      "new.current_period_end := now() + interval '14 days';",
+      "new.billing_provider := null;",
+      "new.payment_provider_customer_reference := null;",
+      "new.provider_subscription_id := null;",
+      "new.success_fee_rate_bps := null;",
+      "new.cancel_at_period_end := false;",
+    ]) {
+      expect(sql, stmt).toContain(stmt);
+    }
+  });
+
+  it("14 days matches TRIAL_DURATION_DAYS in the app", () => {
+    expect(read("services/billing.ts")).toMatch(/TRIAL_DURATION_DAYS\s*=\s*14/);
+  });
+});
+
+describe("rollback scripts", () => {
+  it("exist outside supabase/migrations, so they are never applied automatically", () => {
+    for (const f of [AI_JOBS_DOWN, SUBS_DOWN]) expect(existsSync(path.join(root, f)), f).toBe(true);
+    const migrations = readdirSync(path.join(root, "supabase/migrations"));
+    expect(migrations.some((m) => m.endsWith(".down.sql"))).toBe(false);
+  });
+
+  it("ai_jobs rollback restores the exact production grants observed before the lockdown", () => {
+    const sql = executable(read(AI_JOBS_DOWN));
+    expect(sql).toMatch(/grant delete, insert, references, select, trigger, truncate, update\s+on public\.prompter_ai_jobs to anon, authenticated;/);
+  });
+
+  it("subscription rollback removes the trigger and function and restores exactly the grants it revoked", () => {
+    const sql = executable(read(SUBS_DOWN));
+    expect(sql).toMatch(/drop trigger if exists trg_prompter_subscriptions_enforce_trial_insert/);
+    expect(sql).toMatch(/drop function if exists public\.fn_enforce_trial_subscription_insert\(\)/);
+    expect(sql).toMatch(/grant delete, truncate on public\.prompter_subscriptions to authenticated, anon;/);
+    expect(sql).toMatch(/grant insert on public\.prompter_subscriptions to anon;/);
+    expect(sql).not.toMatch(/\b(delete from|update public|insert into|truncate table|revoke)\b/i);
+  });
+
+  it("migration versions sort after every migration already recorded on production (no out-of-order push)", () => {
+    const latestRecorded = "20261015144639"; // prompter_track_b_meta_page_picker, last version on production
+    for (const f of [AI_JOBS, SUBS]) {
+      const version = path.basename(f).split("_")[0];
+      expect(version > latestRecorded, f).toBe(true);
+    }
+  });
+});
+
+describe("the app never deletes or truncates subscription rows", () => {
+  const SKIP = new Set(["node_modules", ".next", ".git", "tests", "docs", "public", "supabase", ".netlify", "types"]);
+  const walk = (dir: string, out: string[] = []): string[] => {
+    for (const e of readdirSync(dir)) {
+      if (SKIP.has(e)) continue;
+      const full = path.join(dir, e);
+      if (statSync(full).isDirectory()) walk(full, out);
+      else if (/\.(ts|tsx)$/.test(e)) out.push(full);
+    }
+    return out;
+  };
+
+  it("no .from(\"prompter_subscriptions\") chain ends in delete()", () => {
+    const offenders = walk(root).filter((f) => {
+      const text = readFileSync(f, "utf-8");
+      let i = text.indexOf('.from("prompter_subscriptions")');
+      while (i !== -1) {
+        if (/^[\s\S]{0,160}?\.delete\(/.test(text.slice(i, i + 200))) return true;
+        i = text.indexOf('.from("prompter_subscriptions")', i + 1);
+      }
+      return false;
+    });
+    expect(offenders.map((f) => path.relative(root, f))).toEqual([]);
+  });
+});
+
+describe("no other code path writes prompter_ai_jobs through a client", () => {
+  const SKIP = new Set(["node_modules", ".next", ".git", "tests", "docs", "public", "supabase", ".netlify", "types"]);
+  const walk = (dir: string, out: string[] = []): string[] => {
+    for (const e of readdirSync(dir)) {
+      if (SKIP.has(e)) continue;
+      const full = path.join(dir, e);
+      if (statSync(full).isDirectory()) walk(full, out);
+      else if (/\.(ts|tsx)$/.test(e)) out.push(full);
+    }
+    return out;
+  };
+  const users = walk(root)
+    .map((f) => ({ file: path.relative(root, f).split(path.sep).join("/"), text: readFileSync(f, "utf-8") }))
+    .filter(({ text }) => /\.from\(\s*"prompter_ai_jobs"\s*\)/.test(text));
+
+  it("only services/ai-jobs.ts (writes) and services/billing.ts (read-only count) touch the table", () => {
+    expect(users.map((u) => u.file).sort()).toEqual(["services/ai-jobs.ts", "services/billing.ts"]);
+  });
+
+  it("services/billing.ts only reads it", () => {
+    const text = users.find((u) => u.file === "services/billing.ts")!.text;
+    const afterFrom = text.slice(text.indexOf('.from("prompter_ai_jobs")'));
+    expect(afterFrom.slice(0, 200)).toMatch(/\.select\(/);
+    expect(afterFrom.slice(0, 200)).not.toMatch(/\.(insert|update|delete|upsert)\(/);
+  });
+
+  it("services/ai-jobs.ts never inserts, upserts, or deletes through the tenant client", () => {
+    const text = users.find((u) => u.file === "services/ai-jobs.ts")!.text;
+    expect(text).not.toMatch(/\.insert\(/);
+    expect(text).not.toMatch(/\.upsert\(/);
+    // The only delete is on the server-only admin client, scoped to tenant + id + PROCESSING.
+    const deletes = text.match(/\.delete\(\)/g) ?? [];
+    expect(deletes).toHaveLength(1);
+    expect(text).toMatch(/admin\s*\.from\("prompter_ai_jobs"\)\s*\.delete\(\)\s*\.eq\("id", jobId\)\s*\.eq\("tenant_id", tenantId\)\s*\.eq\("status", "PROCESSING"\)/);
+  });
+
+  it("the subscription insert in the app is the canonical trial (status TRIALING, now → +14 days)", () => {
+    const text = read("services/billing.ts");
+    expect(text).toMatch(/status: "TRIALING"/);
+    expect(text).toMatch(/current_period_end: trialEnd\.toISOString\(\)/);
+  });
+});
+
+describe("P0-3 prompter_plan_entitlements lockdown + fail-closed quota function", () => {
+  const MIG = "supabase/migrations/20261019100200_prompter_p0_plan_entitlements_lockdown.sql";
+  const DOWN = "supabase/rollback/20261019100200_prompter_p0_plan_entitlements_lockdown.down.sql";
+  const sql = executable(read(MIG));
+
+  it("revokes every write privilege (incl. TRUNCATE) from anon and authenticated", () => {
+    expect(sql).toMatch(
+      /revoke insert, update, delete, truncate on public\.prompter_plan_entitlements from anon, authenticated;/,
+    );
+  });
+
+  it("the quota function fails closed when no entitlement or no allowance exists", () => {
+    expect(sql).toMatch(/v_entitlement\.plan is null or v_entitlement\.ai_usage_allowance is null/);
+    expect(sql).toMatch(/'ENTITLEMENT_NOT_CONFIGURED'/);
+    expect(sql).toMatch(/security definer/);
+    expect(sql).toMatch(/set search_path = public/);
+  });
+
+  it("is ledger-safe: no DDL on tenants, auth.users or any non-LINOE table", () => {
+    expect(sql).not.toMatch(/\bauth\.users\b/);
+    expect(sql).not.toMatch(/(alter|drop|truncate)\s+table\s+(public\.)?tenants\b/);
+  });
+
+  it("has a rollback outside supabase/migrations that restores the grants", () => {
+    expect(existsSync(path.join(root, DOWN))).toBe(true);
+    expect(executable(read(DOWN))).toMatch(
+      /grant insert, update, delete, truncate on public\.prompter_plan_entitlements to anon, authenticated;/,
+    );
+  });
+
+  it("no application code writes to prompter_plan_entitlements", () => {
+    const hits = ["services", "features", "lib", "app"].flatMap((d) => {
+      const out: string[] = [];
+      const walk = (p: string) => {
+        for (const e of readdirSync(p)) {
+          const f = path.join(p, e);
+          if (statSync(f).isDirectory()) walk(f);
+          else if (/\.(ts|tsx)$/.test(f) && /prompter_plan_entitlements/.test(readFileSync(f, "utf-8"))) out.push(f);
+        }
+      };
+      if (existsSync(path.join(root, d))) walk(path.join(root, d));
+      return out;
+    });
+    for (const f of hits) {
+      expect(readFileSync(f, "utf-8")).not.toMatch(/prompter_plan_entitlements"\)\s*\.(insert|update|delete|upsert)\(/);
+    }
+  });
+});
