@@ -29,6 +29,18 @@ create function public.fn_current_tenant_id() returns uuid language sql stable s
 create function public.fn_current_role() returns text language sql stable security definer set search_path=public as
   $$ select role from public.user_profiles where id = auth.uid() $$;
 
+-- Shared-table state as read from the production catalog on 2026-10-19 (policies + RLS).
+alter table public.tenants enable row level security;
+create policy "Lihat tenant sendiri" on public.tenants for select to public using (id = public.fn_current_tenant_id());
+create policy "Owner bisa edit data usaha sendiri" on public.tenants for update to public
+  using (id = public.fn_current_tenant_id() and public.fn_current_role() = 'owner')
+  with check (id = public.fn_current_tenant_id());
+create table public.ai_assistant_usage_log (id uuid primary key default gen_random_uuid(), tenant_id uuid, created_at timestamptz default now());
+alter table public.ai_assistant_usage_log enable row level security;
+create table public.fitur_ai_usage_log (id uuid primary key default gen_random_uuid(), tenant_id uuid, created_at timestamptz default now());
+alter table public.fitur_ai_usage_log enable row level security;
+create policy "Tenant lihat pemakaian sendiri" on public.fitur_ai_usage_log for select to public using (tenant_id = public.fn_current_tenant_id());
+
 create function public.prompter_set_updated_at() returns trigger language plpgsql as
   $$ begin new.updated_at := now(); return new; end $$;
 

@@ -34,6 +34,7 @@ create table if not exists public.prompter_trial_signup_attempts (
   cookie_hmac text check (cookie_hmac is null or cookie_hmac ~ '^[0-9a-f]{64}$'),
   device_hmac text check (device_hmac is null or device_hmac ~ '^[0-9a-f]{64}$'),
   ip_hmac text check (ip_hmac is null or ip_hmac ~ '^[0-9a-f]{64}$'),
+  purpose text not null default 'signup' check (purpose in ('signup', 'claim')),
   decision text not null check (decision in ('ALLOW', 'REVIEW', 'DENY')),
   shadow boolean not null default false,
   risk_score integer not null default 0 check (risk_score >= 0),
@@ -120,7 +121,8 @@ $$;
 -- phones, offices). Only repeated use of the same random first-party device cookie by different emails
 -- reaches DENY.
 -- ---------------------------------------------------------------------------------------------
-create or replace function public.fn_trial_signup_gate(
+create or replace function public.fn_trial_gate_core(
+  p_purpose text,
   p_mode text,
   p_key_version integer,
   p_email_hmac text,
@@ -148,9 +150,13 @@ declare
   v_worst_retry integer := 0;
   v_limited boolean := false;
   v_id uuid;
+  v_prefix text := case when p_purpose = 'claim' then 'claim_' else '' end;
   v_live interval := interval '30 days';
   v_pending_ttl interval := interval '15 minutes';
 begin
+  if p_purpose not in ('signup', 'claim') then
+    raise exception 'invalid purpose %', p_purpose using errcode = '22023';
+  end if;
   if p_mode not in ('shadow', 'enforce') then
     raise exception 'invalid mode %', p_mode using errcode = '22023';
   end if;
@@ -178,19 +184,19 @@ begin
          (select scope, key_hmac, window_start from public.prompter_trial_rate_buckets where expires_at < now() limit 50);
 
   -- Persistent atomic rate limits. Every attempt counts, including denied ones.
-  select h.hits, h.retry_after_seconds into v_hits, v_retry from public.fn_trial_bucket_hit('ip_hour', p_ip_hmac, 3600) h where p_ip_hmac is not null;
+  select h.hits, h.retry_after_seconds into v_hits, v_retry from public.fn_trial_bucket_hit(v_prefix || 'ip_hour', p_ip_hmac, 3600) h where p_ip_hmac is not null;
   if v_hits > 5 then v_limited := true; v_reasons := array_append(v_reasons, 'RATE_IP_HOUR'::text); v_worst_retry := greatest(v_worst_retry, v_retry); end if;
   v_hits := null;
-  select h.hits, h.retry_after_seconds into v_hits, v_retry from public.fn_trial_bucket_hit('ip_day', p_ip_hmac, 86400) h where p_ip_hmac is not null;
+  select h.hits, h.retry_after_seconds into v_hits, v_retry from public.fn_trial_bucket_hit(v_prefix || 'ip_day', p_ip_hmac, 86400) h where p_ip_hmac is not null;
   if v_hits > 20 then v_limited := true; v_reasons := array_append(v_reasons, 'RATE_IP_DAY'::text); v_worst_retry := greatest(v_worst_retry, v_retry); end if;
   v_hits := null;
-  select h.hits, h.retry_after_seconds into v_hits, v_retry from public.fn_trial_bucket_hit('email_hour', p_email_hmac, 3600) h;
+  select h.hits, h.retry_after_seconds into v_hits, v_retry from public.fn_trial_bucket_hit(v_prefix || 'email_hour', p_email_hmac, 3600) h;
   if v_hits > 5 then v_limited := true; v_reasons := array_append(v_reasons, 'RATE_EMAIL_HOUR'::text); v_worst_retry := greatest(v_worst_retry, v_retry); end if;
   v_hits := null;
-  select h.hits, h.retry_after_seconds into v_hits, v_retry from public.fn_trial_bucket_hit('cookie_day', p_cookie_hmac, 86400) h where p_cookie_hmac is not null;
+  select h.hits, h.retry_after_seconds into v_hits, v_retry from public.fn_trial_bucket_hit(v_prefix || 'cookie_day', p_cookie_hmac, 86400) h where p_cookie_hmac is not null;
   if v_hits > 6 then v_limited := true; v_reasons := array_append(v_reasons, 'RATE_COOKIE_DAY'::text); v_worst_retry := greatest(v_worst_retry, v_retry); end if;
   v_hits := null;
-  select h.hits, h.retry_after_seconds into v_hits, v_retry from public.fn_trial_bucket_hit('device_day', p_device_hmac, 86400) h where p_device_hmac is not null;
+  select h.hits, h.retry_after_seconds into v_hits, v_retry from public.fn_trial_bucket_hit(v_prefix || 'device_day', p_device_hmac, 86400) h where p_device_hmac is not null;
   if v_hits > 10 then v_limited := true; v_reasons := array_append(v_reasons, 'RATE_DEVICE_DAY'::text); v_worst_retry := greatest(v_worst_retry, v_retry); end if;
 
   if v_limited then
@@ -230,14 +236,163 @@ begin
   v_decision := case when v_score >= 100 then 'DENY' when v_score >= 50 then 'REVIEW' else 'ALLOW' end;
 
   insert into public.prompter_trial_signup_attempts
-    (key_version, email_hmac, cookie_hmac, device_hmac, ip_hmac, decision, shadow, risk_score, reasons, outcome, trial_hold)
+    (key_version, email_hmac, cookie_hmac, device_hmac, ip_hmac, purpose, decision, shadow, risk_score, reasons, outcome, trial_hold)
   values
-    (p_key_version, p_email_hmac, p_cookie_hmac, p_device_hmac, p_ip_hmac, v_decision, v_shadow, v_score, v_reasons,
+    (p_key_version, p_email_hmac, p_cookie_hmac, p_device_hmac, p_ip_hmac, p_purpose, v_decision, v_shadow, v_score, v_reasons,
      case when v_decision = 'DENY' then 'ABORTED' else 'PENDING' end,
      (v_decision = 'REVIEW' and not v_shadow))
   returning id into v_id;
 
   return query select v_decision, v_id, v_score, v_reasons, 0;
+end;
+$$;
+
+create or replace function public.fn_trial_signup_gate(
+  p_mode text,
+  p_key_version integer,
+  p_email_hmac text,
+  p_cookie_hmac text,
+  p_device_hmac text,
+  p_ip_hmac text
+)
+returns table(decision text, attempt_id uuid, risk_score integer, reasons text[], retry_after_seconds integer)
+language sql
+security definer
+set search_path = public
+as $$
+  select * from public.fn_trial_gate_core('signup', p_mode, p_key_version, p_email_hmac, p_cookie_hmac, p_device_hmac, p_ip_hmac);
+$$;
+
+-- ---------------------------------------------------------------------------------------------
+-- LINOE-only trial CLAIM (closes the direct-signup bypass without any Auth hook or Auth config change).
+--
+-- Anyone holding the public Supabase key can call the Auth signup endpoint directly and skip the app's
+-- registerAction gate; handle_new_user then creates a tenant. But a LINOE trial only exists once a row is
+-- written to prompter_subscriptions, and that is LINOE-owned. So the trial is "claimed" server-side:
+-- the app calls fn_trial_claim (service_role) which runs the SAME gate (purpose 'claim', own rate buckets)
+-- for the authenticated user and creates the subscription itself. Once `claim_required` is switched on,
+-- any client-side INSERT only yields an already-expired placeholder (see the trigger below), so a direct
+-- signup cannot self-start a trial. UMKMpro/PUBLOE/Apotek signups and logins are untouched: nothing here runs
+-- unless the user opens LINOE and has no subscription yet.
+-- ---------------------------------------------------------------------------------------------
+create table if not exists public.prompter_trial_config (
+  id boolean primary key default true check (id),
+  claim_required boolean not null default false,
+  updated_at timestamptz not null default now()
+);
+insert into public.prompter_trial_config (id, claim_required) values (true, false) on conflict (id) do nothing;
+comment on table public.prompter_trial_config is
+  'LINOE trial anti-abuse switch (single row). claim_required=false (default) leaves behaviour unchanged. service_role/SECURITY DEFINER access only.';
+alter table public.prompter_trial_config enable row level security;
+revoke all on public.prompter_trial_config from public, anon, authenticated;
+
+create or replace function public.fn_trial_claim_required()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select coalesce((select claim_required from public.prompter_trial_config where id), false);
+$$;
+
+create or replace function public.fn_trial_set_claim_required(p_on boolean)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  update public.prompter_trial_config set claim_required = coalesce(p_on, false), updated_at = now() where id;
+  return coalesce(p_on, false);
+end;
+$$;
+
+create or replace function public.fn_trial_claim(
+  p_mode text,
+  p_key_version integer,
+  p_user_id uuid,
+  p_email_hmac text,
+  p_cookie_hmac text,
+  p_device_hmac text,
+  p_ip_hmac text
+)
+returns table(outcome text, decision text, retry_after_seconds integer)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_tenant uuid;
+  v_sub public.prompter_subscriptions%rowtype;
+  v_found boolean;
+  v_claimed boolean;
+  v_hold boolean;
+  v_g record;
+  v_expire boolean;
+  v_decision text;
+begin
+  if p_mode <> 'enforce' then
+    raise exception 'trial claim runs in enforce mode only' using errcode = '22023';
+  end if;
+  if p_user_id is null then
+    return query select 'NO_USER'::text, null::text, 0;
+    return;
+  end if;
+  select up.tenant_id into v_tenant from public.user_profiles up where up.id = p_user_id;
+  if v_tenant is null then
+    return query select 'NO_TENANT'::text, null::text, 0;
+    return;
+  end if;
+
+  perform pg_advisory_xact_lock(hashtextextended('prompter_trial_claim:' || v_tenant::text, 0));
+
+  select * into v_sub from public.prompter_subscriptions where tenant_id = v_tenant for update;
+  v_found := found;
+  v_claimed := exists (select 1 from public.prompter_trial_signup_attempts a where a.user_id = p_user_id and a.purpose = 'claim');
+
+  -- An existing row is final unless it is the expired placeholder a client-side insert produced while
+  -- claim_required was on (period end before creation) and this user has not been through a claim yet.
+  if v_found and not (
+       v_sub.status = 'TRIALING' and v_sub.billing_provider is null
+       and v_sub.current_period_end is not null and v_sub.current_period_end < v_sub.created_at
+       and not v_claimed) then
+    return query select 'EXISTS'::text, null::text, 0;
+    return;
+  end if;
+
+  v_hold := exists (
+    select 1 from public.prompter_trial_signup_attempts a
+     where a.user_id = p_user_id and a.trial_hold and a.hold_released_at is null and a.outcome = 'SIGNED_UP');
+
+  if v_hold then
+    v_expire := true;
+    v_decision := 'REVIEW';
+  else
+    select * into v_g from public.fn_trial_gate_core('claim', p_mode, p_key_version, p_email_hmac, p_cookie_hmac, p_device_hmac, p_ip_hmac);
+    if v_g.attempt_id is null then
+      return query select 'RATE_LIMITED'::text, v_g.decision, v_g.retry_after_seconds;
+      return;
+    end if;
+    v_decision := v_g.decision;
+    v_expire := v_g.decision <> 'ALLOW';
+    update public.prompter_trial_signup_attempts as a
+       set outcome = 'SIGNED_UP', user_id = p_user_id, trial_hold = v_expire
+     where a.id = v_g.attempt_id and a.outcome in ('PENDING', 'ABORTED');
+  end if;
+
+  if v_found then
+    update public.prompter_subscriptions
+       set created_at = now(), updated_at = now(), current_period_start = now(),
+           current_period_end = case when v_expire then now() - interval '1 minute' else now() + interval '14 days' end
+     where tenant_id = v_tenant;
+  else
+    insert into public.prompter_subscriptions (tenant_id, status, plan, created_at, updated_at, current_period_start, current_period_end)
+    values (v_tenant, 'TRIALING', 'FREE', now(), now(), now(),
+            case when v_expire then now() - interval '1 minute' else now() + interval '14 days' end);
+  end if;
+
+  return query select case when v_expire then 'HELD' else 'CREATED' end, v_decision, 0;
 end;
 $$;
 
@@ -313,7 +468,9 @@ begin
     new.current_period_start := now();
     new.current_period_end := now() + interval '14 days';
 
-    if public.fn_trial_hold_active(new.tenant_id) then
+    -- Held tenants, and (once the claim gate is switched on) EVERY client-side insert, get an already-expired
+    -- placeholder. The real trial is created server-side by fn_trial_claim after the gate has run.
+    if public.fn_trial_claim_required() or public.fn_trial_hold_active(new.tenant_id) then
       new.current_period_end := now() - interval '1 minute';
     end if;
 
@@ -400,6 +557,10 @@ $$;
 -- Privileges: Supabase grants EXECUTE on new public functions to anon/authenticated by default.
 -- ---------------------------------------------------------------------------------------------
 revoke all on function public.fn_trial_bucket_hit(text, text, integer) from public, anon, authenticated;
+revoke all on function public.fn_trial_gate_core(text, text, integer, text, text, text, text) from public, anon, authenticated;
+revoke all on function public.fn_trial_claim(text, integer, uuid, text, text, text, text) from public, anon, authenticated;
+revoke all on function public.fn_trial_set_claim_required(boolean) from public, anon, authenticated;
+revoke all on function public.fn_trial_claim_required() from public, anon;
 revoke all on function public.fn_trial_signup_gate(text, integer, text, text, text, text) from public, anon, authenticated;
 revoke all on function public.fn_trial_signup_finalize(uuid, uuid, boolean) from public, anon, authenticated;
 revoke all on function public.fn_trial_release_hold(uuid, text) from public, anon, authenticated;
@@ -407,6 +568,10 @@ revoke all on function public.fn_trial_abuse_purge(integer) from public, anon, a
 revoke all on function public.fn_trial_hold_active(uuid) from public, anon;
 
 grant execute on function public.fn_trial_bucket_hit(text, text, integer) to service_role;
+grant execute on function public.fn_trial_claim(text, integer, uuid, text, text, text, text) to service_role;
+grant execute on function public.fn_trial_set_claim_required(boolean) to service_role;
+-- The subscription trigger runs as the calling role and needs the (data-free) switch.
+grant execute on function public.fn_trial_claim_required() to authenticated, service_role;
 grant execute on function public.fn_trial_signup_gate(text, integer, text, text, text, text) to service_role;
 grant execute on function public.fn_trial_signup_finalize(uuid, uuid, boolean) to service_role;
 grant execute on function public.fn_trial_release_hold(uuid, text) to service_role;

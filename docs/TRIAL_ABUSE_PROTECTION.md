@@ -43,8 +43,30 @@ select public.fn_trial_release_hold('<attempt_id>', 'verified by support: shared
 ```
 It records who/why (`hold_released_reason`), and restores a normal 14-day trial from now if the held subscription row exists.
 
+## Closing the direct-signup bypass (trial claim)
+Anyone with the public Supabase key can sign up straight against Supabase Auth and skip `registerAction`.
+We do not touch Auth (shared with PUBLOE/Apotek/UMKMpro; no Auth Hook, no Auth config change). The LINOE trial is
+a row in LINOE-owned `prompter_subscriptions`, so the trial itself is gated:
+- `TRIAL_ABUSE_MODE=enforce`: `getOrCreateSubscription` calls `claimTrial` -> `fn_trial_claim` (service_role only). It runs
+  the same gate (own `claim_*` rate buckets), then creates the subscription itself: 14-day trial on ALLOW, already-expired
+  (held) on REVIEW/DENY, fully idempotent and serialised per tenant. Identity comes from the verified session, never from arguments.
+- DB switch `prompter_trial_config.claim_required` (default false, flipped with `fn_trial_set_claim_required(true)`):
+  while on, any CLIENT insert into `prompter_subscriptions` yields an expired placeholder, so a direct signup cannot
+  self-start a trial. The claim upgrades such a placeholder after the gate. Turning it off restores the old behaviour instantly.
+- Effect on other products: none. Nothing runs at signup/login in Auth; it only runs when a user opens LINOE without a subscription.
+- Order matters: deploy code with mode=enforce FIRST, flip `claim_required` SECOND (flipping first would hand legacy code
+  expired placeholders; claim recovers them, but users would see a held trial until their next page load).
+
+## Shared-table hardening (separate migration, needs Founder approval to apply)
+`20261019120000` only REVOKEs TRUNCATE/DELETE/INSERT (and anon UPDATE) on `tenants` and all writes on
+`ai_assistant_usage_log` / `fitur_ai_usage_log`. Production catalog shows RLS already rejects those writes for app roles
+(no INSERT/DELETE policy; logs have no write policy), writers are SECURITY DEFINER/service_role, so no working path is removed.
+Reachability note: PostgREST has no TRUNCATE verb, so TRUNCATE on these tables is defence in depth, not a demonstrated
+remote exploit through the public API. (This also applies to `prompter_plan_entitlements`, P0-3.)
+
 ## Required before activation
-Migrations (in order): `20261019100000`, `20261019100100`, `20261019100200` (PR #31 + P0-3), then `20261019110000`.
+Migrations (in order): `20261019100000`, `20261019100100`, `20261019100200` (PR #31 + P0-3), `20261019110000`
+(anti-abuse + claim), and `20261019120000` (shared-table hardening, separate approval).
 Secrets / config (no values here): `TRIAL_ABUSE_HMAC_SECRET` (base64, >= 32 random bytes, dedicated),
 `TRIAL_ABUSE_KEY_VERSION`, `TRIAL_ABUSE_MODE`. `SUPABASE_SECRET_KEY` must already be set (admin client).
 
@@ -53,13 +75,15 @@ Secrets / config (no values here): `TRIAL_ABUSE_HMAC_SECRET` (base64, >= 32 rand
 2. Apply the three P0 migrations, run read-only grant check; then apply `20261019110000`. Feature still OFF.
 3. Create `TRIAL_ABUSE_HMAC_SECRET` in Netlify (Founder). Do not set the mode yet.
 4. `TRIAL_ABUSE_MODE=shadow` → privacy notice switches on automatically. Observe REVIEW/DENY rates for a week; no user is blocked.
-5. Review false positives; only then `TRIAL_ABUSE_MODE=enforce`.
-6. Rollback at any step: set mode `off` (instant, no data touched); SQL rollbacks are in `supabase/rollback/`.
+5. Review false positives; only then `TRIAL_ABUSE_MODE=enforce` (deploy), verify a test signup + claim.
+6. Then `select fn_trial_set_claim_required(true)` (service_role) to close the direct-signup bypass.
+7. Rollback at any step: `fn_trial_set_claim_required(false)`, then mode `off` (instant, no data touched); SQL rollbacks are in `supabase/rollback/`.
 
 ## Residual risks (known, not hidden)
-- Signing up directly against Supabase Auth with the public key bypasses the app gate. Closing this needs a
-  before-user-created Auth hook on the *shared* project (affects UMKMpro too) — requires separate Founder approval.
+- Direct Supabase-Auth signup still creates an auth user + tenant (shared trigger) and cannot be prevented without an
+  Auth hook; it no longer yields a LINOE trial once `claim_required` is on (see above). Remaining abuse: email-confirmation
+  mailbox farming still costs the attacker one mailbox per attempt and is rate-limited per IP/cookie at claim time.
 - Clearing cookies / new browser profile / different device defeats the cookie signal; mobile CGNAT limits the IP signal.
 - Pseudonyms are still personal data; legal review of the notice is recommended before enabling.
-- `ai_assistant_usage_log` and `fitur_ai_usage_log` (UMKMpro tables) also grant TRUNCATE to app roles; out of LINOE scope, not changed.
-- `tenants` still grants DELETE/TRUNCATE to app roles (shared table; needs Founder decision).
+- Claim-time signals are weaker than signup-time: no browser signals, and the device cookie may be absent if the user confirms
+  email on another device. The signup gate (when used) and email/IP pseudonyms still apply.

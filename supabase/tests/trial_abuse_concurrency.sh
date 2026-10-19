@@ -45,4 +45,14 @@ wait
 t=$(cat /tmp/fin_$$_*.out | grep -c '^t$' || true); rm -f /tmp/fin_$$_*.out
 echo "scenario3: transitions=$t"
 [ "$t" = "1" ] || { echo "FAIL scenario3: expected exactly one successful finalize"; exit 1; }
+# Scenario 4: 10 parallel trial CLAIMS for ONE user (fixture from trial_abuse.sql) => one subscription, one CREATED.
+uid=00000000-0000-0000-0000-000000000112
+for n in $(seq 1 10); do
+  ( p -c "select outcome from fn_trial_claim('enforce',1,'$uid','$(h cl-mail)','$(h cl-ck)',null,'$(h cl-ip)')" > "/tmp/cl_$$_$n.out" ) &
+done
+wait
+created=$(cat /tmp/cl_$$_*.out | grep -c '^CREATED$' || true); exists=$(cat /tmp/cl_$$_*.out | grep -c '^EXISTS$' || true); rm -f /tmp/cl_$$_*.out
+subs=$(p -c "select count(*) from prompter_subscriptions where tenant_id='$uid'")
+echo "scenario4: created=$created exists=$exists subscriptions=$subs"
+[ "$created" = "1" ] && [ "$exists" = "9" ] && [ "$subs" = "1" ] || { echo "FAIL scenario4: expected 1 CREATED, 9 EXISTS, 1 row"; exit 1; }
 echo "CONCURRENCY PASS"

@@ -3,6 +3,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, InvoiceStatus, SubscriptionPlan } from "@/types/database";
 import { findPlanTier } from "@/lib/billing/plans";
+import { readTrialAbuseConfig } from "@/lib/trial-abuse/config";
 
 type Subscription = Database["public"]["Tables"]["prompter_subscriptions"]["Row"];
 type Invoice = Database["public"]["Tables"]["prompter_invoices"]["Row"];
@@ -55,6 +56,31 @@ export async function getOrCreateSubscription(
   }
 
   const now = new Date();
+
+  // Trial anti-abuse "claim" (TRIAL_ABUSE_MODE=enforce only): the trial is created server-side after the
+  // gate has run, so a direct Supabase-Auth signup cannot self-start one. Lazy import: when the feature is
+  // off (the default) none of that code is even loaded. See lib/trial-abuse/claim.ts.
+  const abuseMode = readTrialAbuseConfig().mode;
+  if (abuseMode === "enforce" || abuseMode === "invalid") {
+    const { claimTrial } = await import("@/lib/trial-abuse/claim");
+    await claimTrial(supabase, tenantId);
+    const { data: claimed } = await supabase
+      .from("prompter_subscriptions")
+      .select("*")
+      .eq("tenant_id", tenantId)
+      .maybeSingle();
+    if (claimed) return claimed;
+    // FAIL CLOSED: no row could be read back (rate limit, outage, mismatch). Never fabricate a live trial;
+    // the synthetic row is already expired, and the database has no row so quota checks also refuse.
+    return {
+      tenant_id: tenantId,
+      ...DEFAULT_SUBSCRIPTION,
+      status: "TRIALING",
+      current_period_start: now.toISOString(),
+      current_period_end: new Date(now.getTime() - 60_000).toISOString(),
+    };
+  }
+
   const trialEnd = new Date(now.getTime() + TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1000);
 
   const { data: created } = await supabase

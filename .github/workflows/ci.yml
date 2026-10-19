@@ -121,7 +121,7 @@ jobs:
       - name: P0 trial security + trial anti-abuse - before (holes exist), after (fixed), rollback, abuse (decisions, races), abuse-rollback
         run: |
           set -euo pipefail
-          for phase in before after rollback abuse abuse-rollback; do
+          for phase in before after rollback abuse abuse-rollback shared-before shared-after shared-rollback; do
             echo "::group::p0 trial security: $phase"
             supabase/tests/run-local.sh "$phase"
             echo "::endgroup::"

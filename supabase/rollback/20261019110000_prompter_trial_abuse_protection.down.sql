@@ -34,11 +34,16 @@ begin
 end;
 $$;
 
+drop function if exists public.fn_trial_claim(text, integer, uuid, text, text, text, text);
+drop function if exists public.fn_trial_set_claim_required(boolean);
 drop function if exists public.fn_trial_abuse_purge(integer);
 drop function if exists public.fn_trial_release_hold(uuid, text);
 drop function if exists public.fn_trial_hold_active(uuid);
 drop function if exists public.fn_trial_signup_finalize(uuid, uuid, boolean);
 drop function if exists public.fn_trial_signup_gate(text, integer, text, text, text, text);
+drop function if exists public.fn_trial_gate_core(text, text, integer, text, text, text, text);
+drop function if exists public.fn_trial_claim_required();
 drop function if exists public.fn_trial_bucket_hit(text, text, integer);
+drop table if exists public.prompter_trial_config;
 drop table if exists public.prompter_trial_rate_buckets;
 drop table if exists public.prompter_trial_signup_attempts;

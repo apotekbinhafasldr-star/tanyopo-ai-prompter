@@ -1485,6 +1485,22 @@ export interface Database {
           retry_after_seconds: number;
         }[];
       };
+      fn_trial_claim: {
+        Args: {
+          p_mode: string;
+          p_key_version: number;
+          p_user_id: string;
+          p_email_hmac: string;
+          p_cookie_hmac: string | null;
+          p_device_hmac: string | null;
+          p_ip_hmac: string | null;
+        };
+        Returns: {
+          outcome: "CREATED" | "HELD" | "EXISTS" | "RATE_LIMITED" | "NO_TENANT" | "NO_USER";
+          decision: "ALLOW" | "REVIEW" | "DENY" | null;
+          retry_after_seconds: number;
+        }[];
+      };
       fn_trial_signup_finalize: {
         Args: { p_attempt_id: string; p_user_id: string | null; p_signed_up: boolean };
         Returns: boolean;

@@ -221,6 +221,126 @@ insert into results select 'T1 expired ledger rows and buckets are purged; unexp
   and not exists (select 1 from prompter_trial_signup_attempts where cookie_hmac = pg_temp.h('c1'))
   and exists (select 1 from prompter_trial_signup_attempts where cookie_hmac = pg_temp.h('c40'));
 
+-- =========================== TRIAL CLAIM (closes the direct-signup bypass) ===========================
+create or replace function pg_temp.claim(uid text, e int, c int, i int)
+returns table(outcome text, decision text, retry int) language sql as $$
+  select * from public.fn_trial_claim('enforce', 1, uid::uuid, pg_temp.h('ke'||e),
+    case when c=0 then null else pg_temp.h('kc'||c) end, null, case when i=0 then null else pg_temp.h('ki'||i) end) $$;
+grant execute on function pg_temp.claim(text,int,int,int) to public;
+insert into tenants(id,nama_usaha) select ('00000000-0000-0000-0000-0000000001'||lpad(n::text,2,'0'))::uuid, 'claim '||n from generate_series(1,12) n;
+insert into user_profiles select ('00000000-0000-0000-0000-0000000001'||lpad(n::text,2,'0'))::uuid,
+       ('00000000-0000-0000-0000-0000000001'||lpad(n::text,2,'0'))::uuid, 'u'||n, 'owner' from generate_series(1,12) n;
+
+insert into results select 'C0 claim gate is OFF by default (no behaviour change until switched on)', not fn_trial_claim_required();
+select pg_temp.try($q$select fn_trial_claim_required()$q$) as ok_flag into temp table cp0;
+set role authenticated;
+select pg_temp.as_user('00000000-0000-0000-0000-000000000101');
+select pg_temp.try($q$select * from fn_trial_claim('enforce',1,'00000000-0000-0000-0000-000000000101',repeat('a',64),null,null,null)$q$) as c1,
+       pg_temp.try($q$select fn_trial_set_claim_required(false)$q$) as c2,
+       pg_temp.try($q$select * from fn_trial_gate_core('claim','enforce',1,repeat('a',64),null,null,null)$q$) as c3,
+       pg_temp.try($q$select fn_trial_claim_required()$q$) as c4,
+       pg_temp.try($q$select * from prompter_trial_config$q$) as c5 into temp table cpriv;
+reset role;
+insert into results select 'C1 authenticated cannot claim, flip the switch, call the core gate or read config; the boolean switch itself is readable',
+  (select c1<>'ok' and c2<>'ok' and c3<>'ok' and c5<>'ok' and c4='ok' from cpriv);
+
+-- switch ON (operator / service_role)
+set role service_role;
+select fn_trial_set_claim_required(true) as on_ into temp table sw;
+reset role;
+-- user 1 signed up DIRECTLY against Auth (no registerAction): its own client insert only yields an expired placeholder
+set role authenticated;
+select pg_temp.as_user('00000000-0000-0000-0000-000000000101');
+insert into prompter_subscriptions(tenant_id,status,plan,current_period_start,current_period_end)
+  values ('00000000-0000-0000-0000-000000000101','TRIALING','FREE',now(),now()+interval '365 days');
+select pg_temp.grant_count(5) as ph_granted into temp table ph;
+reset role;
+insert into results select 'C2 claim_required: a direct-signup user cannot self-start a trial (client insert = expired placeholder, 0 AI jobs)',
+  (select ph_granted from ph)=0
+  and (select current_period_end < created_at from prompter_subscriptions where tenant_id='00000000-0000-0000-0000-000000000101');
+-- claim through the gate
+set role service_role;
+create temp table cl as select 'u1' k, (pg_temp.claim('00000000-0000-0000-0000-000000000101',1,1,1)).*;
+reset role;
+set role authenticated;
+select pg_temp.as_user('00000000-0000-0000-0000-000000000101');
+select pg_temp.grant_count(31) as cl_granted into temp table clg;
+reset role;
+insert into results select 'C3 claim upgrades the placeholder to a real 14-day trial (30 AI jobs usable)',
+  (select outcome='CREATED' and decision='ALLOW' from cl where k='u1') and (select cl_granted from clg)=30
+  and (select current_period_end - created_at between interval '13 days 23 hours' and interval '14 days 1 hour' from prompter_subscriptions where tenant_id='00000000-0000-0000-0000-000000000101');
+set role service_role;
+insert into cl select 'u1b', (pg_temp.claim('00000000-0000-0000-0000-000000000101',1,1,1)).*;
+reset role;
+insert into results select 'C4 claim is idempotent: second call is EXISTS and writes no extra attempt',
+  (select outcome='EXISTS' from cl where k='u1b')
+  and (select count(*) from prompter_trial_signup_attempts where user_id='00000000-0000-0000-0000-000000000101' and purpose='claim')=1;
+
+-- trial farming through direct signups: same browser cookie, three new users/emails
+set role service_role;
+insert into cl select 'f2', (pg_temp.claim('00000000-0000-0000-0000-000000000102',2,1,2)).*;
+insert into cl select 'f3', (pg_temp.claim('00000000-0000-0000-0000-000000000103',3,1,3)).*;
+reset role;
+insert into results select 'C5 farming via direct signups: 2nd account on the same device is HELD (REVIEW), 3rd is HELD (DENY)',
+  (select outcome='HELD' and decision='REVIEW' from cl where k='f2') and (select outcome='HELD' and decision='DENY' from cl where k='f3')
+  and (select current_period_end < created_at from prompter_subscriptions where tenant_id='00000000-0000-0000-0000-000000000102')
+  and (select current_period_end < created_at from prompter_subscriptions where tenant_id='00000000-0000-0000-0000-000000000103');
+set role authenticated;
+select pg_temp.as_user('00000000-0000-0000-0000-000000000102');
+select pg_temp.grant_count(3) as f2_granted into temp table f2g;
+reset role;
+insert into results select 'C6 held claimant gets 0 AI jobs (TRIAL_EXPIRED); the first account is unaffected', (select f2_granted from f2g)=0
+  and (select current_period_end > now() from prompter_subscriptions where tenant_id='00000000-0000-0000-0000-000000000101');
+
+-- recovery: support releases the false positive (user 2 = e.g. a family member on a shared tablet)
+select a.id as att2 from prompter_trial_signup_attempts a where a.user_id='00000000-0000-0000-0000-000000000102' and a.purpose='claim' \gset
+set role service_role;
+select * into temp table rel_c from fn_trial_release_hold(:'att2'::uuid, 'verified by support: family tablet');
+reset role;
+set role authenticated;
+select pg_temp.as_user('00000000-0000-0000-0000-000000000102');
+select pg_temp.grant_count(31) as rel_c_granted into temp table rcg;
+reset role;
+insert into results select 'C7 false-positive recovery after a claim hold: release restores a normal trial (30 jobs)',
+  (select released and subscriptions_restored=1 from rel_c) and (select rel_c_granted from rcg)=30;
+
+-- a hold from the signup gate is honoured by the claim without running the gate again
+insert into prompter_trial_signup_attempts(key_version,email_hmac,decision,outcome,user_id,trial_hold,risk_score,purpose)
+  values (1,pg_temp.h('hold-signup'),'REVIEW','SIGNED_UP','00000000-0000-0000-0000-000000000104',true,50,'signup');
+select count(*) as before_n into temp table bn from prompter_trial_signup_attempts;
+set role service_role;
+insert into cl select 'h4', (pg_temp.claim('00000000-0000-0000-0000-000000000104',4,0,0)).*;
+reset role;
+insert into results select 'C8 a signup-time hold is honoured by the claim (HELD, gate not re-run, no new attempt)',
+  (select outcome='HELD' from cl where k='h4') and (select count(*) from prompter_trial_signup_attempts)=(select before_n from bn);
+
+-- claim rate limits are separate from signup limits and fail closed
+set role service_role;
+insert into cl select 'r', (pg_temp.claim(('00000000-0000-0000-0000-0000000001'||lpad((4+i)::text,2,'0')), 500+i, 500+i, 900)).* from generate_series(1,6) i;
+reset role;
+insert into results select 'C9 claim IP-hour limit: 5 claims pass, the 6th is RATE_LIMITED with retry>0 and creates no subscription',
+  (select count(*) from cl where k='r' and outcome in ('CREATED','HELD'))=5
+  and (select count(*) from cl where k='r' and outcome='RATE_LIMITED' and retry>0)=1
+  and (select count(*) from prompter_subscriptions where tenant_id in (select ('00000000-0000-0000-0000-0000000001'||lpad(n::text,2,'0'))::uuid from generate_series(5,10) n))=5;
+
+-- unknown user, wrong mode
+set role service_role;
+select outcome as unk into temp table unk from pg_temp.claim('00000000-0000-0000-0000-00000000ffff',1,1,1);
+reset role;
+select pg_temp.try($q$select * from fn_trial_claim('shadow',1,'00000000-0000-0000-0000-000000000101',repeat('a',64),null,null,null)$q$) as shadow_try into temp table sht;
+insert into results select 'C10 unknown user => NO_TENANT; claim refuses non-enforce mode', (select unk from unk)='NO_TENANT' and (select shadow_try<>'ok' from sht);
+
+-- switch OFF again => legacy behaviour (rollback lever)
+set role service_role;
+select fn_trial_set_claim_required(false) as off_ into temp table sw2;
+reset role;
+set role authenticated;
+select pg_temp.as_user('00000000-0000-0000-0000-000000000111');
+insert into prompter_subscriptions(tenant_id,status,plan) values ('00000000-0000-0000-0000-000000000111','TRIALING','FREE');
+reset role;
+insert into results select 'C11 switching claim_required off restores the normal client trial (instant rollback lever)',
+  (select current_period_end > created_at from prompter_subscriptions where tenant_id='00000000-0000-0000-0000-000000000111') and not fn_trial_claim_required();
+
 select name, case when ok then 'PASS' else 'FAIL' end as result from results order by name;
 select case when bool_and(coalesce(ok,false)) then 'ALL PASS' else 'FAILURES PRESENT' end as summary from results;
 do $$ begin

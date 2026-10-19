@@ -18,7 +18,7 @@ for k in SUPABASE_SECRET_KEY SUPABASE_SERVICE_ROLE_KEY DATABASE_URL POSTGRES_URL
   if [ -n "${!k:-}" ]; then echo "refusing: $k is set (no production credential may be present)" >&2; exit 2; fi
 done
 case "${PGDATABASE:-}" in *supabase*|*prod*) echo "refusing: PGDATABASE looks like a shared database" >&2; exit 2 ;; esac
-phase="${1:?before|after|rollback|abuse|abuse-rollback}"
+phase="${1:?before|after|rollback|abuse|abuse-rollback|shared-before|shared-after|shared-rollback}"
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$here/../.."
 db="p0_${phase//-/_}_$$"
@@ -26,6 +26,23 @@ createdb "$db"
 trap 'dropdb --if-exists "$db"' EXIT
 q() { psql -v ON_ERROR_STOP=1 -X -q -d "$db" "$@"; }
 q -f "$here/support/prod_snapshot.sql"
+if [ "${phase#shared-}" != "$phase" ]; then
+  mode="${phase#shared-}"
+  if [ "$mode" != "before" ]; then
+    for m in 20261019100000_prompter_p0_ai_jobs_lockdown 20261019100100_prompter_p0_subscription_trial_insert_guard \
+             20261019100200_prompter_p0_plan_entitlements_lockdown 20261019120000_prompter_shared_tables_truncate_delete_hardening; do
+      q -f "$root/supabase/migrations/$m.sql"
+    done
+    q -f "$root/supabase/migrations/20261019120000_prompter_shared_tables_truncate_delete_hardening.sql"   # idempotent re-run
+  fi
+  if [ "$mode" = "rollback" ]; then
+    q -f "$root/supabase/rollback/20261019120000_prompter_shared_tables_truncate_delete_hardening.down.sql"
+    mode=before
+  fi
+  if [ "$mode" = "after" ]; then af=true; else af=false; fi
+  q -v phase_after="$af" -f "$here/shared_tables_hardening.sql"
+  exit 0
+fi
 if [ "$phase" = "abuse" ] || [ "$phase" = "abuse-rollback" ]; then
   for m in 20261019100000_prompter_p0_ai_jobs_lockdown 20261019100100_prompter_p0_subscription_trial_insert_guard \
            20261019100200_prompter_p0_plan_entitlements_lockdown 20261019110000_prompter_trial_abuse_protection; do
