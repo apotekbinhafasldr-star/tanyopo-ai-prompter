@@ -27,7 +27,17 @@ describe("registerSchema", () => {
     namaUsaha: "Kopi Nusantara",
     email: "budi@usaha.com",
     password: "supersecret",
+    acceptLegal: true,
   };
+
+  it("requires acceptLegal to be exactly true", () => {
+    expect(registerSchema.safeParse({ ...valid, acceptLegal: false }).success).toBe(false);
+    expect(registerSchema.safeParse({ ...valid, acceptLegal: "on" }).success).toBe(false);
+    expect(registerSchema.safeParse({ ...valid, acceptLegal: undefined }).success).toBe(false);
+    const without: Record<string, unknown> = { ...valid };
+    delete without.acceptLegal;
+    expect(registerSchema.safeParse(without).success).toBe(false);
+  });
 
   it("accepts valid registration data", () => {
     expect(registerSchema.safeParse(valid).success).toBe(true);

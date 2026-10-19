@@ -19,8 +19,8 @@ const FAQS = [
     a: "Facebook, Instagram, TikTok, X, website/SEO. Status koneksi tiap platform selalu ditampilkan apa adanya — terhubung, belum dikonfigurasi, atau perlu persetujuan.",
   },
   {
-    q: "Bisakah saya menyetujui campaign sebelum tayang?",
-    a: "Ya. Setiap campaign berbayar melewati Approval Center — Anda meninjau, mengedit, atau meminta regenerasi sebelum apa pun dipublikasikan.",
+    q: "Bisakah saya menyetujui campaign sebelum dijalankan?",
+    a: "Ya. Setiap campaign berbayar melewati Approval Center — Anda meninjau, mengedit, atau meminta regenerasi sebelum campaign dijalankan.",
   },
   {
     q: "Bisakah bisnis internasional menggunakannya?",

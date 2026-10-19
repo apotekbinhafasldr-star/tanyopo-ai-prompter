@@ -80,6 +80,8 @@ export async function registerAction(
     namaUsaha: formData.get("namaUsaha"),
     email: formData.get("email"),
     password: formData.get("password"),
+    // Only an explicitly checked box ("on") counts as acceptance.
+    acceptLegal: formData.get("acceptLegal") === "on",
   });
 
   if (!parsed.success) {

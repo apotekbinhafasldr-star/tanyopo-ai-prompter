@@ -5,7 +5,7 @@ const TRUST_POINTS = [
   { icon: UserCheck, title: "Persetujuan Manusia", desc: "Aksi berbayar menunggu Anda meninjau dan menyetujui, bukan langsung tayang." },
   { icon: Wallet, title: "Budget Guard", desc: "Batas harian, bulanan, dan per-campaign yang tidak bisa dilewati AI." },
   { icon: Lock, title: "Isolasi Tenant", desc: "Data tiap bisnis terisolasi di level database (Row Level Security), bukan hanya di aplikasi." },
-  { icon: ScrollText, title: "Jejak Audit", desc: "Koneksi akun, peluncuran campaign, dan perubahan budget tercatat rapi." },
+  { icon: ScrollText, title: "Jejak Audit", desc: "Koneksi akun, persetujuan campaign, dan perubahan budget tercatat rapi." },
   { icon: KeyRound, title: "Koneksi Aman", desc: "OAuth resmi ke Facebook, Instagram, TikTok, dan X — kami tidak pernah menyimpan password Anda." },
   { icon: Octagon, title: "Emergency Stop", desc: "Satu tombol untuk menghentikan seketika semua aksi otomatis, kapan pun." },
 ];

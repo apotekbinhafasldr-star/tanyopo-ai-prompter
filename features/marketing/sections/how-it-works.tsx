@@ -6,7 +6,7 @@ const STEPS = [
   { icon: Brain, title: "AI Memahami", desc: "Blueprint marketing disusun dari data produk." },
   { icon: Target, title: "Strategi", desc: "Positioning, USP, dan audiens target." },
   { icon: Sparkles, title: "Buat Konten", desc: "Copy, hook, dan creative untuk tiap channel." },
-  { icon: Rocket, title: "Luncurkan", desc: "Tayang setelah lolos budget & persetujuan Anda." },
+  { icon: Rocket, title: "Setujui", desc: "Tinjau budget dan setujui campaign sebelum dijalankan." },
   { icon: BarChart3, title: "Ukur", desc: "Performa nyata dipantau secara berkelanjutan." },
   { icon: Sliders, title: "Optimasi", desc: "AI menyarankan perbaikan berbasis data." },
   { icon: TrendingUp, title: "Tumbuh", desc: "Siklus berulang — makin lama makin tajam." },
