@@ -29,13 +29,16 @@ q -f "$here/support/prod_snapshot.sql"
 if [ "$phase" != "before" ]; then
   q -f "$root/supabase/migrations/20261019100000_prompter_p0_ai_jobs_lockdown.sql"
   q -f "$root/supabase/migrations/20261019100100_prompter_p0_subscription_trial_insert_guard.sql"
+  q -f "$root/supabase/migrations/20261019100200_prompter_p0_plan_entitlements_lockdown.sql"
 fi
 if [ "$phase" != "before" ]; then
   # migrations must be idempotent: a second run changes nothing and raises nothing
   q -f "$root/supabase/migrations/20261019100000_prompter_p0_ai_jobs_lockdown.sql"
   q -f "$root/supabase/migrations/20261019100100_prompter_p0_subscription_trial_insert_guard.sql"
+  q -f "$root/supabase/migrations/20261019100200_prompter_p0_plan_entitlements_lockdown.sql"
 fi
 if [ "$phase" = "rollback" ]; then
+  q -f "$root/supabase/rollback/20261019100200_prompter_p0_plan_entitlements_lockdown.down.sql"
   q -f "$root/supabase/rollback/20261019100100_prompter_p0_subscription_trial_insert_guard.down.sql"
   q -f "$root/supabase/rollback/20261019100000_prompter_p0_ai_jobs_lockdown.down.sql"
   # after rollback the vulnerable "before" behaviour must be back

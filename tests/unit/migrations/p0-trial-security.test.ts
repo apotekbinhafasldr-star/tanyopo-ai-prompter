@@ -204,3 +204,52 @@ describe("no other code path writes prompter_ai_jobs through a client", () => {
     expect(text).toMatch(/current_period_end: trialEnd\.toISOString\(\)/);
   });
 });
+
+describe("P0-3 prompter_plan_entitlements lockdown + fail-closed quota function", () => {
+  const MIG = "supabase/migrations/20261019100200_prompter_p0_plan_entitlements_lockdown.sql";
+  const DOWN = "supabase/rollback/20261019100200_prompter_p0_plan_entitlements_lockdown.down.sql";
+  const sql = executable(read(MIG));
+
+  it("revokes every write privilege (incl. TRUNCATE) from anon and authenticated", () => {
+    expect(sql).toMatch(
+      /revoke insert, update, delete, truncate on public\.prompter_plan_entitlements from anon, authenticated;/,
+    );
+  });
+
+  it("the quota function fails closed when no entitlement or no allowance exists", () => {
+    expect(sql).toMatch(/v_entitlement\.plan is null or v_entitlement\.ai_usage_allowance is null/);
+    expect(sql).toMatch(/'ENTITLEMENT_NOT_CONFIGURED'/);
+    expect(sql).toMatch(/security definer/);
+    expect(sql).toMatch(/set search_path = public/);
+  });
+
+  it("is ledger-safe: no DDL on tenants, auth.users or any non-LINOE table", () => {
+    expect(sql).not.toMatch(/\bauth\.users\b/);
+    expect(sql).not.toMatch(/(alter|drop|truncate)\s+table\s+(public\.)?tenants\b/);
+  });
+
+  it("has a rollback outside supabase/migrations that restores the grants", () => {
+    expect(existsSync(path.join(root, DOWN))).toBe(true);
+    expect(executable(read(DOWN))).toMatch(
+      /grant insert, update, delete, truncate on public\.prompter_plan_entitlements to anon, authenticated;/,
+    );
+  });
+
+  it("no application code writes to prompter_plan_entitlements", () => {
+    const hits = ["services", "features", "lib", "app"].flatMap((d) => {
+      const out: string[] = [];
+      const walk = (p: string) => {
+        for (const e of readdirSync(p)) {
+          const f = path.join(p, e);
+          if (statSync(f).isDirectory()) walk(f);
+          else if (/\.(ts|tsx)$/.test(f) && /prompter_plan_entitlements/.test(readFileSync(f, "utf-8"))) out.push(f);
+        }
+      };
+      if (existsSync(path.join(root, d))) walk(path.join(root, d));
+      return out;
+    });
+    for (const f of hits) {
+      expect(readFileSync(f, "utf-8")).not.toMatch(/prompter_plan_entitlements"\)\s*\.(insert|update|delete|upsert)\(/);
+    }
+  });
+});

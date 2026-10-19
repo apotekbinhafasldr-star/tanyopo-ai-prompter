@@ -293,6 +293,48 @@ reset role;
     (select ts from tr_s)='ok' and (select count(*) from prompter_subscriptions)=0;
 \endif
 
+-- ===== P0-3: prompter_plan_entitlements TRUNCATE => unlimited AI (fail-open quota function) =====
+-- Fresh tenant C so earlier tests (and the TRUNCATE tests above) cannot influence the job count.
+insert into tenants(id,nama_usaha) values ('00000000-0000-0000-0000-0000000000d1','C');
+insert into user_profiles values ('00000000-0000-0000-0000-0000000000d2','00000000-0000-0000-0000-0000000000d1','owner C','owner');
+insert into prompter_subscriptions(tenant_id,status,current_period_start,current_period_end)
+  values ('00000000-0000-0000-0000-0000000000d1','TRIALING', now(), now()+interval '14 days');
+set role authenticated;
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000d2');
+select pg_temp.try($q$truncate prompter_plan_entitlements$q$) as te into temp table tr_e;
+select pg_temp.try($q$delete from prompter_plan_entitlements$q$) as de into temp table de_e;
+select pg_temp.try($q$update prompter_plan_entitlements set ai_usage_allowance = 100000$q$) as ue into temp table ue_e;
+select pg_temp.try($q$insert into prompter_plan_entitlements(plan,ai_usage_allowance) values ('HACK',1)$q$) as ie into temp table ie_e;
+select pg_temp.grant_count(40) as granted into temp table p03;
+reset role;
+set role anon;
+select pg_temp.try($q$truncate prompter_plan_entitlements$q$) as tea into temp table tr_ea;
+reset role;
+select count(*) as ent_rows into temp table ent_cnt from prompter_plan_entitlements;
+\if :phase_after
+  insert into results select 'P0-3a authenticated/anon cannot TRUNCATE, DELETE, UPDATE or INSERT prompter_plan_entitlements',
+    (select te from tr_e)<>'ok' and (select de from de_e)<>'ok' and (select ue from ue_e)<>'ok'
+    and (select ie from ie_e)<>'ok' and (select tea from tr_ea)<>'ok' and (select ent_rows from ent_cnt)=3;
+  insert into results select 'P0-3b quota still enforced: exactly 30 of 40 attempts granted for a fresh trial tenant',
+    (select granted from p03)=30;
+  insert into results select 'P0-3c authenticated can still READ plan entitlements (app unchanged)',
+    (select count(*) from (select pg_temp.try($q$select 1$q$)) x)=1 and
+    (select has_table_privilege('authenticated','public.prompter_plan_entitlements','select'));
+  -- Defence in depth: even if a privileged actor empties the table, the quota function fails closed.
+  delete from prompter_plan_entitlements;
+  set role authenticated;
+  select pg_temp.as_user('00000000-0000-0000-0000-0000000000d2');
+  select pg_temp.grant_count(5) as granted into temp table p03d;
+  select reason as why into temp table p03r from fn_create_ai_job_if_entitled('CONTENT_GENERATION','{}'::jsonb);
+  reset role;
+  insert into results select 'P0-3d empty entitlements table => fail CLOSED (0 granted, ENTITLEMENT_NOT_CONFIGURED)',
+    (select granted from p03d)=0 and (select why from p03r)='ENTITLEMENT_NOT_CONFIGURED';
+  insert into prompter_plan_entitlements values ('FREE',30,3,2,1,'ACTIVE'),('STARTER',150,10,5,3,'ACTIVE'),('AGENCY',1000,null,null,null,'COMING_SOON');
+\else
+  insert into results select 'P0-3 VULNERABLE before: TRUNCATE entitlements by a tenant user => unlimited AI (40 of 40 granted)',
+    (select te from tr_e)='ok' and (select granted from p03)=40;
+\endif
+
 select name, case when ok then 'PASS' else 'FAIL' end as result from results order by name;
 select case when bool_and(coalesce(ok,false)) then 'ALL PASS' else 'FAILURES PRESENT' end as summary from results;
 -- make the script's exit status reflect the result (psql ON_ERROR_STOP -> non-zero)
