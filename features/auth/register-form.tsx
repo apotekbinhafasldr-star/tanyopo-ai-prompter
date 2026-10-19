@@ -8,11 +8,12 @@ import { Input } from "@/components/ui/input";
 import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import { LegalLinks } from "@/features/legal/legal-links";
+import { DeviceSignalsField } from "@/features/auth/device-signals";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 const initialState: AuthActionState = { error: null };
 
-export function RegisterForm() {
+export function RegisterForm({ collectDeviceSignals = false }: { collectDeviceSignals?: boolean }) {
   const [state, formAction, pending] = useActionState(registerAction, initialState);
 
   if (state.existingAccount) {
@@ -58,6 +59,7 @@ export function RegisterForm() {
       </CardHeader>
       <CardContent className="pt-6">
         <form action={formAction} className="flex flex-col gap-4" noValidate>
+          {collectDeviceSignals ? <DeviceSignalsField /> : null}
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="nama">Nama Anda</Label>
             <Input id="nama" name="nama" autoComplete="name" placeholder="Nama lengkap" required />

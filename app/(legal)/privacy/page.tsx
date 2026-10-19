@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { LegalDocument, LegalList, LegalSection } from "@/features/legal/legal-parts";
 import { LEGAL, legalMetadata } from "@/features/legal/legal-meta";
+import { isCollectionEnabled } from "@/lib/trial-abuse/config";
 
 export const metadata = legalMetadata({
   title: "Kebijakan Privasi",
@@ -23,7 +24,12 @@ const TOC = [
   { id: "kontak", title: "Kontak" },
 ];
 
+// The notice describes anti-abuse signal collection only while it is actually switched on
+// (TRIAL_ABUSE_MODE), so it must be rendered per request, not frozen at build time.
+export const dynamic = "force-dynamic";
+
 export default function PrivacyPage() {
+  const abuse = isCollectionEnabled();
   return (
     <LegalDocument
       title="Kebijakan Privasi"
@@ -48,10 +54,28 @@ export default function PrivacyPage() {
             <>
               <strong>Sesi dan keamanan:</strong> sistem autentikasi mencatat sesi login, termasuk alamat IP dan
               informasi perangkat atau peramban. Penyedia hosting dan infrastruktur juga dapat mencatat alamat IP pada
-              log teknis mereka. Saat pendaftaran, aplikasi LINOE memakai alamat IP hanya untuk membatasi jumlah
-              percobaan pendaftaran dari satu jaringan; pembatas itu berjalan di memori server dan alamat IP tidak
-              kami simpan pada tabel data LINOE.
+              log teknis mereka. {abuse
+                ? "Saat pendaftaran, aplikasi LINOE juga memproses alamat IP untuk perlindungan masa uji coba seperti dijelaskan pada butir berikutnya."
+                : "Saat pendaftaran, aplikasi LINOE memakai alamat IP hanya untuk membatasi jumlah percobaan pendaftaran dari satu jaringan; pembatas itu berjalan di memori server dan alamat IP tidak kami simpan pada tabel data LINOE."}
             </>,
+            ...(abuse
+              ? [
+                  <>
+                    <strong>Perlindungan masa uji coba:</strong> untuk mencegah penyalahgunaan masa uji coba gratis
+                    (pendaftaran berulang), saat pendaftaran server kami membuat kode samaran (pseudonim) satu arah dari
+                    email (dinormalkan), alamat IP (dipersempit ke jaringan, bukan alamat lengkap), sebuah cookie acak
+                    milik LINOE di peramban Anda, dan sinyal peramban terbatas: zona waktu, bahasa, ukuran layar yang
+                    dibulatkan, jumlah inti prosesor, dan jenis sistem operasi. Kami hanya menyimpan kode samaran itu,
+                    bukan nilai aslinya, bersama hasil penilaian risiko dan status pendaftaran. Kami tidak memakai
+                    pengambilan sidik jari lewat canvas, WebGL, atau audio, tidak melacak Anda di situs lain, dan tidak
+                    melakukan identifikasi biometrik. Kode samaran tetap dapat dianggap data pribadi. Sinyal ini bukan
+                    bukti identitas seseorang karena perangkat dan jaringan sering dipakai bersama; bila pendaftaran
+                    Anda ditahan untuk verifikasi atau ditolak otomatis, Anda dapat meminta peninjauan oleh manusia
+                    melalui <a href={`mailto:${LEGAL.contactEmail}`}>{LEGAL.contactEmail}</a>. Catatan ini disimpan
+                    selama 90 hari, lalu dihapus.
+                  </>,
+                ]
+              : []),
             <>
               <strong>Sesi demo:</strong> mode demo memakai cookie sesi bertanda tangan dan mencatat pemakaian AI demo
               per sesi (pengenal sesi dan jumlah pemakaian). Data demo berupa data simulasi dan tidak terhubung ke
@@ -86,7 +110,7 @@ export default function PrivacyPage() {
             </>,
             <>
               <strong>Cookie:</strong> cookie yang diperlukan untuk menjaga sesi login dan alur keamanan penyambungan
-              akun.
+              akun{abuse ? ", serta satu cookie acak (lnx_dv, berlaku sekitar 180 hari) yang dipakai untuk perlindungan masa uji coba dan tidak berisi data pribadi" : ""}.
             </>,
           ]}
         />
