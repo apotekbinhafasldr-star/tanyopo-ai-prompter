@@ -15,8 +15,42 @@ import {
 } from "@/lib/campaigns/external-budget-guard";
 import { readEmergencyStopStrict } from "@/services/automation-settings";
 import { decryptToken } from "@/lib/crypto/token-cipher";
+import {
+  LaunchDatabaseError,
+  LaunchFenceLostError,
+  LaunchStopError,
+  buildClaimNote,
+  buildIntentNote,
+  buildProgressNote,
+  correlationToken,
+  describeCreatedObjects,
+  describeLaunchFailure,
+  launchAttemptTag,
+  newLaunchNonce,
+  requireCreatedId,
+  withCorrelationToken,
+  type CorrelationObject,
+  type CreateStep,
+  type CreatedPlatformObjects,
+  type LaunchStep,
+} from "@/lib/campaigns/launch-reconciliation";
+import {
+  PRODUCT_MEDIA_BUCKET,
+  checkAdAccountId,
+  checkCreativeImage,
+  checkLaunchApproval,
+  checkSelectedPageId,
+  pickLaunchMedia,
+  preflightFail,
+  resolveLandingUrl,
+  resolveMetaObjectivePlan,
+  resolveOwnHosts,
+  resolveTargetCountry,
+  type Check,
+  type ProductMediaRow,
+} from "@/lib/campaigns/meta-launch-preflight";
 import type { CampaignProposal } from "@/schemas/ai/campaign-proposal";
-import type { ConnectorPlatform } from "@/types/database";
+import type { ConnectorPlatform, Database } from "@/types/database";
 
 export interface LaunchActionState {
   error: string | null;
@@ -28,15 +62,7 @@ export interface LaunchActionState {
  * `PrimaryGoal` per connector platform rather than assuming one
  * platform's names apply everywhere.
  */
-const OBJECTIVE_MAP: Record<ConnectorPlatform, Record<string, string>> = {
-  META: {
-    INCREASE_SALES: "OUTCOME_SALES",
-    GET_LEADS: "OUTCOME_LEADS",
-    INCREASE_FOLLOWERS: "OUTCOME_ENGAGEMENT",
-    BRAND_AWARENESS: "OUTCOME_AWARENESS",
-    WEBSITE_TRAFFIC: "OUTCOME_TRAFFIC",
-    PROMOTE_APP: "OUTCOME_APP_PROMOTION",
-  },
+const OBJECTIVE_MAP: Record<Exclude<ConnectorPlatform, "META">, Record<string, string>> = {
   TIKTOK: {
     INCREASE_SALES: "CONVERSIONS",
     GET_LEADS: "LEAD_GENERATION",
@@ -55,11 +81,156 @@ const OBJECTIVE_MAP: Record<ConnectorPlatform, Record<string, string>> = {
   },
 };
 
-const DEFAULT_OBJECTIVE: Record<ConnectorPlatform, string> = {
-  META: "OUTCOME_AWARENESS",
+const DEFAULT_OBJECTIVE: Record<Exclude<ConnectorPlatform, "META">, string> = {
   TIKTOK: "REACH",
   X: "AWARENESS",
 };
+
+/**
+ * TikTok / X keep their existing objective mapping unchanged. META is NOT
+ * here: its objective comes only from the verified contracts in
+ * lib/campaigns/meta-objective-contracts.ts via the preflight (no default).
+ */
+function legacyObjective(platform: Exclude<ConnectorPlatform, "META">, objective: string): string {
+  return OBJECTIVE_MAP[platform][objective] ?? DEFAULT_OBJECTIVE[platform];
+}
+
+/** Everything the Meta calls need, produced only by a fully passing preflight. */
+interface MetaLaunchPlan {
+  campaignObjective: string;
+  optimizationGoal: string;
+  targetingCountries: string[];
+  pageId: string;
+  linkUrl: string;
+  imageUrl: string;
+}
+
+interface MetaPreflightInput {
+  supabase: LaunchSupabase;
+  admin: NonNullable<ReturnType<typeof createAdminClient>>;
+  tenantId: string;
+  master: {
+    id: string;
+    objective: string;
+    product_id: string | null;
+    target_country: string | null;
+    selected_media_id: string | null;
+  };
+  adAccountId: string;
+  selectedPageId: string | undefined;
+}
+
+const READ_FAILED = () =>
+  preflightFail("PREFLIGHT_READ_FAILED", "Gagal membaca data pra-peluncuran. Peluncuran dibatalkan dan tidak ada yang dikirim ke Meta, coba lagi.");
+
+/**
+ * Meta preflight (PR #36). READ-ONLY and entirely before the exclusive
+ * claim: it makes no write, no Meta call and no HTTP request to any
+ * user-supplied URL. The image is judged from our own database row plus
+ * Supabase Storage's object metadata (no HEAD/GET on a URL).
+ */
+async function runMetaPreflight(input: MetaPreflightInput): Promise<Check<MetaLaunchPlan>> {
+  const { supabase, admin, tenantId, master, adAccountId, selectedPageId } = input;
+
+  const account = checkAdAccountId(adAccountId);
+  if (!account.ok) return account;
+  const page = checkSelectedPageId(selectedPageId);
+  if (!page.ok) return page;
+  const objective = resolveMetaObjectivePlan(master.objective);
+  if (!objective.ok) return objective;
+  const country = resolveTargetCountry(master.target_country);
+  if (!country.ok) return country;
+
+  // Application hosts from trusted config (no substring of the brand name); fail closed when unknown.
+  const ownHosts = resolveOwnHosts({
+    appUrl: process.env.NEXT_PUBLIC_APP_URL,
+    metaRedirectUri: process.env.META_REDIRECT_URI,
+    supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
+  });
+  if (!ownHosts.ok) return ownHosts;
+
+  // Landing URL: product first, brand profile only when the product has none.
+  let productUrl: string | null = null;
+  if (master.product_id) {
+    const { data: product, error } = await supabase
+      .from("prompter_products")
+      .select("id, website_url")
+      .eq("id", master.product_id)
+      .eq("tenant_id", tenantId)
+      .maybeSingle();
+    if (error) return READ_FAILED();
+    productUrl = product?.website_url ?? null;
+  }
+  let brandUrl: string | null = null;
+  if (!productUrl || productUrl.trim().length === 0) {
+    const { data: brand, error } = await supabase
+      .from("prompter_brand_profiles")
+      .select("website_url")
+      .eq("tenant_id", tenantId)
+      .maybeSingle();
+    if (error) return READ_FAILED();
+    brandUrl = brand?.website_url ?? null;
+  }
+  const link = resolveLandingUrl({ productUrl, brandUrl }, ownHosts.value);
+  if (!link.ok) return link;
+
+  // Creative image: only this tenant's own product media.
+  if (!master.product_id) {
+    return resolveImageMissing();
+  }
+  const { data: mediaRows, error: mediaError } = await supabase
+    .from("prompter_product_media")
+    .select("id, tenant_id, product_id, storage_path, media_type, position")
+    .eq("tenant_id", tenantId)
+    .eq("product_id", master.product_id)
+    .order("position", { ascending: true });
+  if (mediaError || !mediaRows) return READ_FAILED();
+
+  const media = pickLaunchMedia(mediaRows as (ProductMediaRow & { position?: number })[], master.selected_media_id);
+  if (!media.ok) return media;
+
+  const lastSlash = media.value.storage_path.lastIndexOf("/");
+  const directory = lastSlash > 0 ? media.value.storage_path.slice(0, lastSlash) : "";
+  const fileName = media.value.storage_path.slice(lastSlash + 1);
+  let metadata: { mimetype?: unknown; size?: unknown } | null = null;
+  // Directory must be this tenant's own product folder before Storage is even asked.
+  if (directory === `${tenantId}/${master.product_id}` && fileName) {
+    const { data: objects, error: listError } = await admin.storage
+      .from(PRODUCT_MEDIA_BUCKET)
+      .list(directory, { limit: 100, search: fileName });
+    if (listError) return READ_FAILED();
+    const match = (objects ?? []).find((object) => object.name === fileName);
+    metadata = (match?.metadata as { mimetype?: unknown; size?: unknown } | null | undefined) ?? null;
+  }
+
+  const image = checkCreativeImage({
+    media: media.value,
+    tenantId,
+    productId: master.product_id,
+    supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
+    metadata,
+  });
+  if (!image.ok) return image;
+
+  return {
+    ok: true,
+    value: {
+      campaignObjective: objective.value.campaignObjective,
+      optimizationGoal: objective.value.optimizationGoal,
+      targetingCountries: [country.value],
+      pageId: page.value,
+      linkUrl: link.value,
+      imageUrl: image.value.imageUrl,
+    },
+  };
+}
+
+function resolveImageMissing(): Check<never> {
+  return preflightFail(
+    "IMAGE_MISSING",
+    "Campaign belum terhubung ke produk yang memiliki gambar untuk iklan. Tidak ada yang dikirim ke Meta.",
+  );
+}
 
 /**
  * Launches one channel of an approved (SCHEDULED) campaign to its connected
@@ -121,7 +292,9 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
 
   const { data: masterCampaign, error: masterError } = await supabase
     .from("prompter_master_campaigns")
-    .select("id, status, name, objective, currency, daily_budget, total_budget, ai_proposal")
+    .select(
+      "id, status, name, objective, currency, daily_budget, total_budget, ai_proposal, product_id, target_country, selected_media_id",
+    )
     .eq("id", channelCampaign.master_campaign_id)
     .eq("tenant_id", session.tenantId)
     .single();
@@ -132,6 +305,26 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
 
   if (masterCampaign.status !== "SCHEDULED") {
     return { error: "Campaign harus berstatus Terjadwal (sudah disetujui) sebelum diluncurkan." };
+  }
+
+  // Meta preflight, approval part (PR #36): the master's latest CAMPAIGN_LAUNCH
+  // approval must be APPROVED. Read-only, before budget checks, the claim and
+  // any Meta call. TikTok/X are untouched.
+  if (connectorPlatform === "META") {
+    const { data: approvalRows, error: approvalError } = await supabase
+      .from("prompter_approvals")
+      .select("status, created_at")
+      .eq("tenant_id", session.tenantId)
+      .eq("approval_type", "CAMPAIGN_LAUNCH")
+      .eq("resource_type", "prompter_master_campaigns")
+      .eq("resource_id", masterCampaign.id)
+      .order("created_at", { ascending: false })
+      .limit(1);
+    if (approvalError) {
+      return { error: "Gagal memeriksa persetujuan campaign. Peluncuran dibatalkan, coba lagi." };
+    }
+    const approval = checkLaunchApproval(approvalRows);
+    if (!approval.ok) return { error: approval.message };
   }
 
   // P0 budget launch safety — ALL budget validation completes here, BEFORE
@@ -293,36 +486,14 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
           "Pilihan Page Facebook tidak dapat dibaca. Peluncuran dibatalkan dan tidak ada yang dibuat di platform iklan.",
       };
     }
-    // null (no Page chosen yet) stays undefined: connector.createCreative()
-    // already throws its existing error for that case, unchanged.
+    // null (no Page chosen yet) stays undefined: the Meta preflight below
+    // rejects it before the claim (it is never replaced by another Page).
     selectedPageId = pageRow.selected_page_id ?? undefined;
   }
 
-  // P0 remediation (Meta Ads production readiness): atomic claim to prevent
-  // a duplicate/concurrent launch of this same channel campaign. Previously
-  // nothing server-side re-checked this row's own current status before
-  // proceeding — only the launch button's client-side `loading`→`disabled`
-  // state did, which does not protect against a second tab, a network
-  // retry, or two near-simultaneous clicks. This is a single conditional
-  // UPDATE, atomic at the database row level: it only matches (and only
-  // then do we proceed) if this channel campaign's status is still
-  // SCHEDULED, so a second concurrent call for the same row finds zero
-  // matching rows and aborts here instead of creating a second Meta
-  // campaign for the same request.
-  const { data: claimedRows, error: claimError } = await supabase
-    .from("prompter_channel_campaigns")
-    .update({ error: null })
-    .eq("id", channelCampaignId)
-    .eq("tenant_id", session.tenantId)
-    .eq("status", "SCHEDULED")
-    .select("id");
-
-  if (claimError || !claimedRows || claimedRows.length === 0) {
-    return {
-      error: "Campaign ini sudah diluncurkan atau sedang diproses oleh permintaan lain.",
-    };
-  }
-
+  // Credentials, connector and token are all resolved BEFORE the claim: any
+  // failure here writes nothing, so a launch that cannot even start never
+  // leaves the row claimed.
   const admin = createAdminClient();
   if (!admin) {
     return { error: "Server belum dikonfigurasi untuk mengambil kredensial (SUPABASE_SECRET_KEY kosong)." };
@@ -350,6 +521,47 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
     return { error: "Gagal membaca kredensial. Coba hubungkan ulang akun." };
   }
 
+  // Meta preflight (PR #36): every remaining prerequisite is validated here,
+  // read-only, BEFORE the exclusive claim. A failure claims nothing, creates
+  // nothing on Meta and leaves every status untouched.
+  let metaPlan: MetaLaunchPlan | null = null;
+  if (connectorPlatform === "META") {
+    const preflight = await runMetaPreflight({
+      supabase,
+      admin,
+      tenantId: session.tenantId,
+      master: masterCampaign,
+      adAccountId: connectedAccount.external_account_id,
+      selectedPageId,
+    });
+    if (!preflight.ok) {
+      return { error: preflight.message };
+    }
+    metaPlan = preflight.value;
+  }
+
+  // Exclusive claim (launch safety remediation). ONE conditional UPDATE moves
+  // the row SCHEDULED -> FAILED(+in-progress note) and returns the rows it
+  // really changed. Postgres row locking makes this exclusive: of two
+  // concurrent requests, the second blocks on the row lock, then re-checks
+  // `status = 'SCHEDULED'` against the new row version, matches zero rows and
+  // stops here — before any platform call. The previous claim only rewrote
+  // `error` and left the status SCHEDULED, so BOTH requests passed it.
+  // FAILED is deliberately the fail-closed holding state: if this request
+  // dies mid-launch the row can never be launched again by accident, and the
+  // note tells the operator to reconcile in Meta Ads Manager first.
+  //
+  // H2-C: the claim also stamps a fresh, unguessable nonce into the row's
+  // `error` note. Every later write of this attempt is conditional on the
+  // EXACT note the attempt wrote last (see LaunchFence), so a stale worker, a
+  // second attempt or a manual change can never be overwritten by this one.
+  const nonce = newLaunchNonce();
+  const fence: LaunchFence = { nonce, note: buildClaimNote(nonce) };
+  const claim = await claimChannelCampaignLaunch(supabase, session.tenantId, channelCampaignId, fence.note);
+  if (!claim.claimed) {
+    return { error: claim.error };
+  }
+
   const proposal = masterCampaign.ai_proposal as CampaignProposal | null;
   const adAccountId = connectedAccount.external_account_id;
   // This row's own share of the master daily budget (validated above), in
@@ -363,34 +575,90 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
     paid_total_percentage: allocation.paidTotalPercentage,
   };
 
-  let externalCampaignId: string | null = null;
+  const created: CreatedPlatformObjects = {};
+  let step: LaunchStep = "createCampaign";
+
+  // H2-A: Meta object names carry a short correlation token (attempt + object
+  // type) so an object whose id we never received can be found in Ads Manager.
+  // TikTok/X names are left exactly as before. The token is a human aid, not an
+  // idempotency key: Meta is NOT known to offer one.
+  const tokenInNames = metaPlan !== null;
+  const objectName = (object: CorrelationObject, label?: string): string =>
+    tokenInNames
+      ? withCorrelationToken(masterCampaign.name, object, nonce, label)
+      : label
+        ? `${masterCampaign.name} — ${label}`
+        : masterCampaign.name;
+  const tokenFor = (object: CorrelationObject): string | undefined => (tokenInNames ? correlationToken(nonce, object) : undefined);
+
+  /**
+   * Before EVERY create: (1) store the INTENT durably (fenced; no create if it
+   * cannot be stored), then (2) read Emergency Stop strictly, immediately
+   * before the external call. Anything but a confirmed `false` stops here.
+   */
+  const beforeCreate = async (createStep: CreateStep, object: CorrelationObject): Promise<void> => {
+    await persistLaunchProgress(
+      supabase,
+      session.tenantId,
+      channelCampaignId,
+      fence,
+      { error: buildIntentNote(createStep, created, nonce, tokenFor(object)) },
+      "intent",
+    );
+    await assertEmergencyStopClear(supabase, session.tenantId);
+  };
 
   try {
+    await beforeCreate("createCampaign", "campaign");
     const campaign = await connector.createCampaign(accessToken, adAccountId, {
-      name: masterCampaign.name,
-      objective:
-        OBJECTIVE_MAP[connectorPlatform][masterCampaign.objective] ?? DEFAULT_OBJECTIVE[connectorPlatform],
+      name: objectName("campaign"),
+      objective: metaPlan
+        ? metaPlan.campaignObjective
+        : legacyObjective(connectorPlatform as Exclude<ConnectorPlatform, "META">, masterCampaign.objective),
       dailyBudgetMinorUnits,
     });
-    externalCampaignId = campaign.id;
+    const campaignId = requireCreatedId(campaign, "createCampaign");
+    created.campaignId = campaignId;
 
-    // Persist progress immediately — a paused, no-spend object created on
-    // Meta is worth keeping even if a later step below fails.
-    await supabase
-      .from("prompter_channel_campaigns")
-      .update({ external_campaign_id: externalCampaignId, error: null })
-      .eq("id", channelCampaignId);
+    // Record the id at once. If this write fails we stop BEFORE the next
+    // object: continuing would build more objects that we cannot trace.
+    step = "saveResult";
+    await persistLaunchProgress(
+      supabase,
+      session.tenantId,
+      channelCampaignId,
+      fence,
+      { external_campaign_id: campaignId, error: buildProgressNote(created, nonce) },
+      "result",
+    );
 
+    step = "createAdSet";
+    await beforeCreate("createAdSet", "adSet");
     const adSet = await connector.createAdSet(accessToken, adAccountId, {
-      campaignId: externalCampaignId,
-      name: `${masterCampaign.name} — Ad Set`,
+      campaignId,
+      name: objectName("adSet", "Ad Set"),
       dailyBudgetMinorUnits,
-      // No location picker/geocoding yet — defaults to Indonesia.
-      targetingCountries: ["ID"],
+      // META: the master's validated target country and the preflight's
+      // explicit optimization goal. TikTok/X keep their existing behaviour.
+      targetingCountries: metaPlan ? metaPlan.targetingCountries : ["ID"],
+      ...(metaPlan ? { optimizationGoal: metaPlan.optimizationGoal } : {}),
     });
+    const adSetId = requireCreatedId(adSet, "createAdSet");
+    created.adSetId = adSetId;
+    step = "saveResult";
+    await persistLaunchProgress(
+      supabase,
+      session.tenantId,
+      channelCampaignId,
+      fence,
+      { error: buildProgressNote(created, nonce) },
+      "result",
+    );
 
+    step = "createCreative";
+    await beforeCreate("createCreative", "creative");
     const creative = await connector.createCreative(accessToken, adAccountId, {
-      name: `${masterCampaign.name} — Creative`,
+      name: objectName("creative", "Creative"),
       headline: proposal?.headline ?? masterCampaign.name,
       primaryText: proposal?.primary_text ?? "",
       cta: proposal?.cta ?? "Pelajari Lebih Lanjut",
@@ -398,52 +666,259 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
       // the Connections page (features/connections/meta-page-picker.tsx).
       // Undefined for TikTok/X (the field is Meta-specific) and for a Meta
       // account that hasn't picked a Page yet — connector.createCreative()
-      // already throws its existing, unchanged error in that case, so
-      // behavior for an unselected Page is identical to before this change.
+      // already throws its existing, unchanged error in that case.
       // A Page that could not be READ never reaches this point (see above).
-      pageId: selectedPageId,
+      pageId: metaPlan ? metaPlan.pageId : selectedPageId,
+      ...(metaPlan ? { linkUrl: metaPlan.linkUrl, imageUrl: metaPlan.imageUrl } : {}),
     });
+    const creativeId = requireCreatedId(creative, "createCreative");
+    created.creativeId = creativeId;
+    step = "saveResult";
+    await persistLaunchProgress(
+      supabase,
+      session.tenantId,
+      channelCampaignId,
+      fence,
+      { error: buildProgressNote(created, nonce) },
+      "result",
+    );
 
-    await connector.createAd(accessToken, adAccountId, {
-      name: `${masterCampaign.name} — Ad`,
-      adSetId: adSet.id,
-      creativeId: creative.id,
+    step = "createAd";
+    await beforeCreate("createAd", "ad");
+    const ad = await connector.createAd(accessToken, adAccountId, {
+      name: objectName("ad", "Ad"),
+      adSetId,
+      creativeId,
     });
+    created.adId = requireCreatedId(ad, "createAd");
 
-    await supabase
-      .from("prompter_channel_campaigns")
-      .update({ status: "ACTIVE", error: null })
-      .eq("id", channelCampaignId);
-
-    await supabase.from("prompter_audit_logs").insert({
-      tenant_id: session.tenantId,
-      actor_user_id: session.userId,
-      action: "campaign.launched",
-      resource_type: "prompter_channel_campaigns",
-      resource_id: channelCampaignId,
-      context: { platform: connectorPlatform, external_campaign_id: externalCampaignId, ...budgetAuditContext },
-    });
-
-    revalidatePath(`/campaigns/${masterCampaign.id}`);
-    return { error: null };
+    // Final write: only a CONFIRMED update to ACTIVE counts as success.
+    step = "saveResult";
+    await persistLaunchProgress(
+      supabase,
+      session.tenantId,
+      channelCampaignId,
+      fence,
+      { status: "ACTIVE", error: null },
+      "result",
+    );
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Gagal meluncurkan campaign.";
+    const failure = describeLaunchFailure(step, err, created, { nonce, tokenInNames });
 
-    await supabase
-      .from("prompter_channel_campaigns")
-      .update({ status: "FAILED", error: message, external_campaign_id: externalCampaignId })
-      .eq("id", channelCampaignId);
+    // Only a definitive rejection of the very first call (nothing exists on
+    // the platform) returns the row to SCHEDULED. Every other failure stays
+    // FAILED with the ids and a reconciliation note, which blocks a relaunch.
+    // A request that no longer owns the claim writes NOTHING.
+    const ownershipLost = failure.certainty === "FENCE_LOST";
+    const recorded = ownershipLost
+      ? false
+      : await recordLaunchFailure(supabase, session.tenantId, channelCampaignId, fence, {
+          releasable: failure.releasable,
+          message: failure.message,
+          externalCampaignId: created.campaignId ?? null,
+        });
 
-    await supabase.from("prompter_audit_logs").insert({
+    await writeLaunchAudit(supabase, {
       tenant_id: session.tenantId,
       actor_user_id: session.userId,
       action: "campaign.launch_failed",
       resource_type: "prompter_channel_campaigns",
       resource_id: channelCampaignId,
-      context: { platform: connectorPlatform, error: message, ...budgetAuditContext },
+      context: {
+        platform: connectorPlatform,
+        error: failure.message,
+        failed_step: failure.step,
+        certainty: failure.certainty,
+        released_for_retry: failure.releasable && recorded,
+        status_recorded: recorded,
+        ownership_lost: ownershipLost,
+        launch_attempt: launchAttemptTag(nonce),
+        ...(tokenInNames ? { correlation_token: `LNE-${launchAttemptTag(nonce)}-*` } : {}),
+        ...(describeCreatedObjects(created) ? { created_objects: describeCreatedObjects(created) } : {}),
+        ...budgetAuditContext,
+      },
     });
 
     revalidatePath(`/campaigns/${masterCampaign.id}`);
-    return { error: message };
+    return { error: failure.message };
+  }
+
+  await writeLaunchAudit(supabase, {
+    tenant_id: session.tenantId,
+    actor_user_id: session.userId,
+    action: "campaign.launched",
+    resource_type: "prompter_channel_campaigns",
+    resource_id: channelCampaignId,
+    context: {
+      platform: connectorPlatform,
+      external_campaign_id: created.campaignId ?? null,
+      launch_attempt: launchAttemptTag(nonce),
+      ...(tokenInNames ? { correlation_token: `LNE-${launchAttemptTag(nonce)}-*` } : {}),
+      // The final ACTIVE write clears the row's progress note, so the ids of
+      // the ad set, creative and ad would otherwise be lost. Only ids the
+      // platform actually returned are recorded (same format as the
+      // failure audit). The audit write is best-effort and never repeats a
+      // platform call.
+      ...(describeCreatedObjects(created) ? { created_objects: describeCreatedObjects(created) } : {}),
+      ...budgetAuditContext,
+    },
+  });
+
+  revalidatePath(`/campaigns/${masterCampaign.id}`);
+  return { error: null };
+}
+
+type LaunchSupabase = Awaited<ReturnType<typeof createClient>>;
+
+type ClaimResult = { claimed: true } | { claimed: false; error: string };
+
+/**
+ * Ownership of the claim for ONE launch attempt. `note` is the exact `error`
+ * text this attempt wrote last; the next write is conditional on it, so the
+ * row's own text acts as a compare-and-swap token (it carries the nonce).
+ * Semantics of the PostgREST equality filter on this column are demonstrated
+ * against a real PostgREST + PostgreSQL in the H2 PR (special characters,
+ * 25-way races, stale writers).
+ */
+interface LaunchFence {
+  readonly nonce: string;
+  note: string;
+}
+
+type FencedPatch = Database["public"]["Tables"]["prompter_channel_campaigns"]["Update"];
+
+/**
+ * The exclusive launch claim: a single conditional UPDATE, filtered by id,
+ * tenant and `status = 'SCHEDULED'`, that changes the status in the same
+ * statement (and stamps the attempt's nonce note). Exactly one row must come
+ * back; zero (someone else claimed it, wrong tenant, not SCHEDULED) or an
+ * error means the caller stops and calls no platform API.
+ */
+async function claimChannelCampaignLaunch(
+  supabase: LaunchSupabase,
+  tenantId: string,
+  channelCampaignId: string,
+  claimNote: string,
+): Promise<ClaimResult> {
+  const { data, error } = await supabase
+    .from("prompter_channel_campaigns")
+    .update({ status: "FAILED", error: claimNote })
+    .eq("id", channelCampaignId)
+    .eq("tenant_id", tenantId)
+    .eq("status", "SCHEDULED")
+    .select("id");
+
+  if (error || !data || data.length !== 1) {
+    return { claimed: false, error: "Campaign ini sudah diluncurkan atau sedang diproses oleh permintaan lain." };
+  }
+  return { claimed: true };
+}
+
+type FencedWrite = "written" | "lost" | "error";
+
+/**
+ * The ONLY way this attempt writes after the claim: one conditional UPDATE
+ * filtered by id AND tenant AND status = 'FAILED' AND error = <the note this
+ * attempt wrote last>. "written" means exactly one row changed; "lost" means
+ * no row matched (ownership gone); "error" means the database failed or the
+ * answer was ambiguous (the write may or may not have happened).
+ */
+async function writeFenced(
+  supabase: LaunchSupabase,
+  tenantId: string,
+  channelCampaignId: string,
+  fence: LaunchFence,
+  patch: FencedPatch,
+): Promise<FencedWrite> {
+  try {
+    const { data, error } = await supabase
+      .from("prompter_channel_campaigns")
+      .update(patch)
+      .eq("id", channelCampaignId)
+      .eq("tenant_id", tenantId)
+      .eq("status", "FAILED")
+      .eq("error", fence.note)
+      .select("id");
+    if (error || !Array.isArray(data)) return "error";
+    if (data.length === 1) {
+      if (typeof patch.error === "string") fence.note = patch.error;
+      return "written";
+    }
+    return data.length === 0 ? "lost" : "error";
+  } catch {
+    return "error";
+  }
+}
+
+/**
+ * A progress write made while this request holds the claim. It must hit
+ * exactly the claimed row with this attempt's note; anything else stops the
+ * launch before the next object: a LaunchFenceLostError when the row is no
+ * longer ours, a LaunchDatabaseError otherwise.
+ */
+async function persistLaunchProgress(
+  supabase: LaunchSupabase,
+  tenantId: string,
+  channelCampaignId: string,
+  fence: LaunchFence,
+  patch: { status?: "ACTIVE"; external_campaign_id?: string; error: string | null },
+  phase: "intent" | "result",
+): Promise<void> {
+  const outcome = await writeFenced(supabase, tenantId, channelCampaignId, fence, patch);
+  if (outcome === "written") return;
+  const what = phase === "intent" ? "niat pembuatan" : patch.status === "ACTIVE" ? "status akhir" : "progres peluncuran";
+  if (outcome === "lost") throw new LaunchFenceLostError(what);
+  throw new LaunchDatabaseError(what, phase === "intent");
+}
+
+/**
+ * Writes the failure outcome (fenced); returns whether the database confirmed
+ * it. An existing external id is never overwritten with null: it is only
+ * written when this attempt actually received one.
+ */
+async function recordLaunchFailure(
+  supabase: LaunchSupabase,
+  tenantId: string,
+  channelCampaignId: string,
+  fence: LaunchFence,
+  outcome: { releasable: boolean; message: string; externalCampaignId: string | null },
+): Promise<boolean> {
+  const patch: FencedPatch = outcome.releasable
+    ? { status: "SCHEDULED", error: null, external_campaign_id: null }
+    : {
+        status: "FAILED",
+        error: outcome.message,
+        ...(outcome.externalCampaignId ? { external_campaign_id: outcome.externalCampaignId } : {}),
+      };
+  // On any non-"written" result the row keeps whatever state it has: fail closed.
+  return (await writeFenced(supabase, tenantId, channelCampaignId, fence, patch)) === "written";
+}
+
+/**
+ * Fresh, STRICT Emergency Stop read immediately before an external create.
+ * Only a confirmed `false` lets the create proceed: `true`, `null` (read
+ * error), or anything unexpected stops the launch. No release, no retry.
+ */
+async function assertEmergencyStopClear(supabase: LaunchSupabase, tenantId: string): Promise<void> {
+  let state: unknown;
+  try {
+    state = await readEmergencyStopStrict(supabase, tenantId);
+  } catch {
+    state = null;
+  }
+  if (state === false) return;
+  throw new LaunchStopError(state === true ? "ACTIVE" : "UNREADABLE");
+}
+
+/** Audit rows are best-effort: a failed audit write never changes the launch outcome. */
+async function writeLaunchAudit(
+  supabase: LaunchSupabase,
+  row: Database["public"]["Tables"]["prompter_audit_logs"]["Insert"],
+): Promise<void> {
+  try {
+    const { error } = await supabase.from("prompter_audit_logs").insert(row);
+    if (error) console.error("[launch] audit log write failed");
+  } catch {
+    console.error("[launch] audit log write failed");
   }
 }

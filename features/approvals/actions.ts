@@ -4,13 +4,19 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireSessionContext } from "@/services/session";
-import { setChannelCampaignsStatus } from "@/services/channel-campaigns";
+import {
+  checkChannelCampaignState,
+  isMirrorConfirmed,
+  mirrorChannelCampaignStatus,
+  transitionMasterCampaign,
+} from "@/services/channel-campaigns";
 import { getConnector } from "@/lib/connectors/get-connector";
 import { CHANNEL_TO_CONNECTOR } from "@/lib/connectors/channel-map";
 import { decryptToken } from "@/lib/crypto/token-cipher";
+import { formatSafeErrorSummary } from "@/lib/connectors/safe-error-log";
 import { evaluateExternalBudgetWrite } from "@/lib/campaigns/external-budget-guard";
 import { readEmergencyStopStrict } from "@/services/automation-settings";
-import type { ConnectorPlatform, OptimizationActionType } from "@/types/database";
+import type { ConnectorPlatform, Database, OptimizationActionType } from "@/types/database";
 
 export interface ApprovalActionState {
   error: string | null;
@@ -51,7 +57,35 @@ export async function decideApprovalAction(
     return { error: "Approval ini sudah diputuskan sebelumnya." };
   }
 
-  const { error: updateApprovalError } = await supabase
+  const isCampaignLaunch =
+    approval.approval_type === "CAMPAIGN_LAUNCH" && approval.resource_type === "prompter_master_campaigns";
+  const transition = decision === "APPROVED" ? "APPROVE" : "REJECT";
+
+  // Read-only pre-flight BEFORE anything is written: if the channel rows do not
+  // agree with this decision (e.g. a DRAFT row under an AWAITING_APPROVAL
+  // master, or a selected channel with no row) the approval is NOT consumed, so
+  // the owner can still cancel the submission and resubmit. Locked statuses
+  // (FAILED/ACTIVE/PAUSED/COMPLETED) are acceptable and never touched.
+  if (isCampaignLaunch) {
+    const before = await checkChannelCampaignState(supabase, session.tenantId, approval.resource_id, transition, "before");
+    if (!before.ok) {
+      return {
+        error: "Status channel campaign tidak dapat diperiksa. Tidak ada perubahan yang disimpan. Muat ulang halaman dan coba lagi.",
+      };
+    }
+    if (!before.consistent) {
+      return {
+        error:
+          "Status channel campaign tidak konsisten dengan pengajuan ini. Tidak ada perubahan yang disimpan. Batalkan pengajuan lalu ajukan ulang, atau hubungi admin.",
+      };
+    }
+  }
+
+  // The decision is claimed ATOMICALLY: one UPDATE that only matches a still
+  // PENDING approval of this tenant. Two concurrent decisions (double click,
+  // two owners, a late reject after an approve) cannot both pass: the second
+  // matches zero rows and nothing else is written.
+  const { data: decidedRows, error: updateApprovalError } = await supabase
     .from("prompter_approvals")
     .update({
       status: decision,
@@ -59,20 +93,46 @@ export async function decideApprovalAction(
       decided_at: new Date().toISOString(),
       reason,
     })
-    .eq("id", approvalId);
+    .eq("id", approvalId)
+    .eq("tenant_id", session.tenantId)
+    .eq("status", "PENDING")
+    .select("id");
 
   if (updateApprovalError) {
-    return { error: "Gagal menyimpan keputusan." };
+    // The write may or may not have been applied: never report success, and do
+    // not touch the campaign.
+    return { error: "Gagal menyimpan keputusan. Muat ulang halaman dan periksa status approval sebelum mencoba lagi." };
   }
 
-  if (approval.approval_type === "CAMPAIGN_LAUNCH" && approval.resource_type === "prompter_master_campaigns") {
-    const newStatus = decision === "APPROVED" ? "SCHEDULED" : "DRAFT";
+  if (!Array.isArray(decidedRows) || decidedRows.length !== 1) {
+    return { error: "Approval ini sudah diputuskan sebelumnya." };
+  }
 
-    await supabase
-      .from("prompter_master_campaigns")
-      .update({ status: newStatus })
-      .eq("id", approval.resource_id);
-    await setChannelCampaignsStatus(supabase, approval.resource_id, newStatus);
+  if (isCampaignLaunch) {
+    // Fail closed, three distinct outcomes, no retry, no rollback. The decision
+    // is already recorded; nothing below may report success unless the master
+    // AND the channels are confirmed.
+    const masterOutcome = await transitionMasterCampaign(supabase, session.tenantId, approval.resource_id, transition);
+    if (masterOutcome !== "moved") {
+      revalidatePath(`/campaigns/${approval.resource_id}`);
+      revalidatePath("/approvals");
+      return {
+        error:
+          masterOutcome === "conflict"
+            ? "Keputusan tersimpan, tetapi status campaign sudah berubah sehingga tidak diperbarui dan persetujuan BELUM selesai. Muat ulang halaman dan periksa status campaign. Jangan menyetujui ulang atau meluncurkan."
+            : "Keputusan tersimpan, tetapi status campaign tidak dapat dipastikan karena kesalahan database dan persetujuan BELUM selesai. Muat ulang halaman dan periksa status campaign. Jangan menyetujui ulang atau meluncurkan.",
+      };
+    }
+
+    const mirrored = await mirrorChannelCampaignStatus(supabase, session.tenantId, approval.resource_id, transition);
+    if (!isMirrorConfirmed(mirrored)) {
+      revalidatePath(`/campaigns/${approval.resource_id}`);
+      revalidatePath("/approvals");
+      return {
+        error:
+          "Status campaign sudah berubah, tetapi status channel tidak terkonfirmasi sinkron sehingga persetujuan BELUM selesai. Jangan menyetujui ulang atau meluncurkan. Hubungi admin untuk pemulihan manual.",
+      };
+    }
 
     await supabase.from("prompter_audit_logs").insert({
       tenant_id: session.tenantId,
@@ -250,7 +310,27 @@ async function executeAutopilotAction(
   try {
     if (actionType === "PAUSE_CHANNEL") {
       await connector.pauseCampaign(accessToken, connectedAccount.external_account_id, channelCampaign.external_campaign_id);
-      await supabase.from("prompter_channel_campaigns").update({ status: "PAUSED" }).eq("id", channelCampaignId);
+      // The platform call succeeded; LINOE's own record must now follow. The
+      // write is tenant-scoped and must confirm exactly one row. If it does
+      // not, the two sides disagree: say so (never "success"), leave a safe
+      // audit row, and do NOT retry — nothing here calls the platform again.
+      const recorded = await markChannelCampaignPaused(supabase, tenantId, channelCampaignId);
+      if (!recorded) {
+        await insertAuditBestEffort(supabase, {
+          tenant_id: tenantId,
+          actor_user_id: actorUserId,
+          action: "autopilot_action.status_mismatch",
+          resource_type: "prompter_channel_campaigns",
+          resource_id: channelCampaignId,
+          context: {
+            platform: connectorPlatform,
+            action_type: actionType,
+            platform_paused: true,
+            status_recorded: false,
+          },
+        });
+        return "Channel sudah dijeda di platform, tetapi status di LINOE GAGAL diperbarui dan mungkin masih tampil Aktif. Periksa Ads Manager dan sesuaikan manual. Tidak ada percobaan ulang otomatis.";
+      }
     } else if (
       (actionType === "INCREASE_BUDGET" || actionType === "DECREASE_BUDGET") &&
       typeof ctx?.suggested_daily_budget === "number"
@@ -276,17 +356,56 @@ async function executeAutopilotAction(
 
     return null;
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Gagal mengeksekusi tindakan di platform.";
+    // Allowlisted summary only (error name, HTTP status, numeric code): a
+    // provider message can echo request parameters, so it is never stored in
+    // the audit log or in the approval's reason.
+    const detail = formatSafeErrorSummary(err);
 
-    await supabase.from("prompter_audit_logs").insert({
+    await insertAuditBestEffort(supabase, {
       tenant_id: tenantId,
       actor_user_id: actorUserId,
       action: "autopilot_action.execution_failed",
       resource_type: "prompter_channel_campaigns",
       resource_id: channelCampaignId,
-      context: { platform: connectorPlatform, action_type: actionType, error: message },
+      context: { platform: connectorPlatform, action_type: actionType, error: detail },
     });
 
-    return `Eksekusi gagal: ${message}`;
+    return `Eksekusi gagal (${detail}). Hasil di platform tidak dipastikan; periksa Ads Manager. Tidak ada percobaan ulang otomatis.`;
+  }
+}
+
+/**
+ * Marks the channel PAUSED in LINOE after the platform confirmed the pause.
+ * Scoped by id AND tenant, and only from ACTIVE; true only when the database
+ * confirms that exactly one row changed.
+ */
+async function markChannelCampaignPaused(
+  supabase: SupabaseServerClient,
+  tenantId: string,
+  channelCampaignId: string,
+): Promise<boolean> {
+  try {
+    const { data, error } = await supabase
+      .from("prompter_channel_campaigns")
+      .update({ status: "PAUSED" })
+      .eq("id", channelCampaignId)
+      .eq("tenant_id", tenantId)
+      .eq("status", "ACTIVE")
+      .select("id");
+    return !error && Array.isArray(data) && data.length === 1;
+  } catch {
+    return false;
+  }
+}
+
+/** An audit write must never turn an already-decided outcome into a thrown error. */
+async function insertAuditBestEffort(
+  supabase: SupabaseServerClient,
+  row: Database["public"]["Tables"]["prompter_audit_logs"]["Insert"],
+): Promise<void> {
+  try {
+    await supabase.from("prompter_audit_logs").insert(row);
+  } catch {
+    // intentionally ignored
   }
 }

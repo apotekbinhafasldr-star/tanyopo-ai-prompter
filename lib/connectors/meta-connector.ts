@@ -3,6 +3,7 @@ import "server-only";
 import { serverEnv } from "@/lib/env";
 import { isConnectorConfigured } from "@/lib/env";
 import {
+  ConnectorApiError,
   ConnectorConfigError,
   type AdInput,
   type AdSetInput,
@@ -37,20 +38,87 @@ const DIALOG_BASE_URL = `https://www.facebook.com/${GRAPH_API_VERSION}/dialog/oa
 
 const SCOPES = ["ads_management", "ads_read", "business_management", "pages_show_list"];
 
+/**
+ * Facebook Login for Business Configuration IDs are numeric. Anything else
+ * (typo, stray quote, a pasted URL) is rejected instead of being sent to Meta.
+ */
+const LOGIN_CONFIG_ID_PATTERN = /^\d{1,32}$/;
+
 interface GraphErrorBody {
-  error?: { message: string; type?: string; code?: number };
+  error?: { message: string; type?: string; code?: number; error_subcode?: number };
 }
 
-async function graphFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${GRAPH_BASE_URL}${path}`, init);
-  const body = (await response.json().catch(() => ({}))) as T & GraphErrorBody;
+/**
+ * Timeout for the four CREATE calls only (campaign, ad set, creative, ad).
+ * Netlify's synchronous function limit is 60s (not configurable here) and a
+ * launch makes up to four sequential create calls plus database work, so each
+ * gets 10s. A timeout, or a response body that cannot be read, surfaces as a
+ * ConnectorApiError WITHOUT an HTTP status, which `classifyCreateFailure`
+ * treats as UNCERTAIN (Meta may have created the object). There is no
+ * automatic retry anywhere on this path.
+ *
+ * OAuth, account/page listing, insights, pause and budget calls deliberately
+ * keep their previous behaviour: no timeout, errors propagate unchanged.
+ */
+const CREATE_TIMEOUT_MS = 10_000;
 
+interface GraphFetchOptions {
+  /** Set only for create operations. Enables the timeout and the strict body handling below. */
+  create?: boolean;
+}
+
+async function graphFetch<T>(path: string, init?: RequestInit, options: GraphFetchOptions = {}): Promise<T> {
+  if (!options.create) {
+    // Previous behaviour, unchanged.
+    const response = await fetch(`${GRAPH_BASE_URL}${path}`, init);
+    const body = (await response.json().catch(() => ({}))) as T & GraphErrorBody;
+    return interpretGraphResponse(response, body);
+  }
+
+  const timeout = AbortSignal.timeout(CREATE_TIMEOUT_MS);
+  const signal = init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout;
+
+  const timedOut = () => new ConnectorApiError("META", "Meta Graph API tidak merespons tepat waktu.", {});
+  const isAbort = (error: unknown) => error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+
+  // Timeout, abort or an unreadable body: we cannot tell whether Meta created
+  // the object, so no status is reported (=> UNCERTAIN, never retried). The
+  // provider text is never included; no token can reach these messages.
+  let response: Response;
+  try {
+    response = await fetch(`${GRAPH_BASE_URL}${path}`, { ...init, signal });
+  } catch (error) {
+    if (isAbort(error)) throw timedOut();
+    throw error;
+  }
+
+  let body: T & GraphErrorBody;
+  try {
+    body = (await response.json()) as T & GraphErrorBody;
+  } catch (error) {
+    if (isAbort(error)) throw timedOut();
+    throw new ConnectorApiError("META", "Respons Meta Graph API tidak dapat dibaca.", {});
+  }
+  return interpretGraphResponse(response, body);
+}
+
+function interpretGraphResponse<T>(response: Response, body: T & GraphErrorBody): T {
   if (!response.ok || body.error) {
-    throw new Error(body.error?.message ?? `Meta Graph API error (HTTP ${response.status}).`);
+    // Same message as before; the structured fields let callers log a safe
+    // summary without ever touching the (provider-supplied) message.
+    throw new ConnectorApiError("META", body.error?.message ?? `Meta Graph API error (HTTP ${response.status}).`, {
+      status: response.status,
+      code: body.error?.code,
+      subcode: body.error?.error_subcode,
+      type: body.error?.type,
+    });
   }
 
   return body;
 }
+
+/** optimization_goal -> billing_event pairs verified in Meta's docs. REACH only supports IMPRESSIONS. */
+const VERIFIED_BILLING_EVENTS: Readonly<Record<string, string>> = Object.freeze({ REACH: "IMPRESSIONS" });
 
 export class MetaConnector implements PlatformConnector {
   readonly platform = "META" as const;
@@ -83,8 +151,29 @@ export class MetaConnector implements PlatformConnector {
     url.searchParams.set("client_id", appId);
     url.searchParams.set("redirect_uri", redirectUri);
     url.searchParams.set("state", state);
-    url.searchParams.set("scope", SCOPES.join(","));
     url.searchParams.set("response_type", "code");
+
+    const rawConfigId = serverEnv.meta.loginConfigId;
+    if (rawConfigId === undefined) {
+      // Classic Facebook Login (previous behaviour): permissions via `scope`.
+      url.searchParams.set("scope", SCOPES.join(","));
+      return url.toString();
+    }
+
+    // Facebook Login for Business: the Configuration (created in the Meta
+    // App Dashboard) defines the permissions, so `scope` is deliberately NOT
+    // sent alongside it. response_type=code + override_default_response_type
+    // keeps the server-side authorization-code flow (the callback is a
+    // server route and cannot see a URL fragment).
+    const configId = rawConfigId.trim();
+    if (!LOGIN_CONFIG_ID_PATTERN.test(configId)) {
+      throw new ConnectorConfigError(
+        this.platform,
+        "META_LOGIN_CONFIG_ID tidak valid. Isi dengan Configuration ID numerik dari Meta App Dashboard, atau kosongkan.",
+      );
+    }
+    url.searchParams.set("config_id", configId);
+    url.searchParams.set("override_default_response_type", "true");
     return url.toString();
   }
 
@@ -174,7 +263,7 @@ export class MetaConnector implements PlatformConnector {
         special_ad_categories: [],
         access_token: accessToken,
       }),
-    });
+    }, { create: true });
   }
 
   async createAdSet(
@@ -183,6 +272,19 @@ export class MetaConnector implements PlatformConnector {
     input: AdSetInput,
   ): Promise<{ id: string }> {
     this.requireConfig();
+    // No default: the goal must be chosen explicitly by the launch preflight
+    // and must have a billing event verified against Meta's documentation.
+    const goal = input.optimizationGoal;
+    const billingEvent =
+      typeof goal === "string" && Object.prototype.hasOwnProperty.call(VERIFIED_BILLING_EVENTS, goal)
+        ? VERIFIED_BILLING_EVENTS[goal]
+        : undefined;
+    if (!billingEvent) {
+      throw new ConnectorConfigError(
+        this.platform,
+        "Optimization goal Meta belum ditentukan atau belum terverifikasi. Ad set tidak dibuat.",
+      );
+    }
     return graphFetch(`/${adAccountId}/adsets`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -190,22 +292,21 @@ export class MetaConnector implements PlatformConnector {
         name: input.name,
         campaign_id: input.campaignId,
         daily_budget: input.dailyBudgetMinorUnits,
-        billing_event: "IMPRESSIONS",
-        optimization_goal: "REACH",
+        billing_event: billingEvent,
+        optimization_goal: input.optimizationGoal,
         bid_strategy: "LOWEST_COST_WITHOUT_CAP",
         targeting: { geo_locations: { countries: input.targetingCountries } },
         status: "PAUSED",
         access_token: accessToken,
       }),
-    });
+    }, { create: true });
   }
 
   /**
-   * Requires a Facebook Page to run the creative "as". Page selection
-   * (its own OAuth step + picker UI) isn't built yet, so `input.pageId`
-   * is never populated by any caller today — this throws a config error
-   * rather than guessing a page ID, but the connector call itself is
-   * otherwise a real, complete Graph API request.
+   * Requires a Facebook Page, a landing link and an image URL. Nothing is
+   * defaulted: no Tanyopo fallback link, no empty image. `picture` (a URL)
+   * is the documented link_data image field; `image_url` is not one.
+   * The link must equal the call-to-action link.
    */
   async createCreative(
     accessToken: string,
@@ -216,8 +317,14 @@ export class MetaConnector implements PlatformConnector {
     if (!input.pageId) {
       throw new ConnectorConfigError(
         this.platform,
-        `Belum ada Facebook Page terhubung untuk membuat creative "${input.name}". Pemilihan Page akan tersedia pada iterasi berikutnya.`,
+        `Belum ada Facebook Page yang dipilih untuk membuat creative "${input.name}".`,
       );
+    }
+    if (!input.linkUrl) {
+      throw new ConnectorConfigError(this.platform, `URL landing belum tersedia untuk creative "${input.name}".`);
+    }
+    if (!input.imageUrl) {
+      throw new ConnectorConfigError(this.platform, `Gambar belum tersedia untuk creative "${input.name}".`);
     }
 
     return graphFetch(`/${adAccountId}/adcreatives`, {
@@ -230,16 +337,14 @@ export class MetaConnector implements PlatformConnector {
           link_data: {
             message: input.primaryText,
             name: input.headline,
-            link: input.linkUrl ?? "https://tanyopo.ai",
-            image_url: input.imageUrl,
-            call_to_action: input.linkUrl
-              ? { type: "LEARN_MORE", value: { link: input.linkUrl } }
-              : undefined,
+            link: input.linkUrl,
+            picture: input.imageUrl,
+            call_to_action: { type: "LEARN_MORE", value: { link: input.linkUrl } },
           },
         },
         access_token: accessToken,
       }),
-    });
+    }, { create: true });
   }
 
   async createAd(accessToken: string, adAccountId: string, input: AdInput): Promise<{ id: string }> {
@@ -254,7 +359,7 @@ export class MetaConnector implements PlatformConnector {
         status: "PAUSED",
         access_token: accessToken,
       }),
-    });
+    }, { create: true });
   }
 
   /** `adAccountId` is unused — Meta's Graph API objects are globally addressable by id alone. */
