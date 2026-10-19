@@ -45,8 +45,9 @@ import {
   resetPasswordAction,
 } from "@/features/auth/actions";
 
-function registerFormData(overrides: Partial<Record<string, string>> = {}) {
+function registerFormData(overrides: Partial<Record<string, string>> = {}, accept: string | null = "on") {
   const fd = new FormData();
+  if (accept !== null) fd.set("acceptLegal", accept);
   fd.set("nama", overrides.nama ?? "Budi");
   fd.set("namaUsaha", overrides.namaUsaha ?? "Toko Budi");
   fd.set("email", overrides.email ?? "budi@example.com");
@@ -85,6 +86,54 @@ describe("registerAction — B12 signup confirmation redirect", () => {
 
     expect(result.error).toBeNull();
     expect(result.info).toMatch(/cek email/i);
+  });
+});
+
+describe("registerAction — explicit Terms/Privacy acceptance (server-side)", () => {
+  beforeEach(() => {
+    signUpMock.mockReset();
+  });
+
+  it.each([
+    ["missing", null],
+    ["empty", ""],
+    ["false", "false"],
+    ["off", "off"],
+    ["1", "1"],
+  ])("rejects %s acceptance without reaching Supabase Auth", async (_label, value) => {
+    const result = await registerAction({ error: null }, registerFormData({}, value));
+
+    expect(result.error).toMatch(/Syarat & Ketentuan dan Kebijakan Privasi/);
+    expect(result.info).toBeUndefined();
+    expect(signUpMock).not.toHaveBeenCalled();
+  });
+
+  it("does not consume the register rate limit for a rejected (unaccepted) attempt", async () => {
+    const { checkRateLimit } = await import("@/lib/rate-limit");
+    (checkRateLimit as ReturnType<typeof vi.fn>).mockClear();
+
+    await registerAction({ error: null }, registerFormData({}, null));
+
+    expect(checkRateLimit).not.toHaveBeenCalled();
+  });
+
+  it("keeps the rate limit in force for an accepted signup, before signUp", async () => {
+    const { checkRateLimit } = await import("@/lib/rate-limit");
+    (checkRateLimit as ReturnType<typeof vi.fn>).mockReturnValueOnce({ allowed: false });
+
+    const result = await registerAction({ error: null }, registerFormData());
+
+    expect(result.error).toMatch(/Terlalu banyak percobaan/);
+    expect(signUpMock).not.toHaveBeenCalled();
+  });
+
+  it("writes no consent flag into auth metadata (consent evidence is out of scope for this PR)", async () => {
+    signUpMock.mockResolvedValue({ data: { user: { identities: [{}] }, session: null }, error: null });
+
+    await registerAction({ error: null }, registerFormData());
+
+    const data = signUpMock.mock.calls[0][0].options.data as Record<string, unknown>;
+    expect(Object.keys(data).sort()).toEqual(["jenis_usaha", "nama", "nama_usaha"]);
   });
 });
 

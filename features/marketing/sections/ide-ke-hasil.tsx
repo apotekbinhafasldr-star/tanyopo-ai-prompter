@@ -60,8 +60,8 @@ const STEPS: Step[] = [
   },
   {
     icon: Rocket,
-    title: "Buat & Jalankan Campaign",
-    description: "Konten dan campaign dieksekusi otomatis ke channel yang tepat.",
+    title: "Buat & Siapkan Campaign",
+    description: "Konten dan rencana campaign disiapkan per channel, lalu Anda tinjau dan setujui.",
   },
   {
     icon: TrendingUp,

@@ -15,6 +15,15 @@ export const registerSchema = z.object({
     .string()
     .min(8, "Kata sandi minimal 8 karakter")
     .max(72, "Kata sandi maksimal 72 karakter"),
+  // Explicit acceptance of the Terms and Privacy Policy. Only the literal
+  // `true` passes: a missing, false or any other value is rejected. The
+  // browser sends "on" for a checked checkbox, which the action normalises
+  // to `true` before parsing. Enforced here (server side) so a direct
+  // invocation of registerAction cannot skip it. Not persisted anywhere —
+  // see the PR description: permanent consent evidence is a separate decision.
+  acceptLegal: z.literal(true, {
+    error: "Anda harus menyetujui Syarat & Ketentuan dan Kebijakan Privasi untuk mendaftar.",
+  }),
 });
 
 export type RegisterInput = z.infer<typeof registerSchema>;

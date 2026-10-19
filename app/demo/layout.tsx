@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Sparkles } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { LegalLinks } from "@/features/legal/legal-links";
 
 export const metadata: Metadata = {
   title: "Demo — LINOE",
@@ -34,6 +35,9 @@ export default function DemoLayout({ children }: { children: React.ReactNode }) 
         </Button>
       </div>
       <div className="flex flex-1 flex-col">{children}</div>
+      <footer className="border-t border-border px-4 py-3 text-xs text-muted-foreground sm:px-8">
+        <LegalLinks />
+      </footer>
     </div>
   );
 }

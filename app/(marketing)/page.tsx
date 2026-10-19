@@ -21,7 +21,7 @@ import {
 export const metadata: Metadata = {
   title: "LINOE — AI Marketing & Growth Platform by Tanyopo",
   description:
-    "LINOE membantu Anda menganalisis produk, menyusun strategi, membuat konten, menjalankan campaign, memantau hasil, dan mengoptimasi pertumbuhan — semua dengan AI dalam satu platform.",
+    "LINOE membantu Anda menganalisis produk, menyusun strategi, membuat konten, menyiapkan campaign, memantau hasil, dan mengoptimasi pertumbuhan — semua dengan AI dalam satu platform.",
 };
 
 export default function LandingPage() {
