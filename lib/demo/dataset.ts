@@ -107,6 +107,56 @@ export const DEMO_METRICS: DemoCampaignMetrics[] = [
   { channel: "TIKTOK", impressions: 76400, clicks: 2890, leads: 340, orders: 158, adSpend: 950000, revenue: 3476000 },
 ];
 
+/**
+ * Extra SIMULATED scenarios so the demo can show every Ad Performance
+ * Verdict outcome (lib/ad-performance-verdict.ts). Clearly illustrative:
+ * the UI labels them "Contoh skenario simulasi", never as the user's data.
+ * All use the same demo product (price/HPP) as DEMO_PRODUCTS[0].
+ */
+export interface DemoVerdictScenario {
+  id: string;
+  title: string;
+  description: string;
+  metrics: Omit<DemoCampaignMetrics, "channel" | "leads" | "orders"> & { conversions: number };
+  daysObserved: number;
+  /** Overrides the demo product's price / HPP for this scenario only. */
+  unitPrice?: number;
+  hpp?: number;
+}
+
+export const DEMO_VERDICT_SCENARIOS: DemoVerdictScenario[] = [
+  {
+    id: "scenario-new",
+    title: "Creative baru (hari pertama)",
+    description: "Baru tayang, datanya masih sangat sedikit.",
+    metrics: { impressions: 420, clicks: 14, conversions: 3, adSpend: 60000, revenue: 66000 },
+    daysObserved: 1,
+  },
+  {
+    id: "scenario-testing",
+    title: "Creative uji B",
+    description: "Sudah di atas break-even tetapi selisihnya tipis.",
+    metrics: { impressions: 12000, clicks: 310, conversions: 14, adSpend: 160000, revenue: 308000 },
+    daysObserved: 4,
+  },
+  {
+    id: "scenario-loss",
+    title: "Creative C (audiens luas)",
+    description: "Biaya sudah besar, tetapi hampir tidak ada penjualan.",
+    metrics: { impressions: 30000, clicks: 640, conversions: 6, adSpend: 520000, revenue: 132000 },
+    daysObserved: 5,
+  },
+  {
+    id: "scenario-margin",
+    title: "Produk paket hemat (HPP tinggi)",
+    description: "Penjualan ada, tetapi HPP lebih tinggi dari harga jual.",
+    metrics: { impressions: 20000, clicks: 500, conversions: 40, adSpend: 300000, revenue: 880000 },
+    daysObserved: 7,
+    unitPrice: 22000,
+    hpp: 24000,
+  },
+];
+
 export function demoRoas(metrics: DemoCampaignMetrics): number {
   return Math.round((metrics.revenue / metrics.adSpend) * 100) / 100;
 }
