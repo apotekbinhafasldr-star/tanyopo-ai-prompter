@@ -18,14 +18,28 @@ for k in SUPABASE_SECRET_KEY SUPABASE_SERVICE_ROLE_KEY DATABASE_URL POSTGRES_URL
   if [ -n "${!k:-}" ]; then echo "refusing: $k is set (no production credential may be present)" >&2; exit 2; fi
 done
 case "${PGDATABASE:-}" in *supabase*|*prod*) echo "refusing: PGDATABASE looks like a shared database" >&2; exit 2 ;; esac
-phase="${1:?before|after|rollback}"
+phase="${1:?before|after|rollback|abuse|abuse-rollback}"
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$here/../.."
-db="p0_${phase}_$$"
+db="p0_${phase//-/_}_$$"
 createdb "$db"
 trap 'dropdb --if-exists "$db"' EXIT
 q() { psql -v ON_ERROR_STOP=1 -X -q -d "$db" "$@"; }
 q -f "$here/support/prod_snapshot.sql"
+if [ "$phase" = "abuse" ] || [ "$phase" = "abuse-rollback" ]; then
+  for m in 20261019100000_prompter_p0_ai_jobs_lockdown 20261019100100_prompter_p0_subscription_trial_insert_guard \
+           20261019100200_prompter_p0_plan_entitlements_lockdown 20261019110000_prompter_trial_abuse_protection; do
+    q -f "$root/supabase/migrations/$m.sql"
+  done
+  q -f "$root/supabase/migrations/20261019110000_prompter_trial_abuse_protection.sql"   # idempotent re-run
+  if [ "$phase" = "abuse" ]; then
+    q -f "$here/trial_abuse.sql"
+    bash "$here/trial_abuse_concurrency.sh" "$db"
+  else
+    q -f "$here/trial_abuse_rollback.sql"
+  fi
+  exit 0
+fi
 if [ "$phase" != "before" ]; then
   q -f "$root/supabase/migrations/20261019100000_prompter_p0_ai_jobs_lockdown.sql"
   q -f "$root/supabase/migrations/20261019100100_prompter_p0_subscription_trial_insert_guard.sql"
