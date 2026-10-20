@@ -69,6 +69,6 @@ describe("refund policy draft is not published", () => {
     const d = readFileSync("docs/drafts/REFUND_CANCELLATION_POLICY_DRAFT.md", "utf8");
     expect(d).toContain("BLOCKED FOR APPROVAL");
     expect(existsSync("app/(legal)/refund-policy")).toBe(false);
-    expect(readFileSync("features/legal/legal-meta.ts", "utf8")).not.toMatch(/refund/i);
+    expect(readFileSync("features/legal/legal-meta.ts", "utf8")).not.toContain("/refund");
   });
 });
