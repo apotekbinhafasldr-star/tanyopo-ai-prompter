@@ -20,6 +20,7 @@ vi.mock("@/services/checkout", () => ({ startCheckout: startCheckoutMock }));
 vi.mock("@/services/billing", () => ({ changePlan: vi.fn(async () => ({ error: null })) }));
 
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn(async () => currentSupabase) }));
+vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: vi.fn(() => ({ marker: "admin" })) }));
 
 const { headersMock } = vi.hoisted(() => ({ headersMock: vi.fn() }));
 vi.mock("next/headers", () => ({ headers: headersMock }));
@@ -53,6 +54,16 @@ describe("startCheckoutAction — Batch B10 Bagian G/I", () => {
 
     expect(result.error).toMatch(/owner/i);
     expect(startCheckoutMock).not.toHaveBeenCalled();
+  });
+
+  it("Billing Financial Safety — passes the service-role client and the form's intent_key to startCheckout", async () => {
+    startCheckoutMock.mockResolvedValue({ ok: true, checkoutUrl: "https://pay.example.com/i" });
+    const fd = new FormData();
+    fd.set("plan", "STARTER");
+    fd.set("intent_key", "intent-abcdef12");
+    await expect(startCheckoutAction({ error: null }, fd)).rejects.toThrow("REDIRECT:https://pay.example.com/i");
+    expect(startCheckoutMock.mock.calls[0][0]).toEqual({ marker: "admin" });
+    expect(startCheckoutMock.mock.calls[0][1].intentKey).toBe("intent-abcdef12");
   });
 
   it("rejects an invalid plan string before calling startCheckout", async () => {

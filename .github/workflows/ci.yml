@@ -82,3 +82,39 @@ jobs:
 
       - name: PostgreSQL concurrency tests (C1-C8, C10, negative controls)
         run: npx vitest run -c vitest.pg.config.ts
+
+  # Billing Financial Safety: behavioural proof of F1-F4 against the REAL v1
+  # SQL (extracted from the repo migrations) and the new additive migration,
+  # on a throw-away postgres:16 with synthetic data only. Applies the
+  # migration twice (idempotency), runs the rollback twice, and runs real
+  # parallel sessions. No Supabase/gateway secret; run-local.sh refuses any
+  # non-local host.
+  billing-sql:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: linoe_ci
+          POSTGRES_PASSWORD: linoe_ci_password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U linoe_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: linoe_ci
+      PGPASSWORD: linoe_ci_password
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ensure psql client
+        run: command -v psql || (sudo apt-get update && sudo apt-get install -y postgresql-client)
+
+      - name: Billing safety SQL + concurrency tests
+        run: bash supabase/tests/billing/run-local.sh
