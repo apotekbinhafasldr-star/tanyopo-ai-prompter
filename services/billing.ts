@@ -279,9 +279,25 @@ export async function changePlan(
     };
   }
 
-  const { error } = await supabase.from("prompter_subscriptions").update({ plan }).eq("tenant_id", tenantId);
+  // Billing hardening P0: clients can no longer UPDATE prompter_subscriptions at all. The plan
+  // preference goes through fn_set_trial_plan_preference(), which takes tenant and role from the
+  // JWT (not from arguments), is Owner-only, TRIALING-only and never touches status or periods.
+  // The generated Database types do not know this function yet, hence the narrow cast.
+  const rpc = (supabase as unknown as {
+    rpc: (
+      fn: string,
+      args: Record<string, unknown>,
+    ) => PromiseLike<{ data: unknown; error: { message: string } | null }>;
+  }).rpc.bind(supabase);
+  const { data, error } = await rpc("fn_set_trial_plan_preference", { p_plan: plan });
+  const row = (Array.isArray(data) ? data[0] : data) as { out_ok?: boolean; out_reason?: string | null } | null | undefined;
 
-  if (error) {
+  if (error || !row?.out_ok) {
+    if (row?.out_reason === "NOT_TRIALING") {
+      return {
+        error: "Paket Anda sudah aktif berdasarkan pembayaran. Gunakan Upgrade atau Downgrade untuk mengubah paket.",
+      };
+    }
     return { error: "Gagal mengubah paket." };
   }
 
