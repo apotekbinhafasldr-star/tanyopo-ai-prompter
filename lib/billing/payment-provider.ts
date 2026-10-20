@@ -81,6 +81,15 @@ export interface ParsedWebhookEvent {
   internalTransactionId: string | null;
 }
 
+/** Authoritative payment facts read straight from the gateway (never from a
+ * callback). Reconciliation can only auto-credit a PAID payment when the
+ * adapter can supply amount and currency from the gateway itself. */
+export interface RemotePaymentDetails {
+  status: RemotePaymentStatus;
+  amount: number;
+  currency: string;
+}
+
 export interface PaymentProvider {
   /** e.g. "midtrans"/"xendit" — also the `provider` value stored on
    * prompter_subscriptions/prompter_invoices/prompter_payment_transactions
@@ -98,6 +107,13 @@ export interface PaymentProvider {
    * reconciliation. Never the primary activation path; that's always
    * the webhook. */
   getPaymentStatus(externalPaymentId: string): Promise<RemotePaymentStatus>;
+
+  /** OPTIONAL — gateway-verified status + amount + currency for one payment.
+   * Adapters that implement it let the reconciliation job recover a lost
+   * webhook automatically. Adapters that do not (Xendit today) still get
+   * reconciled, but a PAID found by polling is routed to the manual-review
+   * queue instead of being credited on an unverified amount. */
+  getPaymentDetails?(externalPaymentId: string): Promise<RemotePaymentDetails>;
 
   cancelSubscription(externalSubscriptionId: string): Promise<void>;
 

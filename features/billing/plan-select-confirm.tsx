@@ -60,6 +60,10 @@ export function PlanSelectConfirm({
   useCheckout: boolean;
 }) {
   const [confirming, setConfirming] = useState(false);
+  // Billing Financial Safety — one stable key per confirmation. A double
+  // click, a retry or a re-submit of this same form all carry the same
+  // key, so the server resolves them to ONE checkout / ONE invoice.
+  const [intentKey, setIntentKey] = useState("");
   const [state, formAction, pending] = useActionState(
     useCheckout ? startCheckoutAction : changePlanAction,
     initialState,
@@ -73,7 +77,10 @@ export function PlanSelectConfirm({
     return (
       <button
         type="button"
-        onClick={() => setConfirming(true)}
+        onClick={() => {
+          setIntentKey(newIntentKey());
+          setConfirming(true);
+        }}
         className={cn(
           "flex min-h-11 w-full cursor-pointer items-center justify-center rounded-full px-4 py-2.5 text-center text-sm font-semibold shadow-sm",
           primaryCtaClassName,
@@ -98,6 +105,7 @@ export function PlanSelectConfirm({
       </p>
       <form action={formAction} className="flex flex-col gap-2">
         <input type="hidden" name="plan" value={planId} />
+        <input type="hidden" name="intent_key" value={intentKey} />
         {state.error ? (
           <p role="alert" className="text-xs font-medium text-danger">
             {state.error}
@@ -125,4 +133,13 @@ export function PlanSelectConfirm({
       </form>
     </div>
   );
+}
+
+function newIntentKey(): string {
+  try {
+    return crypto.randomUUID();
+  } catch {
+    // Non-secure context fallback; the server only needs 8-64 URL-safe chars.
+    return `k${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`;
+  }
 }

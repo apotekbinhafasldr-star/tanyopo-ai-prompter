@@ -3,7 +3,11 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { findPlanTier } from "@/lib/billing/plans";
 import { getPaymentProvider } from "@/lib/billing/get-payment-provider";
-import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  callPaymentRpc,
+  INTENT_KEY_PATTERN,
+  type BeginCheckoutRow,
+} from "@/lib/billing/payment-rpc";
 import type { Database, SubscriptionPlan } from "@/types/database";
 
 export interface StartCheckoutInput {
@@ -12,6 +16,11 @@ export interface StartCheckoutInput {
   plan: SubscriptionPlan;
   successUrl: string;
   cancelUrl: string;
+  /** Stable per-form-render key (see plan-select-confirm). Same key = same
+   * purchase attempt: a double click, a retry or 20 parallel requests all
+   * resolve to ONE transaction and ONE gateway invoice. Optional: without
+   * it the database still reuses an open invoice for the same purchase. */
+  intentKey?: string | null;
 }
 
 export interface StartCheckoutResult {
@@ -20,23 +29,29 @@ export interface StartCheckoutResult {
   error?: string;
 }
 
+/** How long an invoice created here is offered again to the same tenant
+ * before a new one may be started. Deliberately shorter than any gateway
+ * invoice lifetime: a shorter window can only cause a second invoice (which
+ * the activation function turns into a reviewed DUPLICATE_PAYMENT, never a
+ * double extension), never a lost payment. */
+export const CHECKOUT_REUSE_WINDOW_MS = 30 * 60 * 1000;
+
 /**
- * Batch B10 — checkout core (Bagian G of the brief). The one and only
- * place a checkout can be started. Deliberately does NOT accept an
- * `amount` parameter at all — the price is always looked up server-side
- * from lib/billing/plans.ts's PLAN_TIERS (the same canonical numbers B9's
- * prompter_plan_entitlements mirrors), so there is no client-supplied
- * number anywhere in this path to tamper with.
+ * Checkout core. The ONLY place a checkout can be started. Never accepts an
+ * amount: the price is looked up server-side from lib/billing/plans.ts.
  *
- * Never activates anything itself — a prompter_payment_transactions row
- * is created PENDING, and only fn_apply_verified_payment() (called from
- * the webhook route after a verified payment) can ever move a
- * subscription to ACTIVE. If the configured PaymentProvider isn't ready
- * (NullPaymentProvider today, always), this fails closed with an honest
- * "not available yet" error and creates no transaction row at all.
+ * Billing Financial Safety — the transaction row is now created through
+ * fn_begin_checkout() (service_role only): it serialises per tenant+plan,
+ * reuses a still-valid invoice for the same intent, and never creates a
+ * second PENDING row for the same purchase. A gateway failure releases the
+ * row (fn_mark_checkout_failed) only while no invoice exists at the gateway;
+ * a timeout AFTER the gateway may have created the invoice leaves the row
+ * PENDING so reconciliation can still find and credit it.
+ *
+ * `admin` must be the service-role client. Without it checkout fails closed.
  */
 export async function startCheckout(
-  supabase: SupabaseClient<Database>,
+  admin: SupabaseClient<Database> | null,
   input: StartCheckoutInput,
 ): Promise<StartCheckoutResult> {
   const tier = findPlanTier(input.plan);
@@ -49,64 +64,87 @@ export async function startCheckout(
   }
 
   const provider = getPaymentProvider();
-  if (!provider.isConfigured()) {
+  if (!provider.isConfigured() || !admin) {
     return { ok: false, error: "Pembayaran online sedang dipersiapkan. Silakan coba lagi nanti." };
   }
 
-  const { data: txn, error: insertError } = await supabase
-    .from("prompter_payment_transactions")
-    .insert({
-      tenant_id: input.tenantId,
-      user_id: input.userId,
-      provider: provider.name,
-      plan: input.plan,
-      amount: tier.priceIDR,
-      currency: "IDR",
-    })
-    .select("id")
-    .single();
+  const intentKey = input.intentKey && INTENT_KEY_PATTERN.test(input.intentKey) ? input.intentKey : null;
 
-  if (insertError || !txn) {
+  const begun = await callPaymentRpc<BeginCheckoutRow>(admin, "fn_begin_checkout", {
+    p_tenant_id: input.tenantId,
+    p_user_id: input.userId,
+    p_plan: input.plan,
+    p_amount: tier.priceIDR,
+    p_currency: "IDR",
+    p_provider: provider.name,
+    p_intent_key: intentKey,
+  });
+  const row = begun.data?.[0];
+  if (begun.error || !row) {
     return { ok: false, error: "Gagal memulai proses pembayaran. Silakan coba lagi." };
   }
 
+  switch (row.out_outcome) {
+    case "REUSED":
+      return row.out_checkout_url
+        ? { ok: true, checkoutUrl: row.out_checkout_url }
+        : { ok: false, error: "Gagal memulai proses pembayaran. Silakan coba lagi." };
+    case "IN_PROGRESS":
+      return {
+        ok: false,
+        error: "Pembayaran Anda sedang disiapkan. Tunggu beberapa detik lalu coba lagi.",
+      };
+    case "INTENT_STALE":
+    case "INTENT_CLOSED":
+      return { ok: false, error: "Sesi pembayaran ini sudah berakhir. Muat ulang halaman lalu coba lagi." };
+    case "CREATED":
+      break;
+    default:
+      return { ok: false, error: "Gagal memulai proses pembayaran. Silakan coba lagi." };
+  }
+
+  const transactionId = row.out_transaction_id;
+  if (!transactionId) {
+    return { ok: false, error: "Gagal memulai proses pembayaran. Silakan coba lagi." };
+  }
+
+  let session;
   try {
-    const session = await provider.createCheckoutSession({
+    session = await provider.createCheckoutSession({
       tenantId: input.tenantId,
       plan: input.plan,
       amountIDR: tier.priceIDR,
-      internalTransactionId: txn.id,
-      // Payment Remediation — carries txn.id through so the return trip
-      // can reconcile against the real, authoritative transaction row
-      // instead of a bare "success"/"cancelled" query param.
-      successUrl: appendTxnParam(input.successUrl, txn.id),
-      cancelUrl: appendTxnParam(input.cancelUrl, txn.id),
+      internalTransactionId: transactionId,
+      successUrl: appendTxnParam(input.successUrl, transactionId),
+      cancelUrl: appendTxnParam(input.cancelUrl, transactionId),
     });
-
-    // Payment Remediation — record the provider's own checkout/session id
-    // on the transaction immediately, not only once the webhook arrives.
-    // This is what lets a return-trip reconciliation poll the provider
-    // directly (getPaymentStatus()) while a webhook is still in flight,
-    // without waiting on it. Uses the admin client because the
-    // tenant-scoped client has no UPDATE policy on this table by design
-    // (see the B10 migration) — only service_role may ever mutate a
-    // payment_transactions row. Best-effort: if the admin client isn't
-    // configured, or this update fails, the checkout itself still
-    // succeeds — the only thing lost is the early polling hint, and the
-    // webhook remains the sole path that ever activates anything.
-    const admin = createAdminClient();
-    if (admin) {
-      await admin
-        .from("prompter_payment_transactions")
-        .update({ provider_payment_id: session.externalSessionId })
-        .eq("id", txn.id)
-        .eq("status", "PENDING");
-    }
-
-    return { ok: true, checkoutUrl: session.checkoutUrl };
   } catch {
+    // The gateway may or may not have created an invoice (a timeout is not
+    // a failure). The release below only succeeds while nothing is linked;
+    // the database never discards a row that could still be paid.
+    await callPaymentRpc(admin, "fn_mark_checkout_failed", {
+      p_transaction_id: transactionId,
+      p_reason: "GATEWAY_CREATE_FAILED",
+    });
     return { ok: false, error: "Gagal memulai proses pembayaran. Silakan coba lagi." };
   }
+
+  const linked = await callPaymentRpc<string>(admin, "fn_record_checkout_session", {
+    p_transaction_id: transactionId,
+    p_provider_payment_id: session.externalSessionId,
+    p_checkout_url: session.checkoutUrl,
+    p_checkout_expires_at: new Date(Date.now() + CHECKOUT_REUSE_WINDOW_MS).toISOString(),
+  });
+
+  // Linking failed: the invoice exists at the gateway but our row does not
+  // know its id yet. Do NOT hand out the URL as "all fine" and do NOT mark
+  // the row failed — the webhook still carries our transaction id (external
+  // id) and reconciliation/exception queue cover the rest. Fail honestly.
+  if (linked.error) {
+    return { ok: false, error: "Gagal memulai proses pembayaran. Silakan coba lagi." };
+  }
+
+  return { ok: true, checkoutUrl: session.checkoutUrl };
 }
 
 /** Appends `?txn=<id>` (or `&txn=<id>`) to a caller-supplied redirect URL. */

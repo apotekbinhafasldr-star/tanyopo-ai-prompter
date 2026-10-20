@@ -13,7 +13,7 @@ import { processPaymentWebhook } from "@/services/payment-webhook";
  *   .from("prompter_webhook_events").insert({...}).select("id").single()
  *   .from("prompter_webhook_events").select("id").eq(...).eq(...).maybeSingle()  (redelivery lookup)
  *   .from("prompter_webhook_events").update({...}).eq("id", ...)                 (markEvent)
- *   .rpc("fn_apply_verified_payment", {...})
+ *   .rpc("fn_apply_payment_event", {...})
  *
  * Every chain method returns the same thenable builder so `await` works
  * regardless of how many .eq()/.select() calls precede the terminal one —
@@ -55,6 +55,8 @@ function mockAdmin(opts: {
   };
 }
 
+const TXN = "22222222-2222-4222-8222-222222222222";
+
 function mockProvider(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     name: "midtrans",
@@ -70,7 +72,7 @@ function mockProvider(overrides: Partial<Record<string, unknown>> = {}) {
       status: "PAID",
       amount: 99_000,
       currency: "IDR",
-      internalTransactionId: "txn_1",
+      internalTransactionId: TXN,
     })),
     ...overrides,
   };
@@ -119,142 +121,143 @@ describe("processPaymentWebhook — Batch B10 webhook core", () => {
     expect(result.status).toBe(400);
   });
 
-  it("Bagian K.6/K.9/K.10 — a PAID event with the right amount/currency calls fn_apply_verified_payment exactly once with the parsed values", async () => {
+  const rpcRow = (outcome: string, reason: string | null = null) => ({
+    data: [{ result_outcome: outcome, result_reason: reason }],
+    error: null,
+  });
+
+  it("a PAID event calls fn_apply_payment_event exactly once with the parsed values and source WEBHOOK", async () => {
     getPaymentProviderMock.mockReturnValue(mockProvider());
-    const admin = mockAdmin({
-      insertResult: { data: { id: "row_1" }, error: null },
-      rpcResult: { data: [{ allowed: true, reason: null }], error: null },
-    });
+    const admin = mockAdmin({ insertResult: { data: { id: "row_1" }, error: null }, rpcResult: rpcRow("APPLIED") });
 
     const result = await processPaymentWebhook(admin, "{}", "sig");
 
-    expect(result.ok).toBe(true);
+    expect(result).toMatchObject({ ok: true, status: 200 });
     expect(admin.rpc).toHaveBeenCalledTimes(1);
-    expect(admin.rpc).toHaveBeenCalledWith("fn_apply_verified_payment", {
-      p_transaction_id: "txn_1",
+    expect(admin.rpc).toHaveBeenCalledWith("fn_apply_payment_event", {
+      p_provider: "midtrans",
+      p_transaction_id: TXN,
       p_provider_payment_id: "pay_1",
       p_provider_event_id: "evt_1",
-      p_verified_amount: 99_000,
-      p_verified_currency: "IDR",
+      p_status: "PAID",
+      p_amount: 99_000,
+      p_currency: "IDR",
+      p_source: "WEBHOOK",
     });
+    expect(admin.updateCalls).toEqual([expect.objectContaining({ status: "PROCESSED", error: null })]);
   });
 
-  it("Payment Remediation J — a successful activation marks the webhook event row PROCESSED, not just recorded from the provider's claimed status", async () => {
+  it("ALREADY_APPLIED (a replay) is a 200 and PROCESSED — the gateway stops retrying", async () => {
     getPaymentProviderMock.mockReturnValue(mockProvider());
-    const admin = mockAdmin({
-      insertResult: { data: { id: "row_1" }, error: null },
-      rpcResult: { data: [{ allowed: true, reason: null }], error: null },
-    });
-
-    await processPaymentWebhook(admin, "{}", "sig");
-
-    expect(admin.updateCalls).toContainEqual({ status: "PROCESSED", error: null });
-  });
-
-  it("Payment Remediation K — a failed activation (RPC returns allowed=false) marks the webhook event row FAILED, never PROCESSED", async () => {
-    getPaymentProviderMock.mockReturnValue(mockProvider());
-    const admin = mockAdmin({
-      insertResult: { data: { id: "row_1" }, error: null },
-      rpcResult: { data: [{ allowed: false, reason: "AMOUNT_OR_CURRENCY_MISMATCH" }], error: null },
-    });
-
-    await processPaymentWebhook(admin, "{}", "sig");
-
-    expect(admin.updateCalls).toContainEqual({ status: "FAILED", error: "AMOUNT_OR_CURRENCY_MISMATCH" });
-    expect(admin.updateCalls.some((c) => c.status === "PROCESSED")).toBe(false);
-  });
-
-  it("Payment Remediation K — a transient RPC error (no result at all) marks the webhook event row FAILED, never PROCESSED", async () => {
-    getPaymentProviderMock.mockReturnValue(mockProvider());
-    const admin = mockAdmin({
-      insertResult: { data: { id: "row_1" }, error: null },
-      rpcResult: { data: null, error: { message: "connection reset" } },
-    });
-
-    await processPaymentWebhook(admin, "{}", "sig");
-
-    expect(admin.updateCalls.some((c) => c.status === "FAILED")).toBe(true);
-    expect(admin.updateCalls.some((c) => c.status === "PROCESSED")).toBe(false);
-  });
-
-  it("Bagian K.7 / Payment Remediation L — duplicate webhook delivery (unique-violation on the log insert) looks up the original row and still safely re-attempts activation without double-counting", async () => {
-    getPaymentProviderMock.mockReturnValue(mockProvider());
-    const admin = mockAdmin({
-      insertResult: { data: null, error: { code: "23505", message: "duplicate key" } },
-      redeliveryLookupResult: { data: { id: "row_original" } },
-      rpcResult: { data: [{ allowed: true, reason: "ALREADY_PROCESSED" }], error: null },
-    });
-
+    const admin = mockAdmin({ insertResult: { data: { id: "row_1" }, error: null }, rpcResult: rpcRow("ALREADY_APPLIED") });
     const result = await processPaymentWebhook(admin, "{}", "sig");
-
-    expect(result.ok).toBe(true);
-    // The RPC is still called — its own idempotency (transaction already
-    // PAID) is what actually prevents double-activation/double period
-    // extension, not the log.
-    expect(admin.rpc).toHaveBeenCalledTimes(1);
-    // The redelivery's outcome is still recorded on the original row, not
-    // silently dropped.
-    expect(admin.updateCalls).toContainEqual({ status: "PROCESSED", error: null });
+    expect(result).toMatchObject({ ok: true, status: 200, message: "Already processed." });
+    expect(admin.updateCalls[0]).toMatchObject({ status: "PROCESSED" });
   });
 
-  it("Bagian K.9/K.10 — wrong amount/currency is rejected by the RPC and never treated as a hard error", async () => {
+  it("F2 — an EXCEPTION (e.g. amount mismatch) answers 200 so the gateway stops retrying, records the reason on the delivery row, and activates nothing", async () => {
     getPaymentProviderMock.mockReturnValue(mockProvider());
     const admin = mockAdmin({
       insertResult: { data: { id: "row_1" }, error: null },
-      rpcResult: { data: [{ allowed: false, reason: "AMOUNT_OR_CURRENCY_MISMATCH" }], error: null },
+      rpcResult: rpcRow("EXCEPTION", "AMOUNT_OR_CURRENCY_MISMATCH"),
     });
-
     const result = await processPaymentWebhook(admin, "{}", "sig");
-
     expect(result.status).toBe(200);
-    expect(result.message).toMatch(/MISMATCH/);
+    expect(result.message).toContain("AMOUNT_OR_CURRENCY_MISMATCH");
+    expect(admin.updateCalls[0]).toMatchObject({ status: "FAILED", error: "AMOUNT_OR_CURRENCY_MISMATCH" });
   });
 
-  it("an unknown transaction id is a loud 400, not a silent 200", async () => {
+  it("an unknown transaction id is queued as an exception by the database (200), not lost and not retried forever", async () => {
     getPaymentProviderMock.mockReturnValue(mockProvider());
     const admin = mockAdmin({
       insertResult: { data: { id: "row_1" }, error: null },
-      rpcResult: { data: [{ allowed: false, reason: "TRANSACTION_NOT_FOUND" }], error: null },
+      rpcResult: rpcRow("EXCEPTION", "TRANSACTION_NOT_FOUND"),
     });
-
     const result = await processPaymentWebhook(admin, "{}", "sig");
-
-    expect(result.status).toBe(400);
+    expect(result.status).toBe(200);
+    expect(result.message).toContain("TRANSACTION_NOT_FOUND");
   });
 
-  it("Bagian K.13 — a transient RPC failure asks for a retry (non-2xx) rather than silently dropping the payment", async () => {
-    getPaymentProviderMock.mockReturnValue(mockProvider());
-    const admin = mockAdmin({
-      insertResult: { data: { id: "row_1" }, error: null },
-      rpcResult: { data: null, error: { message: "connection reset" } },
-    });
-
-    const result = await processPaymentWebhook(admin, "{}", "sig");
-
-    expect(result.ok).toBe(false);
-    expect(result.status).toBe(500);
-  });
-
-  it("a non-PAID event (FAILED/EXPIRED/CANCELLED) is recorded as IGNORED and never triggers activation", async () => {
+  it("F1 — a non-PAID event (EXPIRED/FAILED/CANCELLED) is also sent to the ledger function (observed only), marked IGNORED, and never activates", async () => {
     getPaymentProviderMock.mockReturnValue(
       mockProvider({
         parseWebhookEvent: vi.fn(() => ({
           externalEventId: "evt_2",
-          externalPaymentId: "pay_2",
-          eventType: "payment.expire",
+          externalPaymentId: "pay_1",
+          eventType: "invoice.expired",
           status: "EXPIRED",
           amount: 99_000,
           currency: "IDR",
-          internalTransactionId: "txn_2",
+          internalTransactionId: TXN,
         })),
       }),
     );
-    const admin = mockAdmin({ insertResult: { data: { id: "row_2" }, error: null } });
-
+    const admin = mockAdmin({ insertResult: { data: { id: "row_1" }, error: null }, rpcResult: rpcRow("RECORDED", "OBSERVED_EXPIRED") });
     const result = await processPaymentWebhook(admin, "{}", "sig");
+    expect(result).toMatchObject({ ok: true, status: 200 });
+    expect(admin.rpc).toHaveBeenCalledWith("fn_apply_payment_event", expect.objectContaining({ p_status: "EXPIRED" }));
+    expect(admin.updateCalls[0]).toMatchObject({ status: "IGNORED" });
+  });
 
-    expect(result.ok).toBe(true);
+  it("a transient RPC error asks the gateway to retry (500) and marks the delivery FAILED — the database transaction rolled back, so a retry is safe", async () => {
+    getPaymentProviderMock.mockReturnValue(mockProvider());
+    const admin = mockAdmin({
+      insertResult: { data: { id: "row_1" }, error: null },
+      rpcResult: { data: null, error: { message: "connection reset" } },
+    });
+    const result = await processPaymentWebhook(admin, "{}", "sig");
+    expect(result).toMatchObject({ ok: false, status: 500 });
+    expect(admin.updateCalls[0]).toMatchObject({ status: "FAILED", error: "connection reset" });
+  });
+
+  it("an RPC that returns nothing is treated as a transient failure (500), never as success", async () => {
+    getPaymentProviderMock.mockReturnValue(mockProvider());
+    const admin = mockAdmin({ insertResult: { data: { id: "row_1" }, error: null }, rpcResult: { data: [], error: null } });
+    const result = await processPaymentWebhook(admin, "{}", "sig");
+    expect(result.status).toBe(500);
+    expect(admin.updateCalls[0]).toMatchObject({ status: "FAILED", error: "RPC_NO_RESULT" });
+  });
+
+  it("duplicate delivery of the same event id (unique violation on the log insert) still re-runs the idempotent function", async () => {
+    getPaymentProviderMock.mockReturnValue(mockProvider());
+    const admin = mockAdmin({
+      insertResult: { data: null, error: { code: "23505", message: "duplicate key" } },
+      redeliveryLookupResult: { data: { id: "row_existing" } },
+      rpcResult: rpcRow("ALREADY_APPLIED"),
+    });
+    const result = await processPaymentWebhook(admin, "{}", "sig");
+    expect(result).toMatchObject({ ok: true, status: 200 });
+    expect(admin.rpc).toHaveBeenCalledTimes(1);
+    expect(admin.updateCalls[0]).toMatchObject({ status: "PROCESSED" });
+  });
+
+  it("a missing or non-UUID internal transaction reference is a 400 and never reaches the database function", async () => {
+    for (const ref of [null, "txn_1", "not-a-uuid"]) {
+      getPaymentProviderMock.mockReturnValue(
+        mockProvider({
+          parseWebhookEvent: vi.fn(() => ({
+            externalEventId: "evt_9",
+            externalPaymentId: "pay_9",
+            eventType: "payment.settlement",
+            status: "PAID",
+            amount: 99_000,
+            currency: "IDR",
+            internalTransactionId: ref,
+          })),
+        }),
+      );
+      const admin = mockAdmin({ insertResult: { data: { id: "row_1" }, error: null } });
+      const result = await processPaymentWebhook(admin, "{}", "sig");
+      expect(result).toMatchObject({ ok: false, status: 400 });
+      expect(admin.rpc).not.toHaveBeenCalled();
+    }
+  });
+
+  it("failing to write the delivery log for a reason other than a duplicate asks for a retry (500) before any activation", async () => {
+    getPaymentProviderMock.mockReturnValue(mockProvider());
+    const admin = mockAdmin({ insertResult: { data: null, error: { code: "XX000", message: "boom" } } });
+    const result = await processPaymentWebhook(admin, "{}", "sig");
+    expect(result.status).toBe(500);
     expect(admin.rpc).not.toHaveBeenCalled();
-    expect(admin.updateCalls).toContainEqual({ status: "IGNORED", error: null });
   });
 });

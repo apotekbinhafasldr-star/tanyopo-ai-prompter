@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { requireSessionContext } from "@/services/session";
 import { changePlan } from "@/services/billing";
 import { startCheckout } from "@/services/checkout";
@@ -114,13 +115,14 @@ export async function startCheckoutAction(
   }
 
   const origin = await resolveCheckoutOrigin();
-  const supabase = await createClient();
-  const result = await startCheckout(supabase, {
+  const rawIntent = formData.get("intent_key");
+  const result = await startCheckout(createAdminClient(), {
     tenantId: session.tenantId,
     userId: session.userId,
     plan: plan as SubscriptionPlan,
     successUrl: `${origin}/billing?checkout=success`,
     cancelUrl: `${origin}/billing?checkout=cancelled`,
+    intentKey: typeof rawIntent === "string" ? rawIntent : null,
   });
 
   if (!result.ok || !result.checkoutUrl) {

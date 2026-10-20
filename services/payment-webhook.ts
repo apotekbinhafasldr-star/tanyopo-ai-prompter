@@ -2,6 +2,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getPaymentProvider } from "@/lib/billing/get-payment-provider";
+import { callPaymentRpc, UUID_PATTERN, type ApplyPaymentRow } from "@/lib/billing/payment-rpc";
 import type { Database, Json } from "@/types/database";
 
 const UNIQUE_VIOLATION = "23505";
@@ -121,55 +122,49 @@ export async function processPaymentWebhook(
       .eq("id", eventRowId);
   };
 
-  if (event.status !== "PAID") {
-    await markEvent("IGNORED", null);
-    return { ok: true, status: 200, message: `Recorded ${event.status} event, no activation needed.` };
-  }
-
-  if (!event.internalTransactionId) {
+  if (!event.internalTransactionId || !UUID_PATTERN.test(event.internalTransactionId)) {
     await markEvent("FAILED", "NO_INTERNAL_TRANSACTION_REFERENCE");
-    return { ok: false, status: 400, message: "Webhook event has no internal transaction reference." };
+    return { ok: false, status: 400, message: "Webhook event has no valid internal transaction reference." };
   }
 
-  const { data: rpcRows, error: rpcError } = await admin.rpc("fn_apply_verified_payment", {
+  // Billing Financial Safety — EVERY verified event (not only PAID) goes to
+  // fn_apply_payment_event(): it records it in the append-only ledger, and
+  // for PAID verifies amount/currency/gateway reference, serialises on the
+  // subscription and applies at most once. Nothing is marked FAILED in the
+  // database because of one odd payload; problems become OPEN exceptions
+  // for review. A thrown RPC means the DB transaction rolled back, so asking
+  // the gateway to retry (500) is always safe.
+  const { data: rows, error: rpcError } = await callPaymentRpc<ApplyPaymentRow>(admin, "fn_apply_payment_event", {
+    p_provider: provider.name,
     p_transaction_id: event.internalTransactionId,
     p_provider_payment_id: event.externalPaymentId,
     p_provider_event_id: event.externalEventId,
-    p_verified_amount: event.amount,
-    p_verified_currency: event.currency,
+    p_status: event.status,
+    p_amount: event.amount,
+    p_currency: event.currency,
+    p_source: "WEBHOOK",
   });
+  const result = rows?.[0];
 
-  const activation = (Array.isArray(rpcRows) ? rpcRows[0] : rpcRows) as
-    | { allowed: boolean; reason: string | null }
-    | undefined;
-
-  if (rpcError || !activation) {
-    // Transient/unexpected failure — ask the processor to retry. The
-    // transaction is still PENDING (fn_apply_verified_payment only ever
-    // mutates it inside its own successful transaction), so a retry is
-    // always safe, never a double-activation. Recorded as FAILED, not
-    // PROCESSED — this delivery did not actually activate anything.
+  if (rpcError || !result) {
     await markEvent("FAILED", rpcError?.message ?? "RPC_NO_RESULT");
     return { ok: false, status: 500, message: "Failed to apply verified payment." };
   }
 
-  if (!activation.allowed) {
-    // A real, permanent mismatch (wrong amount/currency, or a
-    // transaction that wasn't PENDING) — recorded server-side by the RPC
-    // itself; nothing is activated. An unknown transaction id gets a 400
-    // so a misconfigured integration is loud, not silently accepted;
-    // everything else is a resolved 200 (we successfully processed the
-    // notification — the payment itself is what didn't check out).
-    await markEvent("FAILED", activation.reason ?? "PAYMENT_NOT_APPLIED");
-    const status = activation.reason === "TRANSACTION_NOT_FOUND" ? 400 : 200;
-    return { ok: status === 200, status, message: activation.reason ?? "Payment not applied." };
+  switch (result.result_outcome) {
+    case "APPLIED":
+      await markEvent("PROCESSED", null);
+      return { ok: true, status: 200, message: "Payment applied." };
+    case "ALREADY_APPLIED":
+      await markEvent("PROCESSED", null);
+      return { ok: true, status: 200, message: "Already processed." };
+    case "RECORDED":
+      await markEvent("IGNORED", null);
+      return { ok: true, status: 200, message: `Recorded ${event.status} event, no activation needed.` };
+    default:
+      // EXCEPTION: kept in the ledger + exception queue for review. 200 so
+      // the gateway stops retrying a payload a retry cannot fix.
+      await markEvent("FAILED", result.result_reason ?? "PAYMENT_EXCEPTION");
+      return { ok: true, status: 200, message: `Recorded for review: ${result.result_reason ?? "EXCEPTION"}.` };
   }
-
-  await markEvent("PROCESSED", null);
-
-  return {
-    ok: true,
-    status: 200,
-    message: activation.reason === "ALREADY_PROCESSED" ? "Already processed." : "Payment applied.",
-  };
 }
