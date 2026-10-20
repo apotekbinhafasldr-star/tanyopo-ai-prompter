@@ -58,7 +58,7 @@ create function public.t_run(p_role text, p_sub text, p_name text, p_q text) ret
 declare r text;
 begin
   perform set_config('request.jwt.claims', case when p_sub is null then '{}' else json_build_object('sub', p_sub, 'role', p_role)::text end, false);
-  execute format('set local role %I', p_role);
+  if p_role <> 'cron' then execute format('set local role %I', p_role); end if;   -- 'cron' = run as the session (owner) user, like pg_cron does
   r := public.t_try(p_q);
   reset role;
   insert into public.t_probe values (p_name, p_role, r);

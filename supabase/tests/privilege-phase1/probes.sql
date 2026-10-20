@@ -48,9 +48,9 @@ select t_run('service_role', null, 'svc.entitlements_select', 'select * from pro
 select t_run('service_role', null, 'svc.invoice_insert', $q$insert into prompter_invoices(tenant_id,provider,external_invoice_id,status,amount,currency) values ('a0000000-0000-4000-8000-00000000000a','xendit','inv-probe-1','OPEN',1,'IDR')$q$);
 select t_run('service_role', null, 'svc.demo_ai_usage_rpc', $q$select * from fn_consume_demo_ai_usage('probe-session', 5)$q$);
 select t_run('service_role', null, 'svc.apply_verified_payment_webhook_activation', $q$select * from fn_apply_verified_payment('a9000000-0000-4000-8000-0000000000a9','pay-probe-1','evt-probe-2',99000,'IDR')$q$);
-select t_run('postgres', null, 'cron.apply_expired_subscriptions', 'select fn_apply_expired_subscriptions()');
-select t_run('postgres', null, 'cron.expire_stale_payment_transactions', 'select fn_expire_stale_payment_transactions()');
-select t_run('postgres', null, 'cron.apply_scheduled_cancellations', 'select fn_apply_scheduled_cancellations()');
+select t_run('cron', null, 'cron.apply_expired_subscriptions', 'select fn_apply_expired_subscriptions()');
+select t_run('cron', null, 'cron.expire_stale_payment_transactions', 'select fn_expire_stale_payment_transactions()');
+select t_run('cron', null, 'cron.apply_scheduled_cancellations', 'select fn_apply_scheduled_cancellations()');
 
 -- ===== INTENDED CLOSURES (see expected_changes.txt) =====
 select t_run('anon', null, 'anon.select.' || t, 'select * from ' || t) from unnest(array['prompter_subscriptions','prompter_payment_transactions','prompter_invoices','prompter_plan_entitlements','prompter_feature_flags','prompter_platform_capabilities','prompter_products','prompter_oauth_credentials']) t;
