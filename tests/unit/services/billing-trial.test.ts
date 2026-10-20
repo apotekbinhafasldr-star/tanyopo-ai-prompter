@@ -5,24 +5,25 @@ import type { Database } from "@/types/database";
 
 type Subscription = Database["public"]["Tables"]["prompter_subscriptions"]["Row"];
 
-/** Mocks changePlan()'s two-step flow: `.select("status")...maybeSingle()`
- * to read the tenant's current status, then `.update({ plan })...eq(...)`
- * to write the new preference — never a single upsert anymore (Batch B10
- * A.2), since changePlan() must first check the tenant isn't already a
- * paying (non-TRIALING) subscriber. */
-function mockSupabaseForChangePlan(existingStatus: Database["public"]["Tables"]["prompter_subscriptions"]["Row"]["status"] | null) {
+/** Mocks changePlan()'s flow: `.select("status")...maybeSingle()` reads the tenant's current status
+ * (UX pre-check), then the plan PREFERENCE is written through the authorised RPC
+ * fn_set_trial_plan_preference (billing hardening P0 — clients can no longer UPDATE
+ * prompter_subscriptions at all). `rpcResult` is what the database function returns. */
+function mockSupabaseForChangePlan(
+  existingStatus: Database["public"]["Tables"]["prompter_subscriptions"]["Row"]["status"] | null,
+  rpcResult: { data: unknown; error: { message: string } | null } = { data: [{ out_ok: true, out_reason: null }], error: null },
+) {
   const maybeSingle = vi.fn(async () => ({ data: existingStatus ? { status: existingStatus } : null, error: null }));
   const selectEq = vi.fn(() => ({ maybeSingle }));
   const select = vi.fn(() => ({ eq: selectEq }));
-
-  const updateEq = vi.fn(async () => ({ data: null, error: null }));
-  const update = vi.fn(() => ({ eq: updateEq }));
+  const update = vi.fn();
+  const rpc = vi.fn(async () => rpcResult);
 
   const from = vi.fn(() => ({ select, update }));
-  return { from, select, selectEq, maybeSingle, update, updateEq } as unknown as SupabaseClient<Database> & {
+  return { from, select, selectEq, maybeSingle, update, rpc } as unknown as SupabaseClient<Database> & {
     from: typeof from;
     update: typeof update;
-    updateEq: typeof updateEq;
+    rpc: typeof rpc;
   };
 }
 
@@ -91,13 +92,13 @@ describe("getTrialState", () => {
 });
 
 describe("changePlan", () => {
-  it("never writes status, so selecting a plan cannot self-activate a subscription without payment", async () => {
+  it("never writes status or UPDATEs the table — the preference goes through fn_set_trial_plan_preference only", async () => {
     const supabase = mockSupabaseForChangePlan("TRIALING");
 
     await changePlan(supabase, "t1", "PRO");
 
-    expect(supabase.update).toHaveBeenCalledWith({ plan: "PRO" });
-    expect(supabase.update).not.toHaveBeenCalledWith(expect.objectContaining({ status: expect.anything() }));
+    expect(supabase.rpc).toHaveBeenCalledWith("fn_set_trial_plan_preference", { p_plan: "PRO" });
+    expect(supabase.update).not.toHaveBeenCalled();
   });
 
   it("allows a TRIALING tenant (never paid) to set a plan preference", async () => {
@@ -106,26 +107,44 @@ describe("changePlan", () => {
     const result = await changePlan(supabase, "t1", "GROWTH");
 
     expect(result.error).toBeNull();
-    expect(supabase.update).toHaveBeenCalledWith({ plan: "GROWTH" });
-    expect(supabase.updateEq).toHaveBeenCalledWith("tenant_id", "t1");
+    expect(supabase.rpc).toHaveBeenCalledWith("fn_set_trial_plan_preference", { p_plan: "GROWTH" });
   });
 
-  it("Batch B10 A.2 — rejects the change entirely once the tenant has a real paid (ACTIVE) subscription, so a paying Starter tenant cannot self-upgrade to Business for free", async () => {
+  it("Batch B10 A.2 — rejects the change before the RPC once the tenant has a real paid (ACTIVE) subscription", async () => {
     const supabase = mockSupabaseForChangePlan("ACTIVE");
 
     const result = await changePlan(supabase, "t1", "BUSINESS");
 
     expect(result.error).not.toBeNull();
+    expect(supabase.rpc).not.toHaveBeenCalled();
     expect(supabase.update).not.toHaveBeenCalled();
   });
 
-  it("Batch B10 A.2 — also rejects for a PAST_DUE tenant (still a real paid subscription, just behind on payment)", async () => {
+  it("Batch B10 A.2 — also rejects for a PAST_DUE tenant", async () => {
     const supabase = mockSupabaseForChangePlan("PAST_DUE");
 
     const result = await changePlan(supabase, "t1", "GROWTH");
 
     expect(result.error).not.toBeNull();
-    expect(supabase.update).not.toHaveBeenCalled();
+    expect(supabase.rpc).not.toHaveBeenCalled();
+  });
+
+  it("defence in depth — if the database refuses (NOT_TRIALING, e.g. a stale read), the user gets the same honest message", async () => {
+    const supabase = mockSupabaseForChangePlan("TRIALING", { data: [{ out_ok: false, out_reason: "NOT_TRIALING" }], error: null });
+    const result = await changePlan(supabase, "t1", "PRO");
+    expect(result.error).toMatch(/sudah aktif/i);
+  });
+
+  it("any other database refusal or RPC error is a clean failure, never a silent success", async () => {
+    for (const rpcResult of [
+      { data: [{ out_ok: false, out_reason: "NOT_OWNER" }], error: null },
+      { data: null, error: { message: "boom" } },
+      { data: [], error: null },
+    ]) {
+      const supabase = mockSupabaseForChangePlan("TRIALING", rpcResult);
+      const result = await changePlan(supabase, "t1", "PRO");
+      expect(result.error).toBe("Gagal mengubah paket.");
+    }
   });
 
   it("Batch B9 P1-1 — rejects Agency (COMING_SOON) without ever reaching the database", async () => {
@@ -135,6 +154,7 @@ describe("changePlan", () => {
 
     expect(result.error).not.toBeNull();
     expect(supabase.from).not.toHaveBeenCalled();
+    expect(supabase.rpc).not.toHaveBeenCalled();
   });
 
   it("still allows every other public tier (Free/Starter/Growth/Pro/Business) for a TRIALING tenant", async () => {

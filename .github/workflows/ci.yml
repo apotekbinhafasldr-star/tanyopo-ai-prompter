@@ -82,3 +82,54 @@ jobs:
 
       - name: PostgreSQL concurrency tests (C1-C8, C10, negative controls)
         run: npx vitest run -c vitest.pg.config.ts
+
+  # Billing Security Hardening P0: negative/positive behavioural proof on a throw-away postgres:16
+  # (synthetic data, schema rebuilt from this repo's migrations, Supabase-style default privileges).
+  # Integration with PR #31 / PR #44 runs when their refs can be fetched; run-local.sh refuses any
+  # non-local host and any production credential.
+  billing-hardening-sql:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: linoe_ci
+          POSTGRES_PASSWORD: linoe_ci_password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U linoe_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: linoe_ci
+      PGPASSWORD: linoe_ci_password
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Ensure psql client
+        run: command -v psql || (sudo apt-get update && sudo apt-get install -y postgresql-client)
+
+      - name: Fetch PR #31 and PR #44 migrations for the integration variants (best effort)
+        run: |
+          set +e
+          git fetch -q origin pull/31/head:refs/remotes/pr/31 pull/44/head:refs/remotes/pr/44
+          if git rev-parse -q --verify refs/remotes/pr/31 >/dev/null && git rev-parse -q --verify refs/remotes/pr/44 >/dev/null; then
+            mkdir -p "$RUNNER_TEMP/pr31" "$RUNNER_TEMP/pr44"
+            git archive refs/remotes/pr/31 supabase | tar -x -C "$RUNNER_TEMP/pr31"
+            git archive refs/remotes/pr/44 supabase | tar -x -C "$RUNNER_TEMP/pr44"
+            echo "PR31_DIR=$RUNNER_TEMP/pr31" >> "$GITHUB_ENV"
+            echo "PR44_DIR=$RUNNER_TEMP/pr44" >> "$GITHUB_ENV"
+            echo "integration variants enabled"
+          else
+            echo "::warning::PR #31/#44 refs not fetchable; running the main-only variants"
+          fi
+
+      - name: Billing hardening SQL tests
+        run: bash supabase/tests/hardening/run-local.sh
