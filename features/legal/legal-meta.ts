@@ -14,6 +14,9 @@ export const LEGAL = {
   /** Public company location, approved by the Founder. */
   location: "Ladang Rimba, Aceh Selatan, Indonesia",
   contactEmail: "tanyopofuturetechnology@gmail.com",
+  /** Public company phone, supplied by the Founder (display form + tel: form). */
+  contactPhone: "085831815889",
+  contactPhoneHref: "+6285831815889",
   product: "LINOE by Tanyopo",
   /**
    * "Berlaku sejak" date. Intentionally unset: set it to the real date on

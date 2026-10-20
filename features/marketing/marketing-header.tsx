@@ -107,7 +107,7 @@ export function MarketingHeader() {
               while hero-integrated-nav.tsx (desktop, unscrolled) already
               rendered the current official asset directly. Dropping the
               override here means this now renders LinoeLogo's own default
-              (`variant="official"` — /brand/linoe/linoe-logo-official.png),
+              (`variant="official"` — /brand/linoe/linoe-logo-official.jpg),
               the same asset hero-integrated-nav.tsx already uses — no new
               asset, no redesign, just matching the current default. */}
           <LinoeLogo size="md" />
