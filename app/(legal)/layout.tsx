@@ -2,6 +2,7 @@ import { LinoeLogo } from "@/components/brand/linoe-logo";
 import { LegalHeader } from "@/features/legal/legal-header";
 import { LegalLinks } from "@/features/legal/legal-links";
 import { LEGAL } from "@/features/legal/legal-meta";
+import { CompanyContact } from "@/features/legal/company-contact";
 
 /**
  * Layout for the public legal pages only. Separate from the (marketing)
@@ -17,9 +18,12 @@ export default function LegalLayout({ children }: { children: React.ReactNode })
       <main className="flex-1">{children}</main>
 
       <footer className="border-t border-border">
-        <div className="mx-auto flex max-w-6xl flex-col gap-4 px-4 py-10 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between sm:px-6">
-          <LinoeLogo size="sm" href={null} />
-          <div className="flex flex-col gap-3">
+        <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-10 text-sm text-muted-foreground md:flex-row md:justify-between sm:px-6">
+          <div className="flex flex-col gap-4">
+            <LinoeLogo size="sm" href={null} />
+            <CompanyContact />
+          </div>
+          <div className="flex flex-col gap-3 md:items-end">
             <LegalLinks />
             <p>
               © {new Date().getFullYear()} {LEGAL.operator}. {LEGAL.product}.

@@ -17,6 +17,7 @@ import {
   Faq,
   FinalCta,
 } from "@/features/marketing/sections";
+import { DemoUnavailableNotice } from "@/features/marketing/components/demo-unavailable-notice";
 
 export const metadata: Metadata = {
   title: "LINOE — AI Marketing & Growth Platform by Tanyopo",
@@ -27,6 +28,7 @@ export const metadata: Metadata = {
 export default function LandingPage() {
   return (
     <>
+      <DemoUnavailableNotice />
       <Hero />
       <TanyopoIntelligence />
       <IdeToResult />

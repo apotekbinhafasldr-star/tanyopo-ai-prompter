@@ -6,7 +6,7 @@ import { brand } from "@/lib/brand";
 /**
  * Batch B10 — official final logo installation. `official` (the new
  * default) is the founder's final-approved asset
- * (public/brand/linoe/linoe-logo-official.png — a byte-identical copy of
+ * (public/brand/linoe/linoe-logo-official.jpg — a byte-identical copy of
  * the uploaded LINOE_LOGO_FINAL_APPROVED-1.png, not redrawn or
  * reinterpreted). `legacy` is the prior approved asset
  * (public/brand/linoe/linoe-logo-vertical.png), kept only so the frozen
@@ -17,7 +17,7 @@ import { brand } from "@/lib/brand";
  * Next/Image's aspect ratio is never stretched to fit the other's shape.
  */
 const LOGO_ASSETS = {
-  official: { src: "/brand/linoe/linoe-logo-official.png", width: 1269, height: 1536 },
+  official: { src: "/brand/linoe/linoe-logo-official.jpg", width: 1269, height: 1536 },
   legacy: { src: "/brand/linoe/linoe-logo-vertical.png", width: 1024, height: 1536 },
 } as const;
 

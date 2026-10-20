@@ -19,7 +19,12 @@ export const brand = {
   lockup: "LINOE by Tanyopo",
   shortName: "LINOE",
   parentCompany: "Tanyopo",
-  /** Full ecosystem/company name for legal-ish footer text. */
+  /**
+   * Ecosystem / R&D umbrella name ("Tanyopo Labs"). This is NOT the legal
+   * operator: the legal operator is PT Tanyopo Future Technology
+   * (features/legal/legal-meta.ts#LEGAL.operator). Use LEGAL.operator for
+   * anything that names who runs the service.
+   */
   companyFull: "Tanyopo Labs",
   /** Logo mark initial/monogram fallback when the full mark can't render. */
   initial: "L",

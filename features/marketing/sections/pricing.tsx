@@ -9,6 +9,13 @@ import { PLAN_TIERS } from "@/lib/billing/plans";
 // same single source of truth the authenticated /billing page's
 // PricingCards consumes — this section no longer hardcodes its own,
 // drifted plan list. Values are never duplicated here; only read.
+// Honest-status switch for the PUBLIC landing page. Online payment is not
+// live (the Xendit adapter is sandbox-only and no other gateway is
+// activated), so paid plans must not look purchasable and must not send
+// visitors into a checkout that does not work. Flip to true only after a
+// payment gateway is actually activated and verified, with Founder approval.
+const ONLINE_PAYMENT_LIVE = false;
+
 function formatPriceIDR(priceIDR: number): string {
   return priceIDR.toLocaleString("id-ID");
 }
@@ -75,9 +82,17 @@ export function Pricing() {
                   <Button size="sm" variant="outline" disabled className="mt-auto w-full">
                     Segera Hadir
                   </Button>
-                ) : (
+                ) : tier.priceIDR === 0 ? (
+                  <Button asChild size="sm" className="mt-auto w-full bg-gradient-to-r from-brand to-brand-2 hover:opacity-95">
+                    <Link href="/register">Coba Gratis {tier.pricePeriodLabel}</Link>
+                  </Button>
+                ) : ONLINE_PAYMENT_LIVE ? (
                   <Button asChild size="sm" className="mt-auto w-full bg-gradient-to-r from-brand to-brand-2 hover:opacity-95">
                     <Link href="/register">Pilih Paket Ini</Link>
+                  </Button>
+                ) : (
+                  <Button size="sm" variant="outline" disabled className="mt-auto w-full whitespace-normal">
+                    Pembayaran online segera tersedia
                   </Button>
                 )}
               </div>
@@ -85,7 +100,14 @@ export function Pricing() {
           })}
         </Reveal>
 
-        <p className="mt-6 text-xs text-muted-foreground">
+        {ONLINE_PAYMENT_LIVE ? null : (
+          <p className="mx-auto mt-6 max-w-xl text-xs text-muted-foreground">
+            Pembayaran online untuk paket berbayar belum tersedia dan belum ada penagihan. Saat ini Anda dapat
+            mencoba LINOE gratis selama masa uji coba. Harga di atas adalah daftar harga paket dan dapat
+            berubah.
+          </p>
+        )}
+        <p className="mt-4 text-xs text-muted-foreground">
           Sudah punya akun?{" "}
           <Link href="/login" className="font-medium text-brand hover:underline">
             Masuk
