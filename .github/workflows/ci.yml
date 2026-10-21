@@ -82,3 +82,54 @@ jobs:
 
       - name: PostgreSQL concurrency tests (C1-C8, C10, negative controls)
         run: npx vitest run -c vitest.pg.config.ts
+
+  # AI Jobs quota guard: behaviour tests on a throw-away postgres:16 with SYNTHETIC data (role check, quota reset
+  # resistance, 80 parallel calls, tenant isolation, rollback/reapply). Integration with PR #31/#44/#45/#46 runs when
+  # their refs can be fetched. run-local.sh refuses any non-local host and any production credential variable.
+  ai-jobs-guard-sql:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: linoe_ci
+          POSTGRES_PASSWORD: linoe_ci_password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U linoe_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: linoe_ci
+      PGPASSWORD: linoe_ci_password
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Ensure psql client
+        run: command -v psql || (sudo apt-get update && sudo apt-get install -y postgresql-client)
+
+      - name: Fetch PR #31, #44, #45, #46 migrations for the integration variants (best effort)
+        run: |
+          set +e
+          git fetch -q origin pull/31/head:refs/remotes/pr/31 pull/44/head:refs/remotes/pr/44 pull/45/head:refs/remotes/pr/45 pull/46/head:refs/remotes/pr/46
+          ok=1; for n in 31 44 45 46; do git rev-parse -q --verify refs/remotes/pr/$n >/dev/null || ok=0; done
+          if [ "$ok" = 1 ]; then
+            for n in 31 44 45 46; do
+              mkdir -p "$RUNNER_TEMP/pr$n"
+              git archive refs/remotes/pr/$n supabase | tar -x -C "$RUNNER_TEMP/pr$n"
+              echo "PR${n}_DIR=$RUNNER_TEMP/pr$n" >> "$GITHUB_ENV"
+            done
+            echo "integration variants enabled"
+          else
+            echo "::warning::PR #31/#44/#45/#46 refs not fetchable; running the main-only variant"
+          fi
+
+      - name: AI jobs quota guard SQL tests
+        run: bash supabase/tests/ai-jobs-guard/run-local.sh
