@@ -130,5 +130,7 @@ jobs:
             echo "::warning::PR #31/#44/#45 refs not fetchable; running the main-only variant"
           fi
 
-      - name: Privilege hardening Phase 1 SQL tests
+      - name: Privilege hardening Phase 1 SQL tests (PostgreSQL 17 required)
+        env:
+          REQUIRE_PG_MAJOR: "17"
         run: bash supabase/tests/privilege-phase1/run-local.sh
