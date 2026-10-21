@@ -78,6 +78,7 @@ export async function syncChannelCampaignInsightsAction(
     .from("prompter_oauth_credentials")
     .select("encrypted_access_token")
     .eq("connected_account_id", connectedAccount.id)
+    .eq("tenant_id", session.tenantId)
     .maybeSingle();
 
   if (!credentials) {

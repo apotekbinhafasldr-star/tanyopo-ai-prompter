@@ -34,15 +34,30 @@ function makeSelectChain(result: any) {
   return { select, eq1, eq2, maybeSingle };
 }
 
-// prompter_oauth_credentials is only ever filtered by one column
-// (connected_account_id) before .maybeSingle() — a distinct shape from
-// the two-.eq() chain above.
+// prompter_oauth_credentials is read through the admin client (RLS bypassed), so the
+// query itself must carry BOTH filters: connected_account_id AND tenant_id. This fake
+// applies the filters it receives to one stored row, like the real table would, so a
+// missing/incorrect tenant filter returns the row (test fails) instead of passing silently.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function makeSingleEqSelectChain(result: any) {
-  const maybeSingle = vi.fn(async () => result);
-  const eq1 = vi.fn(() => ({ maybeSingle }));
+function makeCredentialsChain(
+  row: { connected_account_id: string; tenant_id: string; encrypted_access_token: string } | null,
+) {
+  const filters: Record<string, unknown> = {};
+  const maybeSingle = vi.fn(async () => {
+    const matches =
+      row !== null && Object.entries(filters).every(([col, val]) => (row as Record<string, unknown>)[col] === val);
+    return { data: matches ? { encrypted_access_token: row!.encrypted_access_token } : null, error: null };
+  });
+  const eq2 = vi.fn((col: string, val: unknown) => {
+    filters[col] = val;
+    return { maybeSingle };
+  });
+  const eq1 = vi.fn((col: string, val: unknown) => {
+    filters[col] = val;
+    return { eq: eq2 };
+  });
   const select = vi.fn(() => ({ eq: eq1 }));
-  return { select, eq1, maybeSingle };
+  return { select, eq1, eq2, maybeSingle, filters };
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -61,7 +76,7 @@ function makeInsertChain() {
 interface Harness {
   connectedAccountSelect: ReturnType<typeof makeSelectChain>;
   connectedAccountUpdate: ReturnType<typeof makeUpdateChain>;
-  credentialsSelect: ReturnType<typeof makeSingleEqSelectChain>;
+  credentialsSelect: ReturnType<typeof makeCredentialsChain>;
   auditInsert: ReturnType<typeof makeInsertChain>;
   regularFrom: ReturnType<typeof vi.fn>;
   adminFrom: ReturnType<typeof vi.fn>;
@@ -69,20 +84,26 @@ interface Harness {
 
 function buildHarness(overrides: {
   connectedAccount?: { data: unknown; error: unknown };
-  credentials?: { data: unknown; error: unknown };
+  credentialsRow?: { connected_account_id: string; tenant_id: string; encrypted_access_token: string } | null;
 } = {}): Harness {
   const connectedAccountSelect = makeSelectChain(
     overrides.connectedAccount ?? { data: { id: "acct_1", status: "CONNECTED" }, error: null },
   );
   const connectedAccountUpdate = makeUpdateChain({ error: null });
-  const credentialsSelect = makeSingleEqSelectChain(
-    overrides.credentials ?? { data: { encrypted_access_token: "cipher-text" }, error: null },
+  const credentialsSelect = makeCredentialsChain(
+    overrides.credentialsRow === undefined
+      ? { connected_account_id: "acct_1", tenant_id: "t1", encrypted_access_token: "cipher-text" }
+      : overrides.credentialsRow,
   );
   const auditInsert = makeInsertChain();
 
   const regularFrom = vi.fn((table: string) => {
     if (table === "prompter_connected_accounts") {
-      return { select: connectedAccountSelect.select, update: connectedAccountUpdate.update };
+      return {
+        select: connectedAccountSelect.select,
+        update: connectedAccountUpdate.update,
+        delete: vi.fn(() => ({ eq: vi.fn(async () => ({ error: null })) })),
+      };
     }
     if (table === "prompter_audit_logs") {
       return { insert: auditInsert.insert };
@@ -105,7 +126,7 @@ let harness: Harness;
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn(async () => ({ from: harness.regularFrom })) }));
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: vi.fn(() => ({ from: harness.adminFrom })) }));
 
-import { listMetaPagesAction, selectMetaPageAction } from "@/features/connections/actions";
+import { disconnectAction, listMetaPagesAction, selectMetaPageAction } from "@/features/connections/actions";
 
 describe("listMetaPagesAction / selectMetaPageAction — Track B Meta Page Picker", () => {
   beforeEach(() => {
@@ -154,6 +175,55 @@ describe("listMetaPagesAction / selectMetaPageAction — Track B Meta Page Picke
       await listMetaPagesAction();
 
       expect(harness.credentialsSelect.eq1).toHaveBeenCalledWith("connected_account_id", "acct_1");
+    });
+
+    it("also pins the credential lookup to the session tenant (explicit tenant_id, admin client bypasses RLS)", async () => {
+      getPagesMock.mockResolvedValue([]);
+
+      await listMetaPagesAction();
+
+      expect(harness.credentialsSelect.eq2).toHaveBeenCalledWith("tenant_id", "t1");
+      expect(harness.credentialsSelect.filters).toEqual({ connected_account_id: "acct_1", tenant_id: "t1" });
+    });
+
+    it("listMetaPagesAction: a credential row that belongs to ANOTHER tenant is never returned or decrypted", async () => {
+      harness = buildHarness({
+        credentialsRow: { connected_account_id: "acct_1", tenant_id: "t2", encrypted_access_token: "other-tenant-cipher" },
+      });
+
+      const result = await listMetaPagesAction();
+
+      expect(result.error).toMatch(/Kredensial koneksi tidak ditemukan/);
+      expect(decryptTokenMock).not.toHaveBeenCalled();
+      expect(getPagesMock).not.toHaveBeenCalled();
+    });
+
+    it("listMetaPagesAction: fails closed when the session carries no valid tenant id", async () => {
+      requireSessionContextMock.mockResolvedValue({ tenantId: "", userId: "u1", role: "owner" });
+
+      const result = await listMetaPagesAction();
+
+      expect(result.error).toMatch(/Kredensial koneksi tidak ditemukan/);
+      expect(decryptTokenMock).not.toHaveBeenCalled();
+      expect(getPagesMock).not.toHaveBeenCalled();
+    });
+
+    it("disconnectAction: reads the credential with connected_account_id AND the session tenant, then decrypts", async () => {
+      await disconnectAction("META");
+
+      expect(harness.credentialsSelect.filters).toEqual({ connected_account_id: "acct_1", tenant_id: "t1" });
+      expect(decryptTokenMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("disconnectAction: another tenant's credential row is never decrypted or sent to the platform", async () => {
+      harness = buildHarness({
+        credentialsRow: { connected_account_id: "acct_1", tenant_id: "t2", encrypted_access_token: "other-tenant-cipher" },
+      });
+
+      const result = await disconnectAction("META");
+
+      expect(result.error).toBeNull();
+      expect(decryptTokenMock).not.toHaveBeenCalled();
     });
 
     it("scopes the persisted update to the caller's own tenant and platform META, never a client-supplied tenant", async () => {
@@ -246,7 +316,7 @@ describe("listMetaPagesAction / selectMetaPageAction — Track B Meta Page Picke
     });
 
     it("a Meta connection with no credentials row yet fails closed, not with a crash", async () => {
-      harness = buildHarness({ credentials: { data: null, error: null } });
+      harness = buildHarness({ credentialsRow: null });
 
       const result = await listMetaPagesAction();
 

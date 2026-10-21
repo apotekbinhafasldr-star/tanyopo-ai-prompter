@@ -131,7 +131,7 @@ export function buildApprovalHarness(options: ApprovalHarnessOptions) {
     touched.push(`admin:${table}`);
     return {
       select: () => ({
-        eq: () => ({ maybeSingle: async () => ({ data: { encrypted_access_token: "cipher" }, error: null }) }),
+        eq: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { encrypted_access_token: "cipher" }, error: null }) }) }),
       }),
     };
   });

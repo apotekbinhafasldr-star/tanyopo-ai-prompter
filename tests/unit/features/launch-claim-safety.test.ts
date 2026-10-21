@@ -190,7 +190,7 @@ vi.mock("@/lib/supabase/admin", () => ({
     storage: makeAdminStorage(fx),
     from: () => ({
       select: () => ({
-        eq: () => ({ maybeSingle: async () => ({ data: { encrypted_access_token: "cipher" }, error: null }) }),
+        eq: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { encrypted_access_token: "cipher" }, error: null }) }) }),
       }),
     }),
   })),

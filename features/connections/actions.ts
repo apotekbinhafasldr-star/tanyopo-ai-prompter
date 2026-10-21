@@ -54,6 +54,7 @@ async function fetchOwnMetaPagesOrError(
     .from("prompter_oauth_credentials")
     .select("encrypted_access_token")
     .eq("connected_account_id", connectedAccount.id)
+    .eq("tenant_id", tenantId)
     .maybeSingle();
 
   if (!credentials) {
@@ -188,6 +189,7 @@ export async function disconnectAction(platform: ConnectorPlatform): Promise<Con
       .from("prompter_oauth_credentials")
       .select("encrypted_access_token")
       .eq("connected_account_id", account.id)
+      .eq("tenant_id", session.tenantId)
       .maybeSingle();
 
     if (credentials) {
