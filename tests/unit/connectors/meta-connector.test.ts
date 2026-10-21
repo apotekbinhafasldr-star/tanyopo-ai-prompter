@@ -10,8 +10,8 @@ const { metaEnv } = vi.hoisted(() => ({
   },
 }));
 
+vi.mock("@/lib/env.server", () => ({ serverEnv: { meta: metaEnv } }));
 vi.mock("@/lib/env", () => ({
-  serverEnv: { meta: metaEnv },
   isConnectorConfigured: (credentials: Record<string, string | undefined>) =>
     Object.values(credentials).every((v) => !!v && v.length > 0),
 }));

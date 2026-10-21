@@ -1,6 +1,6 @@
 import "server-only";
 
-import { serverEnv } from "@/lib/env";
+import { serverEnv } from "@/lib/env.server";
 import { verifyUmkmproSignature, type UmkmproSignatureFailureReason } from "@/lib/umkmpro/signature";
 
 export const UMKMPRO_TIMESTAMP_HEADER = "x-umkmpro-timestamp";

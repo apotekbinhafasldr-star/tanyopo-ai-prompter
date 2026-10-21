@@ -9,7 +9,7 @@ const { serverEnvMock } = vi.hoisted(() => ({
     },
   },
 }));
-vi.mock("@/lib/env", () => ({ serverEnv: serverEnvMock }));
+vi.mock("@/lib/env.server", () => ({ serverEnv: serverEnvMock }));
 
 import { XenditPaymentProvider } from "@/lib/billing/providers/xendit-payment-provider";
 import { PaymentProviderConfigError } from "@/lib/billing/payment-provider";

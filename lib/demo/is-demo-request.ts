@@ -2,7 +2,7 @@ import "server-only";
 
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
-import { serverEnv } from "@/lib/env";
+import { serverEnv } from "@/lib/env.server";
 import { DEMO_SESSION_COOKIE, verifyDemoSessionToken, type DemoSessionPayload } from "@/lib/demo/session";
 
 /**

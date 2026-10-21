@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { serverEnv } from "@/lib/env";
+import { serverEnv } from "@/lib/env.server";
 import { createDemoSessionToken, DEMO_SESSION_COOKIE, DEMO_SESSION_TTL_MS } from "@/lib/demo/session";
 
 /**

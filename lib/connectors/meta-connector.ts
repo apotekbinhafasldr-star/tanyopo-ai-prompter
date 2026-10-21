@@ -1,6 +1,6 @@
 import "server-only";
 
-import { serverEnv } from "@/lib/env";
+import { serverEnv } from "@/lib/env.server";
 import { isConnectorConfigured } from "@/lib/env";
 import {
   ConnectorApiError,
