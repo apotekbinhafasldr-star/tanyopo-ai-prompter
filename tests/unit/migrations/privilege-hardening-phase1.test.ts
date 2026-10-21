@@ -96,12 +96,27 @@ describe("privilege hardening Phase 1 migration", () => {
     expect(code).toMatch(/lock_timeout/);
   });
 
-  it("the rollback is outside supabase/migrations, only GRANTs, and documents the #31/#44/#45 caveat", () => {
+  it("the rollback is outside supabase/migrations and is a fail-closed targeted forward-fix, never a mass restore", () => {
     expect(existsSync(path.join(migrationsDir, `${name}.down.sql`))).toBe(false);
     const dcode = down.replace(/--.*$/gm, "");
-    expect(dcode).not.toMatch(/\brevoke\b/i);
-    expect(dcode).toMatch(/grant select, insert, update, delete, truncate on public\.%I to anon, authenticated/);
-    expect(dcode).toMatch(/grant select, insert, delete, truncate on public\.prompter_subscriptions to anon, authenticated/);
-    expect(down).toMatch(/RE-RUN their migrations/);
+    // never restores anon / TRUNCATE / REFERENCES / TRIGGER
+    expect(dcode).not.toMatch(/\bto\s+anon\b/i);
+    expect(dcode).not.toMatch(/grant\s+[^;]*\btruncate\b/i);
+    expect(dcode).toMatch(/grant %s on public\.%I to authenticated/);
+    // requires the exact pairs and refuses everything else
+    expect(dcode).toMatch(/refused: name the exact table:PRIVILEGE pairs/);
+    expect(dcode).toMatch(/not \(\(v_t \|\| ':' \|\| v_p\) = any \(c_allowed\)\)/);
+    // the allowlist holds ONLY the 3 low-risk tables x INSERT/UPDATE/DELETE
+    const allowed = [...dcode.slice(dcode.indexOf("c_allowed"), dcode.indexOf("v_raw")).matchAll(/'(prompter_[a-z_]+):([A-Z]+)'/g)].map((m) => `${m[1]}:${m[2]}`);
+    expect(allowed).toHaveLength(9);
+    for (const a of allowed) {
+      expect(a).toMatch(/^prompter_(jobs|platform_capabilities|product_snapshots):(INSERT|UPDATE|DELETE)$/);
+    }
+    for (const forbidden of ["ai_jobs", "payment_transactions", "invoices", "webhook_events", "plan_entitlements", "audit_logs", "subscriptions", "oauth_credentials"]) {
+      expect(allowed.join(" ")).not.toContain(forbidden);
+    }
+    // all-or-nothing post-check
+    expect(dcode).toMatch(/rollback post-check failed: unexpected privilege change/);
+    expect(down).toMatch(/240 privilege cells/);
   });
 });

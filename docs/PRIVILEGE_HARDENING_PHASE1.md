@@ -57,7 +57,15 @@ catalog query and compare with the local "before" matrix. 4. Apply in a quiet wi
 5. Smoke: login, dashboard, AI generation, checkout (gateway OFF → expected message), settings, connections, billing page.
 6. Re-run the catalog query: no TRUNCATE/anon, `UPDATE(plan)` still present.
 
-## Rollback (not executed)
-`supabase/rollback/20261020190000_prompter_privilege_hardening_phase1.down.sql` re-grants the default-privilege state.
-If #31/#44/#45 are already applied, re-run their migrations right after (idempotent REVOKEs); tests prove
-rollback + re-run equals the exact pre-Phase-1 matrix. Never roll back to restore TRUNCATE for any real need — there is none.
+## Rollback (not executed) — fail-closed forward-fix
+`supabase/rollback/20261020190000_prompter_privilege_hardening_phase1.down.sql` is **not** a mass restore any more. The previous
+version re-granted `select, insert, update, delete, truncate` to anon + authenticated and, after #31/#44/#45, re-opened
+**240 privilege cells** (UPDATE on `prompter_ai_jobs` → `created_at` mutable → quota reset; INSERT on `prompter_payment_transactions`;
+all of anon; TRUNCATE). The suite keeps that old script only as a test-only negative control
+(`support/legacy_mass_restore.sql`) to prove the detector catches the defect.
+
+Now you must name the exact pairs a *verified* broken flow needs:
+`psql -v ON_ERROR_STOP=1 -v pairs='prompter_jobs:UPDATE' -f <down.sql>`. Only 9 pairs (`prompter_jobs`, `prompter_platform_capabilities`,
+`prompter_product_snapshots` × INSERT/UPDATE/DELETE, authenticated only) can be restored; everything else (TRUNCATE, anon, ai_jobs,
+payment_transactions, invoices, webhook_events, plan_entitlements, audit_logs, subscriptions, oauth_credentials) is refused, and the
+script is all-or-nothing with a post-check that exactly the named cells changed. Anything else needs its own reviewed migration.

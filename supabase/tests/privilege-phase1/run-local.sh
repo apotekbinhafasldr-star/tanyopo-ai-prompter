@@ -63,20 +63,61 @@ probe_variant() { # <name> <variant>
   if P -d "$c" -f "$here/assert_after.sql" >"$W/assert.out" 2>&1; then grep -E "NOTICE:  PASS" "$W/assert.out" | sed "s/^psql:[^ ]* //; s/^NOTICE:  /$n: /"; else echo "FAILED catalog assertions ($n)"; grep -E "ASSERTION|ERROR" "$W/assert.out" | head -3; fail=1; fi
   # hash of the post-Phase-1 matrix (used for the order-independence check)
   psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q -At -F' ' -d "$c" -c "select 'matrix_after_hash', md5(string_agg(tbl||role||priv||granted, '' order by tbl,role,priv)) from t_matrix()" > "$W/$n.hash"
-  # rollback => EXACT pre-state. When #31/#44/#45 were applied BEFORE Phase 1, the down script re-opens
-  # what they closed (documented), so those PRs' migrations are re-run afterwards, as the runbook says.
+  # ---- rollback = fail-closed targeted forward-fix (never a mass restore) ----
   P -d "$c" -c "create table t_matrix_after_ph1 as select * from t_matrix()" >/dev/null
-  P -d "$c" -f "$root/supabase/rollback/$PH1.down.sql" >/dev/null
+  local D="$root/supabase/rollback/$PH1.down.sql" diffq="select count(*) from t_matrix() a join t_matrix_after_ph1 b using (tbl,role,priv) where a.granted is distinct from b.granted"
+  local refused=0 total=0 pr
+  for pr in "<none>" "" "prompter_ai_jobs:UPDATE" "prompter_ai_jobs:DELETE" "prompter_payment_transactions:INSERT" "prompter_payment_transactions:UPDATE" \
+            "prompter_jobs:TRUNCATE" "prompter_jobs:REFERENCES" "prompter_jobs:TRIGGER" "prompter_jobs:UPDATE,prompter_ai_jobs:UPDATE" \
+            "prompter_oauth_credentials:SELECT" "prompter_audit_logs:DELETE" "prompter_audit_logs:UPDATE" "prompter_subscriptions:DELETE" \
+            "prompter_subscriptions:UPDATE" "prompter_invoices:INSERT" "prompter_webhook_events:INSERT" "prompter_plan_entitlements:UPDATE" \
+            "prompter_plan_entitlements:INSERT" "anon:SELECT" "prompter_nonexistent:UPDATE" "prompter_marketing_metrics:UPDATE"; do
+    total=$((total+1))
+    if [ "$pr" = "<none>" ]; then o=$(PL -d "$c" -v ON_ERROR_STOP=1 -f "$D" 2>&1) && rc=0 || rc=1
+    else o=$(PL -d "$c" -v ON_ERROR_STOP=1 -v pairs="$pr" -f "$D" 2>&1) && rc=0 || rc=1; fi
+    if [ "$rc" = 1 ] && echo "$o" | grep -q "refused"; then refused=$((refused+1)); else echo "   NOT REFUSED: '$pr' rc=$rc"; fi
+  done
+  [ "$refused" = "$total" ] && pass "$n: rollback refuses $total forbidden/ambiguous requests (none, TRUNCATE, anon, ai_jobs, payment_transactions, invoices, webhooks, entitlements, audit, subscriptions, vault, mixed valid+invalid, unknown)" || bad "$n: only $refused/$total refused"
+  r0=$(psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q -At -d "$c" -c "$diffq")
+  [ "$r0" = 0 ] && pass "$n: refused rollbacks changed nothing (all-or-nothing)" || bad "$n: refused rollback changed $r0 cell(s)"
+  P -d "$c" -v pairs='prompter_jobs:UPDATE' -f "$D" >/dev/null 2>&1
+  r1=$(psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q -At -d "$c" -c "$diffq")
+  [ "$r1" = 1 ] && pass "$n: restoring one named pair changes exactly that one cell" || bad "$n: single-pair restore changed $r1 cell(s)"
+  P -d "$c" -v pairs='prompter_jobs:INSERT,prompter_jobs:UPDATE,prompter_jobs:DELETE,prompter_platform_capabilities:INSERT,prompter_platform_capabilities:UPDATE,prompter_platform_capabilities:DELETE,prompter_product_snapshots:INSERT,prompter_product_snapshots:UPDATE,prompter_product_snapshots:DELETE' -f "$D" >/dev/null 2>&1
+  nr=$(psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q -At -d "$c" -c "select count(*) from t_matrix() a join t_matrix_after_ph1 b using (tbl,role,priv) where a.granted is distinct from b.granted and not (a.role='authenticated' and a.granted and a.priv in ('INSERT','UPDATE','DELETE') and a.tbl in ('prompter_jobs','prompter_platform_capabilities','prompter_product_snapshots'))")
+  rr=$(psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q -At -d "$c" -c "select count(*) from t_matrix() a join t_matrix_after_ph1 b using (tbl,role,priv) where b.granted and not a.granted")
+  [ "$nr" = 0 ] && [ "$rr" = 0 ] && pass "$n: maximum permitted rollback re-opens only the 9 allowed authenticated cells (no TRUNCATE/anon/financial/quota cell, nothing removed)" || bad "$n: max rollback side effects ($nr new dangerous, $rr removed)"
+  dang=$(psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q -At -d "$c" -c "select count(*) from t_matrix() where granted and (role='anon' or priv='TRUNCATE')")
+  [ "$dang" = 0 ] && pass "$n: after rollback no anon privilege and no TRUNCATE exists on any prompter_* table" || bad "$n: $dang anon/TRUNCATE cells after rollback"
   if [ "$v" = pr31_44_45 ]; then
-    for m in $L31; do apm "$c" "$PR31_DIR" "$m"; done; apm "$c" "$PR44_DIR" "$M44"; apm "$c" "$PR45_DIR" "$M45"
-    rbmsg="rollback + re-run of #31/#44/#45 migrations"
-  else rbmsg="rollback"; fi
-  r1=$(psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q -At -d "$c" -c "select count(*) from (select * from t_matrix() except select * from t_matrix_before) x") 
-  r2=$(psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q -At -d "$c" -c "select count(*) from (select * from t_matrix_before except select * from t_matrix()) x")
-  [ "$r1" = 0 ] && [ "$r2" = 0 ] && pass "$n: $rbmsg restores the exact pre-Phase-1 privilege matrix" || bad "$n: $rbmsg differs from pre-state ($r1/$r2)"
+    chk=$(psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q -At -d "$c" -c "select
+       not has_table_privilege('authenticated','public.prompter_ai_jobs','UPDATE')
+       and not has_column_privilege('authenticated','public.prompter_ai_jobs','created_at','UPDATE')
+       and not has_column_privilege('authenticated','public.prompter_ai_jobs','tenant_id','UPDATE')
+       and has_column_privilege('authenticated','public.prompter_ai_jobs','status','UPDATE')
+       and not has_table_privilege('authenticated','public.prompter_ai_jobs','INSERT')
+       and not has_table_privilege('authenticated','public.prompter_ai_jobs','DELETE')
+       and not has_table_privilege('authenticated','public.prompter_payment_transactions','INSERT')
+       and not has_table_privilege('authenticated','public.prompter_payment_transactions','UPDATE')
+       and not has_table_privilege('authenticated','public.prompter_payment_transactions','DELETE')
+       and has_column_privilege('authenticated','public.prompter_subscriptions','plan','UPDATE') = (select granted from t_matrix_after_ph1 where tbl='prompter_subscriptions' and priv='COLUMN_UPDATE_PLAN')")
+    [ "$chk" = t ] && pass "$n: after rollback ai_jobs UPDATE/INSERT/DELETE (table + created_at/tenant_id) and payment_transactions INSERT/UPDATE/DELETE stay closed; completion columns stay writable" || bad "$n: a quota/financial privilege is open after rollback"
+  fi
+  # negative control: the OLD mass-restore script must be caught by the same detector
+  P -d postgres -c "drop database if exists p1_legacy" -c "create database p1_legacy template p1c_$1" >/dev/null 2>&1 || { P -d "$c" -c "select 1" >/dev/null; }
+  local lg="p1l_$1"; mk "$lg"; prep "$lg" "$v"; P -d "$lg" -f "$here/support/fixtures.sql" >/dev/null; apply_ph1 "$lg"
+  P -d "$lg" -c "create table t_matrix_after_ph1 as select * from t_matrix()" >/dev/null
+  P -d "$lg" -f "$here/support/legacy_mass_restore.sql" >/dev/null
+  reopened=$(psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q -At -d "$lg" -c "select count(*) from t_matrix() a join t_matrix_after_ph1 b using (tbl,role,priv) where a.granted and not b.granted")
+  legacy_bad=$(psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q -At -d "$lg" -c "select count(*) from t_matrix() where granted and (role='anon' or priv='TRUNCATE')")
+  [ "$legacy_bad" -gt 0 ] && pass "$n: negative control — the legacy mass-restore re-opens $reopened cells ($legacy_bad anon/TRUNCATE); the detector catches it" || bad "$n: detector did not catch the legacy mass-restore"
+  if [ "$v" = pr31_44_45 ]; then
+    lc=$(psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q -At -d "$lg" -c "select has_table_privilege('authenticated','public.prompter_ai_jobs','UPDATE') and has_table_privilege('authenticated','public.prompter_payment_transactions','INSERT')")
+    [ "$lc" = t ] && pass "$n: negative control — legacy script DID re-open ai_jobs UPDATE + payment_transactions INSERT (the PR #46 defect, now impossible)" || bad "$n: legacy control did not reproduce the defect"
+  fi
   apply_ph1 "$c"
   r3=$(psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q -At -d "$c" -c "select count(*) from ((select * from t_matrix() except select * from t_matrix_after_ph1) union all (select * from t_matrix_after_ph1 except select * from t_matrix())) x")
-  [ "$r3" = 0 ] && pass "$n: re-apply after rollback reproduces the exact post-state" || bad "$n: reapply differs ($r3)"
+  [ "$r3" = 0 ] && pass "$n: re-apply after targeted rollback reproduces the exact post-state" || bad "$n: reapply differs ($r3)"
 }
 
 probe_variant main_only main
