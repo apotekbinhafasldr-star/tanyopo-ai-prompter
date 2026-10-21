@@ -194,7 +194,7 @@ function buildHarness(
 
   const adminFrom = vi.fn((table: string) => {
     if (table === "prompter_oauth_credentials") {
-      return { select: () => ({ eq: () => ({ maybeSingle: credentialsMaybeSingle }) }) };
+      return { select: () => ({ eq: () => ({ eq: () => ({ maybeSingle: credentialsMaybeSingle }) }) }) };
     }
     throw new Error(`Unexpected table on admin client: ${table}`);
   });
