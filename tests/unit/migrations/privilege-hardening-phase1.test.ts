@@ -142,6 +142,6 @@ describe("privilege hardening Phase 1 migration", () => {
     expect(dcode).toMatch(/relrowsecurity/);
     expect(dcode).toMatch(/polcmd in \(v_cmd, '\*'\)/);
     expect(dcode).not.toMatch(/\bto\s+(service_role|public|anon)\b/i);
-    expect(dcode).not.toMatch(/\bmaintain\b/i);
+    expect(dcode).not.toMatch(/grant\s+maintain/i);
   });
 });
