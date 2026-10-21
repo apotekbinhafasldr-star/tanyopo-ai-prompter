@@ -82,3 +82,55 @@ jobs:
 
       - name: PostgreSQL concurrency tests (C1-C8, C10, negative controls)
         run: npx vitest run -c vitest.pg.config.ts
+
+  # S1 (trial + AI quota security): behaviour proof on a throw-away postgres:17 (production is 17.x) with SYNTHETIC data.
+  # Phases: holes reproduced "before", fixed "after", idempotent apply, 45+45 parallel quota calls, fail-closed rollback,
+  # and integration with PR #48 (both orders) and PR #46 when their refs can be fetched (best effort, never a secret).
+  # supabase/tests/s1-trial-quota/run-local.sh refuses any non-local host and any production credential variable.
+  s1-trial-quota-sql:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: linoe_ci
+          POSTGRES_PASSWORD: linoe_ci_password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U linoe_ci -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: linoe_ci
+      PGPASSWORD: linoe_ci_password
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Ensure psql client
+        run: command -v psql || (sudo apt-get update && sudo apt-get install -y postgresql-client)
+
+      - name: Fetch PR #31, #46 and #48 for the legacy-rollback control and the integration variants (best effort)
+        run: |
+          set +e
+          git fetch -q origin pull/31/head:refs/tmp/pr31
+          for n in 46 48; do
+            if git fetch -q origin pull/$n/head:refs/remotes/pr/$n; then
+              mkdir -p "$RUNNER_TEMP/pr$n"
+              git archive refs/remotes/pr/$n supabase | tar -x -C "$RUNNER_TEMP/pr$n"
+              echo "PR${n}_DIR=$RUNNER_TEMP/pr$n" >> "$GITHUB_ENV"
+            else
+              echo "::warning::PR #$n ref not fetchable; its integration variant is skipped"
+            fi
+          done
+
+      - name: S1 trial + AI quota SQL tests (PostgreSQL 17 required)
+        env:
+          REQUIRE_PG_MAJOR: "17"
+        run: bash supabase/tests/s1-trial-quota/run-local.sh
