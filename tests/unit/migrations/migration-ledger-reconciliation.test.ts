@@ -62,8 +62,45 @@ describe("migration file names", () => {
     for (const [file] of [...RENAMED, ...LEDGER_ONLY]) expect(files, file).toContain(file);
   });
 
-  it("Track B stays an unapplied draft at its original version (not in the production ledger)", () => {
-    expect(files).toContain("20260913163600_prompter_track_b_meta_page_picker.sql");
+  it("Track B carries the production-ledger version and the draft version is gone (same-name/different-version mismatch guard)", () => {
+    expect(files).toContain("20261015144639_prompter_track_b_meta_page_picker.sql");
+    expect(files.some((f) => f.startsWith("20260913163600"))).toBe(false);
+  });
+
+  it("no two migration files share the same name under different versions (ledger name must map to exactly one version)", () => {
+    const byName = new Map<string, string[]>();
+    for (const f of files) {
+      const name = f.slice(15);
+      byName.set(name, [...(byName.get(name) ?? []), f.slice(0, 14)]);
+    }
+    const dup = [...byName].filter(([, v]) => v.length > 1);
+    expect(dup).toEqual([]);
+  });
+});
+
+/** Track B: file renamed to the ledger version; content unchanged by the rename. */
+const TRACK_B = "20261015144639_prompter_track_b_meta_page_picker.sql";
+/** md5 of the whitespace-normalised ledger `statements` for version 20261015144639 (read-only query, 2026-10-21). */
+const TRACK_B_LEDGER_MD5 = "3a76ef76f3a8e64de17d20523b06759c";
+/** md5 of the executable statements (comments and the ledger's leading `set local lock_timeout` removed) shared by file and ledger. */
+const TRACK_B_EXECUTABLE_MD5 = "36b78743a38a0d06ff25236d19f9ae7a";
+const norm = (s: string) => s.replace(/\s+/g, " ").trim();
+const executable = (s: string) => norm(norm(s.replace(/^\s*--.*$/gm, "")).replace(/set local lock_timeout = '3s';/i, ""));
+
+describe("Track B ledger reconciliation", () => {
+  it("file content is unchanged by the rename to the ledger version", () => {
+    expect(sha256(TRACK_B)).toBe("902016257bcbf91dee456eb0a91035cbe7caa8b6a16599845fce60435811bf6a");
+  });
+
+  it("executable statements equal the ones recorded in the production ledger (only comments and lock_timeout differ)", () => {
+    const sql = readFileSync(path.join(dir, TRACK_B), "utf-8");
+    expect(createHash("md5").update(executable(sql)).digest("hex")).toBe(TRACK_B_EXECUTABLE_MD5);
+    // the ledger text itself is the same statements plus `set local lock_timeout`: its recorded md5 is pinned for audit
+    expect(TRACK_B_LEDGER_MD5).toHaveLength(32);
+    // additive and idempotent only
+    expect(sql).toMatch(/add column if not exists selected_page_id text/);
+    expect(sql).toMatch(/add column if not exists selected_page_name text/);
+    expect(sql.replace(/^\s*--.*$/gm, "")).not.toMatch(/\b(drop|delete|truncate|grant|revoke)\b/i);
   });
 });
 
