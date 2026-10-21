@@ -15,6 +15,11 @@ PH1=20261020190000_prompter_privilege_hardening_phase1
 P() { psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q -v ON_ERROR_STOP=1 "$@"; }
 PL() { psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q "$@"; }
 W="$(mktemp -d)"; fail=0
+if [ -n "${REQUIRE_PG_MAJOR:-}" ]; then  # CI pins PostgreSQL 17 (production is 17.x; MAINTAIN exists only from 17): refuse to run on anything else
+  v=$(psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q -At -d postgres -c "show server_version_num")
+  [ $((v/10000)) = "$REQUIRE_PG_MAJOR" ] || { echo "REFUSED: server_version_num=$v is not PostgreSQL $REQUIRE_PG_MAJOR" >&2; exit 2; }
+  echo "PostgreSQL major $REQUIRE_PG_MAJOR confirmed (server_version_num=$v)"
+fi
 pass() { echo "PASS: $*"; }; bad() { echo "FAIL: $*"; fail=1; }
 
 P -d postgres -c "drop database if exists p1_tpl" -c "create database p1_tpl" >/dev/null
