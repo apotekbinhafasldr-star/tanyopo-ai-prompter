@@ -3,7 +3,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 const { serverEnvMock } = vi.hoisted(() => ({
   serverEnvMock: { payment: { providerName: undefined as string | undefined, apiKey: undefined, webhookSecret: undefined } },
 }));
-vi.mock("@/lib/env", () => ({ serverEnv: serverEnvMock }));
+vi.mock("@/lib/env.server", () => ({ serverEnv: serverEnvMock }));
 
 import { getPaymentProvider } from "@/lib/billing/get-payment-provider";
 import { NullPaymentProvider } from "@/lib/billing/providers/null-payment-provider";

@@ -1,7 +1,7 @@
 import "server-only";
 
 import { timingSafeEqual } from "node:crypto";
-import { serverEnv } from "@/lib/env";
+import { serverEnv } from "@/lib/env.server";
 import {
   PaymentProviderConfigError,
   type CheckoutSessionInput,

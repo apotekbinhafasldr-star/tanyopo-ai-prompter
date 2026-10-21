@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { serverEnv } from "@/lib/env";
+import { serverEnv } from "@/lib/env.server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { claimNextJob, completeJob, failJob } from "@/services/jobs";
 import { apiError, apiSuccess } from "@/lib/api/response";

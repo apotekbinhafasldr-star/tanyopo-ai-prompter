@@ -1,6 +1,6 @@
 import "server-only";
 
-import { serverEnv } from "@/lib/env";
+import { serverEnv } from "@/lib/env.server";
 import type { PaymentProvider } from "@/lib/billing/payment-provider";
 import { NullPaymentProvider } from "@/lib/billing/providers/null-payment-provider";
 import { XenditPaymentProvider } from "@/lib/billing/providers/xendit-payment-provider";

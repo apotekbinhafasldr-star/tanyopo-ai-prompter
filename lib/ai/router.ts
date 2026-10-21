@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { z } from "zod";
-import { serverEnv } from "@/lib/env";
+import { serverEnv } from "@/lib/env.server";
 import { AnthropicProvider } from "@/lib/ai/anthropic-provider";
 import { OpenAIProvider } from "@/lib/ai/openai-provider";
 import { resolveRoute, type AIRoutingEnvConfig } from "@/lib/ai/routing-config";

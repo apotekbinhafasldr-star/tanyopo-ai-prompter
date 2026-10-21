@@ -1,6 +1,7 @@
 import "server-only";
 
-import { serverEnv, isConnectorConfigured } from "@/lib/env";
+import { serverEnv } from "@/lib/env.server";
+import { isConnectorConfigured } from "@/lib/env";
 import {
   ConnectorConfigError,
   type AdInput,

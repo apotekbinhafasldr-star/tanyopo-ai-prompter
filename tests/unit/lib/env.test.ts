@@ -43,7 +43,7 @@ describe("lib/env.ts publicEnv — client-bundle inlining safety", () => {
     // legitimately still uses a dynamic process.env[name] lookup; that's
     // fine there and shouldn't fail this check.
     const readPublicBody = source.slice(source.indexOf("function readPublic"), source.indexOf("function readOptional"));
-    const publicEnvBlock = source.slice(source.indexOf("export const publicEnv"), source.indexOf("export const serverEnv"));
+    const publicEnvBlock = source.slice(source.indexOf("export const publicEnv"), source.indexOf("export function isConnectorConfigured"));;
 
     expect(readPublicBody).not.toMatch(/process\.env\[/);
     expect(publicEnvBlock).not.toMatch(/process\.env\[/);
