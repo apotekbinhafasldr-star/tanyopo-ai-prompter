@@ -33,8 +33,9 @@ describe("privilege hardening Phase 1 migration", () => {
     expect(code).not.toMatch(/\bowner\s+to\b/i);
   });
 
-  it("revokes TRUNCATE from PUBLIC, anon and authenticated, and everything from anon, on every listed table", () => {
+  it("revokes TRUNCATE/REFERENCES/TRIGGER from PUBLIC, anon and authenticated, and everything from anon, on every listed table", () => {
     expect(code).toMatch(/revoke truncate on public\.%I from public, anon, authenticated/);
+    expect(code).toMatch(/revoke references, trigger on public\.%I from public, anon, authenticated/);
     expect(code).toMatch(/revoke all on public\.%I from anon/);
   });
 
@@ -51,6 +52,20 @@ describe("privilege hardening Phase 1 migration", () => {
     // A new prompter_* table must either be added to c_all here or revoke anon/authenticated defaults itself.
     expect(uncovered).toEqual([]);
     for (const t of allTables) expect(created.has(t) || t === "prompter_manual_ad_metrics", t).toBe(true);
+  });
+
+  it("MAINTAIN is revoked only through version-gated dynamic SQL (a static REVOKE MAINTAIN fails to parse on PostgreSQL < 17)", () => {
+    expect(code).toMatch(/server_version_num'\)::int >= 170000/);
+    expect(code).toMatch(/execute format\('revoke maintain on public\.%I from public, anon, authenticated', t\)/);
+    expect(code.replace(/execute format\('[^']*'/g, "")).not.toMatch(/\bmaintain\b\s+on\b/i);
+  });
+
+  it("never touches service_role and never mass-revokes authenticated (REVOKE ALL only for the oauth vault)", () => {
+    expect(code).not.toMatch(/\b(revoke|grant)\b[^;]*\bservice_role\b/i);
+    const mass = [...code.matchAll(/revoke all on [^;]*from authenticated/gi)].map((m) => m[0]);
+    expect(mass).toEqual(["revoke all on public.prompter_oauth_credentials from authenticated"]);
+    expect(code).toMatch(/service_role privilege % on % changed/);
+    expect(code).toMatch(/PUBLIC holds a privilege/);
   });
 
   it("only SELECT-only tables lose INSERT/UPDATE/DELETE; they are exactly the policy-SELECT-only tables", () => {
@@ -90,7 +105,7 @@ describe("privilege hardening Phase 1 migration", () => {
 
   it("is idempotent and skips tables that do not exist yet; fails closed on any unexpected privilege change", () => {
     expect(code).toMatch(/to_regclass\('public\.' \|\| t\) is null/);
-    expect(code).toMatch(/post-check failed: TRUNCATE still granted/);
+    expect(code).toMatch(/post-check failed: % still granted to authenticated on %/);
     expect(code).toMatch(/post-check failed: anon still has/);
     expect(code).toMatch(/post-check failed: unexpected loss of/);
     expect(code).toMatch(/lock_timeout/);
@@ -107,7 +122,7 @@ describe("privilege hardening Phase 1 migration", () => {
     expect(dcode).toMatch(/refused: name the exact table:PRIVILEGE pairs/);
     expect(dcode).toMatch(/not \(\(v_t \|\| ':' \|\| v_p\) = any \(c_allowed\)\)/);
     // the allowlist holds ONLY the 3 low-risk tables x INSERT/UPDATE/DELETE
-    const allowed = [...dcode.slice(dcode.indexOf("c_allowed"), dcode.indexOf("v_raw")).matchAll(/'(prompter_[a-z_]+):([A-Z]+)'/g)].map((m) => `${m[1]}:${m[2]}`);
+    const allowed = [...dcode.slice(dcode.indexOf("c_allowed"), dcode.indexOf("v_pairs text[]")).matchAll(/'(prompter_[a-z_]+):([A-Z]+)'/g)].map((m) => `${m[1]}:${m[2]}`);
     expect(allowed).toHaveLength(9);
     for (const a of allowed) {
       expect(a).toMatch(/^prompter_(jobs|platform_capabilities|product_snapshots):(INSERT|UPDATE|DELETE)$/);
@@ -118,5 +133,15 @@ describe("privilege hardening Phase 1 migration", () => {
     // all-or-nothing post-check
     expect(dcode).toMatch(/rollback post-check failed: unexpected privilege change/);
     expect(down).toMatch(/240 privilege cells/);
+    // plain SQL: no psql meta-commands / variables; unedited placeholder refuses
+    expect(down.split("\n").filter((l) => /^\s*\\/.test(l))).toEqual([]);
+    expect(dcode).not.toMatch(/:\{\?|:'pairs'|\\gset/);
+    expect(dcode).toMatch(/v_raw text := 'REPLACE_WITH_PAIRS'/);
+    expect(dcode).toMatch(/v_raw = 'REPLACE_WITH_PAIRS'/);
+    // RLS-inert guard + never service_role / PUBLIC / MAINTAIN grants
+    expect(dcode).toMatch(/relrowsecurity/);
+    expect(dcode).toMatch(/polcmd in \(v_cmd, '\*'\)/);
+    expect(dcode).not.toMatch(/\bto\s+(service_role|public|anon)\b/i);
+    expect(dcode).not.toMatch(/\bmaintain\b/i);
   });
 });

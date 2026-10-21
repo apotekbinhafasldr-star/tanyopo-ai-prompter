@@ -11,3 +11,4 @@ create table t_pre as
  select 'acl_nonprompter', md5(string_agg(c.relname||coalesce(c.relacl::text,''), '|' order by c.relname)) from pg_class c join pg_namespace n on n.oid=c.relnamespace and n.nspname='public' where c.relkind='r' and c.relname !~ '^(t_|prompter_)'
  union all
  select 'acl_seq_views', coalesce(md5(string_agg(c.relname||coalesce(c.relacl::text,''), '|' order by c.relname)),'none') from pg_class c join pg_namespace n on n.oid=c.relnamespace and n.nspname='public' where c.relkind in ('S','v','m');
+create table t_colacl_before as select * from t_colacl();

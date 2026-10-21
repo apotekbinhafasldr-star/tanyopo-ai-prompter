@@ -77,6 +77,20 @@ select t_run('authenticated', :'oa', 'closed.delete.product_snapshots', 'delete 
 select t_run('authenticated', :'oa', 'closed.select.oauth_credentials', 'select * from prompter_oauth_credentials');
 select t_run('authenticated', :'oa', 'closed.delete.oauth_credentials', 'delete from prompter_oauth_credentials');
 
+-- REFERENCES (needed to create a FK to the table), TRIGGER (needed to create a trigger on it) and LOCK ... ACCESS EXCLUSIVE
+-- (needs UPDATE/DELETE/TRUNCATE or, on PostgreSQL 17, MAINTAIN) must be closed for authenticated. Run BEFORE the TRUNCATE probes.
+select t_run('authenticated', :'oa', 'closed.references.' || c.relname,
+       format('create table t_scratch.%I (x %s references public.%I(%I))', c.relname, format_type(a.atttypid, null), c.relname, a.attname))
+  from pg_class c join pg_namespace n on n.oid=c.relnamespace and n.nspname='public'
+  join pg_constraint k on k.conrelid=c.oid and k.contype='p' and array_length(k.conkey,1)=1
+  join pg_attribute a on a.attrelid=c.oid and a.attnum=k.conkey[1]
+ where c.relkind='r' and c.relname like 'prompter\_%' order by c.relname;
+select t_run('authenticated', :'oa', 'closed.trigger.' || c.relname,
+       format('create trigger t_trg before insert on public.%I for each row execute function public.t_noop()', c.relname))
+  from pg_class c join pg_namespace n on n.oid=c.relnamespace and n.nspname='public' where c.relkind='r' and c.relname like 'prompter\_%' order by c.relname;
+select t_run('authenticated', :'oa', 'closed.lock_exclusive.' || t, format('lock table public.%I in access exclusive mode', t))
+  from unnest(array['prompter_invoices','prompter_jobs','prompter_plan_entitlements','prompter_platform_capabilities','prompter_product_snapshots','prompter_webhook_events','prompter_audit_logs','prompter_payment_transactions']) t;
+
 -- ===== TRUNCATE (ignores RLS) — last, because the "before" clone really loses its rows =====
 select t_run('authenticated', :'oa', 'truncate.authenticated.' || c.relname, format('truncate table public.%I cascade', c.relname))
   from pg_class c join pg_namespace n on n.oid=c.relnamespace and n.nspname='public' where c.relkind='r' and c.relname like 'prompter\_%' order by c.relname;

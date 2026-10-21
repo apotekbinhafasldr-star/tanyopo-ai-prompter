@@ -13,16 +13,21 @@ PostgREST does not expose TRUNCATE), but the privilege has no legitimate user, s
 ## What changes (`20261020190000_prompter_privilege_hardening_phase1.sql`, REVOKE-only)
 | Scope | Change |
 |---|---|
-| all `prompter_*` tables | `REVOKE TRUNCATE` from PUBLIC, anon, authenticated |
+| all `prompter_*` tables | `REVOKE TRUNCATE`, `REFERENCES`, `TRIGGER` (and `MAINTAIN` on PostgreSQL ≥ 17, issued via guarded dynamic SQL because PostgreSQL < 17 cannot parse it) from PUBLIC, anon, authenticated |
 | all `prompter_*` tables | `REVOKE ALL` from anon (no public flow: reads use a logged-in session or the admin client) |
 | `invoices`, `jobs`, `plan_entitlements`, `platform_capabilities`, `product_snapshots`, `webhook_events` (policies allow SELECT only) | `REVOKE INSERT, UPDATE, DELETE` from authenticated |
 | `audit_logs`, `payment_transactions` | `REVOKE UPDATE, DELETE` from authenticated |
 | `subscriptions` | `REVOKE DELETE` from authenticated (never table-level UPDATE — it would drop `UPDATE(plan)`) |
 | `oauth_credentials` | `REVOKE ALL` from authenticated (service-role OAuth callback only; RLS has zero policies) |
 
-Evidence that nothing legitimate is lost: every client-side (non-admin) write in the code base is on `audit_logs` INSERT,
-`payment_transactions` INSERT, `subscriptions` INSERT / `UPDATE(plan)` and `ai_jobs` INSERT/UPDATE/DELETE — all kept.
-Webhook, reconciliation, job queue, OAuth callback, UMKMpro integration and demo use `createAdminClient()` (service_role).
+Evidence that nothing legitimate is lost: `authenticated` keeps SELECT/INSERT/UPDATE/DELETE on the 24 policy-backed tables
+(`products`, `approvals`, `content_items`, `master_campaigns`, `channel_campaigns`, ... — the user-session client writes to them under
+RLS, e.g. `features/campaigns/actions.ts`), on `audit_logs` INSERT, `payment_transactions` INSERT, `subscriptions` INSERT /
+`UPDATE(plan)` and `ai_jobs` INSERT/UPDATE/DELETE. Phase 1 only removes privileges that have no user-session caller:
+TRUNCATE/REFERENCES/TRIGGER/MAINTAIN everywhere, anon everywhere, and write privileges on the evidence/read-only tables.
+`service_role` (webhook, reconciliation, job queue, OAuth callback, UMKMpro integration, demo via `createAdminClient()`) is never
+changed; the migration fails closed if any `service_role` privilege differs.
+(Earlier revisions of this document claimed user-session writes were limited to a handful of tables; that was wrong.)
 
 ## BLOCKED / deliberately not changed (Phase 1 scope)
 * `ai_jobs` INSERT/UPDATE/DELETE — `services/ai-jobs.ts` still completes/deletes job rows with the user client (only TRUNCATE revoked).
@@ -30,12 +35,13 @@ Webhook, reconciliation, job queue, OAuth callback, UMKMpro integration and demo
 * `audit_logs` INSERT — user-client audit writes in `features/*`.
 * `ALTER DEFAULT PRIVILEGES` — schema-wide on a shared database; per-table revokes only. New tables must revoke explicitly
   (a unit test fails when a new `prompter_*` table is neither listed nor self-locked).
-* Not Phase 1 (candidates for Phase 2): privileges that RLS already makes inert (e.g. DELETE on tables with no DELETE policy),
-  `REFERENCES`/`TRIGGER`/`MAINTAIN`, the `anon`-executable helper functions.
+* Not Phase 1 (candidates for Phase 2): privileges that RLS already makes inert (e.g. DELETE on tables with no DELETE policy —
+  `approvals` DELETE is kept because `features/campaigns/actions.ts` issues it), the `anon`-executable helper functions.
 
 ## Safety properties (all asserted by tests)
 Idempotent; skips absent tables (e.g. Phase 2B `prompter_manual_ad_metrics` before it is applied); fails closed inside the
-migration if TRUNCATE/anon survive or if any privilege outside the explicit list is lost or gained; no data/RLS/policy/function/
+migration if TRUNCATE/REFERENCES/TRIGGER/MAINTAIN/anon/PUBLIC privileges survive, if any privilege outside the explicit list is lost or gained
+by `authenticated`, if any `service_role` privilege or column-level grant changes; no data/RLS/policy/function/
 owner/default-privilege change; FK cascades (tenant deletion) run as the table owner and are unaffected.
 
 ## Order and conflicts
@@ -44,7 +50,7 @@ privilege matrix is identical whether Phase 1 is applied before or after them. T
 
 ## Tests
 `supabase/tests/privilege-phase1/run-local.sh` (CI job `privilege-phase1-sql`; refuses non-local hosts and credentials):
-privilege matrix before/after; 46 positive probes (existing reads, checkout INSERT, changePlan `UPDATE(plan)`, AI-job
+privilege matrix (anon/authenticated/service_role × 7–8 privileges) before/after; mutation negative controls (the migration must refuse a broken copy); runs on PostgreSQL 17 in CI; 46 positive probes (existing reads, checkout INSERT, changePlan `UPDATE(plan)`, AI-job
 RPC/update/delete, Owner/Marketing/Member, tenant A/B isolation, service_role webhook/OAuth/queue/demo, cron functions,
 `fn_apply_verified_payment`) that must be byte-identical before/after; 100+ negative probes (anon, TRUNCATE on every table,
 writes to evidence tables) that must flip to `permission denied`; catalog hashes (policies, functions, owners, default ACLs,
@@ -57,15 +63,19 @@ catalog query and compare with the local "before" matrix. 4. Apply in a quiet wi
 5. Smoke: login, dashboard, AI generation, checkout (gateway OFF → expected message), settings, connections, billing page.
 6. Re-run the catalog query: no TRUNCATE/anon, `UPDATE(plan)` still present.
 
-## Rollback (not executed) — fail-closed forward-fix
-`supabase/rollback/20261020190000_prompter_privilege_hardening_phase1.down.sql` is **not** a mass restore any more. The previous
-version re-granted `select, insert, update, delete, truncate` to anon + authenticated and, after #31/#44/#45, re-opened
-**240 privilege cells** (UPDATE on `prompter_ai_jobs` → `created_at` mutable → quota reset; INSERT on `prompter_payment_transactions`;
-all of anon; TRUNCATE). The suite keeps that old script only as a test-only negative control
-(`support/legacy_mass_restore.sql`) to prove the detector catches the defect.
+## Rollback (not executed) — fail-closed forward-fix, plain SQL
+`supabase/rollback/20261020190000_prompter_privilege_hardening_phase1.down.sql` is **not** a mass restore. The previous version
+re-granted `select, insert, update, delete, truncate` to anon + authenticated and, after #31/#44/#45, re-opened **240 privilege cells**
+(UPDATE on `prompter_ai_jobs` → `created_at` mutable → quota reset; INSERT on `prompter_payment_transactions`; all of anon; TRUNCATE).
+The suite keeps that old script only as a test-only negative control (`support/legacy_mass_restore.sql`).
 
-Now you must name the exact pairs a *verified* broken flow needs:
-`psql -v ON_ERROR_STOP=1 -v pairs='prompter_jobs:UPDATE' -f <down.sql>`. Only 9 pairs (`prompter_jobs`, `prompter_platform_capabilities`,
-`prompter_product_snapshots` × INSERT/UPDATE/DELETE, authenticated only) can be restored; everything else (TRUNCATE, anon, ai_jobs,
-payment_transactions, invoices, webhook_events, plan_entitlements, audit_logs, subscriptions, oauth_credentials) is refused, and the
-script is all-or-nothing with a post-check that exactly the named cells changed. Anything else needs its own reviewed migration.
+It is **plain SQL** (no psql meta-commands, no psql variables): it runs in the Supabase SQL editor or `psql -f`. Copy the file, replace the text
+`REPLACE_WITH_PAIRS` on the line marked `-- EDIT` with the exact pairs a *verified* broken flow needs
+(e.g. `'prompter_jobs:UPDATE'`) and run the copy. Left unedited it refuses.
+* Only 9 pairs (`prompter_jobs`, `prompter_platform_capabilities`, `prompter_product_snapshots` × INSERT/UPDATE/DELETE), `authenticated` only.
+* A pair is restored only if it is RLS-inert: RLS is enabled and no policy covers the command (otherwise refused).
+* Refused: TRUNCATE/REFERENCES/TRIGGER/MAINTAIN, anon/PUBLIC/service_role, ai_jobs, payment_transactions, invoices, webhook_events,
+  plan_entitlements, audit_logs, subscriptions, oauth_credentials, malformed lists, unknown tables.
+* All-or-nothing (single DO block) with a post-check that exactly the named cells changed (anon/authenticated/service_role × all privileges,
+  plus column ACLs, plus no PUBLIC grant). Tests also prove it re-opens no cell that #31/#44/#45 had closed.
+Anything else needs its own reviewed migration.

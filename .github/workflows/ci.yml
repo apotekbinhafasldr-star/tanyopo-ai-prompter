@@ -83,14 +83,14 @@ jobs:
       - name: PostgreSQL concurrency tests (C1-C8, C10, negative controls)
         run: npx vitest run -c vitest.pg.config.ts
 
-  # DB privilege hardening Phase 1: behaviour + privilege-matrix tests on a throw-away postgres:16 with
+  # DB privilege hardening Phase 1: behaviour + privilege-matrix tests on a throw-away postgres:17 (production is 17.x; MAINTAIN exists only from 17) with
   # SYNTHETIC data. Integration with PR #31/#44/#45 (both apply orders) runs when their refs can be
   # fetched. run-local.sh refuses any non-local host and any production credential variable.
   privilege-phase1-sql:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16
+        image: postgres:17
         env:
           POSTGRES_USER: linoe_ci
           POSTGRES_PASSWORD: linoe_ci_password
