@@ -89,7 +89,7 @@ if [ -n "${PR31_DIR:-}" ] && [ -n "${PR44_DIR:-}" ] && [ -n "${PR45_DIR:-}" ]; t
   hh=$(cat "$W/pr31_pr44_pr45_then_ph1.hash")
   [ "$h" = "$hh" ] && pass "order-independent: Phase 1 before OR after #31/#44/#45 yields the identical privilege matrix" || bad "order matters: '$h' vs '$hh'"
   # no table created by #31/#44 is left with TRUNCATE for clients
-  n=$(psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q -At -d p1_order -c "select count(*) from t_matrix() where priv='TRUNCATE' and granted")
+  n=$(psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q -At -d p1_order -c "select count(*) from t_matrix() where priv='TRUNCATE' and granted and role in ('anon','authenticated')")
   [ "$n" = 0 ] && pass "combined: no prompter_* table (incl. #31/#44 tables) grants TRUNCATE to a client role" || bad "combined: $n TRUNCATE grants remain"
 else
   echo "SKIP: PR #31/#44/#45 integration variants (PR31_DIR/PR44_DIR/PR45_DIR not provided)"
@@ -103,6 +103,37 @@ create function public.t_regrant() returns event_trigger language plpgsql as $$ 
 create event trigger t_regrant_trg on ddl_command_end when tag in ('REVOKE') execute function public.t_regrant();
 SQL
 if P -d p1_fc -f "$root/supabase/migrations/$PH1.sql" >"$W/fc.out" 2>&1; then bad "fail-closed: migration did NOT abort although TRUNCATE was re-granted"; else grep -q "post-check failed" "$W/fc.out" && pass "fail-closed: migration aborts (post-check) if a revoke does not stick" || bad "fail-closed: aborted for another reason: $(head -2 "$W/fc.out")"; fi
+
+# ---- NEGATIVE CONTROLS (mutation tests): each deliberately broken copy of the migration MUST abort with a post-check error ----
+SRV=$(psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q -At -d postgres -c "show server_version_num")
+mut() { # <label> <python-snippet that edits variable s> -- expects the broken migration to be refused by its own post-checks
+  local label="$1" py="$2" db="p1_mut_$$"
+  mk "$db"; P -d "$db" -f "$here/support/fixtures.sql" >/dev/null
+  MUT_IN="$root/supabase/migrations/$PH1.sql" MUT_OUT="$W/mut.sql" python3 -c "
+import os,re
+s=open(os.environ['MUT_IN']).read()
+marker='  -- ---- fail-closed post-checks'
+$py
+open(os.environ['MUT_OUT'],'w').write(s)"
+  if PL -d "$db" -v ON_ERROR_STOP=1 -f "$W/mut.sql" >"$W/mut.out" 2>&1; then bad "mutation '$label': broken migration was ACCEPTED"; else
+    grep -q "post-check failed" "$W/mut.out" && pass "mutation '$label': refused by the migration's own post-check ($(grep -o 'post-check failed: [^"]*' "$W/mut.out" | head -1 | cut -c1-90))" || bad "mutation '$label': failed for another reason: $(head -2 "$W/mut.out")"; fi
+}
+mut "extra REVOKE SELECT from authenticated (flow breaker)" "s=s.replace(marker,'  revoke select on public.prompter_products from authenticated;\n'+marker,1)"
+mut "service_role loses TRUNCATE"                          "s=s.replace(marker,'  revoke truncate on public.prompter_products from service_role;\n'+marker,1)"
+mut "REFERENCES/TRIGGER revoke removed"                     "s=s.replace(\"    execute format('revoke references, trigger on public.%I from public, anon, authenticated', t);\n\",'',1)"
+mut "REFERENCES re-granted to authenticated"                "s=s.replace(marker,'  grant references on public.prompter_products to authenticated;\n'+marker,1)"
+mut "TRIGGER re-granted to authenticated"                   "s=s.replace(marker,'  grant trigger on public.prompter_products to authenticated;\n'+marker,1)"
+mut "PUBLIC granted SELECT"                                  "s=s.replace(marker,'  grant select on public.prompter_products to public;\n'+marker,1)"
+mut "new column-level grant appears"                        "s=s.replace(marker,'  grant select (id) on public.prompter_products to authenticated;\n'+marker,1)"
+mut "anon re-granted SELECT"                                 "s=s.replace(marker,'  grant select on public.prompter_products to anon;\n'+marker,1)"
+if [ "$SRV" -ge 170000 ]; then
+  mut "MAINTAIN revoke removed (PostgreSQL 17)"            "s=s.replace(\"      execute format('revoke maintain on public.%I from public, anon, authenticated', t);\n\",'      null;\n',1)"
+  mut "MAINTAIN re-granted to authenticated (PostgreSQL 17)" "s=s.replace(marker,'  grant maintain on public.prompter_products to authenticated;\n'+marker,1)"
+else
+  echo "SKIP: MAINTAIN mutation controls need PostgreSQL 17 (server_version_num=$SRV); the CI job runs them on 17"
+  # PostgreSQL < 17 must still APPLY the migration: MAINTAIN is only ever issued through EXECUTE under a version guard
+  grep -q "grant maintain" "$root/supabase/migrations/$PH1.sql" && bad "migration must never GRANT maintain" || pass "PostgreSQL $SRV: migration applied above without parsing MAINTAIN (dynamic, version-guarded)"
+fi
 
 # no production-looking target anywhere in the harness
 [ -n "${KEEP_W:-}" ] && echo "kept: $W" || rm -rf "$W"

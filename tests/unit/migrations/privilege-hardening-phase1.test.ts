@@ -33,8 +33,9 @@ describe("privilege hardening Phase 1 migration", () => {
     expect(code).not.toMatch(/\bowner\s+to\b/i);
   });
 
-  it("revokes TRUNCATE from PUBLIC, anon and authenticated, and everything from anon, on every listed table", () => {
+  it("revokes TRUNCATE/REFERENCES/TRIGGER from PUBLIC, anon and authenticated, and everything from anon, on every listed table", () => {
     expect(code).toMatch(/revoke truncate on public\.%I from public, anon, authenticated/);
+    expect(code).toMatch(/revoke references, trigger on public\.%I from public, anon, authenticated/);
     expect(code).toMatch(/revoke all on public\.%I from anon/);
   });
 
@@ -51,6 +52,20 @@ describe("privilege hardening Phase 1 migration", () => {
     // A new prompter_* table must either be added to c_all here or revoke anon/authenticated defaults itself.
     expect(uncovered).toEqual([]);
     for (const t of allTables) expect(created.has(t) || t === "prompter_manual_ad_metrics", t).toBe(true);
+  });
+
+  it("MAINTAIN is revoked only through version-gated dynamic SQL (a static REVOKE MAINTAIN fails to parse on PostgreSQL < 17)", () => {
+    expect(code).toMatch(/server_version_num'\)::int >= 170000/);
+    expect(code).toMatch(/execute format\('revoke maintain on public\.%I from public, anon, authenticated', t\)/);
+    expect(code.replace(/execute format\('[^']*'/g, "")).not.toMatch(/\bmaintain\b\s+on\b/i);
+  });
+
+  it("never touches service_role and never mass-revokes authenticated (REVOKE ALL only for the oauth vault)", () => {
+    expect(code).not.toMatch(/\b(revoke|grant)\b[^;]*\bservice_role\b/i);
+    const mass = [...code.matchAll(/revoke all on [^;]*from authenticated/gi)].map((m) => m[0]);
+    expect(mass).toEqual(["revoke all on public.prompter_oauth_credentials from authenticated"]);
+    expect(code).toMatch(/service_role privilege % on % changed/);
+    expect(code).toMatch(/PUBLIC holds a privilege/);
   });
 
   it("only SELECT-only tables lose INSERT/UPDATE/DELETE; they are exactly the policy-SELECT-only tables", () => {
@@ -90,7 +105,7 @@ describe("privilege hardening Phase 1 migration", () => {
 
   it("is idempotent and skips tables that do not exist yet; fails closed on any unexpected privilege change", () => {
     expect(code).toMatch(/to_regclass\('public\.' \|\| t\) is null/);
-    expect(code).toMatch(/post-check failed: TRUNCATE still granted/);
+    expect(code).toMatch(/post-check failed: % still granted to authenticated on %/);
     expect(code).toMatch(/post-check failed: anon still has/);
     expect(code).toMatch(/post-check failed: unexpected loss of/);
     expect(code).toMatch(/lock_timeout/);
@@ -100,7 +115,10 @@ describe("privilege hardening Phase 1 migration", () => {
     expect(existsSync(path.join(migrationsDir, `${name}.down.sql`))).toBe(false);
     const dcode = down.replace(/--.*$/gm, "");
     expect(dcode).not.toMatch(/\brevoke\b/i);
+    expect(down).toMatch(/LEGACY MASS-RESTORE ROLLBACK -- SUPERSEDED BY PR #47/);
+    expect(down).toMatch(/DO NOT USE IT/);
     expect(dcode).toMatch(/grant select, insert, update, delete, truncate on public\.%I to anon, authenticated/);
+    expect(dcode).toMatch(/grant references, trigger on public\.%I to anon, authenticated/);
     expect(dcode).toMatch(/grant select, insert, delete, truncate on public\.prompter_subscriptions to anon, authenticated/);
     expect(down).toMatch(/RE-RUN their migrations/);
   });

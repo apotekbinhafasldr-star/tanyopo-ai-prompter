@@ -40,17 +40,35 @@ insert into prompter_connected_accounts(id,tenant_id,platform,external_account_i
 insert into prompter_oauth_credentials(tenant_id,connected_account_id,encrypted_access_token) values
  ('a0000000-0000-4000-8000-00000000000a','a6000000-0000-4000-8000-0000000000a6','FIXTURE-NOT-A-REAL-TOKEN');
 
--- privilege matrix helper (anon / authenticated x 5 privileges, every prompter_* table + column grant)
+-- privilege matrix helper: anon / authenticated / service_role x every table privilege that exists on this server
+-- (MAINTAIN only from PostgreSQL 17), for every prompter_* table, plus the column-level UPDATE(plan) sentinel.
 create function public.t_matrix() returns table(tbl text, role text, priv text, granted boolean) language sql stable as $$
   select c.relname::text, r.r, p.p, has_table_privilege(r.r, c.oid, p.p)
     from pg_class c join pg_namespace n on n.oid = c.relnamespace and n.nspname = 'public'
-    cross join (values ('anon'),('authenticated')) r(r)
-    cross join (values ('SELECT'),('INSERT'),('UPDATE'),('DELETE'),('TRUNCATE')) p(p)
+    cross join (values ('anon'),('authenticated'),('service_role')) r(r)
+    cross join (select unnest(array['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']
+                              || case when current_setting('server_version_num')::int >= 170000 then array['MAINTAIN'] else array[]::text[] end)) p(p)
    where c.relkind = 'r' and c.relname like 'prompter\_%'
   union all
   select 'prompter_subscriptions', 'authenticated', 'COLUMN_UPDATE_PLAN',
          has_column_privilege('authenticated', 'public.prompter_subscriptions', 'plan', 'UPDATE')
 $$;
+
+-- every column-level grant of every prompter_* table, one text entry each (grantee-qualified)
+create function public.t_colacl() returns table(entry text) language sql stable as $$
+  select c.relname || '.' || a.attname || ':' || case x.grantee when 0 then 'PUBLIC' else pg_get_userbyid(x.grantee) end || ':' || x.privilege_type
+    from pg_attribute a
+    join pg_class c on c.oid = a.attrelid and c.relkind = 'r' and c.relname like 'prompter\_%'
+    join pg_namespace n on n.oid = c.relnamespace and n.nspname = 'public'
+    cross join lateral aclexplode(a.attacl) x
+   where a.attacl is not null and not a.attisdropped
+$$;
+
+-- scratch objects for the REFERENCES / TRIGGER probes (a client role may create tables here, never in public)
+create schema t_scratch;
+grant usage, create on schema t_scratch to authenticated;
+create function public.t_noop() returns trigger language plpgsql as $$ begin return new; end $$;
+grant execute on function public.t_noop() to public;
 
 create table public.t_probe(name text primary key, role text, result text);
 grant all on public.t_probe to public;

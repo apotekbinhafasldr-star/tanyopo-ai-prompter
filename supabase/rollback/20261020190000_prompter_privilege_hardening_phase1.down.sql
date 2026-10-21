@@ -1,3 +1,8 @@
+-- !!! LEGACY MASS-RESTORE ROLLBACK -- SUPERSEDED BY PR #47 (fail-closed targeted forward-fix). DO NOT USE IT. !!!
+-- It re-opens TRUNCATE, REFERENCES, TRIGGER, MAINTAIN and all of anon, and (after PR #31/#44/#45) privileges
+-- that those PRs closed. It is kept only so that this branch's own tests can prove the exact pre-state. PR #47
+-- replaces this file; do not merge PR #46 without PR #47.
+--
 -- ROLLBACK for 20261020190000_prompter_privilege_hardening_phase1.sql
 -- Restores EXACTLY the pre-Phase-1 grants that the audited production catalog showed
 -- (Supabase default privileges on the 35 pre-existing prompter_* tables).
@@ -35,6 +40,11 @@ begin
       execute 'grant select, insert, delete, truncate on public.prompter_subscriptions to anon, authenticated';
     else
       execute format('grant select, insert, update, delete, truncate on public.%I to anon, authenticated', t);
+    end if;
+    -- Phase 1 also revoked these (production default privileges held them): restore for an exact pre-state.
+    execute format('grant references, trigger on public.%I to anon, authenticated', t);
+    if current_setting('server_version_num')::int >= 170000 then
+      execute format('grant maintain on public.%I to anon, authenticated', t);   -- dynamic: MAINTAIN is unknown before PostgreSQL 17
     end if;
   end loop;
 end
