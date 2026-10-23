@@ -323,3 +323,67 @@ describe("runAiJob — Batch B9 atomic entitlement gate", () => {
     expect(outcomes.filter((ok) => !ok)).toHaveLength(1);
   });
 });
+
+describe("runAiJob — user-facing message for every entitlement denial code", () => {
+  async function denied(reason: string | null, allowance = 30) {
+    const supabase = mockSupabase({
+      data: [{ job_id: null, allowed: false, reason, used_count: 0, allowance }],
+      error: null,
+    });
+    const result = await runAiJob(baseParams(supabase));
+    expect(result.ok).toBe(false);
+    // A denial never creates a job, never calls a model and never touches the job table.
+    expect(routeStructuredGenerationMock).not.toHaveBeenCalled();
+    expect(supabase.from).not.toHaveBeenCalled();
+    return result.ok ? "" : result.error;
+  }
+
+  const EXPECTED: Array<[string, RegExp]> = [
+    ["ROLE_NOT_ALLOWED", /^Fitur AI LINOE hanya dapat digunakan oleh Owner atau Marketing\.$/],
+    ["AI_USAGE_LIMIT_REACHED", /batas 30 permintaan AI/],
+    ["ENTITLEMENT_NOT_CONFIGURED", /belum tersedia atau belum dikonfigurasi/],
+    ["INVALID_INPUT", /Permintaan AI tidak valid/],
+    ["INVALID_JOB_TYPE", /Permintaan AI tidak valid/],
+    ["TRIAL_EXPIRED", /Masa trial Anda telah berakhir/],
+    ["NO_SUBSCRIPTION", /belum memiliki data langganan/],
+    ["NO_TENANT", /belum memiliki data langganan/],
+  ];
+
+  it.each(EXPECTED)("%s shows its own message", async (code, pattern) => {
+    expect(await denied(code)).toMatch(pattern);
+  });
+
+  it("ROLE_NOT_ALLOWED is a permission message: no plan, quota or configuration wording", async () => {
+    const msg = await denied("ROLE_NOT_ALLOWED");
+    expect(msg).not.toMatch(/paket|batas|kuota|dikonfigurasi|tidak valid|trial/i);
+  });
+
+  it("the four requested categories stay distinguishable (role / quota / entitlement / input are pairwise different)", async () => {
+    const msgs = await Promise.all(
+      ["ROLE_NOT_ALLOWED", "AI_USAGE_LIMIT_REACHED", "ENTITLEMENT_NOT_CONFIGURED", "INVALID_INPUT"].map((c) => denied(c)),
+    );
+    expect(new Set(msgs).size).toBe(4);
+  });
+
+  it("the quota message uses the allowance returned by the database (no hard-coded number)", async () => {
+    expect(await denied("AI_USAGE_LIMIT_REACHED", 200)).toMatch(/batas 200 permintaan AI/);
+  });
+
+  it("codes without a dedicated message keep the previous generic fallback (unchanged behaviour)", async () => {
+    for (const code of ["SUBSCRIPTION_PAST_DUE", "SUBSCRIPTION_CANCELED", "SOMETHING_NEW"]) {
+      expect(await denied(code)).toBe("Akses AI tidak diizinkan untuk paket Anda saat ini.");
+    }
+  });
+
+  it("an allowed row is not affected by the mapping (job is created and the model is called)", async () => {
+    const supabase = mockSupabase({
+      data: [{ job_id: "job-1", allowed: true, reason: null, used_count: 1, allowance: 30 }],
+      error: null,
+    });
+    routeStructuredGenerationMock.mockResolvedValue({
+      data: { ok: true }, provider: "openai", model: "gpt", tokensInput: 1, tokensOutput: 1, fallbackUsed: false, fallbackFrom: null,
+    });
+    const result = await runAiJob(baseParams(supabase));
+    expect(result.ok).toBe(true);
+  });
+});

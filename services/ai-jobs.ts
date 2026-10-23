@@ -66,6 +66,15 @@ function describeEntitlementBlock(row: CreateAiJobIfEntitledRow): string {
     case "NO_SUBSCRIPTION":
     case "NO_TENANT":
       return "Akun Anda belum memiliki data langganan yang valid. Silakan muat ulang halaman atau hubungi dukungan.";
+    // Role policy (migration 20261021120000, PR #48): a permission problem, not a plan or quota problem.
+    case "ROLE_NOT_ALLOWED":
+      return "Fitur AI LINOE hanya dapat digunakan oleh Owner atau Marketing.";
+    // Fail-closed entitlement (no plan row / NULL allowance): the feature is not available, not "over quota".
+    case "ENTITLEMENT_NOT_CONFIGURED":
+      return "Fitur AI belum tersedia atau belum dikonfigurasi untuk akun Anda. Silakan hubungi dukungan.";
+    case "INVALID_INPUT":
+    case "INVALID_JOB_TYPE":
+      return "Permintaan AI tidak valid. Periksa input Anda lalu coba lagi.";
     default:
       return "Akses AI tidak diizinkan untuk paket Anda saat ini.";
   }

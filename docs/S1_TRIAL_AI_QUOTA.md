@@ -42,8 +42,9 @@ migrations take no blocking lock (verified). Trial length (14 days) and quota ma
 ## Interim role policy (until the LINOE user-access policy is confirmed)
 owner and marketing may use LINOE AI; every other `user_profiles.role` (apoteker, kasir, admin_gudang, hr) is refused by PR #48 with
 `ROLE_NOT_ALLOWED`. The check lives only in the LINOE RPC `fn_create_ai_job_if_entitled` and the `prompter_ai_jobs` triggers; no shared function,
-policy, trigger or non-`prompter_` table ACL changes (asserted by the shared-object control in the tests). Not changed here: PR #48 itself and the
-user-facing message for `ROLE_NOT_ALLOWED` (planned separately).
+policy, trigger or non-`prompter_` table ACL changes (asserted by the shared-object control in the tests). Not changed here: PR #48 itself.
+User-facing messages (`services/ai-jobs.ts#describeEntitlementBlock`): `ROLE_NOT_ALLOWED` = "Fitur AI LINOE hanya dapat digunakan oleh Owner atau Marketing."; the quota
+(`AI_USAGE_LIMIT_REACHED`), `ENTITLEMENT_NOT_CONFIGURED` and `INVALID_INPUT`/`INVALID_JOB_TYPE` each have their own message; other codes keep the generic fallback.
 
 ## Not in S1
 S3 trial anti-abuse (HMAC ledger, gate, claim; default OFF, needs secrets/privacy decision) and S4 shared tables (`tenants`, sibling-product
