@@ -196,3 +196,63 @@ jobs:
           grep -q '^ALL PASSED' "$RUNNER_TEMP/ajg17.txt"
           if grep -q '^SKIP' "$RUNNER_TEMP/ajg17.txt"; then echo "::error::a variant was skipped"; exit 1; fi
           for v in main pr31 all; do grep -q "^PASS: $v: " "$RUNNER_TEMP/ajg17.txt" || { echo "::error::variant $v did not run"; exit 1; }; done
+
+  # S1 migration wrapper (supabase/tools/s1-wrapper): generator unit tests + the wrapper executed against a SYNTHETIC
+  # PostgreSQL 17 (ledger shape of production, fake versions). Nothing here can reach Supabase or any shared database.
+  s1-wrapper-pg17:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: linoe_ci
+          POSTGRES_PASSWORD: linoe_ci_password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U linoe_ci -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: linoe_ci
+      PGPASSWORD: linoe_ci_password
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Ensure psql client
+        run: command -v psql || (sudo apt-get update && sudo apt-get install -y postgresql-client)
+
+      - name: Manifest checksums match the three S1 migration files
+        run: node supabase/tools/s1-wrapper/generate.mjs verify
+
+      - name: Manifest lock matches the tested commit (when that commit is reachable)
+        run: |
+          set -e
+          c=$(node -e 'process.stdout.write(require("./supabase/tools/s1-wrapper/manifest.json").lockedAtCommit)')
+          if git cat-file -e "$c^{commit}" 2>/dev/null; then
+            for f in supabase/migrations/20261019100000_prompter_p0_ai_jobs_lockdown.sql supabase/migrations/20261019100100_prompter_p0_subscription_trial_insert_guard.sql supabase/migrations/20261019100200_prompter_p0_plan_entitlements_lockdown.sql; do
+              a=$(git show "$c:$f" | sha256sum | cut -d' ' -f1); b=$(sha256sum "$f" | cut -d' ' -f1)
+              [ "$a" = "$b" ] || { echo "::error::$f differs from lockedAtCommit $c"; exit 1; }
+            done
+            echo "S1 files identical to lockedAtCommit $c"
+          else
+            echo "::warning::lockedAtCommit $c is not reachable (history rewritten or squashed); relying on manifest checksums only"
+          fi
+
+      - name: Generator unit tests
+        run: node --test supabase/tests/s1-wrapper/generator.test.mjs
+
+      - name: S1 wrapper on synthetic PostgreSQL 17 (required)
+        env:
+          REQUIRE_PG_MAJOR: "17"
+        run: |
+          set -o pipefail
+          bash supabase/tests/s1-wrapper/run-local.sh 2>&1 | tee "$RUNNER_TEMP/s1w.txt"
+          grep -q '^ALL S1 WRAPPER CHECKS PASSED' "$RUNNER_TEMP/s1w.txt"
+          if grep -q '^FAIL' "$RUNNER_TEMP/s1w.txt"; then exit 1; fi

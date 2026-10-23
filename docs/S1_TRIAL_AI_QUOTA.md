@@ -70,3 +70,5 @@ Static invariants: `tests/unit/migrations/s1-trial-quota.test.ts`, `tests/unit/s
 - Combined orders `[S1, #46, #48]`, `[#46, S1, #48]`, `[#48 part 1, #46, S1, #48 part 2]` on the same checks.
 - CI job `ai-jobs-guard-pg17`: PR #48's own complete suite (unchanged script from its fetched head, with its #31/#44/#45/#46 variants) on
   PostgreSQL 17; every ref is required and a skipped variant fails the job. Temporary: fold into #48's own job (matrix 16/17) once #48 is approved.
+
+Penerapan ke Production memakai wrapper atomik SQL+ledger: lihat [docs/S1_MIGRATION_WRAPPER.md](S1_MIGRATION_WRAPPER.md).
