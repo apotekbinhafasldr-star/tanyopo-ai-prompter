@@ -291,3 +291,28 @@ describe("S1 scope: no S3 (trial anti-abuse) and no S4 (shared tables) objects",
     expect(sql).toContain("interval '14 days'");
   });
 });
+
+describe("lock safety of the trial-trigger migration", () => {
+  const sql = executable(read(SUBS));
+
+  it("fails fast: SET LOCAL lock_timeout of at most 3 seconds, before the first DDL statement", () => {
+    const m = sql.match(/^\s*set\s+local\s+lock_timeout\s*=\s*'(\d+)(ms|s)'\s*;/im);
+    expect(m, "set local lock_timeout missing").not.toBeNull();
+    const ms = Number(m![1]) * (m![2] === "s" ? 1000 : 1);
+    expect(ms).toBeGreaterThan(0);
+    expect(ms).toBeLessThanOrEqual(3000);
+    expect(sql.indexOf(m![0])).toBeLessThan(sql.search(/create\s+or\s+replace\s+function/i));
+  });
+
+  it("never changes a session, role, database or server default (transaction-scoped only)", () => {
+    expect(sql).not.toMatch(/\bset\s+(session\s+)?lock_timeout\b/i);
+    expect(sql).not.toMatch(/alter\s+(system|database|role)\b[^;]*lock_timeout/i);
+    expect(sql).not.toMatch(/set_config\s*\(\s*'lock_timeout'/i);
+  });
+
+  it("does not change the 14-day trial or the quota maths", () => {
+    expect(sql).toMatch(/interval '14 days'/);
+    expect(sql).not.toMatch(/interval '(?!14 days)\d+ days'/);
+    expect(sql).not.toMatch(/ai_usage_allowance|fn_create_ai_job_if_entitled/);
+  });
+});

@@ -32,6 +32,19 @@ The #48 role policy (owner/marketing only) is **not** changed here — LINOE use
 1. Deploy the app change (`services/ai-jobs.ts`) first; 2. apply the 3 migrations; 3. then #48 (part 1, then part 2).
 Applying the migrations before the code would make the old user-client DELETE fail silently (the row would stay counted).
 
+## Lock safety of `20261019100100` (release audit 2026-10-23)
+`CREATE/DROP TRIGGER` on `prompter_subscriptions` waits for any open writer and queues later writers behind it. The migration therefore starts with
+`set local lock_timeout = '3s'`: after 3 s the statement fails (55P03), the whole file rolls back (nothing half-applied) and can simply be re-run.
+`SET LOCAL` ends with the transaction and never touches session, role, database or server settings. It applies when the file runs as one
+transaction (Supabase CLI, SQL editor, `apply_migration`); with plain `psql -f` it is a harmless no-op, use `psql -1 -f`. The two REVOKE-only
+migrations take no blocking lock (verified). Trial length (14 days) and quota maths are untouched.
+
+## Interim role policy (until the LINOE user-access policy is confirmed)
+owner and marketing may use LINOE AI; every other `user_profiles.role` (apoteker, kasir, admin_gudang, hr) is refused by PR #48 with
+`ROLE_NOT_ALLOWED`. The check lives only in the LINOE RPC `fn_create_ai_job_if_entitled` and the `prompter_ai_jobs` triggers; no shared function,
+policy, trigger or non-`prompter_` table ACL changes (asserted by the shared-object control in the tests). Not changed here: PR #48 itself and the
+user-facing message for `ROLE_NOT_ALLOWED` (planned separately).
+
 ## Not in S1
 S3 trial anti-abuse (HMAC ledger, gate, claim; default OFF, needs secrets/privacy decision) and S4 shared tables (`tenants`, sibling-product
 usage logs; needs cross-product confirmation) stay in PR #31 for now. S1 does **not** stop "new email → new tenant → new trial" farming (S3).
@@ -47,3 +60,12 @@ after (14-day server-time trial, forged period neutralised, DELETE/backdate/inse
 isolation, staff roles, anon, service_role/cascade paths); idempotent apply; 45+45 parallel quota calls = exactly 30 per tenant;
 rollback refuses 18 forbidden requests and re-opens nothing; legacy rollback negative control; integration with #48 (both orders) and #46.
 Static invariants: `tests/unit/migrations/s1-trial-quota.test.ts`, `tests/unit/services/ai-jobs.test.ts`.
+
+### Added in the readiness pass (2026-10-23)
+- `lock_timeout` phase: blocked by an open writer -> fails after ~3 s, all-or-nothing, not global, retry + re-apply idempotent, a later failure in the
+  same transaction rolls everything back, `psql -f` still applies, `psql -1 -f` times out.
+- Role policy: all four non-owner/marketing roles get `ROLE_NOT_ALLOWED` and create/count nothing.
+- Shared-object control: S1 + #48 change no function (other than the LINOE ones), non-`prompter_` ACL, policy or trigger.
+- Combined orders `[S1, #46, #48]`, `[#46, S1, #48]`, `[#48 part 1, #46, S1, #48 part 2]` on the same checks.
+- CI job `ai-jobs-guard-pg17`: PR #48's own complete suite (unchanged script from its fetched head, with its #31/#44/#45/#46 variants) on
+  PostgreSQL 17; every ref is required and a skipped variant fails the job. Temporary: fold into #48's own job (matrix 16/17) once #48 is approved.

@@ -38,6 +38,16 @@
 --
 -- 14 days = TRIAL_DURATION_DAYS in services/billing.ts. Change both together.
 -- Rollback: supabase/rollback/20261019100100_prompter_p0_subscription_trial_insert_guard.down.sql
+--
+-- LOCK SAFETY (release audit 2026-10-21/23): CREATE/DROP TRIGGER on prompter_subscriptions waits for any
+-- transaction that has an open write on the table, and while it waits it queues every later writer behind
+-- it. Fail fast instead: if the lock is not obtained within 3 seconds the statement fails with 55P03
+-- (lock_not_available), the WHOLE migration rolls back (nothing is half-applied) and it can simply be re-run.
+-- SET LOCAL is transaction-scoped: it is undone at COMMIT/ROLLBACK and never changes a session, role, database
+-- or server default. It takes effect when the file is applied as one transaction (Supabase CLI, the SQL
+-- editor and apply_migration all send the file that way); a client that splits the file into separate
+-- autocommit statements (plain `psql -f`) gets a harmless no-op, so use `psql -1 -f` there.
+set local lock_timeout = '3s';
 
 create or replace function public.fn_enforce_trial_subscription_insert()
 returns trigger

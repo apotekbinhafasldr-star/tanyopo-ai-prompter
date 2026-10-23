@@ -9,6 +9,9 @@ insert into user_profiles values
   ('00000000-0000-0000-0000-0000000000a2','00000000-0000-0000-0000-0000000000a1','owner A','owner'),
   ('00000000-0000-0000-0000-0000000000a3','00000000-0000-0000-0000-0000000000a1','mkt A','marketing'),
   ('00000000-0000-0000-0000-0000000000a4','00000000-0000-0000-0000-0000000000a1','kasir A','kasir'),
+  ('00000000-0000-0000-0000-0000000000a5','00000000-0000-0000-0000-0000000000a1','apoteker A','apoteker'),
+  ('00000000-0000-0000-0000-0000000000a6','00000000-0000-0000-0000-0000000000a1','gudang A','admin_gudang'),
+  ('00000000-0000-0000-0000-0000000000a7','00000000-0000-0000-0000-0000000000a1','hr A','hr'),
   ('00000000-0000-0000-0000-0000000000b2','00000000-0000-0000-0000-0000000000b1','owner B','owner');
 create or replace function pg_temp.as_user(uid text) returns void language plpgsql as $$
 begin perform set_config('request.jwt.claims', json_build_object('sub',uid,'role','authenticated')::text, false); end $$;
@@ -39,6 +42,21 @@ select allowed as m into temp table i3 from pg_temp.rpc();
 reset role;
 insert into results select 'I1 kasir -> ROLE_NOT_ALLOWED, owner and marketing allowed (PR #48 guard intact next to S1)',
   (select r from i1)='ROLE_NOT_ALLOWED' and (select o from i2) and (select m from i3);
+
+-- LINOE interim role policy: owner + marketing allowed, EVERY other user_profiles role refused with ROLE_NOT_ALLOWED
+-- and nothing is created or counted for them (the other roles belong to the sibling products sharing the project).
+set role authenticated;
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000a5');
+select reason as r into temp table i1b_apoteker from pg_temp.rpc();
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000a6');
+select reason as r into temp table i1b_gudang from pg_temp.rpc();
+select pg_temp.as_user('00000000-0000-0000-0000-0000000000a7');
+select reason as r into temp table i1b_hr from pg_temp.rpc();
+reset role;
+insert into results select 'I1b apoteker / admin_gudang / hr -> ROLE_NOT_ALLOWED too (every role except owner+marketing)',
+  (select r from i1b_apoteker)='ROLE_NOT_ALLOWED' and (select r from i1b_gudang)='ROLE_NOT_ALLOWED' and (select r from i1b_hr)='ROLE_NOT_ALLOWED';
+insert into results select 'I1c refused roles consume no quota: no job row has an actor outside owner/marketing',
+  (select count(*) from prompter_ai_jobs where actor_user_id in ('00000000-0000-0000-0000-0000000000a4','00000000-0000-0000-0000-0000000000a5','00000000-0000-0000-0000-0000000000a6','00000000-0000-0000-0000-0000000000a7'))=0;
 
 -- client can neither delete nor backdate (privilege layer of S1 + trigger layer of #48)
 set role authenticated;
