@@ -133,3 +133,21 @@ jobs:
 
       - name: AI jobs quota guard SQL tests
         run: bash supabase/tests/ai-jobs-guard/run-local.sh
+
+      # Same suite with PR #53's three S1 migrations as the S1 source (the set that will actually ship). #53 never
+      # redefines the quota RPC, so the order-hazard / rollback assertions adapt (see run-local.sh s1_redef).
+      - name: Fetch PR #53 (S1 source) for the second pass (best effort)
+        run: |
+          set +e
+          git fetch -q origin pull/53/head:refs/remotes/pr/53
+          if git rev-parse -q --verify refs/remotes/pr/53 >/dev/null; then
+            mkdir -p "$RUNNER_TEMP/pr53"
+            git archive refs/remotes/pr/53 supabase | tar -x -C "$RUNNER_TEMP/pr53"
+            echo "PR53_DIR=$RUNNER_TEMP/pr53" >> "$GITHUB_ENV"
+          else
+            echo "::warning::PR #53 ref not fetchable; skipping the S1=#53 pass"
+          fi
+
+      - name: AI jobs quota guard SQL tests (S1 = PR #53)
+        if: env.PR53_DIR != '' && env.PR44_DIR != ''
+        run: S1_ONLY3=1 PR31_DIR="$PR53_DIR" bash supabase/tests/ai-jobs-guard/run-local.sh

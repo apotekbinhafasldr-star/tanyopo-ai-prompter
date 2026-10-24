@@ -16,6 +16,8 @@ PL() { psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q "$@"; }
 PA() { psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q -At "$@"; }
 fail=0; pass() { echo "PASS: $*"; }; bad() { echo "FAIL: $*"; fail=1; }
 L31="20261019100000_prompter_p0_ai_jobs_lockdown 20261019100100_prompter_p0_subscription_trial_insert_guard 20261019100200_prompter_p0_plan_entitlements_lockdown 20261019110000_prompter_trial_abuse_protection 20261019120000_prompter_shared_tables_truncate_delete_hardening"
+# S1_ONLY3=1: PR31_DIR holds PR #53 (exactly the three S1 migrations; the trial-abuse / shared-tables files do not exist there).
+if [ -n "${S1_ONLY3:-}" ]; then L31="20261019100000_prompter_p0_ai_jobs_lockdown 20261019100100_prompter_p0_subscription_trial_insert_guard 20261019100200_prompter_p0_plan_entitlements_lockdown"; fi
 M44=20261020160000_prompter_billing_financial_safety; M45=20261020180000_prompter_billing_security_hardening_p0
 M46=20261020190000_prompter_privilege_hardening_phase1
 
@@ -41,6 +43,17 @@ prep() { # <db> <variant>: everything except fixtures
   esac
 }
 need() { for v in "$@"; do [ -n "${!v:-}" ] && [ -d "${!v}/supabase/migrations" ] || return 1; done; }
+
+# Does the S1 source (PR #31 or PR #53) redefine the quota RPC? #31's S1 files do (older body => apply-order hazard);
+# #53's do not (REVOKE/trigger only). The order-hazard and rollback assertions below depend on this, and are
+# STRICTER, not weaker, in the no-redefine case (the guard must survive S1 in either order).
+s1_redef=0
+if need PR31_DIR; then
+  for m in $L31; do
+    grep -qiE 'create or replace function[[:space:]]+public\.fn_create_ai_job_if_entitled' "$PR31_DIR/supabase/migrations/$m.sql" && s1_redef=1
+  done
+  echo "S1 source redefines fn_create_ai_job_if_entitled: $s1_redef"
+fi
 
 variants="main"
 need PR31_DIR && variants="$variants pr31" || echo "SKIP pr31: PR31_DIR not set"
@@ -75,14 +88,27 @@ if need PR31_DIR; then
   mk ajg_rev; g1 ajg_rev; for m in $L31; do apm ajg_rev "$PR31_DIR" "$m"; done; P -d ajg_rev -f "$here/support/fixtures.sql" >/dev/null
   r1=$(PA -d ajg_rev -c "select position('ROLE_NOT_ALLOWED' in pg_get_functiondef('public.fn_create_ai_job_if_entitled(text,jsonb)'::regprocedure))")
   o="$(PL -d ajg_rev -v ON_ERROR_STOP=1 -f "$root/supabase/migrations/$G2.sql" 2>&1 || true)"
-  if [ "$r1" = 0 ] && echo "$o" | grep -q "part 1 (quota guard) is not live"; then pass "wrong order (guard, then #31) is DETECTED: guard overwritten, part 2 refuses"; else bad "order hazard not detected (r1=$r1)"; fi
-  g1 ajg_rev; g2 ajg_rev && pass "re-applying part 1 repairs the order hazard; part 2 then applies" || bad "repair failed"
+  if [ "$s1_redef" = 1 ]; then
+    if [ "$r1" = 0 ] && echo "$o" | grep -q "part 1 (quota guard) is not live"; then pass "wrong order (guard, then #31) is DETECTED: guard overwritten, part 2 refuses"; else bad "order hazard not detected (r1=$r1)"; fi
+    g1 ajg_rev; g2 ajg_rev && pass "re-applying part 1 repairs the order hazard; part 2 then applies" || bad "repair failed"
+  else
+    # S1 = PR #53: its migrations never redefine the RPC, so applying them AFTER the guard must leave the guard intact
+    # (no hazard), compared byte-for-byte with the function as it was right after part 1.
+    fb=$(PA -d ajg_rev -c "select md5(pg_get_functiondef('public.fn_create_ai_job_if_entitled(text,jsonb)'::regprocedure))")
+    mk ajg_rev2; g1 ajg_rev2; fa=$(PA -d ajg_rev2 -c "select md5(pg_get_functiondef('public.fn_create_ai_job_if_entitled(text,jsonb)'::regprocedure))")
+    if [ "$r1" -gt 0 ] && [ "$fb" = "$fa" ] && ! echo "$o" | grep -q "prerequisite missing"; then pass "wrong order (guard, then #53 S1) is HARMLESS: S1 leaves the guarded RPC byte-identical and part 2 applies"; else bad "S1 (#53) altered/removed the guard (r1=$r1 same_fn=$([ "$fb" = "$fa" ] && echo y || echo n))"; fi
+  fi
 fi
 
 # ---- idempotency, rollback, re-apply, no privilege change (use the last integration variant available) ----
 INCLUDE_FN=true; rv=main; need PR31_DIR && rv=pr31; need PR31_DIR PR44_DIR PR45_DIR PR46_DIR && rv=all
 echo "== idempotent / rollback / reapply on variant $rv"
 [ "$rv" = main ] && INCLUDE_FN=false   # on main the rollback intentionally keeps #31's fail-closed block (see rollback header)
+# Same when S1 is #53: it never redefines the RPC, so the pre-state function is the older B10 body and the rollback
+# intentionally lands on the stricter fail-closed body (never removes a security fix). Triggers, ACLs and the whole
+# privilege matrix are still compared exactly, and the final check below still pins ENTITLEMENT_NOT_CONFIGURED present
+# and ROLE_NOT_ALLOWED absent after rollback.
+[ "$rv" != main ] && [ "$s1_redef" = 0 ] && INCLUDE_FN=false
 sigq="select md5(string_agg(x, '|' order by x)) from (
   select 'f:'||md5(pg_get_functiondef(p.oid)) x from pg_proc p where p.proname='fn_create_ai_job_if_entitled' and p.pronamespace='public'::regnamespace and $INCLUDE_FN
   union all select 't:'||tgname from pg_trigger where tgrelid='public.prompter_ai_jobs'::regclass and not tgisinternal
