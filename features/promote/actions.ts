@@ -9,7 +9,28 @@ import { buildSystemPreamble, buildCampaignProposalPrompt } from "@/lib/ai/promp
 import { runAiJob } from "@/services/ai-jobs";
 import { syncChannelCampaigns } from "@/services/channel-campaigns";
 import { getTenantChannelPerformance } from "@/services/channel-performance";
-import type { Channel, PrimaryGoal } from "@/types/database";
+import type { Channel, Json, PrimaryGoal } from "@/types/database";
+import {
+  buildPurchaseDestinationFromForm,
+  resolveOwnHostsFromEnv,
+  withPurchaseDestination,
+  type PurchaseDestination,
+} from "@/lib/campaigns/purchase-destination";
+
+function ownHostsFromEnv() {
+  return resolveOwnHostsFromEnv({
+    NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
+    META_REDIRECT_URI: process.env.META_REDIRECT_URI,
+    NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
+  });
+}
+
+function promptDestinationOf(dest: PurchaseDestination) {
+  return {
+    type: dest.type,
+    host: dest.type === "WEBSITE" && dest.link ? new URL(dest.link).hostname : null,
+  };
+}
 
 export interface PromoteActionState {
   error: string | null;
@@ -31,11 +52,21 @@ export async function generateCampaignDraftAction(
     totalBudget: formData.get("totalBudget") || undefined,
     durationDays: formData.get("durationDays") || undefined,
     startDate: formData.get("startDate"),
+    destinationType: formData.get("destinationType") || undefined,
+    destinationValue: formData.get("destinationValue") || undefined,
   });
 
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Data tidak valid" };
   }
+
+  // Validated and normalised on the server; the client-sent link is never trusted or stored.
+  const destination = buildPurchaseDestinationFromForm(
+    parsed.data.destinationType,
+    parsed.data.destinationValue,
+    ownHostsFromEnv(),
+  );
+  if (!destination.ok) return { error: destination.message };
 
   const session = await requireSessionContext();
   const supabase = await createClient();
@@ -79,7 +110,7 @@ export async function generateCampaignDraftAction(
     jobType: "CAMPAIGN_PROPOSAL",
     schema: CampaignProposalSchema,
     system: buildSystemPreamble(brandProfile),
-    prompt: buildCampaignProposalPrompt(product, inputs),
+    prompt: buildCampaignProposalPrompt(product, inputs, promptDestinationOf(destination.value)),
     inputReference: { product_id: product.id, ...inputs },
   });
 
@@ -113,7 +144,7 @@ export async function generateCampaignDraftAction(
       currency: product.currency,
       duration_days: parsed.data.durationDays,
       start_date: parsed.data.startDate || null,
-      ai_proposal: proposal,
+      ai_proposal: withPurchaseDestination(proposal, destination.value) as unknown as Json,
       ai_job_id: result.jobId,
     })
     .select("id")
@@ -169,11 +200,20 @@ export async function generateQuickCampaignDraftAction(
     // message. `|| undefined` normalizes "not submitted" the same way
     // every other optional field above already does.
     startDate: formData.get("startDate") || undefined,
+    destinationType: formData.get("destinationType") || undefined,
+    destinationValue: formData.get("destinationValue") || undefined,
   });
 
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Data tidak valid" };
   }
+
+  const destination = buildPurchaseDestinationFromForm(
+    parsed.data.destinationType,
+    parsed.data.destinationValue,
+    ownHostsFromEnv(),
+  );
+  if (!destination.ok) return { error: destination.message };
 
   const session = await requireSessionContext();
   const supabase = await createClient();
@@ -230,7 +270,7 @@ export async function generateQuickCampaignDraftAction(
     jobType: "CAMPAIGN_PROPOSAL",
     schema: CampaignProposalSchema,
     system: buildSystemPreamble(brandProfile),
-    prompt: buildCampaignProposalPrompt(product, inputs),
+    prompt: buildCampaignProposalPrompt(product, inputs, promptDestinationOf(destination.value)),
     inputReference: { product_id: product.id, quick_promote: true, ...inputs },
   });
 
@@ -268,7 +308,7 @@ export async function generateQuickCampaignDraftAction(
       currency: product.currency,
       duration_days: parsed.data.durationDays,
       start_date: parsed.data.startDate || null,
-      ai_proposal: proposal,
+      ai_proposal: withPurchaseDestination(proposal, destination.value) as unknown as Json,
       ai_job_id: result.jobId,
     })
     .select("id")
