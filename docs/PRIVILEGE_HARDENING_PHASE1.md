@@ -63,7 +63,19 @@ catalog query and compare with the local "before" matrix. 4. Apply in a quiet wi
 5. Smoke: login, dashboard, AI generation, checkout (gateway OFF → expected message), settings, connections, billing page.
 6. Re-run the catalog query: no TRUNCATE/anon, `UPDATE(plan)` still present.
 
-## Rollback (not executed)
-`supabase/rollback/20261020190000_prompter_privilege_hardening_phase1.down.sql` is a LEGACY mass-restore (re-grants the default state, incl. TRUNCATE/anon) kept only so this PR's exact-pre-state test passes; DO NOT USE it on production. PR #47 replaces it with a fail-closed, cell-by-cell rollback.
-If #31/#44/#45 are already applied, re-run their migrations right after (idempotent REVOKEs); tests prove
-rollback + re-run equals the exact pre-Phase-1 matrix. Never roll back to restore TRUNCATE for any real need — there is none.
+## Rollback (not executed) — fail-closed forward-fix, plain SQL
+`supabase/rollback/20261020190000_prompter_privilege_hardening_phase1.down.sql` is **not** a mass restore. The previous version
+re-granted `select, insert, update, delete, truncate` to anon + authenticated and, after #31/#44/#45, re-opened **240 privilege cells**
+(UPDATE on `prompter_ai_jobs` → `created_at` mutable → quota reset; INSERT on `prompter_payment_transactions`; all of anon; TRUNCATE).
+The suite keeps that old script only as a test-only negative control (`support/legacy_mass_restore.sql`).
+
+It is **plain SQL** (no psql meta-commands, no psql variables): it runs in the Supabase SQL editor or `psql -f`. Copy the file, replace the text
+`REPLACE_WITH_PAIRS` on the line marked `-- EDIT` with the exact pairs a *verified* broken flow needs
+(e.g. `'prompter_jobs:UPDATE'`) and run the copy. Left unedited it refuses.
+* Only 9 pairs (`prompter_jobs`, `prompter_platform_capabilities`, `prompter_product_snapshots` × INSERT/UPDATE/DELETE), `authenticated` only.
+* A pair is restored only if it is RLS-inert: RLS is enabled and no policy covers the command (otherwise refused).
+* Refused: TRUNCATE/REFERENCES/TRIGGER/MAINTAIN, anon/PUBLIC/service_role, ai_jobs, payment_transactions, invoices, webhook_events,
+  plan_entitlements, audit_logs, subscriptions, oauth_credentials, malformed lists, unknown tables.
+* All-or-nothing (single DO block) with a post-check that exactly the named cells changed (anon/authenticated/service_role × all privileges,
+  plus column ACLs, plus no PUBLIC grant). Tests also prove it re-opens no cell that #31/#44/#45 had closed.
+Anything else needs its own reviewed migration.

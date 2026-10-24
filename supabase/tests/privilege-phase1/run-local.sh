@@ -44,6 +44,18 @@ prep() { # <db> <variant>
     pr31_44_45) for m in $L31; do apm "$db" "$PR31_DIR" "$m"; done; apm "$db" "$PR44_DIR" "$M44"; apm "$db" "$PR45_DIR" "$M45" ;;
   esac
 }
+rbsql() { # <pairs|-> -> path of a plain-SQL copy of the rollback with the pairs filled in ("-" leaves the shipped placeholder untouched)
+  local out="$W/rb_$RANDOM.sql"
+  RB_IN="$root/supabase/rollback/$PH1.down.sql" RB_OUT="$out" RB_PAIRS="$1" python3 -c "
+import os
+s=open(os.environ['RB_IN']).read(); p=os.environ['RB_PAIRS']
+if p!='-':
+    d=\"v_raw text := 'REPLACE_WITH_PAIRS';\"
+    assert s.count(d)==1
+    s=s.replace(d, \"v_raw text := '\"+p.replace(\"'\",\"''\")+\"';\")
+open(os.environ['RB_OUT'],'w').write(s)"
+  echo "$out"
+}
 apply_ph1() { P -d "$1" -f "$root/supabase/migrations/$PH1.sql" >/dev/null; }
 
 probe_variant() { # <name> <variant>
@@ -68,20 +80,64 @@ probe_variant() { # <name> <variant>
   if P -d "$c" -f "$here/assert_after.sql" >"$W/assert.out" 2>&1; then grep -E "NOTICE:  PASS" "$W/assert.out" | sed "s/^psql:[^ ]* //; s/^NOTICE:  /$n: /"; else echo "FAILED catalog assertions ($n)"; grep -E "ASSERTION|ERROR" "$W/assert.out" | head -3; fail=1; fi
   # hash of the post-Phase-1 matrix (used for the order-independence check)
   psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q -At -F' ' -d "$c" -c "select 'matrix_after_hash', md5(string_agg(tbl||role||priv||granted, '' order by tbl,role,priv)) from t_matrix()" > "$W/$n.hash"
-  # rollback => EXACT pre-state. When #31/#44/#45 were applied BEFORE Phase 1, the down script re-opens
-  # what they closed (documented), so those PRs' migrations are re-run afterwards, as the runbook says.
+  # ---- rollback = fail-closed targeted forward-fix (never a mass restore) ----
   P -d "$c" -c "create table t_matrix_after_ph1 as select * from t_matrix()" >/dev/null
-  P -d "$c" -f "$root/supabase/rollback/$PH1.down.sql" >/dev/null
+  local D="$root/supabase/rollback/$PH1.down.sql" diffq="select count(*) from t_matrix() a join t_matrix_after_ph1 b using (tbl,role,priv) where a.granted is distinct from b.granted"
+  local refused=0 total=0 pr
+  for pr in "<none>" "" "prompter_ai_jobs:UPDATE" "prompter_ai_jobs:DELETE" "prompter_payment_transactions:INSERT" "prompter_payment_transactions:UPDATE" \
+            "prompter_jobs:TRUNCATE" "prompter_jobs:REFERENCES" "prompter_jobs:TRIGGER" "prompter_jobs:UPDATE,prompter_ai_jobs:UPDATE" \
+            "prompter_oauth_credentials:SELECT" "prompter_audit_logs:DELETE" "prompter_audit_logs:UPDATE" "prompter_subscriptions:DELETE" \
+            "prompter_subscriptions:UPDATE" "prompter_invoices:INSERT" "prompter_webhook_events:INSERT" "prompter_plan_entitlements:UPDATE" \
+            "prompter_plan_entitlements:INSERT" "anon:SELECT" "prompter_nonexistent:UPDATE" "prompter_marketing_metrics:UPDATE"; do
+    total=$((total+1))
+    if [ "$pr" = "<none>" ]; then f=$(rbsql -); else f=$(rbsql "$pr"); fi
+    o=$(PL -d "$c" -v ON_ERROR_STOP=1 -f "$f" 2>&1) && rc=0 || rc=1
+    if [ "$rc" = 1 ] && echo "$o" | grep -q "refused"; then refused=$((refused+1)); else echo "   NOT REFUSED: '$pr' rc=$rc"; fi
+  done
+  [ "$refused" = "$total" ] && pass "$n: rollback refuses $total forbidden/ambiguous requests (none, TRUNCATE, anon, ai_jobs, payment_transactions, invoices, webhooks, entitlements, audit, subscriptions, vault, mixed valid+invalid, unknown)" || bad "$n: only $refused/$total refused"
+  r0=$(psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q -At -d "$c" -c "$diffq")
+  [ "$r0" = 0 ] && pass "$n: refused rollbacks changed nothing (all-or-nothing)" || bad "$n: refused rollback changed $r0 cell(s)"
+  P -d "$c" -f "$(rbsql 'prompter_jobs:UPDATE')" >/dev/null 2>&1
+  r1=$(psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q -At -d "$c" -c "$diffq")
+  [ "$r1" = 1 ] && pass "$n: restoring one named pair changes exactly that one cell" || bad "$n: single-pair restore changed $r1 cell(s)"
+  P -d "$c" -f "$(rbsql 'prompter_jobs:INSERT,prompter_jobs:UPDATE,prompter_jobs:DELETE,prompter_platform_capabilities:INSERT,prompter_platform_capabilities:UPDATE,prompter_platform_capabilities:DELETE,prompter_product_snapshots:INSERT,prompter_product_snapshots:UPDATE,prompter_product_snapshots:DELETE')" >/dev/null 2>&1
+  nr=$(psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q -At -d "$c" -c "select count(*) from t_matrix() a join t_matrix_after_ph1 b using (tbl,role,priv) where a.granted is distinct from b.granted and not (a.role='authenticated' and a.granted and a.priv in ('INSERT','UPDATE','DELETE') and a.tbl in ('prompter_jobs','prompter_platform_capabilities','prompter_product_snapshots'))")
+  rr=$(psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q -At -d "$c" -c "select count(*) from t_matrix() a join t_matrix_after_ph1 b using (tbl,role,priv) where b.granted and not a.granted")
+  [ "$nr" = 0 ] && [ "$rr" = 0 ] && pass "$n: maximum permitted rollback re-opens only the 9 allowed authenticated cells (no TRUNCATE/anon/financial/quota cell, nothing removed)" || bad "$n: max rollback side effects ($nr new dangerous, $rr removed)"
+  # rollback must not re-open anything another migration (#31/#44/#45) had already closed BEFORE Phase 1
+  closed_elsewhere=$(psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q -At -d "$c" -c "select count(*) from t_matrix_before b join t_matrix() a using (tbl,role,priv) where b.role='authenticated' and not b.granted and a.granted and not exists (select 1 from t_matrix_after_ph1 z where z.tbl=b.tbl and z.role=b.role and z.priv=b.priv and z.granted)")
+  [ "$closed_elsewhere" = 0 ] && pass "$n: rollback re-opens no cell that was already closed before Phase 1 (by #31/#44/#45 or defaults)" || bad "$n: rollback re-opened $closed_elsewhere cell(s) closed before Phase 1"
+  dang=$(psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q -At -d "$c" -c "select count(*) from t_matrix() where granted and role in ('anon','authenticated') and (role='anon' or priv in ('TRUNCATE','REFERENCES','TRIGGER','MAINTAIN'))")
+  [ "$dang" = 0 ] && pass "$n: after rollback no anon privilege and no TRUNCATE/REFERENCES/TRIGGER/MAINTAIN exists on any prompter_* table" || bad "$n: $dang anon/TRUNCATE cells after rollback"
   if [ "$v" = pr31_44_45 ]; then
-    for m in $L31; do apm "$c" "$PR31_DIR" "$m"; done; apm "$c" "$PR44_DIR" "$M44"; apm "$c" "$PR45_DIR" "$M45"
-    rbmsg="rollback + re-run of #31/#44/#45 migrations"
-  else rbmsg="rollback"; fi
-  r1=$(psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q -At -d "$c" -c "select count(*) from (select * from t_matrix() except select * from t_matrix_before) x") 
-  r2=$(psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q -At -d "$c" -c "select count(*) from (select * from t_matrix_before except select * from t_matrix()) x")
-  [ "$r1" = 0 ] && [ "$r2" = 0 ] && pass "$n: $rbmsg restores the exact pre-Phase-1 privilege matrix" || bad "$n: $rbmsg differs from pre-state ($r1/$r2)"
+    chk=$(psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q -At -d "$c" -c "select
+       not has_table_privilege('authenticated','public.prompter_ai_jobs','UPDATE')
+       and not has_column_privilege('authenticated','public.prompter_ai_jobs','created_at','UPDATE')
+       and not has_column_privilege('authenticated','public.prompter_ai_jobs','tenant_id','UPDATE')
+       and has_column_privilege('authenticated','public.prompter_ai_jobs','status','UPDATE')
+       and not has_table_privilege('authenticated','public.prompter_ai_jobs','INSERT')
+       and not has_table_privilege('authenticated','public.prompter_ai_jobs','DELETE')
+       and not has_table_privilege('authenticated','public.prompter_payment_transactions','INSERT')
+       and not has_table_privilege('authenticated','public.prompter_payment_transactions','UPDATE')
+       and not has_table_privilege('authenticated','public.prompter_payment_transactions','DELETE')
+       and has_column_privilege('authenticated','public.prompter_subscriptions','plan','UPDATE') = (select granted from t_matrix_after_ph1 where tbl='prompter_subscriptions' and priv='COLUMN_UPDATE_PLAN')")
+    [ "$chk" = t ] && pass "$n: after rollback ai_jobs UPDATE/INSERT/DELETE (table + created_at/tenant_id) and payment_transactions INSERT/UPDATE/DELETE stay closed; completion columns stay writable" || bad "$n: a quota/financial privilege is open after rollback"
+  fi
+  # negative control: the OLD mass-restore script must be caught by the same detector
+  P -d postgres -c "drop database if exists p1_legacy" -c "create database p1_legacy template p1c_$1" >/dev/null 2>&1 || { P -d "$c" -c "select 1" >/dev/null; }
+  local lg="p1l_$1"; mk "$lg"; prep "$lg" "$v"; P -d "$lg" -f "$here/support/fixtures.sql" >/dev/null; apply_ph1 "$lg"
+  P -d "$lg" -c "create table t_matrix_after_ph1 as select * from t_matrix()" >/dev/null
+  P -d "$lg" -f "$here/support/legacy_mass_restore.sql" >/dev/null
+  reopened=$(psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q -At -d "$lg" -c "select count(*) from t_matrix() a join t_matrix_after_ph1 b using (tbl,role,priv) where a.granted and not b.granted")
+  legacy_bad=$(psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q -At -d "$lg" -c "select count(*) from t_matrix() where granted and role in ('anon','authenticated') and (role='anon' or priv='TRUNCATE')")
+  [ "$legacy_bad" -gt 0 ] && pass "$n: negative control — the legacy mass-restore re-opens $reopened cells ($legacy_bad anon/TRUNCATE); the detector catches it" || bad "$n: detector did not catch the legacy mass-restore"
+  if [ "$v" = pr31_44_45 ]; then
+    lc=$(psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q -At -d "$lg" -c "select has_table_privilege('authenticated','public.prompter_ai_jobs','UPDATE') and has_table_privilege('authenticated','public.prompter_payment_transactions','INSERT')")
+    [ "$lc" = t ] && pass "$n: negative control — legacy script DID re-open ai_jobs UPDATE + payment_transactions INSERT (the PR #46 defect, now impossible)" || bad "$n: legacy control did not reproduce the defect"
+  fi
   apply_ph1 "$c"
   r3=$(psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q -At -d "$c" -c "select count(*) from ((select * from t_matrix() except select * from t_matrix_after_ph1) union all (select * from t_matrix_after_ph1 except select * from t_matrix())) x")
-  [ "$r3" = 0 ] && pass "$n: re-apply after rollback reproduces the exact post-state" || bad "$n: reapply differs ($r3)"
+  [ "$r3" = 0 ] && pass "$n: re-apply after targeted rollback reproduces the exact post-state" || bad "$n: reapply differs ($r3)"
 }
 
 probe_variant main_only main
@@ -99,6 +155,28 @@ if [ -n "${PR31_DIR:-}" ] && [ -n "${PR44_DIR:-}" ] && [ -n "${PR45_DIR:-}" ]; t
 else
   echo "SKIP: PR #31/#44/#45 integration variants (PR31_DIR/PR44_DIR/PR45_DIR not provided)"
 fi
+
+
+# ---- ROLLBACK STATIC + GUARD CONTROLS ----
+RBF="$root/supabase/rollback/$PH1.down.sql"
+[ "$(grep -cE '^[[:space:]]*\\' "$RBF")" = 0 ] && pass "rollback is plain SQL: no psql meta-command line (no \\set/\\if/\\gset/\\echo)" || bad "rollback contains psql meta-commands"
+grep -qE ':\{\?|:'"'"'pairs|\bpsql\b -v' <(grep -vE '^[[:space:]]*--' "$RBF") && bad "rollback still references psql variables" || pass "rollback has no psql variable interpolation"
+# the shipped (unedited) file must refuse
+mk p1_rbplain; P -d p1_rbplain -f "$here/support/fixtures.sql" >/dev/null; apply_ph1 p1_rbplain
+if PL -d p1_rbplain -v ON_ERROR_STOP=1 -f "$RBF" >"$W/rbp.out" 2>&1; then bad "unedited rollback ran"; else grep -q "refused" "$W/rbp.out" && pass "unedited rollback file refuses (fail-closed default)" || bad "unedited rollback failed for another reason"; fi
+# GUARD: a policy that covers the command, or RLS off, must make the rollback refuse (cannot open a real write path)
+mk p1_rbg; P -d p1_rbg -f "$here/support/fixtures.sql" >/dev/null; apply_ph1 p1_rbg
+P -d p1_rbg -c "create policy t_ins on public.prompter_jobs for insert to authenticated with check (true)" >/dev/null
+o=$(PL -d p1_rbg -v ON_ERROR_STOP=1 -f "$(rbsql 'prompter_jobs:INSERT')" 2>&1) && bad "rollback ran although an INSERT policy exists" || { echo "$o" | grep -q "policy covers" && pass "guard: refuses when a policy covers the command" || bad "guard(policy): wrong failure: $o"; }
+P -d p1_rbg -c "drop policy t_ins on public.prompter_jobs" -c "create policy t_all on public.prompter_jobs for all to authenticated using (true)" >/dev/null
+o=$(PL -d p1_rbg -v ON_ERROR_STOP=1 -f "$(rbsql 'prompter_jobs:DELETE')" 2>&1) && bad "rollback ran although an ALL policy exists" || { echo "$o" | grep -q "policy covers" && pass "guard: refuses when a FOR ALL policy covers the command" || bad "guard(all): wrong failure: $o"; }
+P -d p1_rbg -c "drop policy t_all on public.prompter_jobs" -c "alter table public.prompter_jobs disable row level security" >/dev/null
+o=$(PL -d p1_rbg -v ON_ERROR_STOP=1 -f "$(rbsql 'prompter_jobs:UPDATE')" 2>&1) && bad "rollback ran although RLS is disabled" || { echo "$o" | grep -q "RLS is not enabled" && pass "guard: refuses when RLS is disabled" || bad "guard(rls): wrong failure: $o"; }
+chg=$(psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q -At -d p1_rbg -c "select has_table_privilege('authenticated','public.prompter_jobs','UPDATE') or has_table_privilege('authenticated','public.prompter_jobs','INSERT') or has_table_privilege('authenticated','public.prompter_jobs','DELETE')")
+[ "$chg" = f ] && pass "guard: refused requests left prompter_jobs closed" || bad "guard: a refused request changed prompter_jobs"
+# injection attempt through the pair list is refused by the format check
+o=$(PL -d p1_rbplain -v ON_ERROR_STOP=1 -f "$(rbsql "prompter_jobs:UPDATE'; drop table public.prompter_jobs; --")" 2>&1) && bad "malformed pair list ran" || { echo "$o" | grep -q "refused" && pass "malformed/injection pair list refused" || bad "malformed list: wrong failure"; }
+psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q -At -d p1_rbplain -c "select to_regclass('public.prompter_jobs') is not null" | grep -q t && pass "injection attempt left prompter_jobs in place" || bad "prompter_jobs dropped"
 
 # fail-closed: an event trigger that re-grants TRUNCATE right after any REVOKE must make the migration ABORT
 mk p1_fc; P -d p1_fc -f "$here/support/fixtures.sql" >/dev/null
