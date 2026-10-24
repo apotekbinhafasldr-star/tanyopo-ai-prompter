@@ -193,7 +193,7 @@ describe("schemas / safety invariants", () => {
   });
   it("destination code touches no billing, trial or AI quota", () => {
     const src = readFileSync(path.join(process.cwd(), "lib/campaigns/purchase-destination.ts"), "utf8");
-    expect(src).not.toMatch(/billing|trial|quota|supabase|fetch\(/i);
+    expect(src).not.toMatch(/billing|trial|quota|ai-jobs|services\/|lib\/supabase|fetch\(/i);
   });
   it("tenant scoping is kept on the queries that read/write ai_proposal", () => {
     for (const f of ["features/promote/actions.ts", "features/campaigns/actions.ts"]) {
