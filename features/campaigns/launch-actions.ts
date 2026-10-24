@@ -49,6 +49,11 @@ import {
   type Check,
   type ProductMediaRow,
 } from "@/lib/campaigns/meta-launch-preflight";
+import {
+  checkLaunchDestination,
+  resolveOwnHostsFromEnv,
+  withUtm,
+} from "@/lib/campaigns/purchase-destination";
 import type { CampaignProposal } from "@/schemas/ai/campaign-proposal";
 import type { ConnectorPlatform, Database } from "@/types/database";
 
@@ -115,6 +120,7 @@ interface MetaPreflightInput {
     product_id: string | null;
     target_country: string | null;
     selected_media_id: string | null;
+    ai_proposal?: unknown;
   };
   adAccountId: string;
   selectedPageId: string | undefined;
@@ -149,6 +155,8 @@ async function runMetaPreflight(input: MetaPreflightInput): Promise<Check<MetaLa
   });
   if (!ownHosts.ok) return ownHosts;
 
+  const ownHostList = ownHosts.value;
+  const resolveLegacyLandingUrl = async (): Promise<Check<string>> => {
   // Landing URL: product first, brand profile only when the product has none.
   let productUrl: string | null = null;
   if (master.product_id) {
@@ -171,7 +179,30 @@ async function runMetaPreflight(input: MetaPreflightInput): Promise<Check<MetaLa
     if (error) return READ_FAILED();
     brandUrl = brand?.website_url ?? null;
   }
-  const link = resolveLandingUrl({ productUrl, brandUrl }, ownHosts.value);
+  return resolveLandingUrl({ productUrl, brandUrl }, ownHostList);
+  };
+
+  // Purchase destination (stored per campaign in ai_proposal). Re-validated here with the strict own-host
+  // list. Legacy campaigns (no stored destination) keep the product/brand landing URL below, unchanged.
+  const destinationCheck = checkLaunchDestination(master.ai_proposal, ownHosts.value);
+  if (!destinationCheck.ok) {
+    return preflightFail("LANDING_URL_MISSING", destinationCheck.message);
+  }
+  let link: Check<string>;
+  if (destinationCheck.mode === "destination") {
+    const dest = destinationCheck.destination;
+    if (dest.type === "WEBSITE" && dest.link) {
+      // UTM only on website links; never on wa.me.
+      const tagged = withUtm(dest.link, { campaignRef: master.id });
+      link = tagged.ok ? { ok: true, value: tagged.value } : preflightFail("LANDING_URL_UNSAFE", tagged.message);
+    } else if (dest.type === "WHATSAPP" && dest.link) {
+      link = { ok: true, value: dest.link };
+    } else {
+      link = preflightFail("LANDING_URL_MISSING", "Tujuan pembelian campaign tidak valid.");
+    }
+  } else {
+    link = await resolveLegacyLandingUrl();
+  }
   if (!link.ok) return link;
 
   // Creative image: only this tenant's own product media.
@@ -305,6 +336,21 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
 
   if (masterCampaign.status !== "SCHEDULED") {
     return { error: "Campaign harus berstatus Terjadwal (sudah disetujui) sebelum diluncurkan." };
+  }
+
+  // Purchase destination gate (platform-agnostic, read-only, before any approval/credential/claim step):
+  // a campaign whose stored destination is "none" or invalid can never be launched as a paid ad.
+  // Legacy campaigns (no stored destination) are unaffected.
+  const earlyDestination = checkLaunchDestination(
+    masterCampaign.ai_proposal,
+    resolveOwnHostsFromEnv({
+      NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
+      META_REDIRECT_URI: process.env.META_REDIRECT_URI,
+      NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
+    }),
+  );
+  if (!earlyDestination.ok) {
+    return { error: earlyDestination.message };
   }
 
   // Meta preflight, approval part (PR #36): the master's latest CAMPAIGN_LAUNCH

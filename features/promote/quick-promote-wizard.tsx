@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils/cn";
 import { formatCurrency, productTypeLabel } from "@/lib/utils/format";
 import { primaryGoals } from "@/schemas/onboarding";
 import { channelOptions } from "@/schemas/campaign";
+import { PurchaseDestinationField } from "@/features/promote/purchase-destination-field";
 import {
   generateQuickCampaignDraftAction,
   type PromoteActionState,
@@ -24,6 +25,7 @@ interface ProductOption {
   product_type: string;
   price: number | null;
   currency: string;
+  website_url?: string | null;
 }
 
 const TOTAL_STEPS = 3;
@@ -42,9 +44,11 @@ const initialState: PromoteActionState = { error: null };
 export function QuickPromoteWizard({
   products,
   preselectedProductId,
+  brandWhatsapp,
 }: {
   products: ProductOption[];
   preselectedProductId?: string;
+  brandWhatsapp?: string | null;
 }) {
   const [step, setStep] = useState(1);
   const [productId, setProductId] = useState(preselectedProductId ?? "");
@@ -57,10 +61,11 @@ export function QuickPromoteWizard({
   const [targetRegion, setTargetRegion] = useState("");
   const [targetCity, setTargetCity] = useState("");
   const [audienceNotes, setAudienceNotes] = useState("");
+  const [destinationValid, setDestinationValid] = useState(false);
   const [state, formAction, pending] = useActionState(generateQuickCampaignDraftAction, initialState);
 
   const hasBudget = Number(dailyBudget) > 0 || Number(totalBudget) > 0;
-  const canAdvance = step === 1 ? !!productId : objective.length > 0 && hasBudget;
+  const canAdvance = step === 1 ? !!productId : objective.length > 0 && hasBudget && destinationValid;
 
   function toggleChannel(value: string) {
     setChannels((prev) => (prev.includes(value) ? prev.filter((c) => c !== value) : [...prev, value]));
@@ -187,6 +192,13 @@ export function QuickPromoteWizard({
                   />
                 </div>
               </div>
+
+              <PurchaseDestinationField
+                key={productId}
+                websiteDefault={products.find((p) => p.id === productId)?.website_url}
+                whatsappDefault={brandWhatsapp}
+                onValidityChange={setDestinationValid}
+              />
 
               <p className="rounded-[var(--radius-md)] bg-brand-muted p-3 text-sm text-brand">
                 Biarkan LINOE AI memilih strategi terbaik — target audiens, channel, positioning, dan

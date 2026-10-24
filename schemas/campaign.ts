@@ -25,6 +25,10 @@ export const promoteWizardSchema = z.object({
   totalBudget: z.coerce.number().min(0).optional(),
   durationDays: z.coerce.number().int().min(1).max(365).optional(),
   startDate: z.string().trim().optional().or(z.literal("")),
+  // Purchase destination (validated/normalised server-side in lib/campaigns/purchase-destination.ts).
+  // Missing type from a stale client is treated as NONE (fail-safe: strategy only, no paid launch).
+  destinationType: z.string().trim().max(20).optional().or(z.literal("")),
+  destinationValue: z.string().trim().max(2100).optional().or(z.literal("")),
 });
 
 export type PromoteWizardInput = z.infer<typeof promoteWizardSchema>;
@@ -71,6 +75,8 @@ export const quickPromoteSchema = z
       .max(365, "Durasi maksimal 365 hari")
       .optional(),
     startDate: z.string().trim().optional().or(z.literal("")),
+    destinationType: z.string().trim().max(20).optional().or(z.literal("")),
+    destinationValue: z.string().trim().max(2100).optional().or(z.literal("")),
   })
   .refine((data) => (data.dailyBudget ?? 0) > 0 || (data.totalBudget ?? 0) > 0, {
     message: "Masukkan budget harian atau budget total",

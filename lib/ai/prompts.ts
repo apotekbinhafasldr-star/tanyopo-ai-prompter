@@ -148,9 +148,42 @@ export interface CampaignProposalInputs {
   channelPerformanceHistory?: ChannelPerformanceInput[];
 }
 
+/**
+ * Describes the validated purchase destination for the AI. Returns null when no destination info
+ * is supplied (legacy callers) so the prompt output stays byte-identical. The model never receives
+ * a URL or phone number to repeat: the real link is attached by the system at launch.
+ */
+export function describePurchaseDestination(
+  destination: { type: "WEBSITE" | "WHATSAPP" | "NONE"; host?: string | null } | undefined,
+): string | null {
+  if (!destination) return null;
+  const never =
+    "JANGAN menulis URL, domain, atau nomor telepon/WhatsApp apa pun di hook, headline, cta, maupun primary_text — tautan resmi dipasang sistem saat peluncuran. JANGAN mengarang tautan atau nomor.";
+  if (destination.type === "WEBSITE") {
+    return [
+      `Tujuan pembelian (tempat calon pembeli diarahkan setelah klik iklan): website/toko online penjual${destination.host ? ` (${destination.host})` : ""}.`,
+      "CTA harus cocok dengan tujuan ini (misalnya ajakan melihat produk, kunjungi toko, atau beli di website) dan hanya menjanjikan hal yang wajar bisa dilakukan di website penjual.",
+      never,
+    ].join("\n");
+  }
+  if (destination.type === "WHATSAPP") {
+    return [
+      "Tujuan pembelian (tempat calon pembeli diarahkan setelah klik iklan): chat WhatsApp penjual.",
+      "CTA harus cocok dengan tujuan ini (misalnya ajakan chat WhatsApp, tanya stok/harga, atau pesan lewat WhatsApp). Jangan menjanjikan checkout otomatis atau pembayaran online.",
+      never,
+    ].join("\n");
+  }
+  return [
+    "Tujuan pembelian: BELUM ADA (penjual belum punya website atau WhatsApp tujuan). Ini hanya strategi/draf.",
+    "CTA harus netral dan jujur (misalnya ajakan mengenal produk atau minta informasi). JANGAN menjanjikan checkout, 'beli sekarang', pembayaran online, atau tautan pembelian yang tidak tersedia.",
+    never,
+  ].join("\n");
+}
+
 export function buildCampaignProposalPrompt(
   product: Product,
   inputs: CampaignProposalInputs,
+  destination?: { type: "WEBSITE" | "WHATSAPP" | "NONE"; host?: string | null },
 ): string {
   return [
     "Buat proposal campaign untuk produk berikut, dengan penalaran marketing yang terstruktur — bukan hanya mengisi kolom generik.",
@@ -164,6 +197,7 @@ export function buildCampaignProposalPrompt(
     inputs.dailyBudget || inputs.totalBudget
       ? `Budget: ${inputs.dailyBudget ? `harian ${inputs.dailyBudget} ${inputs.currency}` : ""} ${inputs.totalBudget ? `total ${inputs.totalBudget} ${inputs.currency}` : ""}`.trim()
       : null,
+    describePurchaseDestination(destination),
     inputs.channelPerformanceHistory && inputs.channelPerformanceHistory.length > 0
       ? [
           "Data historis performa channel tenant ini (dari campaign-campaign sebelumnya — boleh dipakai sebagai sinyal TAMBAHAN, bukan satu-satunya faktor, dan jangan mengarang angka di luar yang tercantum ini):",

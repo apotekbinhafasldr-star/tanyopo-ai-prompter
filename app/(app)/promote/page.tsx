@@ -70,9 +70,16 @@ export default async function PromotePage({
 
   const { data: products } = await supabase
     .from("prompter_products")
-    .select("id, name, product_type, price, currency")
+    .select("id, name, product_type, price, currency, website_url")
     .eq("tenant_id", session.tenantId)
     .order("created_at", { ascending: false });
+
+  const { data: brand } = await supabase
+    .from("prompter_brand_profiles")
+    .select("whatsapp_number")
+    .eq("tenant_id", session.tenantId)
+    .maybeSingle();
+  const brandWhatsapp = brand?.whatsapp_number ?? null;
 
   const preselectedProductId = product ?? handoffProductId ?? undefined;
 
@@ -99,9 +106,9 @@ export default async function PromotePage({
         ) : null}
       </div>
       {isAdvanced ? (
-        <PromoteWizard products={products ?? []} preselectedProductId={preselectedProductId} />
+        <PromoteWizard products={products ?? []} preselectedProductId={preselectedProductId} brandWhatsapp={brandWhatsapp} />
       ) : (
-        <QuickPromoteWizard products={products ?? []} preselectedProductId={preselectedProductId} />
+        <QuickPromoteWizard products={products ?? []} preselectedProductId={preselectedProductId} brandWhatsapp={brandWhatsapp} />
       )}
     </div>
   );

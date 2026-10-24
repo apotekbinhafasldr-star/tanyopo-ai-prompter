@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils/cn";
 import { formatCurrency, productTypeLabel, channelLabel, goalLabel } from "@/lib/utils/format";
 import { primaryGoals } from "@/schemas/onboarding";
 import { channelOptions } from "@/schemas/campaign";
+import { PurchaseDestinationField } from "@/features/promote/purchase-destination-field";
 import {
   generateCampaignDraftAction,
   type PromoteActionState,
@@ -24,17 +25,20 @@ interface ProductOption {
   product_type: string;
   price: number | null;
   currency: string;
+  website_url?: string | null;
 }
 
-const TOTAL_STEPS = 6;
+const TOTAL_STEPS = 7;
 const initialState: PromoteActionState = { error: null };
 
 export function PromoteWizard({
   products,
   preselectedProductId,
+  brandWhatsapp,
 }: {
   products: ProductOption[];
   preselectedProductId?: string;
+  brandWhatsapp?: string | null;
 }) {
   const [step, setStep] = useState(1);
   const [productId, setProductId] = useState(preselectedProductId ?? "");
@@ -48,6 +52,7 @@ export function PromoteWizard({
   const [totalBudget, setTotalBudget] = useState("");
   const [durationDays, setDurationDays] = useState("");
   const [startDate, setStartDate] = useState("");
+  const [destinationValid, setDestinationValid] = useState(false);
   const [state, formAction, pending] = useActionState(generateCampaignDraftAction, initialState);
 
   const selectedProduct = products.find((p) => p.id === productId);
@@ -58,7 +63,8 @@ export function PromoteWizard({
     3: channels.length > 0,
     4: true,
     5: true,
-    6: true,
+    6: destinationValid,
+    7: true,
   };
 
   function toggleChannel(value: string) {
@@ -237,7 +243,17 @@ export function PromoteWizard({
             </div>
           )}
 
-          {step === 6 && (
+          {/* Kept mounted (hidden) outside step 6 so its hidden inputs always reach the form submit. */}
+          <div className={step === 6 ? "flex flex-col gap-3" : "hidden"}>
+            <PurchaseDestinationField
+              key={productId}
+              websiteDefault={selectedProduct?.website_url}
+              whatsappDefault={brandWhatsapp}
+              onValidityChange={setDestinationValid}
+            />
+          </div>
+
+          {step === 7 && (
             <div className="flex flex-col gap-4">
               <h2 className="text-lg font-semibold text-foreground">Siap membuat strategi dengan AI</h2>
               <div className="rounded-[var(--radius-md)] bg-surface-muted p-4 text-sm text-foreground">

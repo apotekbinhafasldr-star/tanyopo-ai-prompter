@@ -49,6 +49,7 @@ import { QuickReviewSummary } from "@/features/campaigns/quick-review-summary";
 import { DetailDisclosure } from "@/features/campaigns/detail-disclosure";
 import { isQuickReview } from "@/lib/campaigns/review-mode";
 import type { CampaignProposal } from "@/schemas/ai/campaign-proposal";
+import { PurchaseDestinationCard } from "@/features/campaigns/purchase-destination-card";
 import type { Channel, ConnectorPlatform, OptimizationActionType, RiskLevel } from "@/types/database";
 
 export const metadata: Metadata = { title: "Detail Campaign — LINOE" };
@@ -338,6 +339,8 @@ export default async function CampaignDetailPage({
           </CardContent>
         </Card>
       ) : null}
+
+      {proposal ? <PurchaseDestinationCard aiProposal={campaign.ai_proposal} /> : null}
 
       {quickReview && proposal ? (
         <QuickReviewSummary

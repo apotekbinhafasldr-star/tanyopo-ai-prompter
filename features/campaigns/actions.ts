@@ -23,6 +23,11 @@ import { getTenantChannelPerformance } from "@/services/channel-performance";
 import { getOrCreateBudgetPolicy, getMonthToDateSpend, checkBudgetGuard } from "@/services/budget-guard";
 import { parseLocalDateTimeInZone } from "@/lib/scheduling/recommend-time";
 import type { Json } from "@/types/database";
+import {
+  PURCHASE_DESTINATION_KEY,
+  readStoredDestination,
+  resolveOwnHostsFromEnv,
+} from "@/lib/campaigns/purchase-destination";
 
 export interface CampaignActionState {
   error: string | null;
@@ -79,6 +84,32 @@ export async function regenerateCampaignProposalAction(campaignId: string): Prom
     channelPerformanceHistory,
   };
 
+  // The purchase destination lives inside ai_proposal, which regenerate replaces wholesale:
+  // read it from the existing proposal, tell the AI about it, and carry it over untouched.
+  // Legacy campaigns (no key) stay legacy: nothing is added.
+  const existingProposal = campaign.ai_proposal as Record<string, unknown> | null;
+  const existingDestinationRaw = existingProposal?.[PURCHASE_DESTINATION_KEY];
+  const storedDestination = readStoredDestination(
+    existingProposal,
+    resolveOwnHostsFromEnv({
+      NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
+      META_REDIRECT_URI: process.env.META_REDIRECT_URI,
+      NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
+    }),
+  );
+  const promptDestination =
+    storedDestination.kind === "valid"
+      ? {
+          type: storedDestination.destination.type,
+          host:
+            storedDestination.destination.type === "WEBSITE" && storedDestination.destination.link
+              ? new URL(storedDestination.destination.link).hostname
+              : null,
+        }
+      : storedDestination.kind === "legacy"
+        ? undefined
+        : { type: "NONE" as const };
+
   const result = await runAiJob({
     supabase,
     tenantId: session.tenantId,
@@ -86,7 +117,7 @@ export async function regenerateCampaignProposalAction(campaignId: string): Prom
     jobType: "CAMPAIGN_PROPOSAL",
     schema: CampaignProposalSchema,
     system: buildSystemPreamble(brandProfile),
-    prompt: buildCampaignProposalPrompt(product, inputs),
+    prompt: buildCampaignProposalPrompt(product, inputs, promptDestination),
     inputReference: { product_id: product.id, campaign_id: campaignId, ...inputs },
   });
 
@@ -94,12 +125,17 @@ export async function regenerateCampaignProposalAction(campaignId: string): Prom
     return { error: result.error };
   }
 
-  const proposal = withRecommendedChannels(withPrimaryCandidate(result.data));
+  const regenerated = withRecommendedChannels(withPrimaryCandidate(result.data));
+  const proposal =
+    existingDestinationRaw === undefined || existingDestinationRaw === null
+      ? regenerated
+      : { ...regenerated, [PURCHASE_DESTINATION_KEY]: existingDestinationRaw };
 
   const { error: updateError } = await supabase
     .from("prompter_master_campaigns")
-    .update({ ai_proposal: proposal, ai_job_id: result.jobId })
-    .eq("id", campaignId);
+    .update({ ai_proposal: proposal as unknown as Json, ai_job_id: result.jobId })
+    .eq("id", campaignId)
+    .eq("tenant_id", session.tenantId);
 
   if (updateError) {
     return { error: "AI berhasil membuat proposal baru tapi gagal menyimpannya." };
