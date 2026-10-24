@@ -211,6 +211,39 @@ const RESERVED_SUFFIXES = [
 /** The host of the fallback link PR #36 removed from the Meta connector. Blocked exactly, never by substring. */
 const LEGACY_FALLBACK_HOST = "tanyopo.ai";
 
+/**
+ * LINOE's own hosts that are blocked as tenant destinations REGARDLESS of environment
+ * configuration: the legacy host and the production Netlify host. The env-derived list
+ * (resolveOwnHosts) is still applied on top of this.
+ */
+export const PERMANENT_OWN_HOSTS: readonly string[] = Object.freeze([
+  LEGACY_FALLBACK_HOST,
+  "tanyopo-ai-prompter.netlify.app",
+]);
+
+/** Netlify deploy/branch aliases of our production site, e.g. main--tanyopo-ai-prompter.netlify.app. */
+const PERMANENT_OWN_ALIAS_SUFFIX = "--tanyopo-ai-prompter.netlify.app";
+
+/** True when the hostname is (a subdomain of) one of our own hosts or a Netlify alias of our site. */
+export function isOwnAppHostname(hostname: string, ownHosts: readonly string[] = []): boolean {
+  const host = hostname.toLowerCase().replace(/\.$/, "");
+  if (host.endsWith(PERMANENT_OWN_ALIAS_SUFFIX)) return true;
+  for (const own of [...ownHosts, ...PERMANENT_OWN_HOSTS]) {
+    const normalized = own.toLowerCase().replace(/\.$/, "");
+    if (normalized && hostMatches(host, normalized)) return true;
+  }
+  return false;
+}
+
+/** URL-level convenience for forms: true only for a parseable URL whose host is one of ours. */
+export function isOwnAppUrl(raw: string, ownHosts: readonly string[] = []): boolean {
+  try {
+    return isOwnAppHostname(new URL(raw).hostname, ownHosts);
+  } catch {
+    return false;
+  }
+}
+
 const unsafeUrl = (reason: string) =>
   preflightFail("LANDING_URL_UNSAFE", `URL landing tidak dapat dipakai untuk iklan: ${reason}. Perbaiki URL pada produk atau profil brand.`);
 
@@ -300,11 +333,8 @@ export function validateLandingUrl(raw: string, ownHosts: readonly string[] = []
   // Own hosts come from trusted configuration (see resolveOwnHosts), never from a
   // substring of the brand name. The removed legacy fallback host stays blocked
   // as defence in depth (exact domain and its subdomains only).
-  for (const own of [...ownHosts, LEGACY_FALLBACK_HOST]) {
-    const normalized = own.toLowerCase().replace(/\.$/, "");
-    if (normalized && hostMatches(hostname, normalized)) {
-      return unsafeUrl("domain aplikasi ini tidak boleh dipakai sebagai tujuan iklan tenant");
-    }
+  if (isOwnAppHostname(hostname, ownHosts)) {
+    return unsafeUrl("domain aplikasi ini tidak boleh dipakai sebagai tujuan iklan tenant");
   }
 
   return pass(raw);

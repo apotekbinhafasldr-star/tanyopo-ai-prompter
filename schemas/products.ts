@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { businessCategories } from "@/schemas/onboarding";
 import { SUPPORTED_CURRENCIES } from "@/schemas/global-preferences";
+import { isOwnAppUrl } from "@/lib/campaigns/meta-launch-preflight";
 
 export const productSchema = z.object({
   name: z.string().trim().min(2, "Nama produk minimal 2 karakter").max(200),
@@ -19,7 +20,15 @@ export const productSchema = z.object({
   // can leave both blank.
   stockUnit: z.string().trim().max(40).optional().or(z.literal("")),
   hpp: z.coerce.number().min(0, "HPP tidak boleh negatif").optional(),
-  websiteUrl: z.string().trim().url("URL tidak valid").optional().or(z.literal("")),
+  websiteUrl: z
+    .string()
+    .trim()
+    .url("URL tidak valid")
+    .refine((value) => !isOwnAppUrl(value), {
+      message: "Alamat ini adalah website LINOE sendiri. Isi dengan website/toko Anda, atau kosongkan.",
+    })
+    .optional()
+    .or(z.literal("")),
   // Comma-separated ISO 3166-1 alpha-2 codes — produced by the searchable
   // multi-select picker in product-form.tsx (CountryMultiSelect), which
   // writes a hidden comma-joined input under this same field name so this

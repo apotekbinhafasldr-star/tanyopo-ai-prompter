@@ -11,6 +11,8 @@ import { MarketingBlueprintSchema } from "@/schemas/ai/marketing-blueprint";
 import { buildSystemPreamble, buildMarketingBlueprintPrompt } from "@/lib/ai/prompts";
 import { runAiJob } from "@/services/ai-jobs";
 import type { BusinessCategory } from "@/types/database";
+import { isOwnAppUrl } from "@/lib/campaigns/meta-launch-preflight";
+import { resolveOwnHostsFromEnv } from "@/lib/campaigns/purchase-destination";
 
 export interface ActionState {
   error: string | null;
@@ -31,6 +33,23 @@ function parseProductForm(formData: FormData) {
     targetCountries: formData.get("targetCountries"),
     language: formData.get("language") || undefined,
   });
+}
+
+/**
+ * Rejects a product website_url that points at LINOE itself. The schema already blocks the permanent
+ * production hosts; this adds the hosts configured in this deployment's environment.
+ */
+function ownWebsiteUrlError(websiteUrl: string | undefined): string | null {
+  if (!websiteUrl) return null;
+  const ownHosts =
+    resolveOwnHostsFromEnv({
+      NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
+      META_REDIRECT_URI: process.env.META_REDIRECT_URI,
+      NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
+    }) ?? [];
+  return isOwnAppUrl(websiteUrl, ownHosts)
+    ? "Alamat ini adalah website LINOE sendiri. Isi dengan website/toko Anda, atau kosongkan."
+    : null;
 }
 
 /** "id, my, sg" -> ["ID","MY","SG"], de-duplicated, blanks dropped. */
@@ -70,6 +89,8 @@ export async function createProductAction(
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Data tidak valid" };
   }
+  const ownUrlError = ownWebsiteUrlError(parsed.data.websiteUrl);
+  if (ownUrlError) return { error: ownUrlError };
 
   const session = await requireSessionContext();
   const supabase = await createClient();
@@ -169,6 +190,8 @@ export async function updateProductAction(
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Data tidak valid" };
   }
+  const ownUrlError = ownWebsiteUrlError(parsed.data.websiteUrl);
+  if (ownUrlError) return { error: ownUrlError };
 
   const session = await requireSessionContext();
   const supabase = await createClient();
