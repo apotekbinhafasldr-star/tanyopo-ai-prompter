@@ -1,0 +1,5 @@
+# Probe-name prefixes whose AFTER result must be "permission denied" (SQLSTATE 42501) once Phase 1 is applied.
+# Every other probe (reads, existing app flows, service_role, cron, webhook, demo, queue, ai_jobs) must be IDENTICAL before/after.
+anon.
+closed.
+truncate.
