@@ -4,6 +4,7 @@ import { requireSessionContext } from "@/services/session";
 import { createClient } from "@/lib/supabase/server";
 import { PromoteWizard } from "@/features/promote/promote-wizard";
 import { QuickPromoteWizard } from "@/features/promote/quick-promote-wizard";
+import { resolveOwnHostsFromEnv, safeWebsiteDefault } from "@/lib/campaigns/purchase-destination";
 
 export const metadata: Metadata = { title: "Promote — LINOE" };
 
@@ -74,6 +75,18 @@ export default async function PromotePage({
     .eq("tenant_id", session.tenantId)
     .order("created_at", { ascending: false });
 
+  // The product's stored website_url is only a SUGGESTION for the destination field. Validate it on the
+  // server and drop anything unusable (notably LINOE's own address) so the field starts empty instead.
+  const ownHosts = resolveOwnHostsFromEnv({
+    NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
+    META_REDIRECT_URI: process.env.META_REDIRECT_URI,
+    NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
+  });
+  const productOptions = (products ?? []).map((p) => ({
+    ...p,
+    website_url: safeWebsiteDefault(p.website_url, ownHosts),
+  }));
+
   const { data: brand } = await supabase
     .from("prompter_brand_profiles")
     .select("whatsapp_number")
@@ -106,9 +119,9 @@ export default async function PromotePage({
         ) : null}
       </div>
       {isAdvanced ? (
-        <PromoteWizard products={products ?? []} preselectedProductId={preselectedProductId} brandWhatsapp={brandWhatsapp} />
+        <PromoteWizard products={productOptions} preselectedProductId={preselectedProductId} brandWhatsapp={brandWhatsapp} />
       ) : (
-        <QuickPromoteWizard products={products ?? []} preselectedProductId={preselectedProductId} brandWhatsapp={brandWhatsapp} />
+        <QuickPromoteWizard products={productOptions} preselectedProductId={preselectedProductId} brandWhatsapp={brandWhatsapp} />
       )}
     </div>
   );

@@ -127,6 +127,17 @@ export function validateWebsiteUrl(raw: unknown, ownHosts: readonly string[] | n
   return ok(result.value);
 }
 
+/**
+ * Pre-fill value for the wizard's website field, derived from a product's stored website_url.
+ * Only a URL that passes the full website validation (which includes LINOE's own hosts, with or
+ * without environment configuration) is offered; anything else yields null so the field stays empty.
+ */
+export function safeWebsiteDefault(raw: string | null | undefined, ownHosts: readonly string[] | null): string | null {
+  if (typeof raw !== "string" || raw.trim().length === 0) return null;
+  const result = validateWebsiteUrl(raw, ownHosts);
+  return result.ok ? result.value : null;
+}
+
 // ---------------------------------------------------------------------------
 // Build / read
 // ---------------------------------------------------------------------------
