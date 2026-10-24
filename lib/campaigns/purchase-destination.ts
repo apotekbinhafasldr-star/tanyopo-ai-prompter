@@ -84,7 +84,8 @@ export function normalizeIndonesianWhatsapp(raw: unknown): DestinationResult<str
 
   // Indonesian mobile numbers start with 8 (after the country/trunk prefix); 9–12 national digits.
   if (!/^8[0-9]{8,11}$/.test(national)) return fail(WA_INVALID);
-  if (/^(\d)\1+$/.test(national)) return fail(WA_INVALID);
+  // Obvious placeholders such as 08111111111 or 0812222222: seven or more identical digits in a row.
+  if (/(\d)\1{6,}/.test(national)) return fail(WA_INVALID);
 
   return ok(`62${national}`);
 }

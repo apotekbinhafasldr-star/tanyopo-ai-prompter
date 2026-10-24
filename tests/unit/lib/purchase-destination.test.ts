@@ -14,6 +14,7 @@ import {
 import { BUDGET_WRITE_ENABLED_PLATFORMS } from "@/lib/campaigns/external-budget-guard";
 import { buildCampaignProposalPrompt } from "@/lib/ai/prompts";
 import { selectCandidate } from "@/schemas/ai/campaign-proposal";
+import { primaryGoals } from "@/schemas/onboarding";
 import { promoteWizardSchema, quickPromoteSchema } from "@/schemas/campaign";
 
 const OWN = ["linoe.example.com", "abcd.supabase.co"];
@@ -98,7 +99,7 @@ describe("build / form contract", () => {
   });
   it("never trusts a client supplied link: the link is derived from value", () => {
     const r = buildPurchaseDestination({ type: "WEBSITE", value: "https://tokosaya.com", link: "https://evil.com" } as never, OWN);
-    expect(r.ok && r.value.link).toBe("https://tokosaya.com/");
+    expect(r.ok && r.value.link).toBe("https://tokosaya.com");
   });
 });
 
@@ -174,7 +175,7 @@ describe("AI prompt", () => {
 });
 
 describe("schemas / safety invariants", () => {
-  const base = { productId: "6f1c2f3e-1f2a-4b6e-9c1d-0a1b2c3d4e5f", objective: "SALES", channels: ["FACEBOOK"], dailyBudget: 1 };
+  const base = { productId: "6f1c2f3e-1f2a-4b6e-9c1d-0a1b2c3d4e5f", objective: primaryGoals[0].value, channels: ["FACEBOOK"], dailyBudget: 1 };
   it("old payloads without destination fields still parse", () => {
     expect(quickPromoteSchema.safeParse({ ...base }).success).toBe(true);
     expect(promoteWizardSchema.safeParse({ ...base }).success).toBe(true);
