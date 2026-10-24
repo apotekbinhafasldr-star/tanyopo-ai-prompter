@@ -2,7 +2,8 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { z } from "zod";
-import { routeStructuredGeneration, AIRoutingNotConfiguredError } from "@/lib/ai/router";
+import { routeStructuredGeneration, isAiRoutingConfigured, AIRoutingNotConfiguredError } from "@/lib/ai/router";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { AIProviderError } from "@/lib/ai/provider";
 import { TASK_CLASS_BY_JOB_TYPE } from "@/lib/ai/task-classes";
 import { getOrCreateSubscription } from "@/services/billing";
@@ -14,6 +15,41 @@ interface CreateAiJobIfEntitledRow {
   reason: string | null;
   used_count: number;
   allowance: number;
+}
+
+const AI_NOT_CONFIGURED_MESSAGE =
+  "AI belum dikonfigurasi. Tambahkan OPENAI_API_KEY atau ANTHROPIC_API_KEY untuk mengaktifkan fitur ini.";
+
+/**
+ * Releases the quota unit of a job whose model call could not even start.
+ * Server-side only; never exposed to clients and never callable with another
+ * tenant's job id (the delete is filtered by tenant AND id AND PROCESSING).
+ */
+async function releaseUnconfiguredJob(
+  supabase: SupabaseClient<Database>,
+  tenantId: string,
+  jobId: string,
+): Promise<void> {
+  const admin = createAdminClient();
+  if (admin) {
+    const { error } = await admin
+      .from("prompter_ai_jobs")
+      .delete()
+      .eq("id", jobId)
+      .eq("tenant_id", tenantId)
+      .eq("status", "PROCESSING");
+    if (!error) return;
+  }
+
+  await supabase
+    .from("prompter_ai_jobs")
+    .update({
+      status: "FAILED",
+      error: "AI belum dikonfigurasi.",
+      error_category: "CONFIG",
+      completed_at: new Date().toISOString(),
+    })
+    .eq("id", jobId);
 }
 
 /** User-facing Indonesian text for each `reason` code
@@ -30,6 +66,15 @@ function describeEntitlementBlock(row: CreateAiJobIfEntitledRow): string {
     case "NO_SUBSCRIPTION":
     case "NO_TENANT":
       return "Akun Anda belum memiliki data langganan yang valid. Silakan muat ulang halaman atau hubungi dukungan.";
+    // Role policy (migration 20261021120000, PR #48): a permission problem, not a plan or quota problem.
+    case "ROLE_NOT_ALLOWED":
+      return "Fitur AI LINOE hanya dapat digunakan oleh Owner atau Marketing.";
+    // Fail-closed entitlement (no plan row / NULL allowance): the feature is not available, not "over quota".
+    case "ENTITLEMENT_NOT_CONFIGURED":
+      return "Fitur AI belum tersedia atau belum dikonfigurasi untuk akun Anda. Silakan hubungi dukungan.";
+    case "INVALID_INPUT":
+    case "INVALID_JOB_TYPE":
+      return "Permintaan AI tidak valid. Periksa input Anda lalu coba lagi.";
     default:
       return "Akses AI tidak diizinkan untuk paket Anda saat ini.";
   }
@@ -73,6 +118,14 @@ export async function runAiJob<T>(params: RunAiJobParams<T>): Promise<RunAiJobRe
   // audit use but no longer trusted by this function.
   const { supabase, tenantId, jobType, schema, system, prompt, inputReference } = params;
   const taskClass = TASK_CLASS_BY_JOB_TYPE[jobType];
+
+  // P0 trial-security: AI configuration is checked BEFORE a job is created.
+  // A job row consumes quota and clients can no longer delete rows from
+  // prompter_ai_jobs (see migration 20261019100000), so an unconfigured
+  // deployment must never create one in the first place.
+  if (!isAiRoutingConfigured()) {
+    return { ok: false, error: AI_NOT_CONFIGURED_MESSAGE, jobId: null };
+  }
 
   // Ensures a subscription row exists (lazily starting a new tenant's
   // trial on first access) before the atomic entitlement check below —
@@ -142,17 +195,14 @@ export async function runAiJob<T>(params: RunAiJobParams<T>): Promise<RunAiJobRe
     };
   } catch (err) {
     if (err instanceof AIRoutingNotConfiguredError) {
-      // Nothing configured at all — this isn't a failed generation, it's
-      // a NOT_CONFIGURED state. No job row should exist for it — the atomic
-      // RPC above already consumed one unit of the tenant's allowance to
-      // create it, so it's deleted here rather than left as a misleading
-      // FAILED row for a feature nobody tried to use.
-      await supabase.from("prompter_ai_jobs").delete().eq("id", jobId);
-      return {
-        ok: false,
-        error: "AI belum dikonfigurasi. Tambahkan OPENAI_API_KEY atau ANTHROPIC_API_KEY untuk mengaktifkan fitur ini.",
-        jobId: null,
-      };
+      // Defensive only: isAiRoutingConfigured() above makes this unreachable
+      // in practice. If it ever happens, release the quota unit the atomic RPC
+      // already consumed. Clients cannot DELETE job rows (P0-1), so this goes
+      // through the server-only admin client, scoped to this tenant's own row.
+      // If the admin client is unavailable the row is closed as FAILED/CONFIG
+      // instead of being left in PROCESSING.
+      await releaseUnconfiguredJob(supabase, tenantId, jobId);
+      return { ok: false, error: AI_NOT_CONFIGURED_MESSAGE, jobId: null };
     }
 
     const message = err instanceof Error ? err.message : "AI gagal memproses permintaan.";

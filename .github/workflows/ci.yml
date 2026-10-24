@@ -82,3 +82,177 @@ jobs:
 
       - name: PostgreSQL concurrency tests (C1-C8, C10, negative controls)
         run: npx vitest run -c vitest.pg.config.ts
+
+  # S1 (trial + AI quota security): behaviour proof on a throw-away postgres:17 (production is 17.x) with SYNTHETIC data.
+  # Phases: holes reproduced "before", fixed "after", idempotent apply, 45+45 parallel quota calls, fail-closed rollback,
+  # and integration with PR #48 (both orders) and PR #46 when their refs can be fetched (best effort, never a secret).
+  # supabase/tests/s1-trial-quota/run-local.sh refuses any non-local host and any production credential variable.
+  s1-trial-quota-sql:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: linoe_ci
+          POSTGRES_PASSWORD: linoe_ci_password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U linoe_ci -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: linoe_ci
+      PGPASSWORD: linoe_ci_password
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Ensure psql client
+        run: command -v psql || (sudo apt-get update && sudo apt-get install -y postgresql-client)
+
+      - name: Fetch PR #31, #46 and #48 for the legacy-rollback control and the integration variants (best effort)
+        run: |
+          set +e
+          git fetch -q origin pull/31/head:refs/tmp/pr31
+          for n in 46 48; do
+            if git fetch -q origin pull/$n/head:refs/remotes/pr/$n; then
+              mkdir -p "$RUNNER_TEMP/pr$n"
+              git archive refs/remotes/pr/$n supabase | tar -x -C "$RUNNER_TEMP/pr$n"
+              echo "PR${n}_DIR=$RUNNER_TEMP/pr$n" >> "$GITHUB_ENV"
+            else
+              echo "::warning::PR #$n ref not fetchable; its integration variant is skipped"
+            fi
+          done
+
+      - name: S1 trial + AI quota SQL tests (PostgreSQL 17 required)
+        env:
+          REQUIRE_PG_MAJOR: "17"
+        run: bash supabase/tests/s1-trial-quota/run-local.sh
+
+  # PR #48's COMPLETE AI-jobs-guard suite on PostgreSQL 17 (production is 17.x; #48's own CI job runs 16).
+  # Nothing of PR #48 is modified: its head is fetched read-only, its own run-local.sh is executed unchanged from the
+  # fetched tree, together with its #31/#44/#45/#46 integration variants. Unlike the best-effort fetches above,
+  # every ref here is REQUIRED: a missing ref fails the job instead of silently skipping a variant.
+  # Remove or fold into #48's own job (matrix 16/17) once #48 is approved.
+  ai-jobs-guard-pg17:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: linoe_ci
+          POSTGRES_PASSWORD: linoe_ci_password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U linoe_ci -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: linoe_ci
+      PGPASSWORD: linoe_ci_password
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Ensure psql client
+        run: command -v psql || (sudo apt-get update && sudo apt-get install -y postgresql-client)
+
+      - name: Require PostgreSQL 17
+        run: |
+          v=$(psql -d postgres -Atc "show server_version_num")
+          echo "server_version_num=$v"
+          [ $((v/10000)) = 17 ] || { echo "::error::expected PostgreSQL 17, got $v"; exit 1; }
+
+      - name: Fetch PR #48 (suite under test) and #31/#44/#45/#46 (its integration variants) - all required
+        run: |
+          set -e
+          for n in 31 44 45 46 48; do
+            git fetch -q origin pull/$n/head:refs/remotes/pr/$n
+            mkdir -p "$RUNNER_TEMP/pr$n"
+            git archive refs/remotes/pr/$n supabase | tar -x -C "$RUNNER_TEMP/pr$n"
+          done
+          echo "PR31_DIR=$RUNNER_TEMP/pr31" >> "$GITHUB_ENV"
+          echo "PR44_DIR=$RUNNER_TEMP/pr44" >> "$GITHUB_ENV"
+          echo "PR45_DIR=$RUNNER_TEMP/pr45" >> "$GITHUB_ENV"
+          echo "PR46_DIR=$RUNNER_TEMP/pr46" >> "$GITHUB_ENV"
+          echo "PR48 head: $(git rev-parse refs/remotes/pr/48)"
+
+      - name: PR #48 AI jobs quota guard suite on PostgreSQL 17 (unchanged script from the fetched #48 tree)
+        run: |
+          set -o pipefail
+          bash "$RUNNER_TEMP/pr48/supabase/tests/ai-jobs-guard/run-local.sh" 2>&1 | tee "$RUNNER_TEMP/ajg17.txt"
+          grep -q '^ALL PASSED' "$RUNNER_TEMP/ajg17.txt"
+          if grep -q '^SKIP' "$RUNNER_TEMP/ajg17.txt"; then echo "::error::a variant was skipped"; exit 1; fi
+          for v in main pr31 all; do grep -q "^PASS: $v: " "$RUNNER_TEMP/ajg17.txt" || { echo "::error::variant $v did not run"; exit 1; }; done
+
+  # S1 migration wrapper (supabase/tools/s1-wrapper): generator unit tests + the wrapper executed against a SYNTHETIC
+  # PostgreSQL 17 (ledger shape of production, fake versions). Nothing here can reach Supabase or any shared database.
+  s1-wrapper-pg17:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: linoe_ci
+          POSTGRES_PASSWORD: linoe_ci_password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U linoe_ci -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: linoe_ci
+      PGPASSWORD: linoe_ci_password
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Ensure psql client
+        run: command -v psql || (sudo apt-get update && sudo apt-get install -y postgresql-client)
+
+      - name: Manifest checksums match the three S1 migration files
+        run: node supabase/tools/s1-wrapper/generate.mjs verify
+
+      - name: Manifest lock matches the tested commit (when that commit is reachable)
+        run: |
+          set -e
+          c=$(node -e 'process.stdout.write(require("./supabase/tools/s1-wrapper/manifest.json").lockedAtCommit)')
+          if git cat-file -e "$c^{commit}" 2>/dev/null; then
+            for f in supabase/migrations/20261019100000_prompter_p0_ai_jobs_lockdown.sql supabase/migrations/20261019100100_prompter_p0_subscription_trial_insert_guard.sql supabase/migrations/20261019100200_prompter_p0_plan_entitlements_lockdown.sql; do
+              a=$(git show "$c:$f" | sha256sum | cut -d' ' -f1); b=$(sha256sum "$f" | cut -d' ' -f1)
+              [ "$a" = "$b" ] || { echo "::error::$f differs from lockedAtCommit $c"; exit 1; }
+            done
+            echo "S1 files identical to lockedAtCommit $c"
+          else
+            echo "::warning::lockedAtCommit $c is not reachable (history rewritten or squashed); relying on manifest checksums only"
+          fi
+
+      - name: Generator unit tests
+        run: node --test supabase/tests/s1-wrapper/generator.test.mjs
+
+      - name: S1 wrapper on synthetic PostgreSQL 17 (required)
+        env:
+          REQUIRE_PG_MAJOR: "17"
+        run: |
+          set -o pipefail
+          bash supabase/tests/s1-wrapper/run-local.sh 2>&1 | tee "$RUNNER_TEMP/s1w.txt"
+          grep -q '^ALL S1 WRAPPER CHECKS PASSED' "$RUNNER_TEMP/s1w.txt"
+          if grep -q '^FAIL' "$RUNNER_TEMP/s1w.txt"; then exit 1; fi

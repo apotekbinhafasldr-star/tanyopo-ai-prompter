@@ -1,0 +1,21 @@
+{
+  "_comment": "LOCKED source checksums for the three S1 migrations. The generator refuses any other content. Editing a hash here is a deliberate, reviewable act; it must never be done to 'make a file pass'. lockedAtCommit = the tested commit at which these exact bytes were verified.",
+  "lockedAtCommit": "57d91f60b66522853405946a77dafcc5ee932414",
+  "files": {
+    "20261019100000": {
+      "file": "20261019100000_prompter_p0_ai_jobs_lockdown.sql",
+      "sha256": "0da43286f1e8a60123bd0272ab1e668146bb5bd37a90059c725d33f369d8ba66",
+      "bytes": 2049
+    },
+    "20261019100100": {
+      "file": "20261019100100_prompter_p0_subscription_trial_insert_guard.sql",
+      "sha256": "72389edca8260661b8b6905ff5adbc59929e450ee6ea943bd6975c47059de741",
+      "bytes": 5146
+    },
+    "20261019100200": {
+      "file": "20261019100200_prompter_p0_plan_entitlements_lockdown.sql",
+      "sha256": "e483750a4af17982e0d9ad2b2d874871d33e558e76cba9631bf30522647bdd12",
+      "bytes": 1650
+    }
+  }
+}

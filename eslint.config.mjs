@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Standalone node/SQL tooling (no npm deps), tested by its own CI job, not part of the Next.js app.
+    "supabase/**",
   ]),
 ]);
 

@@ -1,0 +1,22 @@
+-- S1 (trial + AI quota security), part 3 of 3: plan entitlement table must be read-only for app roles.
+--
+-- Evidence (production catalog, read-only, 2026-10-19/21): anon and authenticated hold
+-- INSERT/UPDATE/DELETE/TRUNCATE on public.prompter_plan_entitlements. RLS has only a SELECT policy, so
+-- INSERT/UPDATE/DELETE are already blocked by RLS, but TRUNCATE ignores RLS. After `truncate
+-- prompter_plan_entitlements` the quota function (still the B10 body on production) finds no entitlement
+-- row, `v_used >= null` is NULL and every job is granted: unlimited AI for EVERY tenant. Reaching TRUNCATE
+-- needs a SQL-executing path (PostgREST has no TRUNCATE verb), but the privilege has no legitimate user.
+--
+-- Scope: privileges on this LINOE-owned table ONLY. REVOKE-only, idempotent, no data change.
+--
+-- DELIBERATELY NOT HERE: this migration does NOT (re)define fn_create_ai_job_if_entitled(). The final,
+-- guarded definition of that function (role check, input validation, fail-closed ENTITLEMENT_NOT_CONFIGURED)
+-- lives in the separate AI-jobs quota guard (PR #48). A second CREATE OR REPLACE here would silently
+-- overwrite that guard whenever the two are applied in the "wrong" order. With TRUNCATE revoked, only the
+-- table owner / service_role can empty the table, which closes the exploit path on its own; the in-function
+-- fail-closed block is defence in depth that arrives with PR #48.
+--
+-- Rollback: supabase/rollback/20261019100000_prompter_s1_trial_ai_quota.down.sql (fail-closed; cannot restore
+-- this privilege).
+
+revoke insert, update, delete, truncate on public.prompter_plan_entitlements from anon, authenticated;
