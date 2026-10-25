@@ -26,7 +26,7 @@ import {
 import { getTenantChannelPerformance } from "@/services/channel-performance";
 import { getOrCreateBudgetPolicy, getMonthToDateSpend, checkBudgetGuard } from "@/services/budget-guard";
 import { parseLocalDateTimeInZone } from "@/lib/scheduling/recommend-time";
-import type { Json } from "@/types/database";
+import type { ApprovalStatus, Json } from "@/types/database";
 import { campaignHasManualAdMetrics } from "@/features/campaigns/manual-metrics-actions";
 import { PROPOSAL_CONFLICT_MESSAGE, writeCampaignIfUnchanged } from "@/services/campaign-proposal-write";
 import {
@@ -832,7 +832,7 @@ export async function recoverBlockedScheduledCampaignAction(
 
   // 0) every old approval (APPROVED, or a stray PENDING) must be declared void, confirmed by the database,
   //    BEFORE anything else changes. On any doubt nothing else is touched and the campaign stays blocked.
-  const OLD_APPROVALS = ["APPROVED", "PENDING"];
+  const OLD_APPROVALS: ApprovalStatus[] = ["APPROVED", "PENDING"];
   const { data: oldApprovals, error: oldApprovalsError } = await supabase
     .from("prompter_approvals")
     .select("id")
