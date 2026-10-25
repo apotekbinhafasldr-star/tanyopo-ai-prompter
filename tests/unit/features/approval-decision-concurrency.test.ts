@@ -402,13 +402,17 @@ describe("cancelSubmissionAction — H1", () => {
   it("loses a race to an approval (master flips to SCHEDULED just before the write): nothing else is changed", async () => {
     make(seed({ channels: [{ id: "c1", tenant_id: "t1", master_campaign_id: M, channel: "FACEBOOK", status: "FAILED" }] }), {
       beforeExec: ({ table, op, db: d }) => {
-        if (table === "prompter_master_campaigns" && op === "update") d.tables.prompter_master_campaigns[0].status = "SCHEDULED";
+        // The approve decision wins just before the cancel's expire step: approval APPROVED + master SCHEDULED.
+        if (table === "prompter_approvals" && op === "update") {
+          d.tables.prompter_master_campaigns[0].status = "SCHEDULED";
+          d.tables.prompter_approvals[0].status = "APPROVED";
+        }
       },
     });
     await cancelSubmissionAction(form());
     expect(statuses("prompter_master_campaigns")).toEqual(["SCHEDULED"]);
     expect(statuses("prompter_channel_campaigns")).toEqual(["FAILED"]);
-    expect(statuses("prompter_approvals")).toEqual(["PENDING"]);
+    expect(statuses("prompter_approvals")).toEqual(["APPROVED"]); // the cancel expired nothing and changed nothing
   });
 
   it("another tenant's campaign is not touched", async () => {

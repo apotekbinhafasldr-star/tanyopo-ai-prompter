@@ -576,6 +576,9 @@ export async function cancelSubmissionAction(formData: FormData): Promise<void> 
   if (typeof campaignId !== "string") return;
 
   const session = await requireSessionContext();
+  // Owner only, enforced on the server (the button is also Owner-only). Production RLS lets only the Owner
+  // update an approval, so any other role would leave a PENDING approval behind. Refused before any read/write.
+  if (session.role !== "owner") return;
   const supabase = await createClient();
 
   const { data: campaign } = await supabase
@@ -590,22 +593,44 @@ export async function cancelSubmissionAction(formData: FormData): Promise<void> 
     return;
   }
 
-  // Conditional on AWAITING_APPROVAL and exactly one row. Losing a race (the
-  // campaign was approved or changed meanwhile) changes NOTHING else.
+  // Expire the PENDING approvals FIRST and verify the row count (RLS makes a refused update match 0 rows
+  // without an error). If that fails nothing else changes: the campaign stays AWAITING_APPROVAL (still
+  // visible as not cancelled, never reported as success) and can be cancelled again.
+  const PENDING: ApprovalStatus[] = ["PENDING"];
+  const { data: pending, error: pendingError } = await supabase
+    .from("prompter_approvals")
+    .select("id")
+    .eq("tenant_id", session.tenantId)
+    .eq("resource_type", "prompter_master_campaigns")
+    .eq("resource_id", campaignId)
+    .in("status", PENDING);
+  if (pendingError || !Array.isArray(pending)) {
+    revalidatePath(`/campaigns/${campaignId}`);
+    return;
+  }
+  if (pending.length > 0) {
+    const { data: expired, error: expireError } = await supabase
+      .from("prompter_approvals")
+      .update({ status: "EXPIRED" })
+      .eq("tenant_id", session.tenantId)
+      .eq("resource_type", "prompter_master_campaigns")
+      .eq("resource_id", campaignId)
+      .in("status", PENDING)
+      .select("id");
+    if (expireError || !Array.isArray(expired) || expired.length !== pending.length) {
+      revalidatePath(`/campaigns/${campaignId}`);
+      return;
+    }
+  }
+
+  // Conditional on AWAITING_APPROVAL and exactly one row. Losing a race changes NOTHING else (an expired
+  // approval can never launch, so this is fail-closed).
   const reverted = await transitionMasterCampaign(supabase, session.tenantId, campaignId, "CANCEL");
   if (reverted !== "moved") {
     revalidatePath(`/campaigns/${campaignId}`);
     return;
   }
   await mirrorChannelCampaignStatus(supabase, session.tenantId, campaignId, "CANCEL");
-
-  await supabase
-    .from("prompter_approvals")
-    .update({ status: "EXPIRED" })
-    .eq("tenant_id", session.tenantId)
-    .eq("resource_type", "prompter_master_campaigns")
-    .eq("resource_id", campaignId)
-    .eq("status", "PENDING");
 
   revalidatePath(`/campaigns/${campaignId}`);
   revalidatePath("/approvals");

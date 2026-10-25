@@ -592,7 +592,7 @@ describe("P1-1 recovery of a blocked SCHEDULED campaign", () => {
   });
 });
 
-describe("cancelSubmissionAction under production RLS (finding for the Founder, not changed here)", () => {
+describe("cancelSubmissionAction (Owner-only, fail-closed under production RLS)", () => {
   const pending = (): Row => ({
     id: "ap1",
     tenant_id: "t1",
@@ -620,21 +620,73 @@ describe("cancelSubmissionAction under production RLS (finding for the Founder, 
     expect(db.tables.prompter_approvals[0].status).toBe("EXPIRED");
   });
 
-  it("KNOWN GAP: if a Marketing user reaches the server action (the button is Owner-only), the approval stays PENDING", async () => {
-    state.role = "marketing";
+  it.each(["marketing", "kasir", "apoteker", "admin_gudang", "hr"])("role %s is refused before any read or write", async (role) => {
+    state.role = role;
     make(awaiting());
     await cancelSubmissionAction(form({ campaignId: M }));
-    expect(master().status).toBe("DRAFT");
-    expect(db.tables.prompter_approvals[0].status).toBe("PENDING"); // RLS refused the update silently
+    expect(db.log).toHaveLength(0);
+    expect(master().status).toBe("AWAITING_APPROVAL");
+    expect(db.tables.prompter_approvals[0].status).toBe("PENDING");
   });
 
-  it("a leftover PENDING approval blocks the destination edit with an actionable message (fail closed)", async () => {
-    state.role = "marketing";
+  it("another tenant cannot cancel this campaign", async () => {
+    state.tenantId = "t-other";
     make(awaiting());
     await cancelSubmissionAction(form({ campaignId: M }));
-    const r = await updateCampaignDestinationAction(M, DEST_INIT, dest("WEBSITE", "https://tokosaya.com/a"));
-    expect(r.saved).toBe(false);
-    expect(r.error).toMatch(/Pusat Persetujuan/);
-    expect(proposal().purchase_destination).toBeUndefined();
+    expect(master().status).toBe("AWAITING_APPROVAL");
+    expect(db.tables.prompter_approvals[0].status).toBe("PENDING");
+    expect(db.log.some((l) => l.op === "update")).toBe(false);
+  });
+
+  it("no PENDING approval is left after a successful cancel (including stray ones)", async () => {
+    make(
+      seed({
+        master: { status: "AWAITING_APPROVAL" },
+        channels: [{ id: "c1", tenant_id: "t1", master_campaign_id: M, channel: "FACEBOOK", status: "AWAITING_APPROVAL", external_campaign_id: null }],
+        approvals: [pending(), { ...pending(), id: "ap2" }],
+      }),
+    );
+    await cancelSubmissionAction(form({ campaignId: M }));
+    expect(master().status).toBe("DRAFT");
+    expect(db.tables.prompter_approvals.filter((a) => a.status === "PENDING")).toHaveLength(0);
+  });
+
+  it("a failed expire (error) is not success: campaign stays awaiting, nothing else changes", async () => {
+    db = createFakeDb(awaiting(), { failWhen: (c) => (c.table === "prompter_approvals" && c.op === "update" ? "boom" : null) });
+    await cancelSubmissionAction(form({ campaignId: M }));
+    expect(master().status).toBe("AWAITING_APPROVAL");
+    expect(db.tables.prompter_channel_campaigns.map((r) => r.status)).toEqual(["AWAITING_APPROVAL", "AWAITING_APPROVAL"]);
+    expect(db.tables.prompter_approvals[0].status).toBe("PENDING");
+  });
+
+  it("RLS silently refusing the expire (0 rows) is not success either", async () => {
+    db = createFakeDb(awaiting(), { denyWhen: (c) => c.table === "prompter_approvals" && c.op === "update" });
+    await cancelSubmissionAction(form({ campaignId: M }));
+    expect(master().status).toBe("AWAITING_APPROVAL");
+    expect(db.tables.prompter_approvals[0].status).toBe("PENDING");
+  });
+
+  it("after a failed cancel the retry succeeds", async () => {
+    let fail = true;
+    db = createFakeDb(awaiting(), { failWhen: (c) => (fail && c.table === "prompter_approvals" && c.op === "update" ? "boom" : null) });
+    await cancelSubmissionAction(form({ campaignId: M }));
+    fail = false;
+    await cancelSubmissionAction(form({ campaignId: M }));
+    expect(master().status).toBe("DRAFT");
+    expect(db.tables.prompter_approvals[0].status).toBe("EXPIRED");
+  });
+
+  it("a campaign approved concurrently is not cancelled and its approval stays valid", async () => {
+    make(awaiting());
+    injectOnce(
+      (c) => c.table === "prompter_approvals" && c.op === "update",
+      () => {
+        db.tables.prompter_approvals[0].status = "APPROVED";
+        bump({ status: "SCHEDULED" });
+      },
+    );
+    await cancelSubmissionAction(form({ campaignId: M }));
+    expect(master().status).toBe("SCHEDULED");
+    expect(db.tables.prompter_approvals[0].status).toBe("APPROVED");
   });
 });
