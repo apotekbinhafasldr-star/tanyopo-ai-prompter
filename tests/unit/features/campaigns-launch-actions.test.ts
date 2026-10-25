@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import { buildPurchaseDestination } from "@/lib/campaigns/purchase-destination";
 import {
   makeAdminStorage,
   makePreflightFixtures,
@@ -745,7 +746,9 @@ describe("launchChannelCampaignAction — P0 budget launch safety", () => {
 
 describe("launchChannelCampaignAction — approval destination snapshot", () => {
   const WEB = { version: 1, type: "WEBSITE", value: "https://tokosaya.com/produk", link: "https://tokosaya.com/produk" };
-  const WA = { version: 1, type: "WHATSAPP", value: "081234567890", link: "https://wa.me/6281234567890" };
+  const builtWa = buildPurchaseDestination({ type: "WHATSAPP", value: "081234567890" }, null);
+  if (!builtWa.ok) throw new Error("fixture");
+  const WA = builtWa.value as { version: number; type: string; value: string; link: string };
   const proposal = (d: unknown) => ({ headline: "Diskon", primary_text: "Beli", cta: "Beli Sekarang", purchase_destination: d });
   const snapOf = (d: typeof WEB) => ({
     destination_snapshot: { version: 1, kind: "destination", type: d.type, value: d.value, link: d.link },
@@ -777,7 +780,7 @@ describe("launchChannelCampaignAction — approval destination snapshot", () => 
 
     expect(result.error).toBeNull();
     const creative = (connectorMock.createCreative.mock.calls[0] as unknown[])[2] as { linkUrl: string };
-    expect(creative.linkUrl).toBe("https://wa.me/6281234567890");
+    expect(creative.linkUrl).toBe(WA.link);
   });
 
   it("refuses a destination changed after approval, before the claim and before any platform call", async () => {

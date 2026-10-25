@@ -63,8 +63,11 @@ describe("checkApprovalDestinationSnapshot", () => {
     expect(checkApprovalDestinationSnapshot({ [DESTINATION_SNAPSHOT_KEY]: bad }, prop(WEB), OWN).ok).toBe(false);
   });
   it("a tampered current destination that is now invalid is rejected", () => {
-    const tampered = { ...WEB, link: "http://evil.com" };
-    expect(checkApprovalDestinationSnapshot(ctx(prop(WEB)), prop(tampered), OWN).ok).toBe(false);
+    // The link is always rebuilt from `value`, so a forged link alone changes nothing; a forged value does.
+    const forgedLink = { ...WEB, link: "http://evil.com" };
+    expect(checkApprovalDestinationSnapshot(ctx(prop(WEB)), prop(forgedLink), OWN).ok).toBe(true);
+    const forgedValue = { ...WEB, value: "http://evil.com", link: "http://evil.com" };
+    expect(checkApprovalDestinationSnapshot(ctx(prop(WEB)), prop(forgedValue), OWN).ok).toBe(false);
   });
 });
 

@@ -38,7 +38,8 @@ function build(opts: {
   updatedRows?: { id: string }[];
 }) {
   const eqCalls: [string, unknown][] = [];
-  const update = vi.fn((_v: unknown) => {
+  const update = vi.fn((values: unknown) => {
+    void values;
     const b: Record<string, unknown> = {};
     b.eq = (c: string, v: unknown) => {
       eqCalls.push([c, v]);
@@ -47,8 +48,8 @@ function build(opts: {
     b.select = async () => ({ data: opts.updatedRows ?? [{ id: "c1" }], error: null });
     return b;
   });
-  const approvalInsert = vi.fn(async (_v: unknown) => ({ error: null }));
-  const auditInsert = vi.fn(async (_v: unknown) => ({ error: null }));
+  const approvalInsert = vi.fn(async (row: unknown) => (void row, { error: null }));
+  const auditInsert = vi.fn(async (row: unknown) => (void row, { error: null }));
   const selectEqs: [string, unknown][] = [];
   const from = vi.fn((table: string) => {
     if (table === "prompter_master_campaigns") {
