@@ -19,8 +19,6 @@ export const brand = {
   lockup: "LINOE by Tanyopo",
   shortName: "LINOE",
   parentCompany: "Tanyopo",
-  /** Full ecosystem/company name for legal-ish footer text. */
-  companyFull: "Tanyopo Labs",
   /** Logo mark initial/monogram fallback when the full mark can't render. */
   initial: "L",
   category: "AI Marketing & Growth Platform",

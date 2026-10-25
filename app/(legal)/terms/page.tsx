@@ -96,8 +96,11 @@ export default function TermsPage() {
               periode berjalan.
             </>,
             <>
-              Kebijakan pembatalan dan pengembalian dana ditetapkan terpisah dan diumumkan sebelum berlaku bagi Anda.
-              Sampai diumumkan, Syarat ini tidak menjanjikan pengembalian dana.
+              Ketentuan pembatalan dan pengembalian dana diatur dalam{" "}
+              <Link href="/refund" className="font-medium text-brand hover:underline">
+                Kebijakan Refund
+              </Link>
+              , yang merupakan bagian dari Syarat ini.
             </>,
           ]}
         />

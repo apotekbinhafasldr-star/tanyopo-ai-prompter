@@ -36,7 +36,7 @@ function readPreviewCredential(name: string): string | undefined {
 // Legal pages (/privacy, /terms, /data-deletion) must be readable without an
 // account: they are linked from registration, and platform reviewers (Meta,
 // TikTok, X) fetch them anonymously.
-const PUBLIC_PATHS = ["/", "/login", "/register", "/forgot-password", "/privacy", "/terms", "/data-deletion"];
+const PUBLIC_PATHS = ["/", "/login", "/register", "/forgot-password", "/privacy", "/terms", "/refund", "/data-deletion"];
 const AUTH_ONLY_PATHS = ["/login", "/register"];
 
 export function isPublicAsset(pathname: string) {

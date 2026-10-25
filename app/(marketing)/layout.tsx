@@ -2,6 +2,7 @@ import { MarketingHeader } from "@/features/marketing/marketing-header";
 import { LinoeLogo } from "@/components/brand/linoe-logo";
 import { brand } from "@/lib/brand";
 import { LegalLinks } from "@/features/legal/legal-links";
+import { LEGAL } from "@/features/legal/legal-meta";
 
 export default function MarketingLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -16,9 +17,19 @@ export default function MarketingLayout({ children }: { children: React.ReactNod
           <LinoeLogo size="sm" variant="legacy" />
           <div className="flex flex-col gap-3">
             <LegalLinks />
+            <address className="not-italic">
+              <p className="font-medium text-foreground">{LEGAL.operator}</p>
+              <p>{LEGAL.location}</p>
+              <p>
+                Email:{" "}
+                <a href={`mailto:${LEGAL.contactEmail}`} className="hover:text-foreground hover:underline">
+                  {LEGAL.contactEmail}
+                </a>
+              </p>
+            </address>
             <p>
-              © {new Date().getFullYear()} {brand.companyFull}. {brand.lockup} — bagian dari
-              ekosistem Tanyopo, bersama UMKMpro AI.
+              © {new Date().getFullYear()} {LEGAL.operator}. {brand.lockup} — bagian dari ekosistem Tanyopo, bersama
+              UMKMpro AI.
             </p>
           </div>
         </div>

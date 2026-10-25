@@ -10,10 +10,13 @@ vi.mock("next/link", () => ({
   ),
 }));
 vi.mock("@/features/auth/actions", () => ({ registerAction: vi.fn() }));
+vi.mock("@/features/marketing/marketing-header", () => ({ MarketingHeader: () => null }));
 
 import PrivacyPage, { metadata as privacyMeta } from "@/app/(legal)/privacy/page";
 import TermsPage, { metadata as termsMeta } from "@/app/(legal)/terms/page";
 import DataDeletionPage, { metadata as deletionMeta } from "@/app/(legal)/data-deletion/page";
+import RefundPage, { metadata as refundMeta } from "@/app/(legal)/refund/page";
+import MarketingLayout from "@/app/(marketing)/layout";
 import { RegisterForm } from "@/features/auth/register-form";
 import { LegalLinks } from "@/features/legal/legal-links";
 import { LegalHeader } from "@/features/legal/legal-header";
@@ -27,6 +30,7 @@ afterEach(() => cleanup());
 const PAGES = [
   { name: "privacy", Page: PrivacyPage, meta: privacyMeta, path: "/privacy", h1: "Kebijakan Privasi" },
   { name: "terms", Page: TermsPage, meta: termsMeta, path: "/terms", h1: "Syarat & Ketentuan" },
+  { name: "refund", Page: RefundPage, meta: refundMeta, path: "/refund", h1: "Kebijakan Refund" },
   { name: "data-deletion", Page: DataDeletionPage, meta: deletionMeta, path: "/data-deletion", h1: "Penghapusan Data Pengguna" },
 ];
 
@@ -78,9 +82,9 @@ describe.each(PAGES)("/$name legal page", ({ Page, meta, path, h1 }) => {
     expect(text).not.toMatch(/(?<!tidak dapat )menjamin keamanan|keamanan (sempurna|mutlak) (terjamin|dijamin)/i);
   });
 
-  it("links to the other two legal pages", () => {
+  it("links to the other three legal pages", () => {
     render(<Page />);
-    for (const href of ["/privacy", "/terms", "/data-deletion"].filter((p) => p !== path)) {
+    for (const href of ["/privacy", "/terms", "/refund", "/data-deletion"].filter((p) => p !== path)) {
       expect(document.querySelector(`a[href="${href}"]`)).not.toBeNull();
     }
   });
@@ -100,7 +104,9 @@ describe("legal content accuracy", () => {
   it("terms do not promise ad results, refunds, or state production payment as on/off", () => {
     const text = pageText(TermsPage);
     expect(text).toMatch(/tidak\s+menjamin hasil iklan/);
-    expect(text).toMatch(/tidak menjanjikan pengembalian dana/);
+    // Refunds are governed by the dedicated policy, linked from the terms; the terms alone promise none.
+    expect(text).toContain("Kebijakan Refund");
+    expect(text).not.toMatch(/tidak menjanjikan pengembalian dana/);
     expect(text).not.toMatch(/belum diaktifkan|sudah aktif|telah diaktifkan/i);
     expect(text).not.toMatch(/Rp\s?\d/);
   });
@@ -175,9 +181,9 @@ describe("legal content accuracy", () => {
 });
 
 describe("legal links", () => {
-  it("LegalLinks points to all three pages", () => {
+  it("LegalLinks points to all four pages", () => {
     render(<LegalLinks />);
-    for (const href of ["/privacy", "/terms", "/data-deletion"]) {
+    for (const href of ["/privacy", "/terms", "/refund", "/data-deletion"]) {
       expect(document.querySelector(`a[href="${href}"]`)).not.toBeNull();
     }
   });
@@ -201,27 +207,39 @@ describe("legal links", () => {
     expect(screen.getByRole("button", { name: /Daftar Gratis/ })).toBeInTheDocument();
   });
 
-  it("the demo banner layout links to all three legal pages", () => {
+  it("the demo banner layout links to all four legal pages", () => {
     const src = readFileSync("app/demo/layout.tsx", "utf8");
     expect(src).toContain("LegalLinks");
     const { container } = render(<DemoLayout>{null}</DemoLayout>);
-    for (const href of ["/privacy", "/terms", "/data-deletion"]) {
+    for (const href of ["/privacy", "/terms", "/refund", "/data-deletion"]) {
       expect(container.querySelector(`a[href="${href}"]`)).not.toBeNull();
     }
   });
 
-  it("the landing footer links to all three legal pages", () => {
+  it("the landing footer links to all four legal pages and names the same operator, location and email as the legal pages", () => {
     const src = readFileSync("app/(marketing)/layout.tsx", "utf8");
     expect(src).toContain("<LegalLinks");
+    const { container } = render(<MarketingLayout>{null}</MarketingLayout>);
+    const footer = container.querySelector("footer")!;
+    for (const href of ["/privacy", "/terms", "/refund", "/data-deletion"]) {
+      expect(footer.querySelector(`a[href="${href}"]`), href).not.toBeNull();
+    }
+    expect(footer.textContent).toContain(LEGAL.operator);
+    expect(footer.textContent).toContain(LEGAL.location);
+    expect(footer.textContent).toContain(LEGAL.contactEmail);
+    expect(footer.textContent).not.toMatch(/Tanyopo Labs/);
+    // Nothing invented: the only address is the approved email, no phone number.
+    expect((footer.textContent ?? "").split(LEGAL.contactEmail).join("")).not.toContain("@");
+    expect(footer.textContent).not.toMatch(/\+?62\d{8,}|\b08\d{8,}/);
   });
 
   it("proxy.ts lists the legal paths as public (readable without login)", () => {
     const src = readFileSync("proxy.ts", "utf8");
     const line = src.split("\n").find((l) => l.startsWith("const PUBLIC_PATHS"))!;
-    for (const p of ["/privacy", "/terms", "/data-deletion"]) expect(line).toContain(`"${p}"`);
+    for (const p of ["/privacy", "/terms", "/refund", "/data-deletion"]) expect(line).toContain(`"${p}"`);
     // Legal paths are not auth-only: a signed-in user may still read them.
     const authOnly = src.split("\n").find((l) => l.startsWith("const AUTH_ONLY_PATHS"))!;
-    for (const p of ["/privacy", "/terms", "/data-deletion"]) expect(authOnly).not.toContain(p);
+    for (const p of ["/privacy", "/terms", "/refund", "/data-deletion"]) expect(authOnly).not.toContain(p);
   });
 });
 
@@ -342,5 +360,79 @@ describe("remediation guards", () => {
     expect(hero).not.toContain("sebelum tayang");
     // The hero image alt text must not claim automatic campaign execution either.
     expect(hero).not.toContain("menjalankan campaign");
+  });
+});
+
+describe("/refund policy content", () => {
+  const text = () => pageText(RefundPage);
+
+  it("keeps the 14-day free trial and does not treat it as a replacement for refund rights", () => {
+    expect(text()).toMatch(/14 hari/);
+    expect(text()).toMatch(/tidak menggantikan atau mengurangi hak refund/);
+  });
+
+  it("says active subscription payments are generally not refunded for a change of mind, within the law", () => {
+    expect(text()).toMatch(/umumnya tidak dikembalikan hanya karena Anda berubah pikiran/);
+    expect(text()).toMatch(/sepanjang hal itu diperbolehkan oleh hukum/);
+  });
+
+  it("allows refund review for duplicate payments, billing errors and undelivered service", () => {
+    expect(text()).toMatch(/Pembayaran ganda/);
+    expect(text()).toMatch(/Kesalahan penagihan/);
+    expect(text()).toMatch(/tidak diberikan sesuai ketentuan/);
+  });
+
+  it("lets customers cancel renewal, without automatically refunding the current period", () => {
+    expect(text()).toMatch(/membatalkan perpanjangan langganan/);
+    expect(text()).toMatch(/tidak otomatis mengembalikan pembayaran untuk periode yang sedang berjalan/);
+  });
+
+  it("keeps Indonesian consumer rights and sets no payout time or SLA", () => {
+    expect(text()).toMatch(/tidak menghapus atau mengurangi hak Anda sebagai konsumen/);
+    expect(text()).toMatch(/tidak menetapkan jangka waktu pencairan/);
+    expect(text()).not.toMatch(/\b\d+\s*(jam|hari kerja|x\s*24)/i);
+  });
+
+  it("does not claim an automatic refund feature and states payment is still sandbox", () => {
+    expect(text()).toMatch(/belum menyediakan fitur refund otomatis/);
+    expect(text()).toMatch(/sandbox/);
+    expect(text()).toMatch(/Belum ada penagihan atau pembayaran\s+riil/);
+  });
+
+  it("is consistent with the terms: same sandbox sentence, terms link to /refund", () => {
+    render(<TermsPage />);
+    expect(document.querySelector('a[href="/refund"]')).not.toBeNull();
+  });
+});
+
+describe("plan transparency (presentation only)", () => {
+  it("no plan lists an unavailable feature as active: every 'segera' item lives in comingSoonFeatures", () => {
+    for (const tier of PLAN_TIERS) {
+      for (const f of tier.coreFeatures) expect(f, `${tier.id}: ${f}`).not.toMatch(/segera|coming/i);
+      expect(Array.isArray(tier.comingSoonFeatures)).toBe(true);
+    }
+    const pro = PLAN_TIERS.find((t) => t.id === "PRO")!;
+    expect(pro.comingSoonFeatures).toContain("A/B testing & retargeting");
+    expect(PLAN_TIERS.find((t) => t.id === "AGENCY")!.availability).toBe("COMING_SOON");
+  });
+
+  it("prices and quotas are unchanged", () => {
+    const snapshot = Object.fromEntries(PLAN_TIERS.map((t) => [t.id, [t.priceIDR, t.limits.aiUsageAllowance, t.limits.maxActiveProducts, t.limits.maxActiveCampaigns, t.limits.maxUsers]]));
+    expect(snapshot).toEqual({
+      FREE: [0, 30, 3, 2, 1],
+      STARTER: [99000, 150, 10, 5, 1],
+      GROWTH: [199000, 500, 50, 20, 3],
+      PRO: [399000, 1500, 200, 75, 5],
+      BUSINESS: [799000, 4000, 500, 200, 10],
+      AGENCY: [1499000, 10000, null, null, 20],
+    });
+  });
+
+  it("the landing pricing section shows coming-soon features separately and states payment is not yet live", () => {
+    const src = readFileSync("features/marketing/sections/pricing.tsx", "utf8");
+    expect(src).toContain("comingSoonFeatures");
+    expect(src).toContain("Segera hadir (belum tersedia)");
+    expect(src).toContain("Pembayaran online belum aktif");
+    expect(src).toContain('href="/refund"');
   });
 });
