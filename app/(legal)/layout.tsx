@@ -21,6 +21,16 @@ export default function LegalLayout({ children }: { children: React.ReactNode })
           <LinoeLogo size="sm" href={null} />
           <div className="flex flex-col gap-3">
             <LegalLinks />
+            <address className="not-italic">
+              <p className="font-medium text-foreground">{LEGAL.operator}</p>
+              <p>{LEGAL.location}</p>
+              <p>
+                Email:{" "}
+                <a href={`mailto:${LEGAL.contactEmail}`} className="hover:text-foreground hover:underline">
+                  {LEGAL.contactEmail}
+                </a>
+              </p>
+            </address>
             <p>
               © {new Date().getFullYear()} {LEGAL.operator}. {LEGAL.product}.
             </p>

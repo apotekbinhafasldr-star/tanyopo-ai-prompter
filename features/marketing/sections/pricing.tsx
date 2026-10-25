@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Check, Sparkles } from "lucide-react";
+import { Check, Clock, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Reveal } from "@/features/marketing/components/reveal";
 import { PLAN_TIERS } from "@/lib/billing/plans";
@@ -62,14 +62,32 @@ export function Pricing() {
 
                 <p className="break-words text-xs text-muted-foreground">{tier.targetDescription}</p>
 
-                <ul className="flex w-full flex-col gap-1.5">
-                  {tier.coreFeatures.map((feature) => (
-                    <li key={feature} className="flex items-start gap-1.5 text-xs text-foreground/80">
-                      <Check className="mt-0.5 size-3.5 shrink-0 text-brand" aria-hidden />
-                      <span className="break-words">{feature}</span>
-                    </li>
-                  ))}
-                </ul>
+                {tier.coreFeatures.length > 0 ? (
+                  <ul className="flex w-full flex-col gap-1.5">
+                    {tier.coreFeatures.map((feature) => (
+                      <li key={feature} className="flex items-start gap-1.5 text-xs text-foreground/80">
+                        <Check className="mt-0.5 size-3.5 shrink-0 text-brand" aria-hidden />
+                        <span className="break-words">{feature}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+
+                {tier.comingSoonFeatures.length > 0 ? (
+                  <div className="w-full">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      Segera hadir (belum tersedia)
+                    </p>
+                    <ul className="mt-1.5 flex w-full flex-col gap-1.5">
+                      {tier.comingSoonFeatures.map((feature) => (
+                        <li key={feature} className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                          <Clock className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+                          <span className="break-words">{feature}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
 
                 {isComingSoon ? (
                   <Button size="sm" variant="outline" disabled className="mt-auto w-full">
@@ -85,7 +103,16 @@ export function Pricing() {
           })}
         </Reveal>
 
-        <p className="mt-6 text-xs text-muted-foreground">
+        <p className="mx-auto mt-6 max-w-xl text-xs text-muted-foreground">
+          Setiap workspace baru memulai dengan trial gratis 14 hari. Pembayaran online belum aktif dan masih dalam tahap
+          uji coba; paket berbayar belum ditagihkan. Lihat{" "}
+          <Link href="/refund" className="font-medium text-brand hover:underline">
+            Kebijakan Refund
+          </Link>
+          .
+        </p>
+
+        <p className="mt-3 text-xs text-muted-foreground">
           Sudah punya akun?{" "}
           <Link href="/login" className="font-medium text-brand hover:underline">
             Masuk

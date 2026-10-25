@@ -228,14 +228,29 @@ function PricingCard({
                 <ChevronRight className="size-4 shrink-0 transition-transform group-open:rotate-90" aria-hidden />
               </summary>
               <div className="flex flex-col gap-3 pt-3">
-                <div>
-                  <p className={cn("text-xs font-semibold uppercase tracking-wide", visual.subtext)}>Fitur Utama</p>
-                  <ul className={cn("mt-1.5 flex flex-col gap-1.5 text-xs", visual.heading)}>
-                    {tier.coreFeatures.map((feature) => (
-                      <li key={feature}>• {feature}</li>
-                    ))}
-                  </ul>
-                </div>
+                {tier.coreFeatures.length > 0 ? (
+                  <div>
+                    <p className={cn("text-xs font-semibold uppercase tracking-wide", visual.subtext)}>Fitur Utama</p>
+                    <ul className={cn("mt-1.5 flex flex-col gap-1.5 text-xs", visual.heading)}>
+                      {tier.coreFeatures.map((feature) => (
+                        <li key={feature}>• {feature}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+
+                {tier.comingSoonFeatures.length > 0 ? (
+                  <div>
+                    <p className={cn("text-xs font-semibold uppercase tracking-wide", visual.subtext)}>
+                      Segera hadir (belum tersedia)
+                    </p>
+                    <ul className={cn("mt-1.5 flex flex-col gap-1.5 text-xs", visual.subtext)}>
+                      {tier.comingSoonFeatures.map((feature) => (
+                        <li key={feature}>• {feature}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
 
                 {isComingSoon ? (
                   <p className={cn("text-xs", visual.subtext)}>

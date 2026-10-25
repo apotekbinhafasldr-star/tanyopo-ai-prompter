@@ -2,11 +2,10 @@ import type { Metadata } from "next";
 
 /**
  * Shared facts + metadata for the public legal pages (/privacy, /terms,
- * /data-deletion).
+ * /refund, /data-deletion).
  *
  * Only facts the Founder supplied, or that the code demonstrably does, live
- * here. Do not add retention periods, response-time promises (SLA), refund
- * terms, certifications or server locations until they are decided and
+ * here. Do not add retention periods, response-time promises (SLA), certifications or server locations until they are decided and
  * verified.
  */
 export const LEGAL = {
@@ -26,6 +25,7 @@ export const LEGAL = {
 export const LEGAL_LINKS = [
   { href: "/privacy", label: "Kebijakan Privasi" },
   { href: "/terms", label: "Syarat & Ketentuan" },
+  { href: "/refund", label: "Kebijakan Refund" },
   { href: "/data-deletion", label: "Penghapusan Data" },
 ] as const;
 

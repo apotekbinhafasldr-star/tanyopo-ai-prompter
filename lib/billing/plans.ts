@@ -42,8 +42,14 @@ export interface PlanTierConfig {
   badge?: string;
   targetDescription: string;
   limits: PlanLimits;
-  /** Short list for the pricing card body — full detail lives in the feature list below. */
+  /** Short list for the pricing card body — ONLY features that work today. Full detail lives in the feature list below. */
   coreFeatures: string[];
+  /**
+   * Features announced for this plan that are NOT available yet. Kept apart from `coreFeatures` so a plan
+   * is never sold with unavailable features shown as if they were active. Presentation only: it changes no
+   * price, limit or entitlement.
+   */
+  comingSoonFeatures: string[];
   availability: PlanAvailability;
 }
 
@@ -61,6 +67,7 @@ export const PLAN_TIERS: PlanTierConfig[] = [
       "Content Studio & Campaign planning dasar",
       "SEO & Discovery, Growth, Analytics dasar",
     ],
+    comingSoonFeatures: [],
     availability: "ACTIVE",
   },
   {
@@ -76,6 +83,7 @@ export const PLAN_TIERS: PlanTierConfig[] = [
       "Smart Scheduling",
       "SEO & Discovery, Growth",
     ],
+    comingSoonFeatures: [],
     availability: "ACTIVE",
   },
   {
@@ -88,10 +96,11 @@ export const PLAN_TIERS: PlanTierConfig[] = [
     limits: { aiUsageAllowance: 500, maxActiveProducts: 50, maxActiveCampaigns: 20, maxUsers: 3 },
     coreFeatures: [
       "Semua fitur Starter",
-      "Rekomendasi channel & budget lebih lanjut",
+      "Rekomendasi channel & budget",
       "Growth recommendation",
-      "Analytics lebih lengkap",
+      "Analytics",
     ],
+    comingSoonFeatures: [],
     availability: "ACTIVE",
   },
   {
@@ -103,9 +112,11 @@ export const PLAN_TIERS: PlanTierConfig[] = [
     limits: { aiUsageAllowance: 1_500, maxActiveProducts: 200, maxActiveCampaigns: 75, maxUsers: 5 },
     coreFeatures: [
       "Semua fitur Growth",
-      "Advanced analytics & attribution (segera tersedia)",
-      "A/B testing & retargeting (segera tersedia)",
-      "Reporting/export (segera tersedia)",
+    ],
+    comingSoonFeatures: [
+      "Advanced analytics & attribution",
+      "A/B testing & retargeting",
+      "Reporting/export",
     ],
     availability: "ACTIVE",
   },
@@ -118,9 +129,11 @@ export const PLAN_TIERS: PlanTierConfig[] = [
     limits: { aiUsageAllowance: 4_000, maxActiveProducts: 500, maxActiveCampaigns: 200, maxUsers: 10 },
     coreFeatures: [
       "Semua fitur Pro",
-      "Team workflow & multi-user approval (segera tersedia)",
-      "Advanced reporting & automation (segera tersedia)",
-      "Priority support (segera tersedia)",
+    ],
+    comingSoonFeatures: [
+      "Team workflow & multi-user approval",
+      "Advanced reporting & automation",
+      "Priority support",
     ],
     availability: "ACTIVE",
   },
@@ -133,9 +146,11 @@ export const PLAN_TIERS: PlanTierConfig[] = [
     targetDescription: "Agency atau operator yang menangani banyak brand/client.",
     limits: { aiUsageAllowance: 10_000, maxActiveProducts: null, maxActiveCampaigns: null, maxUsers: 20 },
     coreFeatures: [
-      "Multi-client workspace (segera hadir)",
-      "Client separation & report per client (segera hadir)",
-      "Team permission tingkat lanjut (segera hadir)",
+    ],
+    comingSoonFeatures: [
+      "Multi-client workspace",
+      "Client separation & report per client",
+      "Team permission tingkat lanjut",
     ],
     // Multi-client workspace/client separation don't exist in the codebase
     // yet (audited: no such table/route/component) — never sell this as
