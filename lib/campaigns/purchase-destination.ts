@@ -299,3 +299,126 @@ export function describeDestinationTarget(destination: PurchaseDestination): str
   }
   return "—";
 }
+
+// ---------------------------------------------------------------------------
+// Approval snapshot
+// ---------------------------------------------------------------------------
+
+/** Key inside prompter_approvals.context (existing JSON column, no migration). */
+export const DESTINATION_SNAPSHOT_KEY = "destination_snapshot";
+
+/**
+ * What the owner approved, recorded at submission. Every submission records the ACTUAL destination:
+ *  - "destination":       the campaign's own stored destination (website / WhatsApp);
+ *  - "legacy_url":        a legacy campaign (no stored destination): the final product/brand landing URL
+ *                         resolved and validated on the server at that moment;
+ *  - "legacy_unresolved": a legacy campaign with no usable landing URL at that moment;
+ *  - "none" / "invalid":  a stored destination that cannot be launched (kept for the audit trail).
+ * An approval without a snapshot of one of these kinds is never trusted (fail closed).
+ */
+export type DestinationSnapshot =
+  | { version: 1; kind: "destination"; type: "WEBSITE" | "WHATSAPP"; value: string; link: string }
+  | { version: 1; kind: "legacy_url"; link: string }
+  | { version: 1; kind: "legacy_unresolved" }
+  | { version: 1; kind: "none" }
+  | { version: 1; kind: "invalid" };
+
+/** Server-side env hosts for this deployment (null when the app domain is not configured). */
+export function ownHostsFromProcessEnv(): string[] | null {
+  return resolveOwnHostsFromEnv({
+    NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
+    META_REDIRECT_URI: process.env.META_REDIRECT_URI,
+    NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
+  });
+}
+
+/**
+ * Builds the snapshot for the CURRENT campaign. `legacyLandingUrl` is only used for a legacy campaign:
+ * the validated product/brand URL as resolved on the server right now, or null when there is none.
+ */
+export function buildDestinationSnapshot(
+  aiProposal: unknown,
+  ownHosts: readonly string[] | null,
+  legacyLandingUrl: string | null,
+): DestinationSnapshot {
+  const stored = readStoredDestination(aiProposal, ownHosts);
+  switch (stored.kind) {
+    case "legacy":
+      return legacyLandingUrl
+        ? { version: 1, kind: "legacy_url", link: legacyLandingUrl }
+        : { version: 1, kind: "legacy_unresolved" };
+    case "none":
+      return { version: 1, kind: "none" };
+    case "invalid":
+      return { version: 1, kind: "invalid" };
+    case "valid": {
+      const d = stored.destination;
+      return {
+        version: 1,
+        kind: "destination",
+        type: d.type as "WEBSITE" | "WHATSAPP",
+        value: d.value ?? "",
+        link: d.link ?? "",
+      };
+    }
+  }
+}
+
+export const SNAPSHOT_MISMATCH_MESSAGE =
+  "Tujuan iklan berbeda dari yang disetujui, atau persetujuan ini tidak mencatat tujuan iklan (persetujuan lama). Peluncuran dibatalkan dan tidak ada yang dikirim ke platform iklan. Buka halaman campaign: pilih 'Kembalikan ke Draft' (jika sudah Terjadwal) atau 'Batalkan pengajuan' (jika menunggu persetujuan), lalu ajukan dan setujui ulang.";
+
+/**
+ * Compares the CURRENT destination with the snapshot stored in the approval context. Fail closed:
+ * anything that cannot be proven identical is refused, including every approval that has no snapshot
+ * (old approvals are never assumed to match today's destination).
+ *
+ * `legacyLandingUrl` (legacy campaigns only): string = the URL resolved and validated right now;
+ * null = confirmed none/invalid; undefined = unknown (not resolved) which is refused.
+ */
+export function checkApprovalDestinationSnapshot(
+  approvalContext: unknown,
+  aiProposal: unknown,
+  ownHosts: readonly string[] | null,
+  legacyLandingUrl?: string | null,
+): DestinationResult<true> {
+  const current = readStoredDestination(aiProposal, ownHosts);
+  const raw =
+    approvalContext !== null && typeof approvalContext === "object" && !Array.isArray(approvalContext)
+      ? (approvalContext as Record<string, unknown>)[DESTINATION_SNAPSHOT_KEY]
+      : undefined;
+
+  if (raw === undefined || raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    return fail(SNAPSHOT_MISMATCH_MESSAGE);
+  }
+  const snap = raw as Record<string, unknown>;
+
+  if (snap.kind === "destination" && current.kind === "valid") {
+    const d = current.destination;
+    return snap.type === d.type && snap.value === d.value && snap.link === d.link
+      ? ok(true)
+      : fail(SNAPSHOT_MISMATCH_MESSAGE);
+  }
+  // A destination that is "none" or invalid at submission and still is: unlaunchable either way (the
+  // launch refuses it on its own), so there is nothing to compare.
+  if ((snap.kind === "none" && current.kind === "none") || (snap.kind === "invalid" && current.kind === "invalid")) {
+    return ok(true);
+  }
+  if (snap.kind === "legacy_url" && current.kind === "legacy") {
+    return typeof snap.link === "string" && typeof legacyLandingUrl === "string" && snap.link === legacyLandingUrl
+      ? ok(true)
+      : fail(SNAPSHOT_MISMATCH_MESSAGE);
+  }
+  if (snap.kind === "legacy_unresolved" && current.kind === "legacy") {
+    return legacyLandingUrl === null ? ok(true) : fail(SNAPSHOT_MISMATCH_MESSAGE);
+  }
+  return fail(SNAPSHOT_MISMATCH_MESSAGE);
+}
+
+/** One-line summary for wizard review screens; null when the input is not (yet) valid. */
+export function summarizeDestinationInput(type: DestinationType | "", value: string): string | null {
+  if (!type) return null;
+  const built = buildPurchaseDestination({ type, value }, null);
+  if (!built.ok) return null;
+  if (built.value.type === "NONE") return "Belum ada tujuan. Iklan berbayar tidak bisa diluncurkan sampai tujuan diisi.";
+  return `${DESTINATION_LABELS[built.value.type]} · ${describeDestinationTarget(built.value)}`;
+}

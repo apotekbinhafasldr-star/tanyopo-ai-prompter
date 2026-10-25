@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import { buildPurchaseDestination } from "@/lib/campaigns/purchase-destination";
 import {
   makeAdminStorage,
   makePreflightFixtures,
@@ -739,6 +740,156 @@ describe("launchChannelCampaignAction — P0 budget launch safety", () => {
       expect(result.error).toBeNull();
       expect(metricsGte).toBeNull();
       expect(harness.regularFrom.mock.calls.map((c) => c[0])).not.toContain("prompter_marketing_metrics");
+    });
+  });
+});
+
+describe("launchChannelCampaignAction — approval destination snapshot", () => {
+  const builtWa = buildPurchaseDestination({ type: "WHATSAPP", value: "081234567890" }, null);
+  if (!builtWa.ok) throw new Error("fixture");
+  const WA = builtWa.value as { version: number; type: string; value: string; link: string };
+  const WEB = { version: 1, type: "WEBSITE", value: "https://tokosaya.com/produk", link: "https://tokosaya.com/produk" };
+  const proposal = (d: unknown) => ({ headline: "Diskon", primary_text: "Beli", cta: "Beli Sekarang", purchase_destination: d });
+  const snapOf = (d: typeof WEB) => ({
+    destination_snapshot: { version: 1, kind: "destination", type: d.type, value: d.value, link: d.link },
+  });
+  const legacySnap = (link: string | null) => ({
+    destination_snapshot: link ? { version: 1, kind: "legacy_url", link } : { version: 1, kind: "legacy_unresolved" },
+  });
+  const approved = (context?: unknown, created_at = "2026-10-01T00:00:00Z") =>
+    context === undefined ? { status: "APPROVED", created_at } : { status: "APPROVED", created_at, context };
+  const LEGACY_URL = "https://toko-saya.co.id/produk";
+
+  beforeEach(() => {
+    requireSessionContextMock.mockClear();
+    connectorMock.createCampaign.mockClear();
+    connectorMock.createCreative.mockClear();
+  });
+
+  function expectRefusedBeforeAnyCall(result: { error: string | null }, pattern: RegExp) {
+    expect(result.error).toMatch(pattern);
+    expect(harness.claimUpdate).not.toHaveBeenCalled();
+    expect(connectorMock.createCampaign).not.toHaveBeenCalled();
+    expect(connectorMock.createCreative).not.toHaveBeenCalled();
+  }
+
+  it("launches when the current destination equals the approved snapshot (website, with utm)", async () => {
+    harness = buildHarness({ master: { ai_proposal: proposal(WEB) } });
+    fx.approvals = [approved(snapOf(WEB))];
+    const result = await launchChannelCampaignAction("cc1");
+    expect(result.error).toBeNull();
+    const creative = (connectorMock.createCreative.mock.calls[0] as unknown[])[2] as { linkUrl: string };
+    expect(creative.linkUrl).toContain("https://tokosaya.com/produk");
+    expect(creative.linkUrl).toContain("utm_");
+  });
+
+  it("launches a WhatsApp destination with the wa.me link and no utm", async () => {
+    harness = buildHarness({ master: { ai_proposal: proposal(WA) } });
+    fx.approvals = [approved(snapOf(WA))];
+    const result = await launchChannelCampaignAction("cc1");
+    expect(result.error).toBeNull();
+    const creative = (connectorMock.createCreative.mock.calls[0] as unknown[])[2] as { linkUrl: string };
+    expect(creative.linkUrl).toBe(WA.link);
+  });
+
+  it("refuses a destination changed after approval, before the claim and before any platform call", async () => {
+    harness = buildHarness({ master: { ai_proposal: proposal(WA) } });
+    fx.approvals = [approved(snapOf(WEB))];
+    expectRefusedBeforeAnyCall(await launchChannelCampaignAction("cc1"), /berbeda dari yang disetujui/);
+  });
+
+  it("refuses a new-format campaign whose approval has no snapshot (fail closed)", async () => {
+    harness = buildHarness({ master: { ai_proposal: proposal(WEB) } });
+    fx.approvals = [approved(null)];
+    expectRefusedBeforeAnyCall(await launchChannelCampaignAction("cc1"), /persetujuan lama/);
+  });
+
+  it("only the LATEST approval's snapshot counts", async () => {
+    harness = buildHarness({ master: { ai_proposal: proposal(WA) } });
+    fx.approvals = [approved(snapOf(WA), "2026-10-01T00:00:00Z"), approved(snapOf(WEB), "2026-10-02T00:00:00Z")];
+    expectRefusedBeforeAnyCall(await launchChannelCampaignAction("cc1"), /berbeda dari yang disetujui/);
+  });
+
+  it("an EXPIRED approval (e.g. after a recovery) never authorises a launch, even with a matching snapshot", async () => {
+    harness = buildHarness({ master: { ai_proposal: proposal(WEB) } });
+    fx.approvals = [{ status: "EXPIRED", created_at: "2026-10-01T00:00:00Z", context: snapOf(WEB) }];
+    expectRefusedBeforeAnyCall(await launchChannelCampaignAction("cc1"), /persetujuan peluncuran/);
+  });
+
+  describe("legacy campaigns (no stored destination)", () => {
+    it("launches when the product URL is the one recorded at approval", async () => {
+      harness = buildHarness();
+      fx.approvals = [approved(legacySnap(LEGACY_URL))];
+      const result = await launchChannelCampaignAction("cc1");
+      expect(result.error).toBeNull();
+      const creative = (connectorMock.createCreative.mock.calls[0] as unknown[])[2] as { linkUrl: string };
+      expect(creative.linkUrl).toBe(LEGACY_URL);
+    });
+
+    it("an OLD approval with no snapshot never authorises a legacy launch", async () => {
+      harness = buildHarness();
+      fx.approvals = [approved(null)];
+      expectRefusedBeforeAnyCall(await launchChannelCampaignAction("cc1"), /persetujuan lama/);
+    });
+
+    it("an OLD approval whose context has only budget fields is refused", async () => {
+      harness = buildHarness();
+      fx.approvals = [approved({ daily_budget: 100000, total_budget: null })];
+      expectRefusedBeforeAnyCall(await launchChannelCampaignAction("cc1"), /persetujuan lama/);
+    });
+
+    it("the product URL changed after approval is refused", async () => {
+      harness = buildHarness();
+      fx.approvals = [approved(legacySnap(LEGACY_URL))];
+      fx.product = { id: "p1", website_url: "https://toko-lain.co.id/produk" };
+      expectRefusedBeforeAnyCall(await launchChannelCampaignAction("cc1"), /berbeda dari yang disetujui/);
+    });
+
+    it("the brand fallback URL changed after approval is refused", async () => {
+      harness = buildHarness();
+      fx.product = { id: "p1", website_url: null };
+      fx.brand = { website_url: "https://brand-lama.id/" };
+      fx.approvals = [approved(legacySnap("https://brand-lama.id/"))];
+      fx.brand = { website_url: "https://brand-baru.id/" };
+      expectRefusedBeforeAnyCall(await launchChannelCampaignAction("cc1"), /berbeda dari yang disetujui/);
+    });
+
+    it("the URL removed after approval is refused", async () => {
+      harness = buildHarness();
+      fx.approvals = [approved(legacySnap(LEGACY_URL))];
+      fx.product = { id: "p1", website_url: null };
+      fx.brand = { website_url: null };
+      const result = await launchChannelCampaignAction("cc1");
+      expect(result.error).toBeTruthy();
+      expect(harness.claimUpdate).not.toHaveBeenCalled();
+      expect(connectorMock.createCampaign).not.toHaveBeenCalled();
+    });
+
+    it("the URL changed to an LINOE / unsafe address after approval is refused", async () => {
+      harness = buildHarness();
+      fx.approvals = [approved(legacySnap(LEGACY_URL))];
+      fx.product = { id: "p1", website_url: "http://toko-saya.co.id/produk" };
+      const result = await launchChannelCampaignAction("cc1");
+      expect(result.error).toBeTruthy();
+      expect(connectorMock.createCampaign).not.toHaveBeenCalled();
+    });
+
+    it("an approval recorded WITHOUT a landing URL does not cover a URL added later", async () => {
+      harness = buildHarness();
+      fx.approvals = [approved(legacySnap(null))];
+      expectRefusedBeforeAnyCall(await launchChannelCampaignAction("cc1"), /berbeda dari yang disetujui/);
+    });
+
+    it("a legacy campaign that gained a destination after a legacy approval is refused", async () => {
+      harness = buildHarness({ master: { ai_proposal: proposal(WEB) } });
+      fx.approvals = [approved(legacySnap(LEGACY_URL))];
+      expectRefusedBeforeAnyCall(await launchChannelCampaignAction("cc1"), /berbeda dari yang disetujui/);
+    });
+
+    it("the old first-version { kind: 'legacy' } snapshot is not trusted", async () => {
+      harness = buildHarness();
+      fx.approvals = [approved({ destination_snapshot: { version: 1, kind: "legacy" } })];
+      expectRefusedBeforeAnyCall(await launchChannelCampaignAction("cc1"), /berbeda dari yang disetujui/);
     });
   });
 });

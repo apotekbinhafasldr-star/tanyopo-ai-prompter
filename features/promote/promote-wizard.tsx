@@ -14,6 +14,7 @@ import { formatCurrency, productTypeLabel, channelLabel, goalLabel } from "@/lib
 import { primaryGoals } from "@/schemas/onboarding";
 import { channelOptions } from "@/schemas/campaign";
 import { PurchaseDestinationField } from "@/features/promote/purchase-destination-field";
+import { summarizeDestinationInput, type DestinationType } from "@/lib/campaigns/purchase-destination";
 import {
   generateCampaignDraftAction,
   type PromoteActionState,
@@ -53,6 +54,8 @@ export function PromoteWizard({
   const [durationDays, setDurationDays] = useState("");
   const [startDate, setStartDate] = useState("");
   const [destinationValid, setDestinationValid] = useState(false);
+  const [destinationChoice, setDestinationChoice] = useState<{ type: DestinationType | ""; value: string }>({ type: "", value: "" });
+  const destinationSummary = summarizeDestinationInput(destinationChoice.type, destinationChoice.value);
   const [state, formAction, pending] = useActionState(generateCampaignDraftAction, initialState);
 
   const selectedProduct = products.find((p) => p.id === productId);
@@ -250,6 +253,7 @@ export function PromoteWizard({
               websiteDefault={selectedProduct?.website_url}
               whatsappDefault={brandWhatsapp}
               onValidityChange={setDestinationValid}
+              onChange={(type, value) => setDestinationChoice({ type, value })}
             />
           </div>
 
@@ -260,6 +264,7 @@ export function PromoteWizard({
                 <p><strong>Produk:</strong> {selectedProduct?.name}</p>
                 <p><strong>Tujuan:</strong> {goalLabel(objective)}</p>
                 <p><strong>Channel:</strong> {channels.map(channelLabel).join(", ")}</p>
+                <p><strong>Tujuan pembelian:</strong> {destinationSummary ?? "Belum dipilih"}</p>
                 {(targetCity || targetRegion) && (
                   <p><strong>Target:</strong> {[targetCity, targetRegion, targetCountry].filter(Boolean).join(", ")}</p>
                 )}

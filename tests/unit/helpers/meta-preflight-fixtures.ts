@@ -4,7 +4,7 @@
  * to launch; tests mutate the returned object to break one prerequisite.
  */
 export interface PreflightFixtures {
-  approvals: { status: string; created_at: string }[];
+  approvals: { status: string; created_at: string; context?: unknown }[];
   approvalError: boolean;
   product: { id: string; website_url: string | null } | null;
   brand: { website_url: string | null } | null;
@@ -43,12 +43,30 @@ export function chain(result: { data: unknown; error: unknown }) {
   return builder;
 }
 
+/**
+ * Approval rows that do not declare a `context` at all model "an approval submitted with the landing URL this
+ * fixture currently has": they get a legacy_url snapshot of that URL. A row that DOES declare `context`
+ * (including `null` or `{}`) is returned verbatim, so tests of missing / old / changed snapshots stay exact.
+ */
+function withDefaultSnapshots(fx: PreflightFixtures) {
+  const productUrl = fx.product?.website_url?.trim();
+  const link = productUrl ? fx.product?.website_url : (fx.brand?.website_url ?? null);
+  const snapshot = link
+    ? { version: 1, kind: "legacy_url", link }
+    : { version: 1, kind: "legacy_unresolved" };
+  return fx.approvals.map((row) =>
+    "context" in row ? row : { ...row, context: { destination_snapshot: snapshot } },
+  );
+}
+
 /** Returns a builder for the tables the preflight reads, or null for any other table. */
 export function preflightTable(table: string, fx: PreflightFixtures) {
   switch (table) {
     case "prompter_approvals":
       fx.reads.push(table);
-      return chain(fx.approvalError ? { data: null, error: { code: "XX000" } } : { data: fx.approvals, error: null });
+      return chain(
+        fx.approvalError ? { data: null, error: { code: "XX000" } } : { data: withDefaultSnapshots(fx), error: null },
+      );
     case "prompter_products":
       fx.reads.push(table);
       return chain({ data: fx.product, error: null });

@@ -202,6 +202,10 @@ describe("schemas / safety invariants", () => {
       expect(src).toMatch(/\.eq\("tenant_id", session\.tenantId\)/);
     }
     const reg = readFileSync(path.join(process.cwd(), "features/campaigns/actions.ts"), "utf8");
-    expect(reg).toMatch(/update\(\{ ai_proposal: proposal as unknown as Json[^)]*\)\s*\.eq\("id", campaignId\)\s*\.eq\("tenant_id", session\.tenantId\)/);
+    // Regenerate writes through the compare-and-swap helper, which is itself scoped by id + tenant + DRAFT + updated_at
+    // (behaviour covered in campaign-recovery-concurrency.test.ts).
+    expect(reg).toMatch(/writeCampaignIfUnchanged\(supabase, session\.tenantId, campaignId, campaign\.updated_at, \{\s*ai_proposal: proposal as unknown as Json/);
+    const cas = readFileSync(path.join(process.cwd(), "services/campaign-proposal-write.ts"), "utf8");
+    expect(cas).toMatch(/\.eq\("tenant_id", tenantId\)[\s\S]*\.eq\("status", "DRAFT"\)[\s\S]*\.eq\("updated_at", expectedUpdatedAt\)/);
   });
 });

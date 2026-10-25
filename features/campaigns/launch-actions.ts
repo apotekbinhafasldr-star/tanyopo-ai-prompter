@@ -49,9 +49,11 @@ import {
   type Check,
   type ProductMediaRow,
 } from "@/lib/campaigns/meta-launch-preflight";
+import { resolveLegacyLandingCheck } from "@/services/destination-integrity";
 import {
+  checkApprovalDestinationSnapshot,
   checkLaunchDestination,
-  resolveOwnHostsFromEnv,
+  ownHostsFromProcessEnv,
   withUtm,
 } from "@/lib/campaigns/purchase-destination";
 import type { CampaignProposal } from "@/schemas/ai/campaign-proposal";
@@ -122,6 +124,8 @@ interface MetaPreflightInput {
     selected_media_id: string | null;
     ai_proposal?: unknown;
   };
+  /** `context` of the latest CAMPAIGN_LAUNCH approval (holds the destination snapshot). */
+  approvalContext: unknown;
   adAccountId: string;
   selectedPageId: string | undefined;
 }
@@ -136,7 +140,7 @@ const READ_FAILED = () =>
  * Supabase Storage's object metadata (no HEAD/GET on a URL).
  */
 async function runMetaPreflight(input: MetaPreflightInput): Promise<Check<MetaLaunchPlan>> {
-  const { supabase, admin, tenantId, master, adAccountId, selectedPageId } = input;
+  const { supabase, admin, tenantId, master, adAccountId, selectedPageId, approvalContext } = input;
 
   const account = checkAdAccountId(adAccountId);
   if (!account.ok) return account;
@@ -156,31 +160,8 @@ async function runMetaPreflight(input: MetaPreflightInput): Promise<Check<MetaLa
   if (!ownHosts.ok) return ownHosts;
 
   const ownHostList = ownHosts.value;
-  const resolveLegacyLandingUrl = async (): Promise<Check<string>> => {
-  // Landing URL: product first, brand profile only when the product has none.
-  let productUrl: string | null = null;
-  if (master.product_id) {
-    const { data: product, error } = await supabase
-      .from("prompter_products")
-      .select("id, website_url")
-      .eq("id", master.product_id)
-      .eq("tenant_id", tenantId)
-      .maybeSingle();
-    if (error) return READ_FAILED();
-    productUrl = product?.website_url ?? null;
-  }
-  let brandUrl: string | null = null;
-  if (!productUrl || productUrl.trim().length === 0) {
-    const { data: brand, error } = await supabase
-      .from("prompter_brand_profiles")
-      .select("website_url")
-      .eq("tenant_id", tenantId)
-      .maybeSingle();
-    if (error) return READ_FAILED();
-    brandUrl = brand?.website_url ?? null;
-  }
-  return resolveLandingUrl({ productUrl, brandUrl }, ownHostList);
-  };
+  const resolveLegacyLandingUrl = (): Promise<Check<string>> =>
+    resolveLegacyLandingCheck(supabase, tenantId, master.product_id, ownHostList);
 
   // Purchase destination (stored per campaign in ai_proposal). Re-validated here with the strict own-host
   // list. Legacy campaigns (no stored destination) keep the product/brand landing URL below, unchanged.
@@ -204,6 +185,19 @@ async function runMetaPreflight(input: MetaPreflightInput): Promise<Check<MetaLa
     link = await resolveLegacyLandingUrl();
   }
   if (!link.ok) return link;
+
+  // The destination being launched must be exactly the one that was approved. `link` above was resolved
+  // from the database in THIS request (legacy: the validated product/brand URL), right before use, so
+  // nothing can change between this comparison and the link that goes into the creative. A changed,
+  // missing or unreadable snapshot (including every approval that predates snapshots) fails closed
+  // before the claim and before any Meta call.
+  const approved = checkApprovalDestinationSnapshot(
+    approvalContext,
+    master.ai_proposal,
+    ownHosts.value,
+    destinationCheck.mode === "legacy" ? link.value : undefined,
+  );
+  if (!approved.ok) return preflightFail("DESTINATION_CHANGED", approved.message);
 
   // Creative image: only this tenant's own product media.
   if (!master.product_id) {
@@ -341,14 +335,8 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
   // Purchase destination gate (platform-agnostic, read-only, before any approval/credential/claim step):
   // a campaign whose stored destination is "none" or invalid can never be launched as a paid ad.
   // Legacy campaigns (no stored destination) are unaffected.
-  const earlyDestination = checkLaunchDestination(
-    masterCampaign.ai_proposal,
-    resolveOwnHostsFromEnv({
-      NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
-      META_REDIRECT_URI: process.env.META_REDIRECT_URI,
-      NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
-    }),
-  );
+  const launchOwnHosts = ownHostsFromProcessEnv();
+  const earlyDestination = checkLaunchDestination(masterCampaign.ai_proposal, launchOwnHosts);
   if (!earlyDestination.ok) {
     return { error: earlyDestination.message };
   }
@@ -356,10 +344,11 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
   // Meta preflight, approval part (PR #36): the master's latest CAMPAIGN_LAUNCH
   // approval must be APPROVED. Read-only, before budget checks, the claim and
   // any Meta call. TikTok/X are untouched.
+  let approvalContext: unknown = null;
   if (connectorPlatform === "META") {
     const { data: approvalRows, error: approvalError } = await supabase
       .from("prompter_approvals")
-      .select("status, created_at")
+      .select("status, created_at, context")
       .eq("tenant_id", session.tenantId)
       .eq("approval_type", "CAMPAIGN_LAUNCH")
       .eq("resource_type", "prompter_master_campaigns")
@@ -371,6 +360,12 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
     }
     const approval = checkLaunchApproval(approvalRows);
     if (!approval.ok) return { error: approval.message };
+
+    // Same "latest" rule as checkLaunchApproval: the approval that was just verified is the one whose
+    // snapshot is compared.
+    approvalContext =
+      [...(approvalRows ?? [])].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))[0]?.context ??
+      null;
   }
 
   // P0 budget launch safety — ALL budget validation completes here, BEFORE
@@ -577,6 +572,7 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
       admin,
       tenantId: session.tenantId,
       master: masterCampaign,
+      approvalContext,
       adAccountId: connectedAccount.external_account_id,
       selectedPageId,
     });

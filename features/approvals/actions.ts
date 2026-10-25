@@ -10,6 +10,8 @@ import {
   mirrorChannelCampaignStatus,
   transitionMasterCampaign,
 } from "@/services/channel-campaigns";
+import { evaluateApprovalDestination } from "@/services/destination-integrity";
+import { ownHostsFromProcessEnv } from "@/lib/campaigns/purchase-destination";
 import { getConnector } from "@/lib/connectors/get-connector";
 import { CHANNEL_TO_CONNECTOR } from "@/lib/connectors/channel-map";
 import { decryptToken } from "@/lib/crypto/token-cipher";
@@ -77,6 +79,39 @@ export async function decideApprovalAction(
       return {
         error:
           "Status channel campaign tidak konsisten dengan pengajuan ini. Tidak ada perubahan yang disimpan. Batalkan pengajuan lalu ajukan ulang, atau hubungi admin.",
+      };
+    }
+  }
+
+  // Approving is only possible while the campaign's destination is exactly the one recorded in this
+  // approval's snapshot. While a campaign is AWAITING_APPROVAL its proposal cannot be edited (every edit
+  // is a conditional write on DRAFT), so this check cannot be overtaken by a concurrent destination edit.
+  // Read only, before anything is written: the approval is not consumed on refusal.
+  if (isCampaignLaunch && decision === "APPROVED") {
+    const { data: master, error: masterError } = await supabase
+      .from("prompter_master_campaigns")
+      .select("product_id, ai_proposal")
+      .eq("id", approval.resource_id)
+      .eq("tenant_id", session.tenantId)
+      .single();
+    if (masterError || !master) {
+      return { error: "Campaign tidak dapat diperiksa. Tidak ada perubahan yang disimpan. Muat ulang halaman dan coba lagi." };
+    }
+    const integrity = await evaluateApprovalDestination({
+      supabase,
+      tenantId: session.tenantId,
+      productId: master.product_id,
+      aiProposal: master.ai_proposal,
+      approvalContext: approval.context,
+      ownHosts: ownHostsFromProcessEnv(),
+      requireLaunchable: false,
+    });
+    if (!integrity.ok) {
+      return {
+        error:
+          integrity.reason === "read_failed"
+            ? integrity.message
+            : `${integrity.message} Persetujuan ini TIDAK dikonsumsi: batalkan pengajuan, perbaiki tujuan, lalu ajukan ulang.`,
       };
     }
   }

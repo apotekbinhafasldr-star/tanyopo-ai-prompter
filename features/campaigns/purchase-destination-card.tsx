@@ -1,4 +1,5 @@
 import { Card, CardContent } from "@/components/ui/card";
+import { DestinationEditor } from "@/features/campaigns/destination-editor";
 import {
   DESTINATION_LABELS,
   describeDestinationTarget,
@@ -10,7 +11,15 @@ import {
  * Shows where buyers are sent BEFORE the owner approves. Server component: the stored value is
  * re-validated on every render (never trusted). Makes no sales-attribution claim.
  */
-export function PurchaseDestinationCard({ aiProposal }: { aiProposal: unknown }) {
+export function PurchaseDestinationCard({
+  aiProposal,
+  campaignId,
+  canEdit = false,
+}: {
+  aiProposal: unknown;
+  campaignId?: string;
+  canEdit?: boolean;
+}) {
   const stored = readStoredDestination(
     aiProposal,
     resolveOwnHostsFromEnv({
@@ -69,6 +78,13 @@ export function PurchaseDestinationCard({ aiProposal }: { aiProposal: unknown })
             Saat peluncuran, parameter utm sederhana ditambahkan ke tautan website untuk menandai klik. Ini bukan
             pelacakan penjualan otomatis.
           </p>
+        ) : null}
+        {canEdit && campaignId ? (
+          <DestinationEditor
+            campaignId={campaignId}
+            initialType={stored.kind === "valid" ? stored.destination.type : stored.kind === "none" ? "NONE" : ""}
+            initialValue={stored.kind === "valid" ? (stored.destination.value ?? "") : ""}
+          />
         ) : null}
       </CardContent>
     </Card>
