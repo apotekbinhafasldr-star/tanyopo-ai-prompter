@@ -51,6 +51,11 @@ function buildSupabase(opts: {
     if (table === "prompter_master_campaigns") return { select: campaignSelect };
     if (table === "prompter_approvals") return { insert: approvalInsert, delete: approvalDelete };
     if (table === "prompter_audit_logs") return { insert: auditInsert };
+    // Legacy landing-URL resolution at submission (product, then brand): this suite has neither.
+    if (table === "prompter_products" || table === "prompter_brand_profiles") {
+      const none = async () => ({ data: null, error: null });
+      return { select: () => ({ eq: () => ({ maybeSingle: none, eq: () => ({ maybeSingle: none }) }) }) };
+    }
     throw new Error(`unexpected table ${table}`);
   });
 

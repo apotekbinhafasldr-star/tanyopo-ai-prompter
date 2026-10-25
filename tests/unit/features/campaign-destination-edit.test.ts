@@ -36,6 +36,8 @@ function build(opts: {
   campaign?: { id: string; status: string; ai_proposal: unknown; daily_budget?: number; total_budget?: number; currency?: string } | null;
   pending?: { id: string }[];
   updatedRows?: { id: string }[];
+  product?: { id: string; website_url: string | null } | null;
+  brand?: { website_url: string | null } | null;
 }) {
   const eqCalls: [string, unknown][] = [];
   const update = vi.fn((values: unknown) => {
@@ -78,13 +80,18 @@ function build(opts: {
       };
     }
     if (table === "prompter_audit_logs") return { insert: auditInsert };
+    if (table === "prompter_products" || table === "prompter_brand_profiles") {
+      const row = table === "prompter_products" ? opts.product : opts.brand;
+      const result = async () => ({ data: row ?? null, error: null });
+      return { select: () => ({ eq: () => ({ maybeSingle: result, eq: () => ({ maybeSingle: result }) }) }) };
+    }
     throw new Error(`unexpected table ${table}`);
   });
   const rpc = vi.fn(async () => ({ data: [{ allowed: true, reason: null }], error: null }));
   return { from, rpc, update, eqCalls, selectEqs, approvalInsert, auditInsert };
 }
 
-const draft = (ai_proposal: unknown) => ({ id: "c1", status: "DRAFT", ai_proposal });
+const draft = (ai_proposal: unknown) => ({ id: "c1", status: "DRAFT", ai_proposal, updated_at: "2026-10-25T00:00:00.000000+00:00" });
 const INIT = { error: null, saved: false };
 
 beforeEach(() => {
@@ -101,6 +108,7 @@ describe("updateCampaignDestinationAction", () => {
     expect(written.purchase_destination).toMatchObject({ type: "WHATSAPP", link: "https://wa.me/6281234567890" });
     expect(current.eqCalls).toContainEqual(["tenant_id", "t1"]);
     expect(current.eqCalls).toContainEqual(["status", "DRAFT"]);
+    expect(current.eqCalls).toContainEqual(["updated_at", "2026-10-25T00:00:00.000000+00:00"]);
     expect(current.selectEqs).toContainEqual(["tenant_id", "t1"]);
   });
 
@@ -170,10 +178,11 @@ describe("updateCampaignDestinationAction", () => {
     expect(audit).not.toContain("0812345");
   });
 
-  it("an update that matched no row (status changed meanwhile) is reported, not success", async () => {
+  it("an update that matched no row (changed meanwhile) is reported as a conflict, not success", async () => {
     current = build({ campaign: draft({ headline: "H" }), updatedRows: [] });
     const r = await updateCampaignDestinationAction("c1", INIT, form("WEBSITE", "https://tokosaya.com/b"));
     expect(r.saved).toBe(false);
+    expect(r.error).toMatch(/baru saja diubah/);
     expect(current.auditInsert).not.toHaveBeenCalled();
   });
 
@@ -186,7 +195,7 @@ describe("updateCampaignDestinationAction", () => {
 });
 
 describe("submitForApprovalAction — destination snapshot", () => {
-  const base = { daily_budget: 100, total_budget: 1000, currency: "IDR" };
+  const base = { daily_budget: 100, total_budget: 1000, currency: "IDR", product_id: "p1" };
 
   it("stores the current destination in the approval context", async () => {
     current = build({ campaign: { id: "c1", status: "DRAFT", ai_proposal: { purchase_destination: WEB }, ...base } });
@@ -198,9 +207,40 @@ describe("submitForApprovalAction — destination snapshot", () => {
     expect(row.context.destination_snapshot).toMatchObject({ kind: "destination", type: "WEBSITE", link: WEB.link });
   });
 
-  it("legacy campaign records a legacy snapshot", async () => {
-    current = build({ campaign: { id: "c1", status: "DRAFT", ai_proposal: { headline: "H" }, ...base } });
+  it("legacy campaign records the ACTUAL product landing URL (not just 'legacy')", async () => {
+    current = build({
+      campaign: { id: "c1", status: "DRAFT", ai_proposal: { headline: "H" }, ...base },
+      product: { id: "p1", website_url: "https://toko-saya.co.id/produk" },
+    });
     await submitForApprovalAction("c1");
-    expect(current.approvalInsert.mock.calls[0][0].context.destination_snapshot).toEqual({ version: 1, kind: "legacy" });
+    expect(current.approvalInsert.mock.calls[0][0].context.destination_snapshot).toEqual({
+      version: 1,
+      kind: "legacy_url",
+      link: "https://toko-saya.co.id/produk",
+    });
+  });
+
+  it("legacy campaign falls back to the brand URL, validated on the server", async () => {
+    current = build({
+      campaign: { id: "c1", status: "DRAFT", ai_proposal: { headline: "H" }, ...base },
+      product: { id: "p1", website_url: null },
+      brand: { website_url: "https://brand-saya.id/" },
+    });
+    await submitForApprovalAction("c1");
+    expect(current.approvalInsert.mock.calls[0][0].context.destination_snapshot).toMatchObject({
+      kind: "legacy_url",
+      link: "https://brand-saya.id/",
+    });
+  });
+
+  it("legacy campaign with an unsafe or missing URL records 'legacy_unresolved' (never the bad URL)", async () => {
+    current = build({
+      campaign: { id: "c1", status: "DRAFT", ai_proposal: { headline: "H" }, ...base },
+      product: { id: "p1", website_url: "https://tanyopo-ai-prompter.netlify.app/x" },
+    });
+    await submitForApprovalAction("c1");
+    const snap = current.approvalInsert.mock.calls[0][0].context.destination_snapshot;
+    expect(snap).toEqual({ version: 1, kind: "legacy_unresolved" });
+    expect(JSON.stringify(snap)).not.toContain("netlify");
   });
 });

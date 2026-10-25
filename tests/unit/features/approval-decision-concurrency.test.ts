@@ -31,6 +31,8 @@ function seed(over: { approval?: Row; master?: Row; channels?: Row[] } = {}): Re
         resource_type: "prompter_master_campaigns",
         resource_id: M,
         status: "PENDING",
+        // Submitted for a campaign with no product / brand URL: the legacy snapshot "unresolved".
+        context: { destination_snapshot: { version: 1, kind: "legacy_unresolved" } },
         ...over.approval,
       },
     ],

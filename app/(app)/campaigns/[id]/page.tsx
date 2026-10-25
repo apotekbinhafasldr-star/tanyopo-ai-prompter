@@ -50,6 +50,7 @@ import { DetailDisclosure } from "@/features/campaigns/detail-disclosure";
 import { isQuickReview } from "@/lib/campaigns/review-mode";
 import type { CampaignProposal } from "@/schemas/ai/campaign-proposal";
 import { PurchaseDestinationCard } from "@/features/campaigns/purchase-destination-card";
+import { RecoverToDraft } from "@/features/campaigns/recover-to-draft";
 import type { Channel, ConnectorPlatform, OptimizationActionType, RiskLevel } from "@/types/database";
 
 export const metadata: Metadata = { title: "Detail Campaign — LINOE" };
@@ -338,6 +339,10 @@ export default async function CampaignDetailPage({
             </div>
           </CardContent>
         </Card>
+      ) : null}
+
+      {campaign.status === "SCHEDULED" && (session.role === "owner" || session.role === "marketing") ? (
+        <RecoverToDraft campaignId={id} />
       ) : null}
 
       {proposal ? (

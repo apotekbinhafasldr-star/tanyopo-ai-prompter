@@ -18,11 +18,20 @@ import {
   isMirrorConfirmed,
   mirrorChannelCampaignStatus,
   transitionMasterCampaign,
+  readChannelRowsForRecovery,
+  moveChannelCampaignsScheduledToDraft,
+  restoreChannelCampaignsToScheduled,
+  transitionMasterScheduledToDraft,
 } from "@/services/channel-campaigns";
 import { getTenantChannelPerformance } from "@/services/channel-performance";
 import { getOrCreateBudgetPolicy, getMonthToDateSpend, checkBudgetGuard } from "@/services/budget-guard";
 import { parseLocalDateTimeInZone } from "@/lib/scheduling/recommend-time";
 import type { Json } from "@/types/database";
+import { PROPOSAL_CONFLICT_MESSAGE, writeCampaignIfUnchanged } from "@/services/campaign-proposal-write";
+import {
+  evaluateApprovalDestination,
+  resolveLegacyLandingCheck,
+} from "@/services/destination-integrity";
 import {
   PURCHASE_DESTINATION_KEY,
   buildDestinationSnapshot,
@@ -134,13 +143,14 @@ export async function regenerateCampaignProposalAction(campaignId: string): Prom
       ? regenerated
       : { ...regenerated, [PURCHASE_DESTINATION_KEY]: existingDestinationRaw };
 
-  const { error: updateError } = await supabase
-    .from("prompter_master_campaigns")
-    .update({ ai_proposal: proposal as unknown as Json, ai_job_id: result.jobId })
-    .eq("id", campaignId)
-    .eq("tenant_id", session.tenantId);
-
-  if (updateError) {
+  // The AI call takes seconds: write only if the campaign is still exactly as it was READ above (same
+  // updated_at, still DRAFT). Otherwise the user's newer edit (e.g. the destination) would be overwritten.
+  const written = await writeCampaignIfUnchanged(supabase, session.tenantId, campaignId, campaign.updated_at, {
+    ai_proposal: proposal as unknown as Json,
+    ai_job_id: result.jobId,
+  });
+  if (written === "conflict") return { error: PROPOSAL_CONFLICT_MESSAGE };
+  if (written === "error") {
     return { error: "AI berhasil membuat proposal baru tapi gagal menyimpannya." };
   }
 
@@ -178,7 +188,7 @@ export async function selectCampaignCandidateAction(
 
   const { data: campaign, error: fetchError } = await supabase
     .from("prompter_master_campaigns")
-    .select("ai_proposal, status")
+    .select("ai_proposal, status, updated_at")
     .eq("id", campaignId)
     .eq("tenant_id", session.tenantId)
     .single();
@@ -198,12 +208,11 @@ export async function selectCampaignCandidateAction(
 
   const updatedProposal = selectCandidate(currentProposal, candidateIndex);
 
-  const { error: updateError } = await supabase
-    .from("prompter_master_campaigns")
-    .update({ ai_proposal: updatedProposal as unknown as Json })
-    .eq("id", campaignId);
-
-  if (updateError) {
+  const written = await writeCampaignIfUnchanged(supabase, session.tenantId, campaignId, campaign.updated_at, {
+    ai_proposal: updatedProposal as unknown as Json,
+  });
+  if (written === "conflict") return { error: PROPOSAL_CONFLICT_MESSAGE };
+  if (written === "error") {
     return { error: "Gagal menyimpan pilihan kandidat." };
   }
 
@@ -283,7 +292,7 @@ export async function updateCampaignCopyAction(
 
   const { data: campaign, error: fetchError } = await supabase
     .from("prompter_master_campaigns")
-    .select("ai_proposal, status")
+    .select("ai_proposal, status, updated_at")
     .eq("id", campaignId)
     .eq("tenant_id", session.tenantId)
     .single();
@@ -306,12 +315,11 @@ export async function updateCampaignCopyAction(
     cta: typeof cta === "string" ? cta : currentProposal.cta,
   };
 
-  const { error: updateError } = await supabase
-    .from("prompter_master_campaigns")
-    .update({ ai_proposal: updatedProposal })
-    .eq("id", campaignId);
-
-  if (updateError) {
+  const written = await writeCampaignIfUnchanged(supabase, session.tenantId, campaignId, campaign.updated_at, {
+    ai_proposal: updatedProposal,
+  });
+  if (written === "conflict") return { error: PROPOSAL_CONFLICT_MESSAGE };
+  if (written === "error") {
     return { error: "Gagal menyimpan perubahan." };
   }
 
@@ -451,7 +459,7 @@ export async function submitForApprovalAction(campaignId: string): Promise<Campa
 
   const { data: campaign, error: campaignError } = await supabase
     .from("prompter_master_campaigns")
-    .select("id, status, daily_budget, total_budget, currency, ai_proposal")
+    .select("id, status, daily_budget, total_budget, currency, ai_proposal, product_id")
     .eq("id", campaignId)
     .eq("tenant_id", session.tenantId)
     .single();
@@ -466,7 +474,23 @@ export async function submitForApprovalAction(campaignId: string): Promise<Campa
 
   // What the owner is approving: the destination exactly as it is NOW. The launch compares the
   // campaign's current destination with this snapshot and refuses on any difference.
-  const destinationSnapshot = buildDestinationSnapshot(campaign.ai_proposal, ownHostsFromProcessEnv());
+  // A legacy campaign (no stored destination) uses the product/brand landing URL: that URL is resolved and
+  // validated on the server NOW and recorded, so changing the product/brand URL later needs a new approval.
+  const submitOwnHosts = ownHostsFromProcessEnv();
+  let legacyLandingUrl: string | null = null;
+  if (readStoredDestination(campaign.ai_proposal, submitOwnHosts).kind === "legacy") {
+    const resolved = await resolveLegacyLandingCheck(
+      supabase,
+      session.tenantId,
+      campaign.product_id,
+      submitOwnHosts ?? [],
+    );
+    if (resolved.ok) legacyLandingUrl = resolved.value;
+    else if (resolved.code === "PREFLIGHT_READ_FAILED") {
+      return { error: "Gagal membaca tujuan iklan. Pengajuan tidak dibuat, coba lagi." };
+    }
+  }
+  const destinationSnapshot = buildDestinationSnapshot(campaign.ai_proposal, submitOwnHosts, legacyLandingUrl);
 
   const policy = await getOrCreateBudgetPolicy(supabase, session.tenantId);
   const monthToDateSpend = await getMonthToDateSpend(supabase, session.tenantId);
@@ -622,7 +646,7 @@ export async function updateCampaignDestinationAction(
 
   const { data: campaign, error: campaignError } = await supabase
     .from("prompter_master_campaigns")
-    .select("id, status, ai_proposal")
+    .select("id, status, ai_proposal, updated_at")
     .eq("id", campaignId)
     .eq("tenant_id", session.tenantId)
     .single();
@@ -663,15 +687,11 @@ export async function updateCampaignDestinationAction(
   const previous = readStoredDestination(current, ownHostsFromProcessEnv());
   const next = { ...(current as Record<string, Json>), [PURCHASE_DESTINATION_KEY]: built.value as unknown as Json };
 
-  const { data: updated, error: updateError } = await supabase
-    .from("prompter_master_campaigns")
-    .update({ ai_proposal: next })
-    .eq("id", campaignId)
-    .eq("tenant_id", session.tenantId)
-    .eq("status", "DRAFT")
-    .select("id");
-
-  if (updateError || !updated || updated.length !== 1) {
+  const written = await writeCampaignIfUnchanged(supabase, session.tenantId, campaignId, campaign.updated_at, {
+    ai_proposal: next,
+  });
+  if (written === "conflict") return { error: PROPOSAL_CONFLICT_MESSAGE, saved: false };
+  if (written === "error") {
     return { error: "Tujuan iklan tidak berhasil disimpan. Muat ulang halaman lalu coba lagi.", saved: false };
   }
 
@@ -690,4 +710,176 @@ export async function updateCampaignDestinationAction(
 
   revalidatePath(`/campaigns/${campaignId}`);
   return { error: null, saved: true };
+}
+
+
+export interface RecoverState {
+  error: string | null;
+  done: boolean;
+}
+
+/**
+ * Returns a BLOCKED, never-launched SCHEDULED campaign to DRAFT so it can be fixed and re-approved.
+ *
+ * A campaign is "blocked" when its destination is unlaunchable or does not match what its latest approval
+ * recorded (this includes every approval that predates destination snapshots). The recovery:
+ *  - is owner/marketing only, tenant scoped, and refuses anything that is not SCHEDULED, whose channels are
+ *    not ALL still SCHEDULED with no external id, or that has any recorded ad metrics (no spend activity);
+ *  - refuses a campaign that is not blocked (nothing to recover);
+ *  - moves the channel rows first and the master second, each as a conditional UPDATE (see
+ *    services/channel-campaigns.ts), so a concurrent launch claim and the recovery can never both win a
+ *    row; if any step cannot be confirmed the rows it moved are put back and nothing is reported as done;
+ *  - then marks the old approvals EXPIRED (best effort: the approval table is owner-writable, and a newer
+ *    submission is always the "latest" approval the launch looks at, so an old APPROVED row can never
+ *    authorise a launch again). No approval, audit or campaign row is deleted.
+ */
+export async function recoverBlockedScheduledCampaignAction(
+  campaignId: string,
+  _prevState: RecoverState,
+  _formData: FormData,
+): Promise<RecoverState> {
+  void _prevState;
+  void _formData;
+  const session = await requireSessionContext();
+
+  if (session.role !== "owner" && session.role !== "marketing") {
+    return { error: "Hanya Owner atau Marketing yang dapat mengembalikan campaign ke Draft.", done: false };
+  }
+
+  const supabase = await createClient();
+
+  const { data: master, error: masterError } = await supabase
+    .from("prompter_master_campaigns")
+    .select("id, status, product_id, ai_proposal")
+    .eq("id", campaignId)
+    .eq("tenant_id", session.tenantId)
+    .single();
+  if (masterError || !master) return { error: "Campaign tidak ditemukan.", done: false };
+  if (master.status !== "SCHEDULED") {
+    return {
+      error: "Hanya campaign berstatus Terjadwal yang belum pernah diluncurkan yang bisa dikembalikan ke Draft.",
+      done: false,
+    };
+  }
+
+  const channels = await readChannelRowsForRecovery(supabase, session.tenantId, campaignId);
+  if (!channels.ok) return { error: "Status channel tidak dapat diperiksa. Tidak ada perubahan, coba lagi.", done: false };
+  if (
+    channels.rows.length === 0 ||
+    channels.rows.some((r) => r.status !== "SCHEDULED" || r.external_campaign_id !== null)
+  ) {
+    return {
+      error:
+        "Campaign ini sudah pernah diluncurkan atau sedang diproses di platform iklan, sehingga tidak bisa dikembalikan ke Draft.",
+      done: false,
+    };
+  }
+
+  // Any recorded ad activity (platform metrics or manually entered spend) means money may have moved.
+  const [platformActivity, manualActivity] = await Promise.all([
+    supabase
+      .from("prompter_marketing_metrics")
+      .select("id")
+      .eq("tenant_id", session.tenantId)
+      .eq("master_campaign_id", campaignId)
+      .limit(1),
+    supabase
+      .from("prompter_manual_ad_metrics")
+      .select("id")
+      .eq("tenant_id", session.tenantId)
+      .eq("master_campaign_id", campaignId)
+      .limit(1),
+  ]);
+  if (platformActivity.error || manualActivity.error) {
+    return { error: "Aktivitas iklan tidak dapat diperiksa. Tidak ada perubahan, coba lagi.", done: false };
+  }
+  if ((platformActivity.data?.length ?? 0) > 0 || (manualActivity.data?.length ?? 0) > 0) {
+    return {
+      error: "Campaign ini sudah memiliki data performa atau pengeluaran iklan, sehingga tidak bisa dikembalikan ke Draft.",
+      done: false,
+    };
+  }
+
+  // Only a BLOCKED campaign is recoverable: latest approval must be APPROVED AND match the destination.
+  const { data: approvalRows, error: approvalError } = await supabase
+    .from("prompter_approvals")
+    .select("status, created_at, context")
+    .eq("tenant_id", session.tenantId)
+    .eq("approval_type", "CAMPAIGN_LAUNCH")
+    .eq("resource_type", "prompter_master_campaigns")
+    .eq("resource_id", campaignId)
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (approvalError) return { error: "Persetujuan tidak dapat diperiksa. Tidak ada perubahan, coba lagi.", done: false };
+  const latest = [...(approvalRows ?? [])].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))[0];
+
+  if (latest && latest.status === "APPROVED") {
+    const integrity = await evaluateApprovalDestination({
+      supabase,
+      tenantId: session.tenantId,
+      productId: master.product_id,
+      aiProposal: master.ai_proposal,
+      approvalContext: latest.context,
+      ownHosts: ownHostsFromProcessEnv(),
+      requireLaunchable: true,
+    });
+    if (integrity.ok) {
+      return {
+        error: "Campaign ini tidak terblokir: tujuan iklan sesuai dengan yang disetujui. Tidak perlu dikembalikan ke Draft.",
+        done: false,
+      };
+    }
+    if (integrity.reason === "read_failed") return { error: integrity.message, done: false };
+  }
+
+  // 1) channels first (exclusive with the launch claim, row by row)
+  const movedChannels = await moveChannelCampaignsScheduledToDraft(supabase, session.tenantId, campaignId);
+  if (!movedChannels.ok || movedChannels.ids.length !== channels.rows.length) {
+    const restored = await restoreChannelCampaignsToScheduled(supabase, session.tenantId, campaignId, movedChannels.ids);
+    revalidatePath(`/campaigns/${campaignId}`);
+    return {
+      error: restored
+        ? "Campaign baru saja berubah atau sedang diluncurkan oleh proses lain. Tidak ada perubahan yang disimpan. Muat ulang halaman."
+        : "Perubahan tidak dapat diselesaikan dan status channel mungkin tidak konsisten. Jangan meluncurkan. Hubungi admin untuk pemeriksaan.",
+      done: false,
+    };
+  }
+
+  // 2) then the master
+  const masterOutcome = await transitionMasterScheduledToDraft(supabase, session.tenantId, campaignId);
+  if (masterOutcome !== "moved") {
+    const restored = await restoreChannelCampaignsToScheduled(supabase, session.tenantId, campaignId, movedChannels.ids);
+    revalidatePath(`/campaigns/${campaignId}`);
+    return {
+      error: restored
+        ? "Status campaign berubah saat dipulihkan. Tidak ada perubahan yang disimpan. Muat ulang halaman."
+        : "Status campaign tidak dapat dipastikan dan channel mungkin tidak konsisten. Jangan meluncurkan. Hubungi admin untuk pemeriksaan.",
+      done: false,
+    };
+  }
+
+  // 3) old approvals are no longer valid (nothing is deleted)
+  const { data: expired } = await supabase
+    .from("prompter_approvals")
+    .update({ status: "EXPIRED" })
+    .eq("tenant_id", session.tenantId)
+    .eq("approval_type", "CAMPAIGN_LAUNCH")
+    .eq("resource_type", "prompter_master_campaigns")
+    .eq("resource_id", campaignId)
+    .eq("status", "APPROVED")
+    .select("id");
+
+  await supabase.from("prompter_audit_logs").insert({
+    tenant_id: session.tenantId,
+    actor_user_id: session.userId,
+    action: "campaign.recovered_to_draft",
+    resource_type: "prompter_master_campaigns",
+    resource_id: campaignId,
+    context: { approvals_expired: Array.isArray(expired) ? expired.length : 0 },
+  });
+
+  revalidatePath(`/campaigns/${campaignId}`);
+  revalidatePath("/campaigns");
+  revalidatePath("/approvals");
+  return { error: null, done: true };
 }

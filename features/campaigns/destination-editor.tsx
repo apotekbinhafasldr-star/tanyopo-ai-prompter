@@ -27,7 +27,11 @@ export function DestinationEditor({
   const [open, setOpen] = useState(false);
   const [valid, setValid] = useState(false);
   const [state, formAction, pending] = useActionState(
-    updateCampaignDestinationAction.bind(null, campaignId),
+    async (prev: DestinationEditState, formData: FormData): Promise<DestinationEditState> => {
+      const result = await updateCampaignDestinationAction(campaignId, prev, formData);
+      if (result.saved) setOpen(false); // collapse and show the confirmation below
+      return result;
+    },
     INITIAL,
   );
 

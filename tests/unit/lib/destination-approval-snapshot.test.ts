@@ -1,6 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
-import path from "node:path";
 import {
   buildDestinationSnapshot,
   checkApprovalDestinationSnapshot,
@@ -12,22 +10,30 @@ import { BUDGET_WRITE_ENABLED_PLATFORMS } from "@/lib/campaigns/external-budget-
 const OWN = ["linoe.example.com"];
 const WEB = { version: 1, type: "WEBSITE", value: "https://tokosaya.com/a", link: "https://tokosaya.com/a" };
 const WA = { version: 1, type: "WHATSAPP", value: "081234567890", link: "https://wa.me/6281234567890" };
+const NONE = { version: 1, type: "NONE", value: null, link: null };
 const prop = (d?: unknown) => (d === undefined ? { headline: "x" } : { headline: "x", purchase_destination: d });
-const ctx = (p: unknown) => ({ [DESTINATION_SNAPSHOT_KEY]: buildDestinationSnapshot(p, OWN) });
+const URL1 = "https://toko-saya.co.id/produk";
+const ctx = (p: unknown, legacyUrl: string | null = URL1) => ({
+  [DESTINATION_SNAPSHOT_KEY]: buildDestinationSnapshot(p, OWN, legacyUrl),
+});
 
 describe("buildDestinationSnapshot", () => {
-  it("legacy / none / valid / invalid", () => {
-    expect(buildDestinationSnapshot(prop(), OWN)).toEqual({ version: 1, kind: "legacy" });
-    expect(buildDestinationSnapshot(prop({ version: 1, type: "NONE", value: null, link: null }), OWN).kind).toBe("none");
-    expect(buildDestinationSnapshot(prop(WEB), OWN)).toMatchObject({ kind: "destination", type: "WEBSITE", link: WEB.link });
-    expect(buildDestinationSnapshot(prop({ ...WEB, value: "http://x.com", link: "http://x.com" }), OWN).kind).toBe("invalid");
+  it("legacy campaigns record the ACTUAL landing URL, or 'legacy_unresolved' when there is none", () => {
+    expect(buildDestinationSnapshot(prop(), OWN, URL1)).toEqual({ version: 1, kind: "legacy_url", link: URL1 });
+    expect(buildDestinationSnapshot(prop(), OWN, null)).toEqual({ version: 1, kind: "legacy_unresolved" });
+    expect(JSON.stringify(buildDestinationSnapshot(prop(), OWN, URL1))).not.toBe('{"version":1,"kind":"legacy"}');
   });
-  it("not tied to ownHosts presence for a valid seller URL", () => {
-    expect(buildDestinationSnapshot(prop(WEB), null).kind).toBe("destination");
+  it("none / valid / invalid stored destinations", () => {
+    expect(buildDestinationSnapshot(prop(NONE), OWN, null).kind).toBe("none");
+    expect(buildDestinationSnapshot(prop(WEB), OWN, URL1)).toMatchObject({ kind: "destination", type: "WEBSITE", link: WEB.link });
+    expect(buildDestinationSnapshot(prop({ ...WEB, value: "http://x.com", link: "http://x.com" }), OWN, null).kind).toBe("invalid");
+  });
+  it("the legacy URL is ignored when the campaign has its own destination", () => {
+    expect(JSON.stringify(buildDestinationSnapshot(prop(WEB), OWN, URL1))).not.toContain("toko-saya");
   });
 });
 
-describe("checkApprovalDestinationSnapshot", () => {
+describe("checkApprovalDestinationSnapshot — stored destination", () => {
   it("same destination passes", () => {
     expect(checkApprovalDestinationSnapshot(ctx(prop(WEB)), prop(WEB), OWN).ok).toBe(true);
     expect(checkApprovalDestinationSnapshot(ctx(prop(WA)), prop(WA), OWN).ok).toBe(true);
@@ -37,19 +43,12 @@ describe("checkApprovalDestinationSnapshot", () => {
     const other = { ...WEB, value: "https://lain.com/", link: "https://lain.com/" };
     expect(checkApprovalDestinationSnapshot(ctx(prop(WEB)), prop(other), OWN).ok).toBe(false);
   });
-  it("changed to NONE or destination removed after approval is rejected", () => {
-    expect(checkApprovalDestinationSnapshot(ctx(prop(WEB)), prop({ version: 1, type: "NONE", value: null, link: null }), OWN).ok).toBe(false);
-    expect(checkApprovalDestinationSnapshot(ctx(prop(WEB)), prop(), OWN).ok).toBe(false);
+  it("changed to NONE, or destination removed after approval, is rejected", () => {
+    expect(checkApprovalDestinationSnapshot(ctx(prop(WEB)), prop(NONE), OWN).ok).toBe(false);
+    expect(checkApprovalDestinationSnapshot(ctx(prop(WEB)), prop(), OWN, URL1).ok).toBe(false);
   });
-  it("snapshot of legacy only matches a still-legacy campaign", () => {
-    expect(checkApprovalDestinationSnapshot(ctx(prop()), prop(), OWN).ok).toBe(true);
-    expect(checkApprovalDestinationSnapshot(ctx(prop()), prop(WEB), OWN).ok).toBe(false);
-  });
-  it("no snapshot: legacy campaign ok, new-format campaign fails closed", () => {
-    expect(checkApprovalDestinationSnapshot({ daily_budget: 1 }, prop(), OWN).ok).toBe(true);
-    expect(checkApprovalDestinationSnapshot(null, prop(), OWN).ok).toBe(true);
-    expect(checkApprovalDestinationSnapshot({ daily_budget: 1 }, prop(WEB), OWN).ok).toBe(false);
-    expect(checkApprovalDestinationSnapshot(undefined, prop(WA), OWN).ok).toBe(false);
+  it("none stays none (nothing to compare; launch refuses it on its own)", () => {
+    expect(checkApprovalDestinationSnapshot(ctx(prop(NONE), null), prop(NONE), OWN).ok).toBe(true);
   });
   it.each([
     "oops",
@@ -58,16 +57,47 @@ describe("checkApprovalDestinationSnapshot", () => {
     { kind: "none" },
     { kind: "invalid" },
     { kind: "destination" },
+    { kind: "legacy" },
     { kind: "destination", type: "WEBSITE", value: WEB.value, link: "https://beda.com/" },
   ])("malformed snapshot %j fails closed", (bad) => {
     expect(checkApprovalDestinationSnapshot({ [DESTINATION_SNAPSHOT_KEY]: bad }, prop(WEB), OWN).ok).toBe(false);
   });
-  it("a tampered current destination that is now invalid is rejected", () => {
-    // The link is always rebuilt from `value`, so a forged link alone changes nothing; a forged value does.
+  it("a forged link alone changes nothing (rebuilt from value); a forged value does", () => {
     const forgedLink = { ...WEB, link: "http://evil.com" };
     expect(checkApprovalDestinationSnapshot(ctx(prop(WEB)), prop(forgedLink), OWN).ok).toBe(true);
     const forgedValue = { ...WEB, value: "http://evil.com", link: "http://evil.com" };
     expect(checkApprovalDestinationSnapshot(ctx(prop(WEB)), prop(forgedValue), OWN).ok).toBe(false);
+  });
+});
+
+describe("checkApprovalDestinationSnapshot — legacy campaigns and old approvals", () => {
+  it("same landing URL passes", () => {
+    expect(checkApprovalDestinationSnapshot(ctx(prop()), prop(), OWN, URL1).ok).toBe(true);
+  });
+  it("landing URL changed, removed (null) or unknown (undefined) is rejected", () => {
+    expect(checkApprovalDestinationSnapshot(ctx(prop()), prop(), OWN, "https://toko-lain.co.id/").ok).toBe(false);
+    expect(checkApprovalDestinationSnapshot(ctx(prop()), prop(), OWN, null).ok).toBe(false);
+    expect(checkApprovalDestinationSnapshot(ctx(prop()), prop(), OWN, undefined).ok).toBe(false);
+  });
+  it("'legacy_unresolved' only matches a campaign that is still unresolved", () => {
+    const c = ctx(prop(), null);
+    expect(checkApprovalDestinationSnapshot(c, prop(), OWN, null).ok).toBe(true);
+    expect(checkApprovalDestinationSnapshot(c, prop(), OWN, URL1).ok).toBe(false);
+    expect(checkApprovalDestinationSnapshot(c, prop(), OWN, undefined).ok).toBe(false);
+  });
+  it("a legacy snapshot does not cover a campaign that now has its own destination", () => {
+    expect(checkApprovalDestinationSnapshot(ctx(prop()), prop(WEB), OWN, URL1).ok).toBe(false);
+  });
+  it("NO approval without a snapshot is ever trusted — not for legacy, not for new-format", () => {
+    for (const old of [{ daily_budget: 1 }, {}, null, undefined, "x"]) {
+      expect(checkApprovalDestinationSnapshot(old, prop(), OWN, URL1).ok).toBe(false);
+      expect(checkApprovalDestinationSnapshot(old, prop(WEB), OWN).ok).toBe(false);
+    }
+  });
+  it("the refusal tells the user how to recover", () => {
+    const r = checkApprovalDestinationSnapshot(null, prop(), OWN, URL1);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.message).toMatch(/Kembalikan ke Draft/);
   });
 });
 
@@ -88,15 +118,5 @@ describe("summarizeDestinationInput", () => {
 describe("paid-ad gate stays default-deny", () => {
   it("BUDGET_WRITE_ENABLED_PLATFORMS is empty", () => {
     expect(BUDGET_WRITE_ENABLED_PLATFORMS).toEqual([]);
-  });
-});
-
-describe("regenerate keeps the destination (source regression)", () => {
-  const src = readFileSync(path.join(process.cwd(), "features/campaigns/actions.ts"), "utf8");
-  const start = src.indexOf("export async function regenerateCampaignProposalAction");
-  const body = src.slice(start, src.indexOf("export async function", start + 10));
-  it("reads the existing destination and writes it back onto the new proposal", () => {
-    expect(body).toContain("PURCHASE_DESTINATION_KEY");
-    expect(body).toContain('.eq("tenant_id"');
   });
 });

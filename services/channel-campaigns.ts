@@ -207,3 +207,107 @@ export async function mirrorChannelCampaignStatus(
   const check = await checkChannelCampaignState(supabase, tenantId, masterCampaignId, transition, "after");
   return { ok: check.ok, updated, consistent: check.consistent };
 }
+
+// ---------------------------------------------------------------------------
+// Recovery of a blocked SCHEDULED campaign back to DRAFT
+//
+// Deliberately NOT part of STATUS_TRANSITIONS: it is only reachable through
+// recoverBlockedScheduledCampaignAction, which first proves the campaign has
+// never launched (every channel still SCHEDULED, no external id, no metrics).
+// Channels move FIRST: the exclusive launch claim is also a conditional
+// UPDATE on `status = 'SCHEDULED'` of the same rows, so per row exactly one
+// of {recovery, claim} wins; a launch can therefore never start on a channel
+// that recovery already moved, and recovery never touches a claimed one.
+// ---------------------------------------------------------------------------
+
+export interface RecoveryChannelRow {
+  id: string;
+  status: string;
+  external_campaign_id: string | null;
+}
+
+/** Tenant-scoped, read-only list of the channel rows of a master. `ok:false` means the state is unknown. */
+export async function readChannelRowsForRecovery(
+  supabase: SupabaseClient<Database>,
+  tenantId: string,
+  masterCampaignId: string,
+): Promise<{ ok: boolean; rows: RecoveryChannelRow[] }> {
+  try {
+    const { data, error } = await supabase
+      .from("prompter_channel_campaigns")
+      .select("id, status, external_campaign_id")
+      .eq("master_campaign_id", masterCampaignId)
+      .eq("tenant_id", tenantId);
+    if (error || !Array.isArray(data)) return { ok: false, rows: [] };
+    return { ok: true, rows: data as RecoveryChannelRow[] };
+  } catch {
+    return { ok: false, rows: [] };
+  }
+}
+
+/** SCHEDULED -> DRAFT for never-claimed channel rows only. Returns the ids actually moved. */
+export async function moveChannelCampaignsScheduledToDraft(
+  supabase: SupabaseClient<Database>,
+  tenantId: string,
+  masterCampaignId: string,
+): Promise<{ ok: boolean; ids: string[] }> {
+  try {
+    const { data, error } = await supabase
+      .from("prompter_channel_campaigns")
+      .update({ status: "DRAFT" })
+      .eq("master_campaign_id", masterCampaignId)
+      .eq("tenant_id", tenantId)
+      .eq("status", "SCHEDULED")
+      .is("external_campaign_id", null)
+      .select("id");
+    if (error || !Array.isArray(data)) return { ok: false, ids: [] };
+    return { ok: true, ids: data.map((r) => r.id) };
+  } catch {
+    return { ok: false, ids: [] };
+  }
+}
+
+/** Undo of the step above for exactly the ids it moved (only rows still DRAFT). */
+export async function restoreChannelCampaignsToScheduled(
+  supabase: SupabaseClient<Database>,
+  tenantId: string,
+  masterCampaignId: string,
+  ids: readonly string[],
+): Promise<boolean> {
+  if (ids.length === 0) return true;
+  try {
+    const { data, error } = await supabase
+      .from("prompter_channel_campaigns")
+      .update({ status: "SCHEDULED" })
+      .in("id", [...ids])
+      .eq("master_campaign_id", masterCampaignId)
+      .eq("tenant_id", tenantId)
+      .eq("status", "DRAFT")
+      .select("id");
+    return !error && Array.isArray(data) && data.length === ids.length;
+  } catch {
+    return false;
+  }
+}
+
+/** SCHEDULED -> DRAFT on the master: one conditional UPDATE scoped by id, tenant and source status. */
+export async function transitionMasterScheduledToDraft(
+  supabase: SupabaseClient<Database>,
+  tenantId: string,
+  masterCampaignId: string,
+): Promise<MasterTransitionOutcome> {
+  try {
+    const { data, error } = await supabase
+      .from("prompter_master_campaigns")
+      .update({ status: "DRAFT" })
+      .eq("id", masterCampaignId)
+      .eq("tenant_id", tenantId)
+      .eq("status", "SCHEDULED")
+      .select("id");
+    if (error || !Array.isArray(data)) return "error";
+    if (data.length === 1) return "moved";
+    return data.length === 0 ? "conflict" : "error";
+  } catch {
+    return "error";
+  }
+}
