@@ -27,6 +27,7 @@ import { getTenantChannelPerformance } from "@/services/channel-performance";
 import { getOrCreateBudgetPolicy, getMonthToDateSpend, checkBudgetGuard } from "@/services/budget-guard";
 import { parseLocalDateTimeInZone } from "@/lib/scheduling/recommend-time";
 import type { Json } from "@/types/database";
+import { campaignHasManualAdMetrics } from "@/features/campaigns/manual-metrics-actions";
 import { PROPOSAL_CONFLICT_MESSAGE, writeCampaignIfUnchanged } from "@/services/campaign-proposal-write";
 import {
   evaluateApprovalDestination,
@@ -776,24 +777,17 @@ export async function recoverBlockedScheduledCampaignAction(
   }
 
   // Any recorded ad activity (platform metrics or manually entered spend) means money may have moved.
-  const [platformActivity, manualActivity] = await Promise.all([
-    supabase
-      .from("prompter_marketing_metrics")
-      .select("id")
-      .eq("tenant_id", session.tenantId)
-      .eq("master_campaign_id", campaignId)
-      .limit(1),
-    supabase
-      .from("prompter_manual_ad_metrics")
-      .select("id")
-      .eq("tenant_id", session.tenantId)
-      .eq("master_campaign_id", campaignId)
-      .limit(1),
-  ]);
-  if (platformActivity.error || manualActivity.error) {
+  const { data: platformActivity, error: platformError } = await supabase
+    .from("prompter_marketing_metrics")
+    .select("id")
+    .eq("tenant_id", session.tenantId)
+    .eq("master_campaign_id", campaignId)
+    .limit(1);
+  const manualActivity = await campaignHasManualAdMetrics(campaignId);
+  if (platformError || manualActivity === null) {
     return { error: "Aktivitas iklan tidak dapat diperiksa. Tidak ada perubahan, coba lagi.", done: false };
   }
-  if ((platformActivity.data?.length ?? 0) > 0 || (manualActivity.data?.length ?? 0) > 0) {
+  if ((platformActivity?.length ?? 0) > 0 || manualActivity) {
     return {
       error: "Campaign ini sudah memiliki data performa atau pengeluaran iklan, sehingga tidak bisa dikembalikan ke Draft.",
       done: false,

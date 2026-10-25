@@ -248,3 +248,22 @@ export async function deleteManualMetricAction(
   revalidatePath(`/campaigns/${current.master_campaign_id}`);
   return OK("Entri dihapus.");
 }
+
+/**
+ * Read only. Does this campaign (of the caller's tenant) have ANY manually entered ad metrics? Used by the
+ * "return a blocked Scheduled campaign to Draft" guard, which must never reset a campaign that already has
+ * ad spend recorded. `null` = could not be determined (callers must fail closed). Lives here because this
+ * is the only module allowed to read the manual table.
+ */
+export async function campaignHasManualAdMetrics(campaignId: string): Promise<boolean | null> {
+  const session = await requireSessionContext();
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("prompter_manual_ad_metrics")
+    .select("id")
+    .eq("tenant_id", session.tenantId)
+    .eq("master_campaign_id", campaignId)
+    .limit(1);
+  if (error || !Array.isArray(data)) return null;
+  return data.length > 0;
+}
