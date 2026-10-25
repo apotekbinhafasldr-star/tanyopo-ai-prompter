@@ -50,8 +50,9 @@ import {
   type ProductMediaRow,
 } from "@/lib/campaigns/meta-launch-preflight";
 import {
+  checkApprovalDestinationSnapshot,
   checkLaunchDestination,
-  resolveOwnHostsFromEnv,
+  ownHostsFromProcessEnv,
   withUtm,
 } from "@/lib/campaigns/purchase-destination";
 import type { CampaignProposal } from "@/schemas/ai/campaign-proposal";
@@ -341,14 +342,8 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
   // Purchase destination gate (platform-agnostic, read-only, before any approval/credential/claim step):
   // a campaign whose stored destination is "none" or invalid can never be launched as a paid ad.
   // Legacy campaigns (no stored destination) are unaffected.
-  const earlyDestination = checkLaunchDestination(
-    masterCampaign.ai_proposal,
-    resolveOwnHostsFromEnv({
-      NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
-      META_REDIRECT_URI: process.env.META_REDIRECT_URI,
-      NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
-    }),
-  );
+  const launchOwnHosts = ownHostsFromProcessEnv();
+  const earlyDestination = checkLaunchDestination(masterCampaign.ai_proposal, launchOwnHosts);
   if (!earlyDestination.ok) {
     return { error: earlyDestination.message };
   }
@@ -359,7 +354,7 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
   if (connectorPlatform === "META") {
     const { data: approvalRows, error: approvalError } = await supabase
       .from("prompter_approvals")
-      .select("status, created_at")
+      .select("status, created_at, context")
       .eq("tenant_id", session.tenantId)
       .eq("approval_type", "CAMPAIGN_LAUNCH")
       .eq("resource_type", "prompter_master_campaigns")
@@ -371,6 +366,18 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
     }
     const approval = checkLaunchApproval(approvalRows);
     if (!approval.ok) return { error: approval.message };
+
+    // The destination being launched must be exactly the one that was approved (snapshot taken at
+    // submission). A changed, missing or unreadable snapshot refuses the launch before the claim.
+    const latestApproval = [...(approvalRows ?? [])].sort(
+      (a, b) => Date.parse(b.created_at) - Date.parse(a.created_at),
+    )[0];
+    const snapshotCheck = checkApprovalDestinationSnapshot(
+      latestApproval?.context,
+      masterCampaign.ai_proposal,
+      launchOwnHosts,
+    );
+    if (!snapshotCheck.ok) return { error: snapshotCheck.message };
   }
 
   // P0 budget launch safety — ALL budget validation completes here, BEFORE

@@ -14,6 +14,7 @@ import { formatCurrency, productTypeLabel } from "@/lib/utils/format";
 import { primaryGoals } from "@/schemas/onboarding";
 import { channelOptions } from "@/schemas/campaign";
 import { PurchaseDestinationField } from "@/features/promote/purchase-destination-field";
+import { summarizeDestinationInput, type DestinationType } from "@/lib/campaigns/purchase-destination";
 import {
   generateQuickCampaignDraftAction,
   type PromoteActionState,
@@ -62,6 +63,8 @@ export function QuickPromoteWizard({
   const [targetCity, setTargetCity] = useState("");
   const [audienceNotes, setAudienceNotes] = useState("");
   const [destinationValid, setDestinationValid] = useState(false);
+  const [destinationChoice, setDestinationChoice] = useState<{ type: DestinationType | ""; value: string }>({ type: "", value: "" });
+  const destinationSummary = summarizeDestinationInput(destinationChoice.type, destinationChoice.value);
   const [state, formAction, pending] = useActionState(generateQuickCampaignDraftAction, initialState);
 
   const hasBudget = Number(dailyBudget) > 0 || Number(totalBudget) > 0;
@@ -198,7 +201,12 @@ export function QuickPromoteWizard({
                 websiteDefault={products.find((p) => p.id === productId)?.website_url}
                 whatsappDefault={brandWhatsapp}
                 onValidityChange={setDestinationValid}
+              onChange={(type, value) => setDestinationChoice({ type, value })}
               />
+
+              <p className="rounded-[var(--radius-md)] bg-surface-muted p-3 text-sm text-foreground">
+                <strong>Tujuan pembelian:</strong> {destinationSummary ?? "Belum dipilih"}
+              </p>
 
               <p className="rounded-[var(--radius-md)] bg-brand-muted p-3 text-sm text-brand">
                 Biarkan LINOE AI memilih strategi terbaik — target audiens, channel, positioning, dan

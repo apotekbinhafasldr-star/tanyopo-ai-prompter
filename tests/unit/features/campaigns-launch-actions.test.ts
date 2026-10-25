@@ -742,3 +742,96 @@ describe("launchChannelCampaignAction — P0 budget launch safety", () => {
     });
   });
 });
+
+describe("launchChannelCampaignAction — approval destination snapshot", () => {
+  const WEB = { version: 1, type: "WEBSITE", value: "https://tokosaya.com/produk", link: "https://tokosaya.com/produk" };
+  const WA = { version: 1, type: "WHATSAPP", value: "081234567890", link: "https://wa.me/6281234567890" };
+  const proposal = (d: unknown) => ({ headline: "Diskon", primary_text: "Beli", cta: "Beli Sekarang", purchase_destination: d });
+  const snapOf = (d: typeof WEB) => ({
+    destination_snapshot: { version: 1, kind: "destination", type: d.type, value: d.value, link: d.link },
+  });
+
+  beforeEach(() => {
+    requireSessionContextMock.mockClear();
+    connectorMock.createCampaign.mockClear();
+    connectorMock.createCreative.mockClear();
+  });
+
+  it("launches when the current destination equals the approved snapshot (website, with utm)", async () => {
+    harness = buildHarness({ master: { ai_proposal: proposal(WEB) } });
+    fx.approvals = [{ status: "APPROVED", created_at: "2026-10-01T00:00:00Z", context: snapOf(WEB) }];
+
+    const result = await launchChannelCampaignAction("cc1");
+
+    expect(result.error).toBeNull();
+    const creative = (connectorMock.createCreative.mock.calls[0] as unknown[])[2] as { linkUrl: string };
+    expect(creative.linkUrl).toContain("https://tokosaya.com/produk");
+    expect(creative.linkUrl).toContain("utm_");
+  });
+
+  it("launches a WhatsApp destination with the wa.me link and no utm", async () => {
+    harness = buildHarness({ master: { ai_proposal: proposal(WA) } });
+    fx.approvals = [{ status: "APPROVED", created_at: "2026-10-01T00:00:00Z", context: snapOf(WA) }];
+
+    const result = await launchChannelCampaignAction("cc1");
+
+    expect(result.error).toBeNull();
+    const creative = (connectorMock.createCreative.mock.calls[0] as unknown[])[2] as { linkUrl: string };
+    expect(creative.linkUrl).toBe("https://wa.me/6281234567890");
+  });
+
+  it("refuses a destination changed after approval, before the claim and before any platform call", async () => {
+    harness = buildHarness({ master: { ai_proposal: proposal(WA) } });
+    fx.approvals = [{ status: "APPROVED", created_at: "2026-10-01T00:00:00Z", context: snapOf(WEB) }];
+
+    const result = await launchChannelCampaignAction("cc1");
+
+    expect(result.error).toMatch(/berubah sejak campaign disetujui/);
+    expect(harness.claimUpdate).not.toHaveBeenCalled();
+    expect(connectorMock.createCampaign).not.toHaveBeenCalled();
+  });
+
+  it("refuses a new-format campaign whose approval has no snapshot (fail closed)", async () => {
+    harness = buildHarness({ master: { ai_proposal: proposal(WEB) } });
+    fx.approvals = [{ status: "APPROVED", created_at: "2026-10-01T00:00:00Z" }];
+
+    const result = await launchChannelCampaignAction("cc1");
+
+    expect(result.error).toMatch(/tidak mencatat tujuan/);
+    expect(harness.claimUpdate).not.toHaveBeenCalled();
+    expect(connectorMock.createCampaign).not.toHaveBeenCalled();
+  });
+
+  it("only the LATEST approval's snapshot counts", async () => {
+    harness = buildHarness({ master: { ai_proposal: proposal(WA) } });
+    fx.approvals = [
+      { status: "APPROVED", created_at: "2026-10-01T00:00:00Z", context: snapOf(WA) },
+      { status: "APPROVED", created_at: "2026-10-02T00:00:00Z", context: snapOf(WEB) },
+    ];
+
+    const result = await launchChannelCampaignAction("cc1");
+
+    expect(result.error).toMatch(/berubah sejak campaign disetujui/);
+    expect(connectorMock.createCampaign).not.toHaveBeenCalled();
+  });
+
+  it("legacy campaign (no destination) with a legacy approval keeps launching as before", async () => {
+    harness = buildHarness();
+    fx.approvals = [{ status: "APPROVED", created_at: "2026-10-01T00:00:00Z" }];
+
+    const result = await launchChannelCampaignAction("cc1");
+
+    expect(result.error).toBeNull();
+    expect(connectorMock.createCampaign).toHaveBeenCalled();
+  });
+
+  it("a legacy campaign that gained a destination after a legacy approval is refused", async () => {
+    harness = buildHarness({ master: { ai_proposal: proposal(WEB) } });
+    fx.approvals = [{ status: "APPROVED", created_at: "2026-10-01T00:00:00Z", context: { daily_budget: 1 } }];
+
+    const result = await launchChannelCampaignAction("cc1");
+
+    expect(result.error).toMatch(/tidak mencatat tujuan/);
+    expect(connectorMock.createCampaign).not.toHaveBeenCalled();
+  });
+});

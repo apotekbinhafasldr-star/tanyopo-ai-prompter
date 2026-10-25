@@ -340,7 +340,13 @@ export default async function CampaignDetailPage({
         </Card>
       ) : null}
 
-      {proposal ? <PurchaseDestinationCard aiProposal={campaign.ai_proposal} /> : null}
+      {proposal ? (
+        <PurchaseDestinationCard
+          aiProposal={campaign.ai_proposal}
+          campaignId={id}
+          canEdit={isDraft && (session.role === "owner" || session.role === "marketing")}
+        />
+      ) : null}
 
       {quickReview && proposal ? (
         <QuickReviewSummary

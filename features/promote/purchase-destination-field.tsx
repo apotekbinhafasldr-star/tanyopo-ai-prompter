@@ -32,18 +32,30 @@ export function PurchaseDestinationField({
   websiteDefault,
   whatsappDefault,
   onValidityChange,
+  onChange,
+  initialType,
+  initialValue,
 }: {
   websiteDefault?: string | null;
   whatsappDefault?: string | null;
   onValidityChange: (valid: boolean) => void;
+  /** Reports the current choice so a parent can show it in a summary. */
+  onChange?: (type: DestinationType | "", value: string) => void;
+  /** Edit mode: start from the campaign's stored destination. */
+  initialType?: DestinationType | "";
+  initialValue?: string;
 }) {
-  const [type, setType] = useState<DestinationType | "">("");
-  const [website, setWebsite] = useState(websiteDefault ?? "");
-  const [whatsapp, setWhatsapp] = useState(whatsappDefault ?? "");
+  const [type, setType] = useState<DestinationType | "">(initialType ?? "");
+  const [website, setWebsite] = useState(initialType === "WEBSITE" ? (initialValue ?? "") : (websiteDefault ?? ""));
+  const [whatsapp, setWhatsapp] = useState(
+    initialType === "WHATSAPP" ? (initialValue ?? "") : (whatsappDefault ?? ""),
+  );
 
-  // A fresh (re)mount has no choice yet: reset the parent's validity so it can never go stale.
+  // A fresh (re)mount reports its real state so the parent's validity can never go stale.
   useEffect(() => {
-    onValidityChange(false);
+    const v = initialType === "WEBSITE" || initialType === "WHATSAPP" ? (initialValue ?? "") : "";
+    onValidityChange(initialType ? buildPurchaseDestination({ type: initialType, value: v }, null).ok : false);
+    onChange?.(initialType ?? "", v);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -53,8 +65,9 @@ export function PurchaseDestinationField({
   const error = result && !result.ok && value.trim().length > 0 ? result.message : null;
 
   function report(nextType: DestinationType | "", nextWebsite: string, nextWhatsapp: string) {
-    if (!nextType) return onValidityChange(false);
     const v = nextType === "WEBSITE" ? nextWebsite : nextType === "WHATSAPP" ? nextWhatsapp : "";
+    onChange?.(nextType, v);
+    if (!nextType) return onValidityChange(false);
     onValidityChange(buildPurchaseDestination({ type: nextType, value: v }, null).ok);
   }
 

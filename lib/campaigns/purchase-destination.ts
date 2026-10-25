@@ -299,3 +299,91 @@ export function describeDestinationTarget(destination: PurchaseDestination): str
   }
   return "—";
 }
+
+// ---------------------------------------------------------------------------
+// Approval snapshot
+// ---------------------------------------------------------------------------
+
+/** Key inside prompter_approvals.context (existing JSON column, no migration). */
+export const DESTINATION_SNAPSHOT_KEY = "destination_snapshot";
+
+export type DestinationSnapshot =
+  | { version: 1; kind: "legacy" }
+  | { version: 1; kind: "none" }
+  | { version: 1; kind: "invalid" }
+  | { version: 1; kind: "destination"; type: "WEBSITE" | "WHATSAPP"; value: string; link: string };
+
+/** Server-side env hosts for this deployment (null when the app domain is not configured). */
+export function ownHostsFromProcessEnv(): string[] | null {
+  return resolveOwnHostsFromEnv({
+    NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
+    META_REDIRECT_URI: process.env.META_REDIRECT_URI,
+    NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
+  });
+}
+
+/** What the owner is being asked to approve, derived from the campaign as it is at submission time. */
+export function buildDestinationSnapshot(aiProposal: unknown, ownHosts: readonly string[] | null): DestinationSnapshot {
+  const stored = readStoredDestination(aiProposal, ownHosts);
+  switch (stored.kind) {
+    case "legacy":
+      return { version: 1, kind: "legacy" };
+    case "none":
+      return { version: 1, kind: "none" };
+    case "invalid":
+      return { version: 1, kind: "invalid" };
+    case "valid": {
+      const d = stored.destination;
+      return {
+        version: 1,
+        kind: "destination",
+        type: d.type as "WEBSITE" | "WHATSAPP",
+        value: d.value ?? "",
+        link: d.link ?? "",
+      };
+    }
+  }
+}
+
+const SNAPSHOT_MISMATCH =
+  "Tujuan iklan berubah sejak campaign disetujui, atau persetujuan ini tidak mencatat tujuan iklan. Peluncuran dibatalkan. Batalkan pengajuan, lalu ajukan dan setujui ulang. Tidak ada yang dikirim ke platform iklan.";
+
+/**
+ * Compares the CURRENT destination with the snapshot stored in the approval context.
+ * Fail closed: anything that cannot be proven identical is refused. The one tolerated gap is a
+ * legacy campaign (no destination at all) with an approval that predates snapshots, which keeps
+ * its previous behaviour untouched.
+ */
+export function checkApprovalDestinationSnapshot(
+  approvalContext: unknown,
+  aiProposal: unknown,
+  ownHosts: readonly string[] | null,
+): DestinationResult<true> {
+  const current = readStoredDestination(aiProposal, ownHosts);
+  const raw =
+    approvalContext !== null && typeof approvalContext === "object" && !Array.isArray(approvalContext)
+      ? (approvalContext as Record<string, unknown>)[DESTINATION_SNAPSHOT_KEY]
+      : undefined;
+
+  if (raw === undefined || raw === null) {
+    return current.kind === "legacy" ? ok(true) : fail(SNAPSHOT_MISMATCH);
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) return fail(SNAPSHOT_MISMATCH);
+  const snap = raw as Record<string, unknown>;
+
+  if (snap.kind === "legacy") return current.kind === "legacy" ? ok(true) : fail(SNAPSHOT_MISMATCH);
+  if (snap.kind === "destination" && current.kind === "valid") {
+    const d = current.destination;
+    return snap.type === d.type && snap.value === d.value && snap.link === d.link ? ok(true) : fail(SNAPSHOT_MISMATCH);
+  }
+  return fail(SNAPSHOT_MISMATCH);
+}
+
+/** One-line summary for wizard review screens; null when the input is not (yet) valid. */
+export function summarizeDestinationInput(type: DestinationType | "", value: string): string | null {
+  if (!type) return null;
+  const built = buildPurchaseDestination({ type, value }, null);
+  if (!built.ok) return null;
+  if (built.value.type === "NONE") return "Belum ada tujuan. Iklan berbayar tidak bisa diluncurkan sampai tujuan diisi.";
+  return `${DESTINATION_LABELS[built.value.type]} · ${describeDestinationTarget(built.value)}`;
+}

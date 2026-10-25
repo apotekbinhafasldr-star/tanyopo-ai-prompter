@@ -4,7 +4,7 @@
  * to launch; tests mutate the returned object to break one prerequisite.
  */
 export interface PreflightFixtures {
-  approvals: { status: string; created_at: string }[];
+  approvals: { status: string; created_at: string; context?: unknown }[];
   approvalError: boolean;
   product: { id: string; website_url: string | null } | null;
   brand: { website_url: string | null } | null;

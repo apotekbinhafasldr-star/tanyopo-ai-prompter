@@ -25,6 +25,9 @@ import { parseLocalDateTimeInZone } from "@/lib/scheduling/recommend-time";
 import type { Json } from "@/types/database";
 import {
   PURCHASE_DESTINATION_KEY,
+  buildDestinationSnapshot,
+  buildPurchaseDestination,
+  ownHostsFromProcessEnv,
   readStoredDestination,
   resolveOwnHostsFromEnv,
 } from "@/lib/campaigns/purchase-destination";
@@ -448,7 +451,7 @@ export async function submitForApprovalAction(campaignId: string): Promise<Campa
 
   const { data: campaign, error: campaignError } = await supabase
     .from("prompter_master_campaigns")
-    .select("id, status, daily_budget, total_budget, currency")
+    .select("id, status, daily_budget, total_budget, currency, ai_proposal")
     .eq("id", campaignId)
     .eq("tenant_id", session.tenantId)
     .single();
@@ -460,6 +463,10 @@ export async function submitForApprovalAction(campaignId: string): Promise<Campa
   if (campaign.status !== "DRAFT") {
     return { error: "Campaign ini sudah diajukan sebelumnya." };
   }
+
+  // What the owner is approving: the destination exactly as it is NOW. The launch compares the
+  // campaign's current destination with this snapshot and refuses on any difference.
+  const destinationSnapshot = buildDestinationSnapshot(campaign.ai_proposal, ownHostsFromProcessEnv());
 
   const policy = await getOrCreateBudgetPolicy(supabase, session.tenantId);
   const monthToDateSpend = await getMonthToDateSpend(supabase, session.tenantId);
@@ -480,7 +487,11 @@ export async function submitForApprovalAction(campaignId: string): Promise<Campa
     resource_type: "prompter_master_campaigns",
     resource_id: campaignId,
     requested_by: session.userId,
-    context: { daily_budget: campaign.daily_budget, total_budget: campaign.total_budget },
+    context: {
+      daily_budget: campaign.daily_budget,
+      total_budget: campaign.total_budget,
+      destination_snapshot: destinationSnapshot,
+    } as unknown as Json,
   });
 
   if (approvalError) {
@@ -573,4 +584,110 @@ export async function cancelSubmissionAction(formData: FormData): Promise<void> 
 
   revalidatePath(`/campaigns/${campaignId}`);
   revalidatePath("/approvals");
+}
+
+
+export interface DestinationEditState {
+  error: string | null;
+  saved: boolean;
+}
+
+/**
+ * Changes where a campaign's ad sends buyers. Owner/marketing only, DRAFT only, tenant scoped, validated
+ * on the server (same rules as creation). A campaign that is awaiting approval, scheduled or later is never
+ * edited here: the owner must cancel the submission first, so a destination can never change behind an
+ * approval. Only the purchase_destination key inside ai_proposal is written; products and the brand profile
+ * are never touched.
+ */
+export async function updateCampaignDestinationAction(
+  campaignId: string,
+  _prevState: DestinationEditState,
+  formData: FormData,
+): Promise<DestinationEditState> {
+  const session = await requireSessionContext();
+
+  if (session.role !== "owner" && session.role !== "marketing") {
+    return { error: "Hanya Owner atau Marketing yang dapat mengubah tujuan iklan.", saved: false };
+  }
+
+  const rawType = formData.get("destinationType");
+  const rawValue = formData.get("destinationValue");
+  const built = buildPurchaseDestination(
+    { type: typeof rawType === "string" ? rawType : "", value: typeof rawValue === "string" ? rawValue.trim() : "" },
+    ownHostsFromProcessEnv(),
+  );
+  if (!built.ok) return { error: built.message, saved: false };
+
+  const supabase = await createClient();
+
+  const { data: campaign, error: campaignError } = await supabase
+    .from("prompter_master_campaigns")
+    .select("id, status, ai_proposal")
+    .eq("id", campaignId)
+    .eq("tenant_id", session.tenantId)
+    .single();
+
+  if (campaignError || !campaign) {
+    return { error: "Campaign tidak ditemukan.", saved: false };
+  }
+
+  if (campaign.status !== "DRAFT") {
+    return {
+      error: "Tujuan iklan hanya bisa diubah saat campaign berstatus Draft. Batalkan pengajuan terlebih dahulu.",
+      saved: false,
+    };
+  }
+
+  const current = campaign.ai_proposal;
+  if (current === null || typeof current !== "object" || Array.isArray(current)) {
+    return { error: "Campaign ini belum punya proposal AI, sehingga tujuan belum bisa diatur.", saved: false };
+  }
+
+  // A submission writes its approval row before the status flips: refuse while one is pending so an edit
+  // cannot slip between the snapshot and the status change.
+  const { data: pending, error: pendingError } = await supabase
+    .from("prompter_approvals")
+    .select("id")
+    .eq("tenant_id", session.tenantId)
+    .eq("resource_type", "prompter_master_campaigns")
+    .eq("resource_id", campaignId)
+    .eq("status", "PENDING")
+    .limit(1);
+  if (pendingError) {
+    return { error: "Gagal memeriksa status pengajuan. Tujuan tidak diubah, coba lagi.", saved: false };
+  }
+  if (pending && pending.length > 0) {
+    return { error: "Campaign sedang diajukan. Batalkan pengajuan sebelum mengubah tujuan iklan.", saved: false };
+  }
+
+  const previous = readStoredDestination(current, ownHostsFromProcessEnv());
+  const next = { ...(current as Record<string, Json>), [PURCHASE_DESTINATION_KEY]: built.value as unknown as Json };
+
+  const { data: updated, error: updateError } = await supabase
+    .from("prompter_master_campaigns")
+    .update({ ai_proposal: next })
+    .eq("id", campaignId)
+    .eq("tenant_id", session.tenantId)
+    .eq("status", "DRAFT")
+    .select("id");
+
+  if (updateError || !updated || updated.length !== 1) {
+    return { error: "Tujuan iklan tidak berhasil disimpan. Muat ulang halaman lalu coba lagi.", saved: false };
+  }
+
+  // The audit trail records the kind of change only: never the URL or the phone number.
+  await supabase.from("prompter_audit_logs").insert({
+    tenant_id: session.tenantId,
+    actor_user_id: session.userId,
+    action: "campaign.destination_updated",
+    resource_type: "prompter_master_campaigns",
+    resource_id: campaignId,
+    context: {
+      from: previous.kind === "valid" ? previous.destination.type : previous.kind,
+      to: built.value.type,
+    },
+  });
+
+  revalidatePath(`/campaigns/${campaignId}`);
+  return { error: null, saved: true };
 }
