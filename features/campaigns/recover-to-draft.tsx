@@ -27,8 +27,8 @@ export function RecoverToDraft({ campaignId }: { campaignId: string }) {
         <p className="text-xs text-muted-foreground">
           Jika peluncuran ditolak karena tujuan iklan berbeda dari yang disetujui (atau persetujuan lama tidak
           mencatat tujuan), kembalikan campaign ke Draft, perbaiki tujuannya, lalu ajukan dan setujui ulang.
-          Hanya untuk campaign yang belum pernah diluncurkan dan belum punya data pengeluaran iklan. Persetujuan
-          lama menjadi tidak berlaku.
+          Hanya Owner, dan hanya untuk campaign yang belum pernah diluncurkan dan belum punya data pengeluaran
+          iklan. Persetujuan lama menjadi tidak berlaku.
         </p>
         {state.error ? (
           <p role="alert" className="text-sm text-danger">

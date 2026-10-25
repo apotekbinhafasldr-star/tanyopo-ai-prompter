@@ -148,7 +148,7 @@ describe("updateCampaignDestinationAction", () => {
   it("refuses while an approval is pending", async () => {
     current = build({ campaign: draft({ headline: "H" }), pending: [{ id: "a1" }] });
     const r = await updateCampaignDestinationAction("c1", INIT, form("WEBSITE", "https://tokosaya.com/b"));
-    expect(r.error).toMatch(/sedang diajukan/);
+    expect(r.error).toMatch(/menunggu/);
     expect(current.update).not.toHaveBeenCalled();
   });
 

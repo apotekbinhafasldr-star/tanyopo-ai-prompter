@@ -112,6 +112,8 @@ function make(s: Record<string, Row[]>) {
       prompter_approvals: (n) => ({ id: `ap${n}`, status: "PENDING", created_at: `2026-10-25T00:00:${String(n).padStart(2, "0")}Z` }),
     },
     beforeExec: (ctx) => hook?.(ctx),
+    // Production RLS (verified read-only): prompter_approvals UPDATE is OWNER-only; INSERT is owner/marketing.
+    denyWhen: (c) => c.table === "prompter_approvals" && c.op === "update" && state.role !== "owner",
   });
 }
 const master = () => db.tables.prompter_master_campaigns[0];
@@ -431,19 +433,14 @@ describe("P1-1 recovery of a blocked SCHEDULED campaign", () => {
     expect(master().status).toBe("SCHEDULED");
   });
 
-  it.each(["kasir", "apoteker", "admin_gudang", "hr"])("role %s is refused before any read", async (role) => {
+  it.each(["marketing", "kasir", "apoteker", "admin_gudang", "hr"])("role %s is refused on the server before any read", async (role) => {
     state.role = role;
     make(scheduled());
     const r = await REC();
-    expect(r.error).toMatch(/Owner atau Marketing/);
+    expect(r.error).toMatch(/Hanya Owner/);
     expect(db.log).toHaveLength(0);
-  });
-
-  it("marketing may recover", async () => {
-    state.role = "marketing";
-    make(scheduled());
-    expect((await REC()).done).toBe(true);
-    expect(master().status).toBe("DRAFT");
+    expect(master().status).toBe("SCHEDULED");
+    expect(db.tables.prompter_approvals[0].status).toBe("APPROVED");
   });
 
   it("another tenant cannot recover this campaign", async () => {
@@ -471,7 +468,10 @@ describe("P1-1 recovery of a blocked SCHEDULED campaign", () => {
     expect(r.done).toBe(false);
     expect(master().status).toBe("SCHEDULED");
     expect(channelStatuses()).toEqual(["FAILED", "SCHEDULED"]);
-    expect(db.tables.prompter_approvals[0].status).toBe("APPROVED");
+    // Old approval was already declared void: the campaign can not launch, and the message says so.
+    expect(db.tables.prompter_approvals[0].status).toBe("EXPIRED");
+    expect(r.error).toMatch(/kedaluwarsa/);
+    expect(checkLaunchApproval(db.tables.prompter_approvals as { status: string; created_at: string }[]).ok).toBe(false);
   });
 
   it("race with another status change of the master: channels are restored, nothing is reported done", async () => {
@@ -484,18 +484,33 @@ describe("P1-1 recovery of a blocked SCHEDULED campaign", () => {
     expect(r.done).toBe(false);
     expect(master().status).toBe("ACTIVE");
     expect(channelStatuses()).toEqual(["SCHEDULED", "SCHEDULED"]);
-    expect(db.tables.prompter_approvals[0].status).toBe("APPROVED");
+    expect(db.tables.prompter_approvals[0].status).toBe("EXPIRED");
   });
 
-  it("a database failure while moving channels leaves master and approval untouched", async () => {
-    make(scheduled());
+  it("a database failure while moving channels leaves the master untouched and the campaign unlaunchable", async () => {
     db = createFakeDb(scheduled(), {
       failWhen: (c) => (c.table === "prompter_channel_campaigns" && c.op === "update" ? "boom" : null),
     });
     const r = await REC();
     expect(r.done).toBe(false);
     expect(master().status).toBe("SCHEDULED");
-    expect(db.tables.prompter_approvals[0].status).toBe("APPROVED");
+    expect(channelStatuses()).toEqual(["SCHEDULED", "SCHEDULED"]);
+    expect(db.tables.prompter_approvals[0].status).toBe("EXPIRED");
+  });
+
+  it("a partial recovery stays fail-closed and a retry completes it", async () => {
+    make(scheduled());
+    injectOnce(
+      (c) => c.table === "prompter_master_campaigns" && c.op === "update",
+      () => bump({ status: "ACTIVE" }),
+    );
+    expect((await REC()).done).toBe(false);
+    master().status = "SCHEDULED"; // the other request ended up not launching
+    hook = null;
+    const retry = await REC();
+    expect(retry).toEqual({ error: null, done: true });
+    expect(master().status).toBe("DRAFT");
+    expect(channelStatuses()).toEqual(["DRAFT", "DRAFT"]);
   });
 
   it("an unreadable approval fails closed", async () => {
@@ -505,5 +520,121 @@ describe("P1-1 recovery of a blocked SCHEDULED campaign", () => {
     const r = await REC();
     expect(r.done).toBe(false);
     expect(master().status).toBe("SCHEDULED");
+  });
+
+  describe("approvals MUST be confirmed EXPIRED (production RLS: only the Owner can update an approval)", () => {
+    it("an Owner recovery expires the APPROVED approval and any stray PENDING one, and says how many", async () => {
+      make(scheduled({ approvals: [oldApproval(), oldApproval({ id: "stray", status: "PENDING", created_at: "2026-10-02T00:00:00Z" })] }));
+      const r = await REC();
+      expect(r).toEqual({ error: null, done: true });
+      expect(db.tables.prompter_approvals.map((a) => a.status)).toEqual(["EXPIRED", "EXPIRED"]);
+      expect(db.tables.prompter_audit_logs[0].context).toEqual({ approvals_expired: 2 });
+    });
+
+    it("the approval is expired BEFORE the campaign changes", async () => {
+      make(scheduled());
+      await REC();
+      const firstApprovalWrite = db.log.findIndex((l) => l.table === "prompter_approvals" && l.op === "update");
+      const firstCampaignWrite = db.log.findIndex(
+        (l) => (l.table === "prompter_channel_campaigns" || l.table === "prompter_master_campaigns") && l.op === "update",
+      );
+      expect(firstApprovalWrite).toBeGreaterThan(-1);
+      expect(firstApprovalWrite).toBeLessThan(firstCampaignWrite);
+    });
+
+    it("a database error while expiring is NOT reported as success and changes nothing else", async () => {
+      db = createFakeDb(scheduled(), {
+        failWhen: (c) => (c.table === "prompter_approvals" && c.op === "update" ? "boom" : null),
+      });
+      const r = await REC();
+      expect(r.done).toBe(false);
+      expect(r.error).toMatch(/DIBATALKAN.*kedaluwarsa/);
+      expect(master().status).toBe("SCHEDULED");
+      expect(channelStatuses()).toEqual(["SCHEDULED", "SCHEDULED"]);
+      expect(db.tables.prompter_approvals[0].status).toBe("APPROVED");
+      expect(db.tables.prompter_audit_logs).toHaveLength(0);
+    });
+
+    it("RLS silently refusing the update (zero rows) is detected and NOT reported as success", async () => {
+      db = createFakeDb(scheduled(), { denyWhen: (c) => c.table === "prompter_approvals" && c.op === "update" });
+      const r = await REC();
+      expect(r.done).toBe(false);
+      expect(r.error).toMatch(/DIBATALKAN/);
+      expect(master().status).toBe("SCHEDULED");
+      expect(channelStatuses()).toEqual(["SCHEDULED", "SCHEDULED"]);
+      expect(db.tables.prompter_approvals[0].status).toBe("APPROVED");
+    });
+
+    it("a partial expire (fewer rows than found) is refused", async () => {
+      make(scheduled({ approvals: [oldApproval(), oldApproval({ id: "old2", created_at: "2026-10-02T00:00:00Z" })] }));
+      injectOnce(
+        (c) => c.table === "prompter_approvals" && c.op === "update",
+        () => {
+          db.tables.prompter_approvals[1].tenant_id = "t-other"; // one row slips out of reach
+        },
+      );
+      const r = await REC();
+      expect(r.done).toBe(false);
+      expect(master().status).toBe("SCHEDULED");
+      expect(channelStatuses()).toEqual(["SCHEDULED", "SCHEDULED"]);
+    });
+
+    it("a failed audit write after a completed recovery is reported honestly (campaign is Draft)", async () => {
+      db = createFakeDb(scheduled(), {
+        failWhen: (c) => (c.table === "prompter_audit_logs" && c.op === "insert" ? "boom" : null),
+      });
+      const r = await REC();
+      expect(r.done).toBe(true);
+      expect(r.error).toMatch(/audit gagal/);
+      expect(master().status).toBe("DRAFT");
+      expect(db.tables.prompter_approvals[0].status).toBe("EXPIRED");
+    });
+  });
+});
+
+describe("cancelSubmissionAction under production RLS (finding for the Founder, not changed here)", () => {
+  const pending = (): Row => ({
+    id: "ap1",
+    tenant_id: "t1",
+    approval_type: "CAMPAIGN_LAUNCH",
+    resource_type: "prompter_master_campaigns",
+    resource_id: M,
+    status: "PENDING",
+    created_at: "2026-10-25T00:00:01Z",
+    context: {},
+  });
+  const awaiting = () =>
+    seed({
+      master: { status: "AWAITING_APPROVAL" },
+      channels: [
+        { id: "c1", tenant_id: "t1", master_campaign_id: M, channel: "FACEBOOK", status: "AWAITING_APPROVAL", external_campaign_id: null },
+        { id: "c2", tenant_id: "t1", master_campaign_id: M, channel: "INSTAGRAM", status: "AWAITING_APPROVAL", external_campaign_id: null },
+      ],
+      approvals: [pending()],
+    });
+
+  it("Owner cancel: campaign back to Draft AND the approval expired", async () => {
+    make(awaiting());
+    await cancelSubmissionAction(form({ campaignId: M }));
+    expect(master().status).toBe("DRAFT");
+    expect(db.tables.prompter_approvals[0].status).toBe("EXPIRED");
+  });
+
+  it("KNOWN GAP: if a Marketing user reaches the server action (the button is Owner-only), the approval stays PENDING", async () => {
+    state.role = "marketing";
+    make(awaiting());
+    await cancelSubmissionAction(form({ campaignId: M }));
+    expect(master().status).toBe("DRAFT");
+    expect(db.tables.prompter_approvals[0].status).toBe("PENDING"); // RLS refused the update silently
+  });
+
+  it("a leftover PENDING approval blocks the destination edit with an actionable message (fail closed)", async () => {
+    state.role = "marketing";
+    make(awaiting());
+    await cancelSubmissionAction(form({ campaignId: M }));
+    const r = await updateCampaignDestinationAction(M, DEST_INIT, dest("WEBSITE", "https://tokosaya.com/a"));
+    expect(r.saved).toBe(false);
+    expect(r.error).toMatch(/Pusat Persetujuan/);
+    expect(proposal().purchase_destination).toBeUndefined();
   });
 });

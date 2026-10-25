@@ -810,6 +810,12 @@ describe("launchChannelCampaignAction — approval destination snapshot", () => 
     expectRefusedBeforeAnyCall(await launchChannelCampaignAction("cc1"), /berbeda dari yang disetujui/);
   });
 
+  it("an EXPIRED approval (e.g. after a recovery) never authorises a launch, even with a matching snapshot", async () => {
+    harness = buildHarness({ master: { ai_proposal: proposal(WEB) } });
+    fx.approvals = [{ status: "EXPIRED", created_at: "2026-10-01T00:00:00Z", context: snapOf(WEB) }];
+    expectRefusedBeforeAnyCall(await launchChannelCampaignAction("cc1"), /persetujuan peluncuran/);
+  });
+
   describe("legacy campaigns (no stored destination)", () => {
     it("launches when the product URL is the one recorded at approval", async () => {
       harness = buildHarness();

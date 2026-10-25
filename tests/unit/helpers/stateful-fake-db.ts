@@ -29,6 +29,11 @@ export interface FakeDbOptions {
    * (a counter), so a compare-and-swap on `updated_at` behaves like the real database.
    */
   touchOnUpdate?: Record<string, string>;
+  /**
+   * Models Row Level Security: a denied UPDATE/DELETE silently matches ZERO rows (no error, like a USING
+   * policy that filters the row out); a denied INSERT fails (like a WITH CHECK violation).
+   */
+  denyWhen?: (ctx: { table: string; op: string }) => boolean;
   /** Column defaults the real table would fill on INSERT (id, status, created_at...). `n` counts inserts per table. */
   insertDefaults?: Record<string, (n: number) => Row>;
 }
@@ -66,6 +71,8 @@ export function createFakeDb(seed: Record<string, Row[]>, options: FakeDbOptions
       const entry: LoggedStatement = { table, op, payload, filters: [...filters], matched: 0 };
       log.push(entry);
       if (failure) return { data: null, error: { message: failure } };
+      const denied = options.denyWhen?.({ table, op }) ?? false;
+      if (denied && op === "insert") return { data: null, error: { message: "new row violates row-level security policy" } };
 
       if (op === "insert") {
         const n = (insertCounts[table] = (insertCounts[table] ?? 0) + 1);
@@ -73,7 +80,7 @@ export function createFakeDb(seed: Record<string, Row[]>, options: FakeDbOptions
         entry.matched = 1;
         return { data: null, error: null };
       }
-      const hit = matches();
+      const hit = denied && (op === "update" || op === "delete") ? [] : matches();
       entry.matched = hit.length;
       if (op === "update") {
         for (const r of hit) {

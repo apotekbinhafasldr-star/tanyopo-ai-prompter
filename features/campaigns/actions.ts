@@ -682,7 +682,8 @@ export async function updateCampaignDestinationAction(
     return { error: "Gagal memeriksa status pengajuan. Tujuan tidak diubah, coba lagi.", saved: false };
   }
   if (pending && pending.length > 0) {
-    return { error: "Campaign sedang diajukan. Batalkan pengajuan sebelum mengubah tujuan iklan.", saved: false };
+    return { error:
+        "Masih ada persetujuan yang menunggu untuk campaign ini. Batalkan pengajuan (Owner) atau minta Owner menolak/memutuskannya di Pusat Persetujuan, lalu ubah tujuan iklan.", saved: false };
   }
 
   const previous = readStoredDestination(current, ownHostsFromProcessEnv());
@@ -724,15 +725,16 @@ export interface RecoverState {
  *
  * A campaign is "blocked" when its destination is unlaunchable or does not match what its latest approval
  * recorded (this includes every approval that predates destination snapshots). The recovery:
- *  - is owner/marketing only, tenant scoped, and refuses anything that is not SCHEDULED, whose channels are
+ *  - is Owner only (server side), tenant scoped, and refuses anything that is not SCHEDULED, whose channels are
  *    not ALL still SCHEDULED with no external id, or that has any recorded ad metrics (no spend activity);
  *  - refuses a campaign that is not blocked (nothing to recover);
  *  - moves the channel rows first and the master second, each as a conditional UPDATE (see
  *    services/channel-campaigns.ts), so a concurrent launch claim and the recovery can never both win a
  *    row; if any step cannot be confirmed the rows it moved are put back and nothing is reported as done;
- *  - then marks the old approvals EXPIRED (best effort: the approval table is owner-writable, and a newer
- *    submission is always the "latest" approval the launch looks at, so an old APPROVED row can never
- *    authorise a launch again). No approval, audit or campaign row is deleted.
+ *  - FIRST marks every old approval of the campaign EXPIRED and requires the database to confirm exactly
+ *    that many rows; if it cannot, NOTHING else is changed and the failure is reported (a blocked campaign
+ *    is already unlaunchable, so expiring first can never open a launch). No approval, audit or campaign
+ *    row is deleted.
  */
 export async function recoverBlockedScheduledCampaignAction(
   campaignId: string,
@@ -743,8 +745,10 @@ export async function recoverBlockedScheduledCampaignAction(
   void _formData;
   const session = await requireSessionContext();
 
-  if (session.role !== "owner" && session.role !== "marketing") {
-    return { error: "Hanya Owner atau Marketing yang dapat mengembalikan campaign ke Draft.", done: false };
+  // Owner only. The old approvals must be marked EXPIRED, and the database lets only the Owner update an
+  // approval (RLS "Owner memutuskan approval"): for any other role that step silently changes zero rows.
+  if (session.role !== "owner") {
+    return { error: "Hanya Owner yang dapat mengembalikan campaign ke Draft.", done: false };
   }
 
   const supabase = await createClient();
@@ -826,6 +830,42 @@ export async function recoverBlockedScheduledCampaignAction(
     if (integrity.reason === "read_failed") return { error: integrity.message, done: false };
   }
 
+  // 0) every old approval (APPROVED, or a stray PENDING) must be declared void, confirmed by the database,
+  //    BEFORE anything else changes. On any doubt nothing else is touched and the campaign stays blocked.
+  const OLD_APPROVALS = ["APPROVED", "PENDING"];
+  const { data: oldApprovals, error: oldApprovalsError } = await supabase
+    .from("prompter_approvals")
+    .select("id")
+    .eq("tenant_id", session.tenantId)
+    .eq("approval_type", "CAMPAIGN_LAUNCH")
+    .eq("resource_type", "prompter_master_campaigns")
+    .eq("resource_id", campaignId)
+    .in("status", OLD_APPROVALS);
+  if (oldApprovalsError || !Array.isArray(oldApprovals)) {
+    return { error: "Persetujuan lama tidak dapat diperiksa. Tidak ada perubahan, coba lagi.", done: false };
+  }
+  let approvalsExpired = 0;
+  if (oldApprovals.length > 0) {
+    const { data: expired, error: expireError } = await supabase
+      .from("prompter_approvals")
+      .update({ status: "EXPIRED" })
+      .eq("tenant_id", session.tenantId)
+      .eq("approval_type", "CAMPAIGN_LAUNCH")
+      .eq("resource_type", "prompter_master_campaigns")
+      .eq("resource_id", campaignId)
+      .in("status", OLD_APPROVALS)
+      .select("id");
+    if (expireError || !Array.isArray(expired) || expired.length !== oldApprovals.length) {
+      revalidatePath(`/campaigns/${campaignId}`);
+      return {
+        error:
+          "Pemulihan DIBATALKAN: persetujuan lama tidak berhasil ditandai kedaluwarsa. Status campaign tidak diubah dan campaign tetap tidak bisa diluncurkan. Muat ulang halaman dan coba lagi sebagai Owner; jika terus gagal, hubungi admin.",
+        done: false,
+      };
+    }
+    approvalsExpired = expired.length;
+  }
+
   // 1) channels first (exclusive with the launch claim, row by row)
   const movedChannels = await moveChannelCampaignsScheduledToDraft(supabase, session.tenantId, campaignId);
   if (!movedChannels.ok || movedChannels.ids.length !== channels.rows.length) {
@@ -833,7 +873,7 @@ export async function recoverBlockedScheduledCampaignAction(
     revalidatePath(`/campaigns/${campaignId}`);
     return {
       error: restored
-        ? "Campaign baru saja berubah atau sedang diluncurkan oleh proses lain. Tidak ada perubahan yang disimpan. Muat ulang halaman."
+        ? "Campaign baru saja berubah atau sedang diluncurkan oleh proses lain. Status campaign tidak diubah (persetujuan lama sudah dinyatakan kedaluwarsa, jadi campaign tetap tidak bisa diluncurkan). Muat ulang halaman lalu coba lagi."
         : "Perubahan tidak dapat diselesaikan dan status channel mungkin tidak konsisten. Jangan meluncurkan. Hubungi admin untuk pemeriksaan.",
       done: false,
     };
@@ -846,34 +886,30 @@ export async function recoverBlockedScheduledCampaignAction(
     revalidatePath(`/campaigns/${campaignId}`);
     return {
       error: restored
-        ? "Status campaign berubah saat dipulihkan. Tidak ada perubahan yang disimpan. Muat ulang halaman."
+        ? "Status campaign berubah saat dipulihkan dan tidak diubah (persetujuan lama sudah dinyatakan kedaluwarsa, jadi campaign tetap tidak bisa diluncurkan). Muat ulang halaman lalu coba lagi."
         : "Status campaign tidak dapat dipastikan dan channel mungkin tidak konsisten. Jangan meluncurkan. Hubungi admin untuk pemeriksaan.",
       done: false,
     };
   }
 
-  // 3) old approvals are no longer valid (nothing is deleted)
-  const { data: expired } = await supabase
-    .from("prompter_approvals")
-    .update({ status: "EXPIRED" })
-    .eq("tenant_id", session.tenantId)
-    .eq("approval_type", "CAMPAIGN_LAUNCH")
-    .eq("resource_type", "prompter_master_campaigns")
-    .eq("resource_id", campaignId)
-    .eq("status", "APPROVED")
-    .select("id");
-
-  await supabase.from("prompter_audit_logs").insert({
+  const { error: auditError } = await supabase.from("prompter_audit_logs").insert({
     tenant_id: session.tenantId,
     actor_user_id: session.userId,
     action: "campaign.recovered_to_draft",
     resource_type: "prompter_master_campaigns",
     resource_id: campaignId,
-    context: { approvals_expired: Array.isArray(expired) ? expired.length : 0 },
+    context: { approvals_expired: approvalsExpired },
   });
 
   revalidatePath(`/campaigns/${campaignId}`);
   revalidatePath("/campaigns");
   revalidatePath("/approvals");
+  if (auditError) {
+    return {
+      error:
+        "Campaign sudah dikembalikan ke Draft dan persetujuan lama sudah kedaluwarsa, tetapi catatan audit gagal ditulis. Beri tahu admin.",
+      done: true,
+    };
+  }
   return { error: null, done: true };
 }

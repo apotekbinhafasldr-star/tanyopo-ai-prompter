@@ -341,7 +341,7 @@ export default async function CampaignDetailPage({
         </Card>
       ) : null}
 
-      {campaign.status === "SCHEDULED" && (session.role === "owner" || session.role === "marketing") ? (
+      {campaign.status === "SCHEDULED" && session.role === "owner" ? (
         <RecoverToDraft campaignId={id} />
       ) : null}
 
