@@ -346,6 +346,7 @@ describe("remediation guards", () => {
       "features/marketing/sections/trust.tsx",
       "features/marketing/sections/device-showcase.tsx",
       "features/marketing/sections/faq.tsx",
+      "features/marketing/faq-data.ts",
       "features/marketing/components/tanyopo-intelligence-diagram.tsx",
       "app/(marketing)/page.tsx",
       "app/layout.tsx",
