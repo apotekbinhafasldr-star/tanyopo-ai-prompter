@@ -15,6 +15,12 @@ import { LEGAL_LINKS } from "@/features/legal/legal-meta";
 
 afterEach(() => vi.unstubAllEnvs());
 
+type RobotsRule = { userAgent?: string | string[]; allow?: string | string[]; disallow?: string | string[] };
+function rulesOf(): RobotsRule[] {
+  const r = robots().rules as RobotsRule | RobotsRule[];
+  return Array.isArray(r) ? r : [r];
+}
+
 function stubOrigin(appUrl: string | undefined, netlifyUrl: string | undefined) {
   vi.stubEnv("NEXT_PUBLIC_APP_URL", appUrl ?? "");
   vi.stubEnv("URL", netlifyUrl ?? "");
@@ -45,14 +51,14 @@ describe("robots.txt", () => {
     const r = robots();
     expect(r.sitemap).toBe(`${PRODUCTION_ORIGIN}/sitemap.xml`);
     expect(String(r.sitemap)).not.toMatch(/localhost/);
-    const rules = Array.isArray(r.rules) ? r.rules : [r.rules];
+    const rules = rulesOf();
     expect(rules).toHaveLength(1);
     expect(rules[0].userAgent).toBe("*");
     expect(rules[0].allow).toBe("/");
   });
 
   it("disallows only /api/ and /auth/, and nothing crawlers need: pages with noindex, /demo, and Next assets stay crawlable", () => {
-    const rule = (Array.isArray(robots().rules) ? robots().rules : [robots().rules])[0];
+    const rule = rulesOf()[0];
     const disallow = ([] as string[]).concat(rule.disallow ?? []);
     expect(disallow.sort()).toEqual(["/api/", "/auth/"]);
     for (const mustStayCrawlable of ["/login", "/register", "/forgot-password", "/onboarding", "/demo", "/_next/static/", "/", "/privacy", "/terms", "/refund", "/data-deletion"]) {
