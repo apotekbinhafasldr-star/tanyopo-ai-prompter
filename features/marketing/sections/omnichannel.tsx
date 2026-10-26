@@ -19,9 +19,8 @@ export function Omnichannel() {
             Satu Strategi, Banyak Channel
           </h2>
           <p className="mx-auto mt-2 max-w-xl text-sm text-muted-foreground sm:text-base">
-            Arsitektur koneksi resmi (OAuth) untuk platform marketing utama. Channel yang belum
-            Anda hubungkan tetap ditandai jelas sebagai belum terhubung — tidak pernah
-            berpura-pura aktif.
+            Hubungkan akun lewat OAuth resmi dan siapkan strategi lintas channel. Channel yang belum
+            terhubung atau belum tersedia tetap ditandai jelas — tidak pernah berpura-pura aktif.
           </p>
         </Reveal>
 

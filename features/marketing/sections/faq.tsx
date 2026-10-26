@@ -16,7 +16,7 @@ const FAQS = [
   },
   {
     q: "Platform marketing apa saja yang didukung?",
-    a: "Facebook, Instagram, TikTok, X, website/SEO. Status koneksi tiap platform selalu ditampilkan apa adanya — terhubung, belum dikonfigurasi, atau perlu persetujuan.",
+    a: "Anda dapat menghubungkan akun Facebook, Instagram, TikTok, dan X, serta menyusun strategi untuk website/SEO. Persiapan campaign tersedia. Untuk Meta (Facebook & Instagram), publikasi campaign berbayar masih menunggu persetujuan platform. Untuk TikTok dan X, publikasi campaign masih dalam pengembangan. Status tiap platform selalu ditampilkan apa adanya.",
   },
   {
     q: "Bisakah saya menyetujui campaign sebelum dijalankan?",

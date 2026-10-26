@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { OG_IMAGE } from "@/lib/seo/og";
 
 /**
  * Shared facts + metadata for the public legal pages (/privacy, /terms,
@@ -37,9 +38,17 @@ export function legalMetadata(opts: { title: string; description: string; path: 
     openGraph: {
       title: `${opts.title} — LINOE by Tanyopo`,
       description: opts.description,
+      url: opts.path,
       type: "website",
       locale: "id_ID",
       siteName: "LINOE by Tanyopo",
+      images: [OG_IMAGE],
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: `${opts.title} — LINOE by Tanyopo`,
+      description: opts.description,
+      images: [OG_IMAGE.url],
     },
     robots: { index: true, follow: true },
   };

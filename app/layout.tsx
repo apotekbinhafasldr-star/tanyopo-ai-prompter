@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { getSiteOrigin } from "@/lib/seo/site-url";
+import { OG_IMAGE, SITE_DESCRIPTION, SITE_TITLE } from "@/lib/seo/og";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -12,42 +14,23 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-/**
- * Absolute base for canonical / Open Graph URLs. Read from the public app
- * URL env var; if it is missing or not a valid URL, no base is set (Next.js
- * then keeps its default behaviour) rather than guessing a domain.
- */
-function resolveMetadataBase(): URL | undefined {
-  const raw = process.env.NEXT_PUBLIC_APP_URL;
-  if (!raw) return undefined;
-  try {
-    return new URL(raw);
-  } catch {
-    return undefined;
-  }
-}
-
 export const metadata: Metadata = {
-  metadataBase: resolveMetadataBase(),
-  title: {
-    default: "LINOE — AI Marketing & Growth Platform by Tanyopo",
-    template: "%s",
-  },
-  description:
-    "LINOE membantu Anda menganalisis produk, menyusun strategi, membuat konten, menyiapkan campaign, memantau hasil, dan mengoptimasi pertumbuhan — semua dengan AI dalam satu platform.",
+  metadataBase: new URL(getSiteOrigin()),
+  title: { default: SITE_TITLE, template: "%s" },
+  description: SITE_DESCRIPTION,
   openGraph: {
-    title: "LINOE — AI Marketing & Growth Platform by Tanyopo",
-    description:
-      "LINOE membantu Anda menganalisis produk, menyusun strategi, membuat konten, menyiapkan campaign, memantau hasil, dan mengoptimasi pertumbuhan — semua dengan AI dalam satu platform.",
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
     siteName: "LINOE",
     locale: "id_ID",
     type: "website",
+    images: [OG_IMAGE],
   },
   twitter: {
-    card: "summary",
-    title: "LINOE — AI Marketing & Growth Platform by Tanyopo",
-    description:
-      "LINOE membantu Anda menganalisis produk, menyusun strategi, membuat konten, menyiapkan campaign, memantau hasil, dan mengoptimasi pertumbuhan — semua dengan AI dalam satu platform.",
+    card: "summary_large_image",
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
+    images: [OG_IMAGE.url],
   },
 };
 
