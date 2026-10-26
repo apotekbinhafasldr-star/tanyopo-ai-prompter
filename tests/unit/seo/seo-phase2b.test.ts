@@ -77,7 +77,7 @@ describe("SEO Phase 2B — JSON-LD", () => {
   });
 
   it("serialization escapes HTML/script-breaking characters", () => {
-    const out = serializeJsonLd({ a: "</script><script>alert(1)</script> & <b>", b: " " });
+    const out = serializeJsonLd({ a: "</script><script>alert(1)</script> & <b>", b: "\u2028" });
     expect(out).not.toContain("<");
     expect(out).not.toContain(">");
     expect(out).not.toContain("&");
