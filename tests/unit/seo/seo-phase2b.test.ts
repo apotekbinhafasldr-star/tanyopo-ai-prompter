@@ -9,8 +9,8 @@ import { getSiteOrigin, PRODUCTION_ORIGIN } from "@/lib/seo/site-url";
 afterEach(() => vi.unstubAllEnvs());
 const read = (f: string) => readFileSync(f, "utf8");
 
-type Node = Record<string, unknown> & { "@type": string };
-const graph = (o = PRODUCTION_ORIGIN) => buildLandingJsonLd(o)["@graph"] as unknown as Node[];
+type LdNode = Record<string, unknown> & { "@type": string };
+const graph = (o = PRODUCTION_ORIGIN) => buildLandingJsonLd(o)["@graph"] as unknown as LdNode[];
 const byType = (t: string) => graph().filter((n) => n["@type"] === t);
 
 describe("SEO Phase 2B — JSON-LD", () => {

@@ -45,8 +45,10 @@ export const metadata: Metadata = {
 export default function LandingPage() {
   return (
     <>
+      {/* JSON-LD: serialised with escaped "<" / ">" / "&" (lib/seo/json-ld.ts). */}
       <script
         type="application/ld+json"
+        // eslint-disable-next-line react/no-danger
         dangerouslySetInnerHTML={{ __html: serializeJsonLd(buildLandingJsonLd(getSiteOrigin())) }}
       />
       <Hero />
