@@ -61,7 +61,7 @@ describe("idempotency primitives", () => {
   });
 
   it("canonical JSON ignores key order and renders bigint", () => {
-    expect(canonicalJson({ b: 1n, a: 2 })).toBe(canonicalJson({ a: 2, b: 1n }));
+    expect(canonicalJson({ b: BigInt(1), a: 2 })).toBe(canonicalJson({ a: 2, b: BigInt(1) }));
   });
 
   it("keeps the first value on a duplicate and throws on a conflicting one", () => {
