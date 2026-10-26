@@ -73,6 +73,11 @@ export function isPublicAsset(pathname: string) {
     // this one static file (public/) with no session, so it must not be
     // bounced to /login. Exact match for that single file only.
     pathname === "/tiktokiVFBxYCt3jynuM9zWCeMZN7GSgt3EVUL.txt" ||
+    // SEO crawl files (app/robots.ts, app/sitemap.ts). Crawlers fetch them with no session; without this they
+    // would be redirected to /login and search engines would never see them. Both are public by design and
+    // contain only public URLs. Exact matches only.
+    pathname === "/robots.txt" ||
+    pathname === "/sitemap.xml" ||
     /\.(svg|png|jpg|jpeg|gif|webp|ico|css|js|map)$/.test(pathname)
   );
 }
