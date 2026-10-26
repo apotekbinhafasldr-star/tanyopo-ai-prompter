@@ -64,7 +64,7 @@ describe("SEO Phase 2B — JSON-LD", () => {
 
   it("makes no false integration, payment, or sales-result claims", () => {
     const json = serializeJsonLd(buildLandingJsonLd(PRODUCTION_ORIGIN)) + JSON_LD_DESCRIPTION;
-    expect(json).not.toMatch(/omzet|penjualan naik|dijamin|garansi|rating|ratingValue|reviewCount|"offers"/i);
+    expect(json).not.toMatch(/omzet|penjualan naik|dijamin|garansi|aggregateRating|ratingValue|reviewCount|"review"|"offers"/i);
     expect(json).not.toMatch(/pembayaran (online )?(sudah )?aktif/i);
     // TikTok/X appear only inside the honest FAQ answer that says publication is in development.
     const answers = FAQS.filter((f) => /TikTok|\bX\b/.test(f.a));
