@@ -100,3 +100,23 @@ describe("SEO Phase 2A — integration claim accuracy", () => {
     }
   });
 });
+
+describe("SEO Phase 2A — official logo (no legacy asset)", () => {
+  it("OG generation source uses the official logo, never the legacy one", () => {
+    const html = read("scripts/og/og.html");
+    expect(html).toContain("linoe-logo-official.png");
+    expect(html).not.toContain("linoe-logo-vertical");
+    expect(read("scripts/og/render.py")).not.toMatch(/src=.*linoe-logo-vertical/);
+    expect(read("lib/seo/og.ts")).not.toContain("linoe-logo-vertical");
+  });
+
+  it("OG PNG differs from the legacy-logo render and the official logo asset is a JPEG", () => {
+    const official = readFileSync("public/brand/linoe/linoe-logo-official.png");
+    expect(official[0]).toBe(0xff); // JPEG magic despite .png extension
+    expect(official[1]).toBe(0xd8);
+  });
+
+  it("marketing footer no longer pins the legacy logo variant", () => {
+    expect(read("app/(marketing)/layout.tsx")).not.toContain('variant="legacy"');
+  });
+});
