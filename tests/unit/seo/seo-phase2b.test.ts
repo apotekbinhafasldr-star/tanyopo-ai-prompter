@@ -97,3 +97,50 @@ describe("SEO Phase 2B — JSON-LD", () => {
     expect(page).toContain("images: [OG_IMAGE]");
   });
 });
+
+describe("SEO Phase 2B — FAQ accuracy & consistency", () => {
+  const find = (q: string) => FAQS.find((f) => f.q === q);
+
+  it("includes the approved audience and developer FAQs verbatim", () => {
+    expect(find("Siapa yang cocok menggunakan LINOE?")?.a).toBe(
+      "LINOE dirancang untuk membantu UMKM, pemilik bisnis, dan tim pemasaran merencanakan serta menyiapkan promosi dengan bantuan AI.",
+    );
+    expect(find("Siapa pengembang LINOE?")?.a).toBe(
+      "LINOE dikembangkan oleh PT Tanyopo Future Technology, perusahaan teknologi yang berlokasi di Aceh Selatan, Indonesia.",
+    );
+  });
+
+  it("both new FAQs appear in the FAQPage JSON-LD", () => {
+    const names = (byType("FAQPage")[0].mainEntity as { name: string }[]).map((q) => q.name);
+    expect(names).toContain("Siapa yang cocok menggunakan LINOE?");
+    expect(names).toContain("Siapa pengembang LINOE?");
+  });
+
+  it("developer FAQ matches the legal identity constants", () => {
+    const a = find("Siapa pengembang LINOE?")!.a;
+    expect(a).toContain(LEGAL.operator);
+    expect(a).toContain("Aceh Selatan");
+  });
+
+  it("approval FAQ says campaigns are prepared and automatic paid publication is in development", () => {
+    const a = find("Apakah saya bisa meninjau dan menyetujui campaign?")!.a;
+    expect(a).toContain("membantu menyiapkan campaign");
+    expect(a).toContain("masih dalam pengembangan");
+    expect(a).toContain("tidak menayangkan iklan berbayar secara otomatis");
+  });
+
+  it("no FAQ implies automatic paid-ad publication is already live", () => {
+    for (const f of FAQS) {
+      expect(f.a, f.q).not.toMatch(/sebelum campaign dijalankan|dieksekusi otomatis|menjalankan campaign|peluncuran campaign|sebelum tayang/i);
+    }
+    const budget = find("Apakah AI mengontrol budget iklan saya?")!.a;
+    expect(budget).toContain("masih dalam pengembangan");
+  });
+
+  it("every rendered FAQ comes from the shared data (no hidden or hardcoded FAQ in the UI)", () => {
+    const ui = read("features/marketing/sections/faq.tsx");
+    expect(ui).toContain("FAQS.map");
+    expect(ui).not.toMatch(/\bq:\s*"/);
+  });
+});
+
