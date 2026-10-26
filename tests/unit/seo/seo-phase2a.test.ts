@@ -81,13 +81,13 @@ describe("SEO Phase 2A — Open Graph & Twitter", () => {
 
 describe("SEO Phase 2A — integration claim accuracy", () => {
   const files = [
-    "features/marketing/sections/faq.tsx",
+    "features/marketing/faq-data.ts",
     "features/marketing/sections/trust.tsx",
     "features/marketing/sections/omnichannel.tsx",
   ];
 
   it("FAQ separates connection / preparation / publication and marks TikTok & X as in development", () => {
-    const src = read("features/marketing/sections/faq.tsx");
+    const src = read("features/marketing/faq-data.ts");
     expect(src).toContain("TikTok dan X, publikasi campaign masih dalam pengembangan");
     expect(src).toContain("menunggu persetujuan");
   });

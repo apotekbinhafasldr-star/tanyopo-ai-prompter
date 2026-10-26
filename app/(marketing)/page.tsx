@@ -18,6 +18,8 @@ import {
   FinalCta,
 } from "@/features/marketing/sections";
 import { OG_IMAGE, SITE_DESCRIPTION, SITE_TITLE } from "@/lib/seo/og";
+import { buildLandingJsonLd, serializeJsonLd } from "@/lib/seo/json-ld";
+import { getSiteOrigin } from "@/lib/seo/site-url";
 
 export const metadata: Metadata = {
   title: SITE_TITLE,
@@ -43,6 +45,10 @@ export const metadata: Metadata = {
 export default function LandingPage() {
   return (
     <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: serializeJsonLd(buildLandingJsonLd(getSiteOrigin())) }}
+      />
       <Hero />
       <TanyopoIntelligence />
       <IdeToResult />
