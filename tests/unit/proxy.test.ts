@@ -48,7 +48,9 @@ describe("isPublicAsset — B12 hotfix regression: auth routes that handle their
   it("TikTok URL-prefix verification — exempts only the exact verification file, no other .txt", () => {
     expect(isPublicAsset("/tiktokiVFBxYCt3jynuM9zWCeMZN7GSgt3EVUL.txt")).toBe(true);
     expect(isPublicAsset("/tiktokOTHER.txt")).toBe(false);
-    expect(isPublicAsset("/robots.txt")).toBe(false);
+    // Only the two exact SEO crawl files are public (see the SEO foundation tests); any other .txt/.xml is gated.
+    expect(isPublicAsset("/notes.txt")).toBe(false);
+    expect(isPublicAsset("/private.xml")).toBe(false);
   });
 });
 

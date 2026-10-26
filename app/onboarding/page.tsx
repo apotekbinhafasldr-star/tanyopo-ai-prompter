@@ -4,6 +4,7 @@ import { LinoeLogo } from "@/components/brand/linoe-logo";
 
 export const metadata: Metadata = {
   title: "Onboarding — LINOE",
+  robots: { index: false, follow: false },
 };
 
 export default function OnboardingPage() {

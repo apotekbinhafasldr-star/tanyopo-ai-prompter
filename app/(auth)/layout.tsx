@@ -1,4 +1,12 @@
+import type { Metadata } from "next";
 import { LinoeLogo } from "@/components/brand/linoe-logo";
+
+// Authentication pages (login, register, forgot/reset password, session error) are not search landing pages.
+// `noindex` is read by crawlers only if they may fetch the page, so these paths are intentionally NOT disallowed
+// in robots.txt. Each page keeps its own title (metadata merges).
+export const metadata: Metadata = {
+  robots: { index: false, follow: false },
+};
 
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
   return (
