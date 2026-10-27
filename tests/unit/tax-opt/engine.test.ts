@@ -5,7 +5,6 @@ import {
   simulate, tax31E, taxFinalUmkm, taxGeneral, validateSchemeSelection, reviewExpenses, expenseAdjustments, blocked, computed,
   type EntityProfile, type SchemeInput, type TaxCreditRecord,
 } from "@/lib/tax-opt";
-import type { AdminPrincipal } from "@/lib/admin/permissions";
 
 const M = (v: string) => money(v, "IDR");
 const V = { verifiedBy: "Akuntan", verifiedAt: "2026-10-27" };
