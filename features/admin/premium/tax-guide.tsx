@@ -161,7 +161,7 @@ function Selected(p: TaxGuideProps & { kind: "PPH_BADAN" | "PPN" }) {
         <p className="fin-note">
           Jenis SPT yang didukung panduan ini: SPT Tahunan PPh Badan dan SPT Masa PPN. Portal:{" "}
           <a href={CORETAX_PORTAL.url} target="_blank" rel="noopener noreferrer" style={{ color: "var(--blue)" }}>{CORETAX_PORTAL.label}</a>.
-          Langkah yang berlabel "Belum terverifikasi" tidak dikarang: ikuti petunjuk di layar Coretax atau tanyakan ke KPP atau akuntan.
+          Langkah yang berlabel &quot;Belum terverifikasi&quot; tidak dikarang: ikuti petunjuk di layar Coretax atau tanyakan ke KPP atau akuntan.
         </p>
       </Card>
     </>
