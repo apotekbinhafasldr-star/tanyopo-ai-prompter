@@ -22,7 +22,7 @@ describe("optimization model", () => {
     expect(r.simulation.savingsTotal.state).toBe("SIMULASI");
   });
   it("demo expenses: missing receipt flagged, nondeductible becomes separate adjustment only", () => {
-    const r = runOptimization(buildDemoOptimization("nyata"));
+    const r = runOptimization(buildDemoOptimization("contoh"));
     expect(r.findings.some((f) => f.text.includes("Iklan"))).toBe(true);
   });
   it("final tax credit never counted; double evidence flagged", () => {

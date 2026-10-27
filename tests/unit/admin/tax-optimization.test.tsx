@@ -20,6 +20,32 @@ const as = (role: "SUPER_ADMIN" | "STAFF", permissions: string[] = []) => {
 };
 afterEach(() => cleanup());
 
+describe("Profil PT Tanyopo (menunggu verifikasi dokumen)", () => {
+  it("shows the stated facts as unverified, keeps NPWP date apart from founding, and the Founder recap as not final", async () => {
+    as("SUPER_ADMIN");
+    render(await Page(SP()));
+    const c = screen.getByTestId("company-profile");
+    expect(c).toHaveTextContent("PT Tanyopo Future Technology");
+    expect(c).toHaveTextContent("PT Perorangan");
+    expect(c).toHaveTextContent("17 September 2026");
+    expect(c).toHaveTextContent(/Tanggal NPWP bukan tanggal pendirian/);
+    expect(c).toHaveTextContent("Non-PKP");
+    expect(c).toHaveTextContent("MENUNGGU VERIFIKASI DOKUMEN");
+    const f = screen.getByTestId("founder-spend");
+    expect(f).toHaveTextContent(/4\.279\.425/);
+    expect(f).toHaveTextContent(/Rekap awal, bukan angka final/);
+    expect(f).toHaveTextContent(/Tidak otomatis biaya fiskal dan tidak ada jurnal otomatis/);
+  });
+  it("is not shown in the fictional scenario, and no eligibility is concluded", async () => {
+    as("SUPER_ADMIN");
+    const { unmount } = render(await Page(SP({ skenario: "contoh" })));
+    expect(screen.queryByTestId("company-profile")).toBeNull();
+    unmount();
+    render(await Page(SP()));
+    expect(screen.getByTestId("scheme-PPH_FINAL_UMKM")).toHaveTextContent("BELUM DAPAT DIHITUNG");
+  });
+});
+
 describe("Persetujuan Founder dan status verifikasi hukum", () => {
   it("DEMO data cannot be approved; card shows fingerprint, rules version and no form", async () => {
     as("SUPER_ADMIN");

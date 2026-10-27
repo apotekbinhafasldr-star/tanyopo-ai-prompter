@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { formatRupiah } from "@/lib/admin/format";
+import { zero } from "@/lib/finance/money";
+import { COMPANY, COMPANY_AS_OF, FOUNDER_SPEND_RECAP } from "@/lib/admin/company-profile";
 import { figureView, LAW_VERIFIED_ON, LEGAL_SOURCES, PROVISION_CHECKS, verificationSummary, type FigureView, type OptimizationResult } from "@/lib/tax-opt";
 import { MISSING_LABEL } from "@/lib/tax-opt/expenses";
 import { Badge, Card, Check, Chip, DemoNotice, Empty, Frame, Hero, Row } from "./parts";
@@ -81,6 +83,24 @@ export function TaxOptimization({ result, paidTotalText, scenario, canApprove, d
           <Link className="fin-note" href="/admin/finance/tax/optimization?skenario=contoh" prefetch={false} data-testid="scenario-link">Lihat skenario contoh fiktif dengan data lengkap</Link>
         </Card>
       )}
+
+      {scenario === "nyata" ? (
+        <Card title="Profil perusahaan" sub="Sesuai keterangan Founder. Semuanya menunggu verifikasi dokumen; belum ada yang terverifikasi.">
+          <div data-testid="company-profile">
+            <Row label="Nama" value={COMPANY.name} />
+            <Row label="Bentuk" value="PT Perorangan" />
+            <Row label="Tahun pendirian" value={COMPANY.foundedYear} />
+            <Row label="Tanggal terdaftar NPWP" value="17 September 2026" />
+            <p className="fin-note">Tanggal NPWP bukan tanggal pendirian. Tanggal akta belum diketahui dan tidak ditebak.</p>
+            <Row label="Status PKP" value="Non-PKP" />
+            <Row label={`Peredaran bruto sampai ${COMPANY_AS_OF}`} value={formatRupiah(zero("IDR"))} />
+            <Badge tone="warn">MENUNGGU VERIFIKASI DOKUMEN</Badge>
+            <div className="fin-row" data-testid="founder-spend"><span>Pengeluaran Founder yang teridentifikasi<br /><small>Rekap awal, bukan angka final. Belum diklasifikasikan: bisa berupa setoran modal, pinjaman pemegang saham, biaya pra-operasi, atau pengeluaran pribadi. Tidak otomatis biaya fiskal dan tidak ada jurnal otomatis.</small></span><span className="n">{formatRupiah(FOUNDER_SPEND_RECAP)}</span></div>
+            <p className="fin-note"><b>Dokumen yang dibutuhkan:</b></p>
+            {COMPANY.documentsNeeded.map((d) => <p key={d} className="fin-note">- {d}</p>)}
+          </div>
+        </Card>
+      ) : null}
 
       <Card title="Ringkasan" sub="Status angka: terverifikasi, simulasi, perlu verifikasi akuntan, atau belum dapat dihitung. Satu angka hanya sekuat bahan terlemahnya.">
         <FigureBlock label="Estimasi kewajiban pajak (kurang/lebih bayar)" fig={finalFig} />

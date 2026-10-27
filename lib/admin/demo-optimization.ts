@@ -1,9 +1,13 @@
 import { money, zero } from "@/lib/finance/money";
 import type { OperatingExpense } from "@/lib/finance/types";
 import { legalParametersFor, type ExpenseFiscalReview, type OptimizationInput, type TaxCreditRecord, type TaxNotice } from "@/lib/tax-opt";
+import { COMPANY, founderSpendRecord, pendingProfile, pendingTurnover } from "./company-profile";
 import { buildDemoAccounting, buildDemoFiscal, DEMO_YEAR } from "./demo-accounting";
 
 const idr = (v: string) => money(v, "IDR");
+
+/** Name shown for the real-company scenario. */
+export const NYATA_COMPANY_NAME = COMPANY.name;
 
 export type DemoScenario = "nyata" | "contoh";
 
@@ -70,12 +74,15 @@ export function buildDemoOptimization(scenario: DemoScenario): OptimizationInput
       entityComplete: true,
     };
   }
+  // "nyata": PT Tanyopo as stated by the Founder, every fact still waiting for documents (company-profile.ts).
   return {
     ...base,
+    expenses: [founderSpendRecord()],
+    expenseReviews: [],
     schemeInput: {
       taxYear: DEMO_YEAR,
-      profile: null,
-      turnover: { amount: null, complete: false, verifiedBy: null, verifiedAt: null },
+      profile: pendingProfile(),
+      turnover: pendingTurnover(),
       taxableIncome: null,
       taxableIncomeVerified: false,
       legal: legalParametersFor(DEMO_YEAR),
