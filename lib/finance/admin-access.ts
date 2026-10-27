@@ -6,9 +6,23 @@
  * `finance_platform_admins`, which is only writable through a reviewed
  * migration or the service role. Everything here fails closed: a missing,
  * revoked, inactive or unknown record means no access.
+ *
+ * Phase B: the role/permission model now lives in lib/admin/permissions.ts
+ * (SUPER_ADMIN, STAFF with explicit permissions, and the two PR #61 roles).
+ * This file maps each finance action to the permission it needs.
  */
 
-export type FinanceAdminRole = "FINANCE_ADMIN" | "FINANCE_VIEWER";
+import {
+  AdminAccessError,
+  authorizePermission,
+  permissionsOf,
+  type Permission,
+  type PlatformAdminRecord,
+  type PlatformRole,
+} from "@/lib/admin/permissions";
+
+export type FinanceAdminRole = PlatformRole;
+export type { PlatformAdminRecord };
 
 export type FinanceAction =
   | "VIEW_DASHBOARD"
@@ -19,41 +33,26 @@ export type FinanceAction =
   | "RECORD_REFUND"
   | "IMPORT_SETTLEMENT";
 
-export interface PlatformAdminRecord {
-  readonly userId: string;
-  readonly role: string;
-  readonly isActive: boolean;
-  readonly revokedAt: string | null;
-}
+export const FINANCE_ACTION_PERMISSION: Record<FinanceAction, Permission> = {
+  VIEW_DASHBOARD: "finance.view",
+  EXPORT_CSV: "finance.export",
+  RECORD_EXPENSE: "finance.expense.write",
+  VOID_EXPENSE: "finance.expense.write",
+  MANAGE_TAX_SETTINGS: "tax.manage",
+  RECORD_REFUND: "refund.approve",
+  IMPORT_SETTLEMENT: "finance.settlement.import",
+};
 
-export class FinanceAccessError extends Error {
-  readonly code: "UNAUTHENTICATED" | "FORBIDDEN" | "NOT_CONFIGURED";
+export class FinanceAccessError extends AdminAccessError {
   constructor(code: "UNAUTHENTICATED" | "FORBIDDEN" | "NOT_CONFIGURED", message: string) {
-    super(message);
+    super(code, message);
     this.name = "FinanceAccessError";
-    this.code = code;
   }
 }
 
-const PERMISSIONS: Record<FinanceAdminRole, ReadonlySet<FinanceAction>> = {
-  FINANCE_ADMIN: new Set<FinanceAction>([
-    "VIEW_DASHBOARD",
-    "EXPORT_CSV",
-    "RECORD_EXPENSE",
-    "VOID_EXPENSE",
-    "MANAGE_TAX_SETTINGS",
-    "RECORD_REFUND",
-    "IMPORT_SETTLEMENT",
-  ]),
-  FINANCE_VIEWER: new Set<FinanceAction>(["VIEW_DASHBOARD", "EXPORT_CSV"]),
-};
-
-function isKnownRole(role: string): role is FinanceAdminRole {
-  return role === "FINANCE_ADMIN" || role === "FINANCE_VIEWER";
-}
-
+/** Role-only check (no per-person grants). STAFF always needs its record: use authorizeFinanceAction. */
 export function roleCan(role: string, action: FinanceAction): boolean {
-  return isKnownRole(role) && PERMISSIONS[role].has(action);
+  return permissionsOf({ role }).has(FINANCE_ACTION_PERMISSION[action]);
 }
 
 /**
@@ -66,14 +65,13 @@ export function authorizeFinanceAction(
   record: PlatformAdminRecord | null | undefined,
   action: FinanceAction,
 ): { userId: string; role: FinanceAdminRole } {
-  if (!userId) {
-    throw new FinanceAccessError("UNAUTHENTICATED", "Sign-in required");
+  try {
+    const principal = authorizePermission(userId, record, FINANCE_ACTION_PERMISSION[action]);
+    return { userId: principal.userId, role: principal.role };
+  } catch (e) {
+    if (e instanceof AdminAccessError && !(e instanceof FinanceAccessError)) {
+      throw new FinanceAccessError(e.code, e.message);
+    }
+    throw e;
   }
-  if (!record || record.userId !== userId || !record.isActive || record.revokedAt) {
-    throw new FinanceAccessError("FORBIDDEN", "Not a platform finance admin");
-  }
-  if (!isKnownRole(record.role) || !roleCan(record.role, action)) {
-    throw new FinanceAccessError("FORBIDDEN", "Role is not allowed to perform this action");
-  }
-  return { userId, role: record.role };
 }
