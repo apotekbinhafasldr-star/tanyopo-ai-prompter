@@ -96,7 +96,7 @@ describe("demo data is labelled and nothing financial can be done", () => {
     as("SUPER_ADMIN");
     render(await AdminFinancePage());
     expect(screen.getByText("Pembayaran terverifikasi")).toBeInTheDocument();
-    expect(screen.getByText("Pendapatan diakui")).toBeInTheDocument();
+    expect(screen.getAllByText("Pendapatan diakui").length).toBeGreaterThan(0);
     expect(screen.getByText("Dana sudah settle")).toBeInTheDocument();
     expect(screen.getByText("Belum settle")).toBeInTheDocument();
     expect(screen.getAllByText("Settle terlambat").length).toBeGreaterThan(0);
