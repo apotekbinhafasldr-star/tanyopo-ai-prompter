@@ -188,7 +188,7 @@ describe("no sensitive data leaks into any rendered page", () => {
     for (const [, page] of PAGES) {
       const { container, unmount } = render(await page());
       // Official public law download links (JDIH Kemenkeu) carry a document id; that is a source citation, not a private id.
-      const text = container.innerHTML.replace(/https:\/\/jdih\.kemenkeu\.go\.id\/api\/download\/[0-9a-f-]{36}\/[A-Za-z0-9._-]+/g, "[SUMBER-RESMI]");
+      const text = container.innerHTML.replace(/https:\/\/jdih\.kemenkeu\.go\.id\/api\/download\/[0-9a-f-]{36}\/[A-Za-z0-9._-]+/g, "[sumber]");
       expect(text).not.toMatch(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
       expect(text).not.toMatch(/service_role|SUPABASE|secret|apikey|api_key|bearer/i);
       expect(text).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
