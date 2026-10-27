@@ -6,3 +6,4 @@ export * from "./ar-ap";
 export * from "./bank-rec";
 export * from "./adjustments";
 export * from "./from-finance";
+export * from "./fiscal";

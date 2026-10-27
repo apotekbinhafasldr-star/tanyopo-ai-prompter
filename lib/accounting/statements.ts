@@ -263,3 +263,21 @@ export function generalLedger(ledger: Ledger, code: string, range: DateRange): G
   }
   return { code, name: account.name, openingBalance: opening, rows, closingBalance: balance };
 }
+
+/** Plain-language data-quality notes shown next to the reports. They never change a number. */
+export function reportWarnings(ledger: Ledger, asOf: string): string[] {
+  const notes: string[] = ["Draf: belum final sebelum rekonsiliasi bank dan verifikasi akuntan."];
+  const bs = balanceSheet(ledger, asOf);
+  const hasOpening = ledger.entries().some((e) => e.type === "OPENING");
+  const cash = bs.assets.find((a) => a.code === "1110");
+  if (cash && cash.amount.minor < BigInt(0)) {
+    notes.push(
+      hasOpening
+        ? "Saldo Kas dan Bank negatif: periksa pencatatan."
+        : "Saldo Kas dan Bank negatif karena saldo awal belum diinput. Saldo awal tidak dikarang; input hanya dengan bukti (rekening koran).",
+    );
+  }
+  if (!bs.balanced) notes.push("Neraca TIDAK seimbang: jangan dipakai sebelum diperiksa.");
+  if (!trialBalance(ledger, asOf).balanced) notes.push("Neraca saldo TIDAK seimbang.");
+  return notes;
+}

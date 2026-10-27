@@ -202,3 +202,15 @@ describe("statements", () => {
     expect(trialBalance(l, "2026-11-30").rows).toHaveLength(0);
   });
 });
+
+describe("report warnings", () => {
+  it("flags negative cash without opening balance, and never invents one", async () => {
+    const { reportWarnings } = await import("@/lib/accounting");
+    const l = mk();
+    l.post(draft("x", "2026-11-01", [{ account: "6100", debit: idr("10") }, { account: "1110", credit: idr("10") }]), "u", AT);
+    const notes = reportWarnings(l, "2026-11-30");
+    expect(notes.some((n) => n.includes("saldo awal belum diinput"))).toBe(true);
+    expect(l.entries().some((e) => e.type === "OPENING")).toBe(false);
+    expect(reportWarnings(mk(), "2026-11-30")).toHaveLength(1);
+  });
+});
