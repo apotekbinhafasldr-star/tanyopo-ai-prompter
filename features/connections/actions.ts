@@ -8,6 +8,8 @@ import { getConnector } from "@/lib/connectors/get-connector";
 import { MetaConnector } from "@/lib/connectors/meta-connector";
 import { ConnectorConfigError } from "@/lib/connectors/types";
 import { decryptToken } from "@/lib/crypto/token-cipher";
+import { describeSafeError } from "@/lib/connectors/safe-error-log";
+import { runMetaReadinessCheck, type MetaReadinessActionResult } from "@/features/connections/meta-readiness-core";
 import type { ConnectorPlatform } from "@/types/database";
 
 export interface ConnectionActionState {
@@ -215,4 +217,54 @@ export async function disconnectAction(platform: ConnectorPlatform): Promise<Con
 
   revalidatePath("/connections");
   return { error: null };
+}
+
+/**
+ * F-2a — READ-ONLY Meta ad-account readiness check. Owner-only and
+ * tenant-scoped; it reads this tenant's own connection (RLS client) and its
+ * own encrypted credentials (admin client, filtered by tenant AND connection),
+ * makes at most two GET calls to Meta, and writes nothing. The returned value
+ * carries no token, no ad-account id and no funding-source id — see
+ * `runMetaReadinessCheck`. It never opens the External Budget Safety Gate and
+ * never creates or activates a campaign.
+ */
+export async function checkMetaAdAccountReadinessAction(): Promise<MetaReadinessActionResult> {
+  const session = await requireSessionContext();
+  const supabase = await createClient();
+
+  return runMetaReadinessCheck(
+    { tenantId: session.tenantId, role: session.role },
+    {
+      async loadConnection(tenantId) {
+        const { data, error } = await supabase
+          .from("prompter_connected_accounts")
+          .select("id, status, external_account_id, expires_at")
+          .eq("tenant_id", tenantId)
+          .eq("platform", "META")
+          .maybeSingle();
+        if (error) return { ok: false };
+        return { ok: true, connection: data ?? null };
+      },
+      async loadEncryptedToken(tenantId, connectedAccountId) {
+        const admin = createAdminClient();
+        if (!admin) return { ok: false };
+        const { data, error } = await admin
+          .from("prompter_oauth_credentials")
+          .select("encrypted_access_token")
+          .eq("connected_account_id", connectedAccountId)
+          .eq("tenant_id", tenantId)
+          .maybeSingle();
+        if (error) return { ok: false };
+        return { ok: true, encrypted: data?.encrypted_access_token ?? null };
+      },
+      decrypt: decryptToken,
+      connector: new MetaConnector(),
+      now: () => new Date(),
+      logFailure(stage, err) {
+        // Structured, allowlisted fields only (error name, HTTP status, numeric
+        // code/subcode). Never the message, a token, a URL or a response body.
+        console.error("[meta-readiness] failure", { stage, ...(err === undefined ? {} : describeSafeError(err)) });
+      },
+    },
+  );
 }
