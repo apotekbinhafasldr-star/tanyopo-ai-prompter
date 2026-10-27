@@ -28,6 +28,8 @@ export interface ReadinessConnectionRow {
   status: string;
   external_account_id: string | null;
   expires_at: string | null;
+  /** F-2b: set at every (re)connect; bounds how old an Owner's account confirmation may be. */
+  last_refreshed_at?: string | null;
 }
 
 export interface MetaReadinessDeps {
@@ -41,8 +43,21 @@ export interface MetaReadinessDeps {
   decrypt(blob: string): string;
   connector: {
     isConfigured(): boolean;
-    getAccountReadinessSnapshot(accessToken: string, expectedAdAccountId: string): Promise<MetaReadinessLookup>;
+    getAccountReadinessSnapshot(
+      accessToken: string,
+      expectedAdAccountId: string,
+      options?: { selectionConfirmed?: boolean },
+    ): Promise<MetaReadinessLookup>;
   };
+  /**
+   * F-2b (optional): has the Owner explicitly confirmed the stored ad account
+   * since the latest (re)connect? Absent, failing or false => the F-2a rule
+   * applies and more than one ad account is never resolved.
+   */
+  isSelectionConfirmed?(
+    tenantId: string,
+    connection: ReadinessConnectionRow,
+  ): Promise<{ ok: true; confirmed: boolean } | { ok: false }>;
   now(): Date;
   /** Receives a stage name and the thrown value; the implementation must log only structured, non-sensitive fields. */
   logFailure(stage: string, err?: unknown): void;
@@ -106,9 +121,18 @@ export async function runMetaReadinessCheck(
     return unavailable("CREDENTIALS_UNAVAILABLE");
   }
 
+  let selectionConfirmed = false;
+  if (deps.isSelectionConfirmed) {
+    const confirmation = await deps.isSelectionConfirmed(session.tenantId, connection);
+    if (confirmation.ok) selectionConfirmed = confirmation.confirmed;
+    else deps.logFailure("read_confirmation");
+  }
+
   let lookup: MetaReadinessLookup;
   try {
-    lookup = await deps.connector.getAccountReadinessSnapshot(accessToken, connection.external_account_id);
+    lookup = await deps.connector.getAccountReadinessSnapshot(accessToken, connection.external_account_id, {
+      selectionConfirmed,
+    });
   } catch (err) {
     deps.logFailure("graph_lookup", err);
     if (err instanceof ConnectorConfigError) return unavailable("NOT_CONFIGURED");

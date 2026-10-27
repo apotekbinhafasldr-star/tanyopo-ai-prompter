@@ -127,6 +127,8 @@ function interpretGraphResponse<T>(response: Response, body: T & GraphErrorBody)
 const READINESS_TIMEOUT_MS = 10_000;
 /** Graph ad-account ids look like `act_<digits>`. Anything else is never put into a request path. */
 const AD_ACCOUNT_ID_PATTERN = /^act_\d{1,32}$/;
+/** F-2b: how many ad accounts one listing reads (a further page is reported as `truncated`). */
+const AD_ACCOUNT_LIST_LIMIT = 50;
 
 function stripActPrefix(value: string): string {
   return value.startsWith("act_") ? value.slice(4) : value;
@@ -145,10 +147,45 @@ export type MetaReadinessLookup =
 
 interface RawReadinessAdAccount {
   id?: unknown;
+  name?: unknown;
   account_status?: unknown;
   currency?: unknown;
   is_prepay_account?: unknown;
   funding_source?: unknown;
+}
+
+/** One selectable ad account (F-2b). `snapshot.minDailyBudgetRaw` is always null here. */
+export interface MetaAdAccountListItem {
+  id: string;
+  name: string;
+  snapshot: MetaAdAccountSnapshot;
+}
+
+export interface MetaAdAccountListing {
+  accounts: MetaAdAccountListItem[];
+  truncated: boolean;
+}
+
+/** Display name only: control characters removed, bounded, never empty. */
+function safeAccountName(value: unknown): string {
+  const cleaned =
+    typeof value === "string"
+      ? Array.from(value, (ch) => (ch.charCodeAt(0) < 32 || ch.charCodeAt(0) === 127 ? " " : ch))
+          .join("")
+          .trim()
+          .slice(0, 80)
+      : "";
+  return cleaned.length > 0 ? cleaned : "Akun iklan tanpa nama";
+}
+
+/** Normalises one raw `/adaccounts` row. The funding source ID is reduced to a boolean here. */
+function toSnapshot(row: RawReadinessAdAccount): Omit<MetaAdAccountSnapshot, "minDailyBudgetRaw"> {
+  return {
+    accountStatus: typeof row.account_status === "number" ? row.account_status : null,
+    currency: typeof row.currency === "string" && /^[A-Z]{3}$/.test(row.currency) ? row.currency : null,
+    isPrepayAccount: typeof row.is_prepay_account === "boolean" ? row.is_prepay_account : null,
+    hasFundingSource: typeof row.funding_source === "string" && row.funding_source.length > 0 ? true : null,
+  };
 }
 
 /** optimization_goal -> billing_event pairs verified in Meta's docs. REACH only supports IMPRESSIONS. */
@@ -304,13 +341,22 @@ export class MetaConnector implements PlatformConnector {
    * Errors propagate as `ConnectorApiError` (structured fields only matter:
    * see `classifyGraphFailure`).
    */
-  async getAccountReadinessSnapshot(accessToken: string, expectedAdAccountId: string): Promise<MetaReadinessLookup> {
+  async getAccountReadinessSnapshot(
+    accessToken: string,
+    expectedAdAccountId: string,
+    options: { selectionConfirmed?: boolean } = {},
+  ): Promise<MetaReadinessLookup> {
     this.requireConfig();
+    // F-2b: with several accounts, the stored one is evaluated ONLY when the
+    // Owner explicitly confirmed it (and it must still be in Meta's list).
+    // Without that confirmation the F-2a behaviour is unchanged: limit=2, and
+    // more than one account is MULTIPLE (never "the first one").
+    const confirmed = options.selectionConfirmed === true;
 
     const list = await graphFetch<{ data?: RawReadinessAdAccount[]; paging?: { next?: unknown } }>(
       `/me/adaccounts?${new URLSearchParams({
         fields: "id,account_status,currency,is_prepay_account,funding_source",
-        limit: "2",
+        limit: confirmed ? String(AD_ACCOUNT_LIST_LIMIT) : "2",
         access_token: accessToken,
       })}`,
       undefined,
@@ -319,9 +365,13 @@ export class MetaConnector implements PlatformConnector {
 
     const rows = Array.isArray(list.data) ? list.data : [];
     if (rows.length === 0) return { kind: "NONE" };
-    if (rows.length > 1 || list.paging?.next) return { kind: "MULTIPLE" };
+    if (!confirmed && (rows.length > 1 || list.paging?.next)) return { kind: "MULTIPLE" };
 
-    const row = rows[0];
+    const expectedBare = typeof expectedAdAccountId === "string" ? stripActPrefix(expectedAdAccountId) : "";
+    const row = confirmed
+      ? rows.find((r) => typeof r.id === "string" && stripActPrefix(r.id) === expectedBare)
+      : rows[0];
+    if (!row) return { kind: "MISMATCH" };
     const id = typeof row.id === "string" ? row.id : "";
     if (
       !AD_ACCOUNT_ID_PATTERN.test(id) ||
@@ -346,16 +396,38 @@ export class MetaConnector implements PlatformConnector {
       minDailyBudgetRaw = null;
     }
 
-    return {
-      kind: "OK",
-      snapshot: {
-        accountStatus: typeof row.account_status === "number" ? row.account_status : null,
-        currency: typeof row.currency === "string" && /^[A-Z]{3}$/.test(row.currency) ? row.currency : null,
-        isPrepayAccount: typeof row.is_prepay_account === "boolean" ? row.is_prepay_account : null,
-        hasFundingSource: typeof row.funding_source === "string" && row.funding_source.length > 0 ? true : null,
-        minDailyBudgetRaw,
-      },
-    };
+    return { kind: "OK", snapshot: { ...toSnapshot(row), minDailyBudgetRaw } };
+  }
+
+  /**
+   * F-2b — READ-ONLY list of the ad accounts this token can access, for the
+   * account picker. One GET (`/me/adaccounts`, up to 50). Per account it keeps
+   * the id, a display name and the same normalised facts as the readiness
+   * check; the funding source ID is reduced to a boolean and never returned.
+   * Rows with a malformed id are dropped; duplicates are collapsed. `truncated`
+   * means Meta has further pages that were not read.
+   */
+  async listAdAccounts(accessToken: string): Promise<MetaAdAccountListing> {
+    this.requireConfig();
+    const list = await graphFetch<{ data?: RawReadinessAdAccount[]; paging?: { next?: unknown } }>(
+      `/me/adaccounts?${new URLSearchParams({
+        fields: "id,name,account_status,currency,is_prepay_account,funding_source",
+        limit: String(AD_ACCOUNT_LIST_LIMIT),
+        access_token: accessToken,
+      })}`,
+      undefined,
+      { timeoutMs: READINESS_TIMEOUT_MS },
+    );
+
+    const accounts: MetaAdAccountListItem[] = [];
+    const seen = new Set<string>();
+    for (const row of Array.isArray(list.data) ? list.data : []) {
+      const id = typeof row.id === "string" ? row.id : "";
+      if (!AD_ACCOUNT_ID_PATTERN.test(id) || seen.has(id)) continue;
+      seen.add(id);
+      accounts.push({ id, name: safeAccountName(row.name), snapshot: { ...toSnapshot(row), minDailyBudgetRaw: null } });
+    }
+    return { accounts, truncated: Boolean(list.paging?.next) };
   }
 
   async createCampaign(

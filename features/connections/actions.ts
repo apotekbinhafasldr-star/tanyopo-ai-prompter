@@ -10,6 +10,13 @@ import { ConnectorConfigError } from "@/lib/connectors/types";
 import { decryptToken } from "@/lib/crypto/token-cipher";
 import { describeSafeError } from "@/lib/connectors/safe-error-log";
 import { runMetaReadinessCheck, type MetaReadinessActionResult } from "@/features/connections/meta-readiness-core";
+import {
+  listMetaAdAccounts,
+  selectMetaAdAccount,
+  type MetaAdAccountListResult,
+  type MetaAdAccountSelectResult,
+  type MetaAdAccountSelectionDeps,
+} from "@/features/connections/meta-ad-account-selection-core";
 import type { ConnectorPlatform } from "@/types/database";
 
 export interface ConnectionActionState {
@@ -238,13 +245,14 @@ export async function checkMetaAdAccountReadinessAction(): Promise<MetaReadiness
       async loadConnection(tenantId) {
         const { data, error } = await supabase
           .from("prompter_connected_accounts")
-          .select("id, status, external_account_id, expires_at")
+          .select("id, status, external_account_id, expires_at, last_refreshed_at")
           .eq("tenant_id", tenantId)
           .eq("platform", "META")
           .maybeSingle();
         if (error) return { ok: false };
         return { ok: true, connection: data ?? null };
       },
+      isSelectionConfirmed: readSelectionConfirmed,
       async loadEncryptedToken(tenantId, connectedAccountId) {
         const admin = createAdminClient();
         if (!admin) return { ok: false };
@@ -267,4 +275,147 @@ export async function checkMetaAdAccountReadinessAction(): Promise<MetaReadiness
       },
     },
   );
+}
+
+/**
+ * F-2b — "the Owner confirmed this ad account" marker. No new column: the
+ * confirmation is the newest `connection.meta_ad_account_selected` audit row
+ * for THIS connection that (a) was written after the latest (re)connect and
+ * (b) names exactly the account that is stored now. A reconnect therefore
+ * invalidates an older choice, and any change to the stored account that was
+ * not made through the selection action leaves it unconfirmed (fail-closed).
+ * Read with the admin client, filtered by tenant AND connection.
+ */
+const AD_ACCOUNT_SELECTED_ACTION = "connection.meta_ad_account_selected";
+
+async function readSelectionConfirmed(
+  tenantId: string,
+  connection: { id: string; external_account_id: string | null; last_refreshed_at?: string | null },
+): Promise<{ ok: true; confirmed: boolean } | { ok: false }> {
+  if (!connection.external_account_id || !connection.last_refreshed_at) return { ok: true, confirmed: false };
+  const admin = createAdminClient();
+  if (!admin) return { ok: false };
+  const { data, error } = await admin
+    .from("prompter_audit_logs")
+    .select("context, created_at")
+    .eq("tenant_id", tenantId)
+    .eq("action", AD_ACCOUNT_SELECTED_ACTION)
+    .eq("resource_id", connection.id)
+    .gte("created_at", connection.last_refreshed_at)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) return { ok: false };
+  const context = data?.context as { external_account_id?: unknown } | null | undefined;
+  return { ok: true, confirmed: context?.external_account_id === connection.external_account_id };
+}
+
+function buildAdAccountSelectionDeps(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+): MetaAdAccountSelectionDeps {
+  return {
+    async loadConnection(tenantId) {
+      const { data, error } = await supabase
+        .from("prompter_connected_accounts")
+        .select("id, status, external_account_id, expires_at, last_refreshed_at")
+        .eq("tenant_id", tenantId)
+        .eq("platform", "META")
+        .maybeSingle();
+      if (error) return { ok: false };
+      return { ok: true, connection: data ?? null };
+    },
+    async loadEncryptedToken(tenantId, connectedAccountId) {
+      const admin = createAdminClient();
+      if (!admin) return { ok: false };
+      const { data, error } = await admin
+        .from("prompter_oauth_credentials")
+        .select("encrypted_access_token")
+        .eq("connected_account_id", connectedAccountId)
+        .eq("tenant_id", tenantId)
+        .maybeSingle();
+      if (error) return { ok: false };
+      return { ok: true, encrypted: data?.encrypted_access_token ?? null };
+    },
+    decrypt: decryptToken,
+    connector: new MetaConnector(),
+    isSelectionConfirmed: readSelectionConfirmed,
+    async hasMetaCampaigns(tenantId) {
+      const { data, error } = await supabase
+        .from("prompter_channel_campaigns")
+        .select("id")
+        .eq("tenant_id", tenantId)
+        .in("channel", ["FACEBOOK", "INSTAGRAM"])
+        .not("external_campaign_id", "is", null)
+        .limit(1);
+      if (error) return { ok: false };
+      return { ok: true, has: (data ?? []).length > 0 };
+    },
+    async persistSelection(input) {
+      // Tenant, platform, CONNECTED and the exact connect timestamp are all part
+      // of the WHERE clause; exactly one row must change.
+      const { data, error } = await supabase
+        .from("prompter_connected_accounts")
+        .update({ external_account_id: input.adAccountId, external_account_name: input.adAccountName })
+        .eq("id", input.connectionId)
+        .eq("tenant_id", input.tenantId)
+        .eq("platform", "META")
+        .eq("status", "CONNECTED")
+        .eq("last_refreshed_at", input.expectedLastRefreshedAt)
+        .select("id");
+      if (error) return { ok: false, reason: "ERROR" };
+      if (!data || data.length !== 1) return { ok: false, reason: "CONFLICT" };
+
+      const admin = createAdminClient();
+      if (!admin) return { ok: false, reason: "ERROR" };
+      const { error: auditError } = await admin.from("prompter_audit_logs").insert({
+        tenant_id: input.tenantId,
+        actor_user_id: input.userId,
+        action: AD_ACCOUNT_SELECTED_ACTION,
+        resource_type: "prompter_connected_accounts",
+        resource_id: input.connectionId,
+        context: {
+          platform: "META",
+          external_account_id: input.adAccountId,
+          previous_external_account_id: input.previousAdAccountId,
+        },
+      });
+      // Without the audit row the choice stays UNCONFIRMED (readiness fails
+      // closed) and the Owner is told to retry; nothing else is left half-done.
+      if (auditError) return { ok: false, reason: "ERROR" };
+      return { ok: true };
+    },
+    now: () => new Date(),
+    logFailure(stage, err) {
+      // Structured, allowlisted fields only. Never the message, token, URL or body.
+      console.error("[meta-ad-account] failure", { stage, ...(err === undefined ? {} : describeSafeError(err)) });
+    },
+  };
+}
+
+/**
+ * F-2b — READ-ONLY list of the Meta ad accounts this tenant's connection can
+ * access, for the account picker. Owner-only and tenant-scoped; writes nothing.
+ */
+export async function listMetaAdAccountsAction(): Promise<MetaAdAccountListResult> {
+  const session = await requireSessionContext();
+  const supabase = await createClient();
+  return listMetaAdAccounts({ tenantId: session.tenantId, role: session.role }, buildAdAccountSelectionDeps(supabase));
+}
+
+/**
+ * F-2b — stores the Owner's chosen ad account. The id is untrusted input: it is
+ * accepted only if it is in the list Meta returns right now for this tenant's
+ * own token. Only the stored account choice changes; no campaign, budget or
+ * payment is touched, and the Budget Gate is never opened.
+ */
+export async function selectMetaAdAccountAction(adAccountId: string): Promise<MetaAdAccountSelectResult> {
+  const session = await requireSessionContext();
+  const supabase = await createClient();
+  const result = await selectMetaAdAccount(
+    { tenantId: session.tenantId, userId: session.userId, role: session.role },
+    adAccountId,
+    buildAdAccountSelectionDeps(supabase),
+  );
+  if (result.error === null) revalidatePath("/connections");
+  return result;
 }

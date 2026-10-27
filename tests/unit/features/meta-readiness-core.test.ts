@@ -110,7 +110,7 @@ describe("runMetaReadinessCheck — tenant isolation", () => {
     expect(h.loadConnection).toHaveBeenCalledWith("tenant-A");
     expect(h.loadEncryptedToken).toHaveBeenCalledWith("tenant-A", "conn-A");
     expect(h.decrypt).toHaveBeenCalledWith("cipher-A");
-    expect(h.getAccountReadinessSnapshot).toHaveBeenCalledWith("plain(cipher-A)", "act_111");
+    expect(h.getAccountReadinessSnapshot).toHaveBeenCalledWith("plain(cipher-A)", "act_111", { selectionConfirmed: false });
     expect(JSON.stringify(h.getAccountReadinessSnapshot.mock.calls)).not.toContain("cipher-B");
     expect(JSON.stringify(h.getAccountReadinessSnapshot.mock.calls)).not.toContain("act_222");
   });

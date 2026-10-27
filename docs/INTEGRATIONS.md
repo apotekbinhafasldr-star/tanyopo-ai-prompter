@@ -152,3 +152,20 @@ A **read-only** check, started by the Owner from the Meta card on `/connections`
 - Failures are classified from the HTTP status and Graph error **code** only (190/102 token, 10 and 200–299 permission, 4/17/32/613 rate limit, 100 unsupported field); the provider message is never read or logged. Logs carry the stage and the allowlisted summary from `describeSafeError`.
 
 **Not verified against a live account.** Field availability was checked against Meta's published AdAccount and Marketing API error references only; no real credentials were used. The first live read-only check, on the Founder's own ad account, needs separate approval. Permissions: `ads_read` (already requested) covers reading the ad-account node; the user's role on the ad account also matters (`is_prepay_account` needs the ADVERTISE or MANAGE task).
+
+## Meta ad-account selection (Phase F-2b)
+
+The Owner can choose which Meta ad account LINOE reads, from the Meta card on `/connections` ("Akun iklan" → "Pilih Akun Iklan"). Choosing only stores which account is used for the readiness check and later steps. It creates no campaign, changes no budget or payment, never opens the External Budget Safety Gate, and has no billing impact.
+
+**Flow.** `listMetaAdAccountsAction` (read-only, on demand) calls `MetaConnector#listAdAccounts` (one `GET /me/adaccounts`, up to 50) and shows each account's name, id, currency, status and per-account readiness. Nothing is pre-selected when there are several accounts; with exactly one it is pre-selected but still saved explicitly. `selectMetaAdAccountAction(adAccountId)` accepts the id **only if it is in the list Meta returns right now for this tenant's own token** (IDOR / stale-id protection), then updates `prompter_connected_accounts.external_account_id/external_account_name`. Logic lives in `features/connections/meta-ad-account-selection-core.ts` (dependency-injected); wiring in `features/connections/actions.ts`.
+
+**Storage — no migration.** The choice reuses the existing `external_account_id` / `external_account_name` columns. "Confirmed by the Owner" is the newest `connection.meta_ad_account_selected` row in `prompter_audit_logs` for this tenant and connection that was written after the latest (re)connect (`last_refreshed_at`) and names exactly the stored account. Consequences: a reconnect invalidates the older confirmation (the OAuth callback still stores the first account Meta returns, as before, but it is shown as "belum Anda konfirmasi" and readiness stays `UNKNOWN` while several accounts exist), and any change to the stored account made outside the selection action stays unconfirmed (fail-closed).
+
+**Guards.**
+- Owner-only, checked server-side before anything is read; tenant comes from the session, never from the client.
+- The write is bound to tenant, platform `META`, status `CONNECTED` and the exact `last_refreshed_at` read earlier, and must change exactly one row; a reconnect in between yields a conflict message and no audit row. If the audit row cannot be written the Owner is told to retry and the choice remains unconfirmed.
+- Changing to a different account is refused when the tenant already has Facebook/Instagram campaigns with an `external_campaign_id`, because pause and insights use the stored account. Re-confirming the same account is always allowed. If this cannot be checked, the change is refused.
+- Readiness (`checkMetaAdAccountReadinessAction`) with a confirmed selection evaluates exactly that account (list of up to 50, matched by id); a stored account that is no longer accessible is `UNKNOWN` (`AD_ACCOUNT_MISMATCH`). Without confirmation the F-2a rule is unchanged (more than one account → `UNKNOWN`, the first is never assumed).
+- Tokens, funding-source ids and provider messages never reach the browser or logs (same allowlist as F-2a).
+
+**Limits.** Field availability on the current Graph version is still unverified against a live account. More than 50 accounts: only the first 50 are shown (stated in the UI).
