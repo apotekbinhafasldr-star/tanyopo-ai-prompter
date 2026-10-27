@@ -142,6 +142,7 @@ describe("guide wizard — PPh Badan", () => {
     expect(screen.getByTestId("guide-package-button")).toBeDisabled();
     expect(screen.getByTestId("guide-package-button").closest("form")).toHaveAttribute("action", "/admin/finance/tax/coretax-package");
     a.unmount();
+    window.localStorage.clear(); // the first viewer's position is remembered; start the second one fresh
     as("SUPER_ADMIN");
     render(await AdminTaxGuidePage(SP({ jenis: "pph-badan" })));
     goTo(8);
