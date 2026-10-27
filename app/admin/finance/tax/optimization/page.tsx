@@ -3,6 +3,7 @@ import { buildDemoOptimization, parseScenario } from "@/lib/admin/demo-optimizat
 import { formatRupiah } from "@/lib/admin/format";
 import { can } from "@/lib/admin/permissions";
 import { runOptimization } from "@/lib/tax-opt";
+import { calculationHash, rulesVersion } from "@/lib/tax-opt/approval";
 import { requireAdminPage } from "@/services/platform-admin";
 
 export default async function AdminTaxOptimizationPage({
@@ -23,6 +24,7 @@ export default async function AdminTaxOptimizationPage({
       paidTotalText={formatRupiah(result.credits.paidVerified)}
       scenario={scenario}
       canApprove={can(principal, "tax.optimization.approve")}
+      approval={{ calcHashShort: calculationHash({ input, result }).slice(0, 16), rulesVersion: rulesVersion() }}
       demo
     />
   );

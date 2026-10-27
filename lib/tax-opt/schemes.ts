@@ -195,7 +195,7 @@ function eval31E(input: SchemeInput): SchemeResult {
       sourceIds: sources,
       assumptions: [
         `Tarif ${Math.floor((legal.corporateRateBps * (100 - legal.facility31E.reductionPercent)) / 100) / 100}% atas bagian PKP = PKP x (Rp4,8 miliar / peredaran bruto), sisanya tarif umum.`,
-        "Rumus porsi diturunkan dari uraian halaman DJP (bukan kutipan pasal): konfirmasi akuntan.",
+        "Rumus porsi sesuai materi tutorial resmi DJP (contoh omzet Rp30 miliar menghasilkan Rp1.012.000.000); teks pasal dan penjelasan UU tidak terbaca: konfirmasi akuntan.",
         "Pembulatan ke rupiah sesuai SPT belum diterapkan.",
       ],
     }),
@@ -237,7 +237,7 @@ function evalFinal(input: SchemeInput): SchemeResult {
     "Tetap terutang walau perusahaan rugi.",
   ];
   if (form === "PT_PERORANGAN") {
-    return { id: "PPH_FINAL_UMKM", name: LABEL.PPH_FINAL_UMKM, eligibility: "MEMENUHI_SYARAT", reasons: ["Perseroan perorangan memenuhi Pasal 57 ayat (1) PP 20/2026 (batas waktu umum dihapus)."], tax: computed(amount, { ...c, sourceIds: sources, assumptions }), sourceIds: sources };
+    return { id: "PPH_FINAL_UMKM", name: LABEL.PPH_FINAL_UMKM, eligibility: "MEMENUHI_SYARAT", reasons: ["Perseroan perorangan memenuhi Pasal 57 ayat (1) PP 20/2026 (batas waktu umum dihapus).", "Peredaran bruto harus gabungan pendiri orang pribadi dan seluruh perseroan perorangannya (Pasal 57 ayat (2) huruf e, Pasal 58): konfirmasi akuntan."], tax: computed(amount, { ...c, sourceIds: sources, assumptions }), sourceIds: sources };
   }
   if (form !== "KOPERASI" && (p.registeredOn as string) >= "2026-04-22") {
     return no("PT/CV/firma yang terdaftar sejak 22 April 2026 bukan lagi subjek PPh final UMKM (PP 20/2026): hanya peralihan bagi yang sudah berjalan.");
@@ -273,7 +273,7 @@ export function evaluateSchemes(input: SchemeInput): SchemeEvaluation {
     results,
     conflicts,
     recommended: null,
-    note: "Mesin tidak memilih skema hanya karena pajaknya lebih kecil. Pilihan akhir ditetapkan Founder bersama akuntan.",
+    note: "Mesin tidak memilih skema hanya karena pajaknya lebih kecil. Pilihan akhir ditetapkan Founder bersama akuntan. Memilih tarif umum (Pasal 17, dengan Pasal 31E) bagi yang semula PPh final wajib diberitahukan ke DJP (Pasal 57 ayat (3) PP 20/2026) dan tidak dapat kembali ke final bila dikecualikan menurut ayat (4).",
   };
 }
 

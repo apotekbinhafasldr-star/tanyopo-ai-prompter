@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { formatRupiah } from "@/lib/admin/format";
-import { figureView, LAW_VERIFIED_ON, LEGAL_SOURCES, type FigureView, type OptimizationResult } from "@/lib/tax-opt";
+import { figureView, LAW_VERIFIED_ON, LEGAL_SOURCES, PROVISION_CHECKS, verificationSummary, type FigureView, type OptimizationResult } from "@/lib/tax-opt";
 import { MISSING_LABEL } from "@/lib/tax-opt/expenses";
 import { Badge, Card, Check, Chip, DemoNotice, Empty, Frame, Hero, Row } from "./parts";
 
@@ -52,9 +52,11 @@ export interface TaxOptimizationProps {
   scenario: "nyata" | "contoh";
   canApprove: boolean;
   demo: boolean;
+  /** Fingerprint of what is on screen; the Founder approves THIS calculation under THIS rules version. */
+  approval?: { calcHashShort: string; rulesVersion: string };
 }
 
-export function TaxOptimization({ result, paidTotalText, scenario, canApprove, demo }: TaxOptimizationProps) {
+export function TaxOptimization({ result, paidTotalText, scenario, canApprove, demo, approval }: TaxOptimizationProps) {
   const sim = result.simulation;
   const line = (id: string) => figureView((sim.lines.find((l) => l.id === id) as (typeof sim.lines)[number]).figure);
   const savings = figureView(sim.savingsTotal);
@@ -169,12 +171,30 @@ export function TaxOptimization({ result, paidTotalText, scenario, canApprove, d
         {result.findings.map((f, i) => <Check key={`${i}-${f.text}`} ok={f.level === "info"} label={f.text} />)}
       </Card>
 
+      <Card title="Persetujuan Founder" sub="Catatan internal permanen. Bukan verifikasi akuntan dan tidak membuat angka menjadi terverifikasi.">
+        <div data-testid="approval-card">
+          <Check ok={false} label={demo ? "Tidak dapat disimpan: data masih DEMO" : "Menunggu keputusan"} />
+          <Row label="Yang berhak memutuskan" value={canApprove ? "akun ini berhak menyetujui" : "akun ini tidak berhak menyetujui"} />
+          {approval ? <Row label="Sidik perhitungan" value={approval.calcHashShort} /> : null}
+          {approval ? <Row label="Versi aturan" value={approval.rulesVersion} /> : null}
+          <p className="fin-note">Keputusan tersimpan append-only dan tidak dapat diubah. Koreksi atau pencabutan dicatat sebagai peristiwa baru. Jika perhitungan atau versi aturan berubah, persetujuan lama otomatis tidak berlaku sampai ditinjau ulang. Persetujuan hanya untuk angka TERVERIFIKASI tanpa butir terbuka.</p>
+        </div>
+      </Card>
+
+      <Card title="Status verifikasi dasar hukum" sub={`Diperiksa ${LAW_VERIFIED_ON}. Pasal tanpa naskah primer tidak dianggap terverifikasi.`}>
+        <p className="fin-note" data-testid="provision-summary">{(() => { const v = verificationSummary(); return `Primer ${v.primary} · Sebagian ${v.partial} · Hanya DJP ${v.secondary} · BLOCKED ${v.blocked}`; })()}</p>
+        {PROVISION_CHECKS.map((p) => (
+          <div key={p.id} data-testid={`provision-${p.id}`}>
+            <div className="fin-row"><span>{p.provision}</span><Badge tone={p.status === "TERVERIFIKASI_PRIMER" ? "good" : p.status === "BLOCKED" ? "bad" : "warn"}>{p.status.replaceAll("_", " ")}</Badge></div>
+            <p className="fin-note">{p.note}</p>
+          </div>
+        ))}
+      </Card>
+
       <Card title="Status kesiapan pelaporan" sub="Hasil optimasi baru boleh dibawa ke Coretax jika semua butir selesai.">
         <Check ok={result.readyToUse} label={result.readyToUse ? "Siap dibawa ke akuntan" : "BELUM SIAP"} />
         {result.openItems.map((o) => <Check key={o} ok={false} label={o} />)}
-        <p className="fin-note">
-          Persetujuan rekomendasi final hanya oleh Founder{canApprove ? " (akun ini berhak)" : " (akun ini tidak berhak menyetujui)"}. Persetujuan belum disimpan: penyimpanan menunggu rancangan keamanan yang disetujui. Tidak ada pengiriman SPT atau pembayaran otomatis.
-        </p>
+        <p className="fin-note">Tidak ada pengiriman SPT atau pembayaran otomatis.</p>
         <Link className="fin-btn" style={{ display: "flex", alignItems: "center", justifyContent: "center" }} href="/admin/finance/tax/guide" prefetch={false}>BUKA PANDUAN LAPOR PAJAK</Link>
       </Card>
 

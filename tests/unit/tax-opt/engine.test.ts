@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { money, toDecimalString, zero } from "@/lib/finance/money";
 import {
-  approveRecommendation, claimCredits, evaluateSchemes, legalParametersFor, reviewCredits, reviewPpn, checkNotice,
+  claimCredits, evaluateSchemes, legalParametersFor, reviewCredits, reviewPpn, checkNotice,
   simulate, tax31E, taxFinalUmkm, taxGeneral, validateSchemeSelection, reviewExpenses, expenseAdjustments, blocked, computed,
   type EntityProfile, type SchemeInput, type TaxCreditRecord,
 } from "@/lib/tax-opt";
@@ -29,6 +29,25 @@ describe("tax math", () => {
   it("31E turnover above 4.8bn: only proportion gets discount", () => {
     // omzet 9.6bn: half of income gets 11%, rest 22%
     expect(toDecimalString(tax31E(M("1000000000"), M("9600000000"), LEGAL))).toBe("165000000.00");
+  });
+  it("31E matches the official DJP worked example (omzet 30bn, PKP 5bn -> 1,012,000,000)", () => {
+    expect(toDecimalString(tax31E(M("5000000000"), M("30000000000"), LEGAL))).toBe("1012000000.00");
+  });
+  it("PT biasa vs PT perorangan under PP 20/2026", () => {
+    const fin = (o: Partial<EntityProfile>, year: string) =>
+      get(evaluateSchemes(input({ taxYear: year, profile: profile(o), legal: legalParametersFor(year, V)! })), "PPH_FINAL_UMKM").eligibility;
+    // PT biasa registered 2022: PP 23/2018 Pasal 5 counts from the registration year -> 2022, 2023, 2024.
+    expect(fin({ registeredOn: "2022-03-01" }, "2024")).toBe("MEMENUHI_SYARAT");
+    expect(fin({ registeredOn: "2022-03-01" }, "2025")).toBe("PERLU_VERIFIKASI_AKUNTAN"); // PP 55/2022 Pasal 59 BLOCKED
+    expect(fin({ registeredOn: "2022-03-01" }, "2026")).toBe("TIDAK_MEMENUHI");
+    // A year without verified rules is never computed.
+    expect(fin({ registeredOn: "2022-03-01" }, "2027")).toBe("BELUM_DAPAT_DIHITUNG");
+    // Perseroan perorangan (1 owner): no time window.
+    expect(fin({ legalForm: "PT_PERORANGAN", registeredOn: "2020-01-01" }, "2026")).toBe("MEMENUHI_SYARAT");
+    expect(fin({ legalForm: "PT_PERORANGAN", registeredOn: "2026-06-01", providesFreeProfessionServices: true }, "2026")).toBe("TIDAK_MEMENUHI");
+    // Facilities cannot be combined with final tax.
+    expect(fin({ hasOtherIncomeTaxFacility: true }, "2025")).toBe("TIDAK_MEMENUHI");
+    expect(fin({ electedNormalRate: true }, "2025")).toBe("TIDAK_MEMENUHI");
   });
   it("final UMKM 0.5% of turnover, no rounding drift", () => {
     expect(toDecimalString(taxFinalUmkm(M("1234567891"), LEGAL))).toBe("6172839.46");
@@ -155,7 +174,6 @@ describe("notices", () => {
   });
 });
 
-const founder = { userId: "f", role: "SUPER_ADMIN", permissions: new Set(["tax.optimization.approve"]) } as unknown as AdminPrincipal;
 describe("simulation + decision", () => {
   const e = (o: Partial<SchemeInput> = {}) => evaluateSchemes(input(o));
   const simIn = (sch = e(), credits = reviewCredits([cr("1")], "2026", "C", "IDR")) => ({
@@ -180,15 +198,6 @@ describe("simulation + decision", () => {
   it("unverified law caps at SIMULASI", () => {
     const s = simulate({ ...simIn(e({ legal: LEGAL_UNVER })), legal: LEGAL_UNVER });
     expect(s.lines.find((l) => l.id === "FINAL")!.figure.state).not.toBe("TERVERIFIKASI");
-  });
-  it("only Founder may approve, and only verified figures", () => {
-    const rec = { id: "r", taxYear: "2026", schemeIds: ["PASAL_31E" as const], rationale: "ok", preparedBy: "s", figureStates: ["TERVERIFIKASI" as const] };
-    const staff = { userId: "s", role: "FINANCE_ADMIN", permissions: new Set(["tax.optimization.view"]) } as unknown as AdminPrincipal;
-    expect(approveRecommendation(staff, rec, "2026-10-27T00:00:00Z").ok).toBe(false);
-    expect(approveRecommendation(founder, { ...rec, figureStates: ["SIMULASI"] }, "x").ok).toBe(false);
-    expect(approveRecommendation(founder, { ...rec, rationale: " " }, "x").ok).toBe(false);
-    expect(approveRecommendation(founder, { ...rec, schemeIds: ["PPH_FINAL_UMKM", "PASAL_31E"] }, "x").ok).toBe(false);
-    expect(approveRecommendation(founder, rec, "2026-10-27T00:00:00Z").ok).toBe(true);
   });
   it("figure invariants: blocked has no amount; computed unverified is SIMULASI", () => {
     expect(blocked(["x"]).amount).toBeNull();

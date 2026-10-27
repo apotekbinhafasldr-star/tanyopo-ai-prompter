@@ -256,3 +256,42 @@ jobs:
           bash supabase/tests/s1-wrapper/run-local.sh 2>&1 | tee "$RUNNER_TEMP/s1w.txt"
           grep -q '^ALL S1 WRAPPER CHECKS PASSED' "$RUNNER_TEMP/s1w.txt"
           if grep -q '^FAIL' "$RUNNER_TEMP/s1w.txt"; then exit 1; fi
+
+  # Phase E.1: Founder approval storage (supabase/migrations/20261027130000_linoe_tax_optimization_approvals.sql) on a
+  # THROW-AWAY PostgreSQL 17 with synthetic data. Applies the finance foundation + admin access migrations first, then runs
+  # the behaviour suite, real parallel backends, rollback, and negative controls. Nothing here can reach Supabase.
+  tax-approvals-pg17:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: linoe_ci
+          POSTGRES_PASSWORD: linoe_ci_password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U linoe_ci -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: linoe_ci
+      PGPASSWORD: linoe_ci_password
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ensure psql client
+        run: command -v psql || (sudo apt-get update && sudo apt-get install -y postgresql-client)
+
+      - name: Tax optimization approvals on PostgreSQL 17 (required)
+        env:
+          REQUIRE_PG_MAJOR: "17"
+        run: |
+          set -o pipefail
+          bash supabase/tests/tax-approvals/run-local.sh 2>&1 | tee "$RUNNER_TEMP/taxapp.txt"
+          grep -q '^ALL TAX APPROVAL CHECKS PASSED' "$RUNNER_TEMP/taxapp.txt"
+          if grep -q '^FAIL' "$RUNNER_TEMP/taxapp.txt"; then exit 1; fi

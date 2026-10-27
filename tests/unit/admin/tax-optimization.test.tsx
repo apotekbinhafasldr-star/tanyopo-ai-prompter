@@ -20,6 +20,28 @@ const as = (role: "SUPER_ADMIN" | "STAFF", permissions: string[] = []) => {
 };
 afterEach(() => cleanup());
 
+describe("Persetujuan Founder dan status verifikasi hukum", () => {
+  it("DEMO data cannot be approved; card shows fingerprint, rules version and no form", async () => {
+    as("SUPER_ADMIN");
+    const { container } = render(await Page(SP()));
+    const card = screen.getByTestId("approval-card");
+    expect(card).toHaveTextContent("Tidak dapat disimpan: data masih DEMO");
+    expect(card).toHaveTextContent(/Sidik perhitungan/);
+    expect(card).toHaveTextContent(/taxopt-e1;law=2026-10-27/);
+    expect(card).toHaveTextContent(/bukan verifikasi akuntan|tidak membuat angka menjadi terverifikasi/i);
+    expect(container.querySelector("form")).toBeNull();
+  });
+  it("blocked and DJP-only provisions are shown as such, never as verified", async () => {
+    as("SUPER_ADMIN");
+    render(await Page(SP()));
+    expect(screen.getByTestId("provision-P5")).toHaveTextContent("BLOCKED");
+    expect(screen.getByTestId("provision-P10")).toHaveTextContent("BLOCKED");
+    expect(screen.getByTestId("provision-P8")).toHaveTextContent("SEKUNDER DJP");
+    expect(screen.getByTestId("provision-P1")).toHaveTextContent("TERVERIFIKASI PRIMER");
+    expect(screen.getByTestId("provision-summary")).toHaveTextContent(/BLOCKED \d+/);
+  });
+});
+
 describe("Optimasi Pajak Legal page", () => {
   it("is a 404 for signed-out visitors and staff without the special permission", async () => {
     hoisted.principal = null;

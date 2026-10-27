@@ -15,7 +15,7 @@ Menu pajak (chip, bukan navigasi bawah): Rekap pajak | Panduan lapor | Optimasi 
   | PERLU VERIFIKASI AKUNTAN/KONSULTAN PAJAK | ketidakpastian hukum | tidak dihitung |
   | BELUM DAPAT DIHITUNG | data kurang | tidak ada angka |
 - Pembukuan asli tidak diubah. Koreksi fiskal dari biaya nondeductible dibuat sebagai `FiscalAdjustment` terpisah (`opt|expense|<id>`), terverifikasi, dengan bukti.
-- Tidak ada pengiriman SPT, pembayaran, login, atau migrasi baru. Persetujuan Founder (`approveRecommendation`) hanya aturan murni yang menghasilkan peristiwa audit; belum disimpan (lihat keputusan Founder).
+- Tidak ada pengiriman SPT, pembayaran, login, atau migrasi baru. Persetujuan Founder: lihat bagian E.1 di bawah.
 
 ## Modul (`lib/tax-opt/`)
 | File | Isi |
@@ -53,3 +53,24 @@ Tahun pajak di luar 2022-2026: tidak dihitung. Parameter hukum selalu tanpa pemv
 - Batas waktu banding tidak diperoleh dari halaman yang dibaca: tidak dihitung.
 - Cara menghitung tahun pertama jangka waktu final ambigu: tahun batas ditandai PERLU VERIFIKASI.
 - Semua data adalah DEMO. `?skenario=contoh` adalah skenario fiktif berlabel.
+
+
+## Phase E.1: verifikasi hukum dan persetujuan Founder permanen
+
+### Status verifikasi pasal
+Daftar P1-P12 ada di `lib/tax-opt/verification.ts` dan tampil di halaman Optimasi. Status: TERVERIFIKASI_PRIMER, TERVERIFIKASI_SEBAGIAN, SEKUNDER_DJP (hanya panduan DJP), BLOCKED (naskah tidak terbaca). Yang BLOCKED atau sekunder tidak pernah dianggap terverifikasi; angka yang bergantung padanya tetap SIMULASI atau PERLU VERIFIKASI AKUNTAN. Kelayakan PT Tanyopo tidak ditetapkan: data perusahaan belum terverifikasi.
+
+### Penyimpanan persetujuan (migrasi 20261027130000, belum diterapkan)
+- Tabel `tax_opt_decisions`: append-only, berantai hash per subjek. Tidak ada grant INSERT/UPDATE/DELETE; UPDATE, DELETE, TRUNCATE ditolak trigger.
+- Satu jalur tulis: fungsi SECURITY DEFINER `tax_opt_record_decision`, EXECUTE hanya `service_role`. Memeriksa Super Admin aktif dari tabel `finance_platform_admins` (bukan email), kunci advisory per subjek, `expected_seq` (konflik TO409), `request_id` idempoten, hash/versi aturan yang dilihat vs sekarang (TO412).
+- Menyimpan: ID keputusan, ID pemutus, waktu, jenis rekomendasi, tahun pajak, versi aturan, hash data hitung, keputusan+alasan, rujukan bukti (kode pendek, bukan URL/jalur), rujukan verifikasi akuntan. Tidak menyimpan nominal atau isi dokumen.
+- Status efektif diturunkan: bila hash perhitungan atau versi aturan berubah, persetujuan lama tidak berlaku sampai ditinjau ulang. Koreksi/pencabutan = peristiwa baru (REVOKED).
+- Cakupan selalu INTERNAL_RECOMMENDATION_ONLY. Persetujuan tidak mengubah status verifikasi angka, tidak menggantikan akuntan/konsultan pajak, dan tidak membuat laporan siap lapor.
+- Trigger anti-eskalasi pada `finance_platform_admins`: tidak ada promosi diri atau pemberian hak oleh staf.
+- Rollback `supabase/rollback/20261027130000_*.down.sql` menolak jalan jika sudah ada keputusan.
+
+### Aplikasi
+`lib/tax-opt/approval.ts` (hash), `lib/tax-opt/decision.ts` (aturan sebelum DB, pemutus selalu dari sesi server), `services/tax-optimization-approvals.ts` (rpc, gagal tertutup), route `POST /admin/finance/tax/optimization/decision` (flag, origin sama, `tax.optimization.approve`). Selama data masih DEMO, route menolak menyimpan (422 DEMO).
+
+### Pengujian
+`supabase/tests/tax-approvals/` (SQL, konkurensi, rollback, kontrol negatif) dijalankan di PostgreSQL 16 lokal dan di CI job `tax-approvals-pg17` (PostgreSQL 17). Tes TS: `tests/unit/tax-opt/approval.test.ts`, `tests/unit/migrations/tax-approvals.test.ts`, `tests/unit/admin/tax-decision-route.test.ts`.
