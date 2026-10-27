@@ -73,8 +73,13 @@ describe("roles and permissions", () => {
     const staff = permissionsOf({ role: "STAFF", permissions: ["finance.view", "finance.export", "tax.view"] });
     expect(staff.has("refund.approve")).toBe(false);
     expect(staff.has("bank.manage")).toBe(false);
-    const granted = permissionsOf({ role: "STAFF", permissions: ["refund.approve"] });
-    expect(granted.has("refund.approve")).toBe(true);
+    // Founder-only at the initial stage: even an explicit grant is ignored.
+    const granted = permissionsOf({ role: "STAFF", permissions: ["refund.approve", "finance.view"] });
+    expect(granted.has("refund.approve")).toBe(false);
+    expect(granted.has("finance.view")).toBe(true);
+    expect(permissionsOf({ role: "SUPER_ADMIN" }).has("refund.approve")).toBe(true);
+    expect(permissionsOf({ role: "FINANCE_ADMIN" }).has("refund.approve")).toBe(false);
+    expect(evaluateStaffChange(principal("SUPER_ADMIN", [], "founder"), null, { role: "STAFF", permissions: ["refund.approve"], isActive: true }, 1).ok).toBe(false);
   });
 
   it("staff.manage can never be granted", () => {

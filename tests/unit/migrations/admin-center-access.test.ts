@@ -34,7 +34,10 @@ describe("admin center access migration — additive, scoped, no hard-coded iden
     const list = /permissions <@ array\[(.*?)\]/.exec(up);
     expect(list).not.toBeNull();
     expect(list?.[1]).not.toContain("staff.manage");
-    expect(list?.[1]).toContain("'refund.approve'");
+    // Refund approval is Founder-only at this stage: the table cannot even store it for a person.
+    expect(list?.[1]).not.toContain("refund.approve");
+    expect(list?.[1]).toContain("'tax.export'");
+    expect(list?.[1]).toContain("'accounting.view'");
     expect(list?.[1]).toContain("'bank.manage'");
   });
 
