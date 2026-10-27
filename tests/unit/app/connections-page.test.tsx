@@ -67,6 +67,10 @@ vi.mock("@/features/connections/meta-page-picker", () => ({
   ),
 }));
 
+vi.mock("@/features/connections/meta-readiness-panel", () => ({
+  MetaReadinessPanel: () => <div data-testid="meta-readiness-panel">Periksa Kesiapan</div>,
+}));
+
 import ConnectionsPage from "@/app/(app)/connections/page";
 
 const META_CONNECTED = {
@@ -205,5 +209,65 @@ describe("ConnectionsPage — schema without Track B columns and failed reads", 
 
     expect(screen.getAllByText("Belum Dikonfigurasi")).toHaveLength(3);
     expect(screen.queryByText("Belum Terhubung")).toBeNull();
+  });
+});
+
+describe("ConnectionsPage — Meta readiness check (F-2a)", () => {
+  let consoleError: MockInstance;
+
+  beforeEach(() => {
+    hoisted.role = "owner";
+    hoisted.configured = true;
+    hoisted.list = { data: [], error: null };
+    hoisted.pageRead = { data: null, error: null };
+    hoisted.selects = [];
+    consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    cleanup();
+    consoleError.mockRestore();
+  });
+
+  it("offers the readiness check to the Owner of a CONNECTED Meta account", async () => {
+    hoisted.list = { data: [META_CONNECTED], error: null };
+
+    await renderPage();
+
+    expect(screen.getByTestId("meta-readiness-panel")).toBeInTheDocument();
+  });
+
+  it("still offers it when the Page-selection read fails (independent of Track B)", async () => {
+    hoisted.list = { data: [META_CONNECTED], error: null };
+    hoisted.pageRead = { data: null, error: MISSING_COLUMN_ERROR };
+
+    await renderPage();
+
+    expect(screen.getByTestId("meta-readiness-panel")).toBeInTheDocument();
+  });
+
+  it("does not offer it to a non-owner", async () => {
+    hoisted.role = "marketing";
+    hoisted.list = { data: [META_CONNECTED], error: null };
+
+    await renderPage();
+
+    expect(screen.queryByTestId("meta-readiness-panel")).toBeNull();
+  });
+
+  it("does not offer it when Meta is not connected", async () => {
+    hoisted.list = { data: [], error: null };
+
+    await renderPage();
+
+    expect(screen.queryByTestId("meta-readiness-panel")).toBeNull();
+  });
+
+  it("does not offer it for an account that is not CONNECTED", async () => {
+    hoisted.list = { data: [{ ...META_CONNECTED, status: "ACTION_REQUIRED" }], error: null };
+
+    await renderPage();
+
+    expect(screen.queryByTestId("meta-readiness-panel")).toBeNull();
   });
 });

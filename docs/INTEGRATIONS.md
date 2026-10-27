@@ -126,3 +126,29 @@ Today's only implementation, `lib/jobs/providers/supabase-job-queue.ts#SupabaseJ
 ## Current state (Phase 7)
 
 Meta, TikTok, and X connectors and OAuth flows are all implemented and structurally complete but unverified against a live ad account on any of the three (see above) — `/connections` renders real Connect/Disconnect flows for all three, gated by each connector's own `isConfigured()`. UMKMpro AI integration is implemented and its signed-authentication layer was verified against a real running local server (see [ROADMAP.md](ROADMAP.md) Phase 4 for what was and wasn't exercisable in this environment). As of Phase 7, `getInsights`, `pauseCampaign`, and `updateBudget` are wired to real UI-triggered actions (metrics sync, and Owner-approved autopilot execution) for the first time — see [ROADMAP.md](ROADMAP.md) Phase 7 and [SECURITY.md](SECURITY.md) "Automation safety" for the approval/Budget Guard/Emergency Stop boundaries around when `pauseCampaign`/`updateBudget` are actually allowed to run.
+
+## Meta ad-account readiness check (Phase F-2a)
+
+A **read-only** check, started by the Owner from the Meta card on `/connections` ("Periksa Kesiapan"), that tells whether the connected Meta ad account looks able to deliver ads and be billed in IDR. It does not create, change or activate anything, never opens the External Budget Safety Gate (`BUDGET_WRITE_ENABLED_PLATFORMS` stays empty) and writes nothing to the database. Ad spend is paid by the customer directly to Meta; LINOE does not hold or move ad budgets.
+
+**Where it lives**
+
+- `lib/connectors/meta-readiness.ts` — pure evaluation (no I/O): `evaluateMetaReadiness`, `unavailableMetaReadiness`, `classifyGraphFailure`.
+- `MetaConnector#getAccountReadinessSnapshot` (`lib/connectors/meta-connector.ts`) — at most two `GET` calls: `/me/adaccounts?fields=id,account_status,currency,is_prepay_account,funding_source&limit=2`, then, only when exactly one matching account came back, `/{act_id}?fields=min_daily_budget` (optional; failure is ignored). Not part of the shared `PlatformConnector` interface, like `getPages`.
+- `features/connections/meta-readiness-core.ts` — orchestration with injected dependencies (testable without Next.js, Supabase or Meta).
+- `checkMetaAdAccountReadinessAction` (`features/connections/actions.ts`) — the server action that wires the real dependencies. Owner-only; tenant-scoped (connection via the RLS client; credentials via the admin client filtered by tenant **and** connection id).
+- `features/connections/meta-readiness-view.tsx` / `meta-readiness-panel.tsx` — the Indonesian UI.
+
+**States.** `READY` only when every check has positive evidence: `account_status` = 1 (active), `currency` = `IDR`, a `funding_source` was returned, and `is_prepay_account` = `false`. Any Meta-reported problem (status 2/3/7/8/9, non-IDR currency) is `NOT_READY`. Anything missing, unreadable or unrecognised is `UNKNOWN` — never `READY`.
+
+**Deliberate limits**
+
+- A missing `funding_source` is `UNKNOWN`, not "no payment method": the API omits the field both when there is none and when the token may not read it.
+- A prepaid account is `UNKNOWN`: LINOE does not read the balance, and `READY` must not imply that funds exist.
+- Account status codes other than 1, 2, 3, 7, 8, 9 are `UNKNOWN` until their meaning is verified.
+- More than one discoverable ad account (or a paginated list), no account, or an account different from the one stored at connection time → `UNKNOWN`. The first account is never assumed; account selection is a separate, not yet approved phase.
+- `funding_source_details` (needs the MANAGE task on the ad account and carries payment-method details) is deliberately never requested. The funding source id is reduced to a boolean inside the connector and is never returned, stored or logged.
+- `min_daily_budget` is informational, shown unconverted (currency minor units), and never changes the state.
+- Failures are classified from the HTTP status and Graph error **code** only (190/102 token, 10 and 200–299 permission, 4/17/32/613 rate limit, 100 unsupported field); the provider message is never read or logged. Logs carry the stage and the allowlisted summary from `describeSafeError`.
+
+**Not verified against a live account.** Field availability was checked against Meta's published AdAccount and Marketing API error references only; no real credentials were used. The first live read-only check, on the Founder's own ad account, needs separate approval. Permissions: `ads_read` (already requested) covers reading the ad-account node; the user's role on the ad account also matters (`is_prepay_account` needs the ADVERTISE or MANAGE task).

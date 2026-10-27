@@ -2,6 +2,7 @@ import "server-only";
 
 import { serverEnv } from "@/lib/env";
 import { isConnectorConfigured } from "@/lib/env";
+import type { MetaAdAccountSnapshot } from "@/lib/connectors/meta-readiness";
 import {
   ConnectorApiError,
   ConnectorConfigError,
@@ -65,17 +66,22 @@ const CREATE_TIMEOUT_MS = 10_000;
 interface GraphFetchOptions {
   /** Set only for create operations. Enables the timeout and the strict body handling below. */
   create?: boolean;
+  /**
+   * Opt-in timeout for a READ call (F-2a readiness check). Uses the same strict
+   * body handling as `create`. Absent = the previous no-timeout behaviour.
+   */
+  timeoutMs?: number;
 }
 
 async function graphFetch<T>(path: string, init?: RequestInit, options: GraphFetchOptions = {}): Promise<T> {
-  if (!options.create) {
+  if (!options.create && options.timeoutMs === undefined) {
     // Previous behaviour, unchanged.
     const response = await fetch(`${GRAPH_BASE_URL}${path}`, init);
     const body = (await response.json().catch(() => ({}))) as T & GraphErrorBody;
     return interpretGraphResponse(response, body);
   }
 
-  const timeout = AbortSignal.timeout(CREATE_TIMEOUT_MS);
+  const timeout = AbortSignal.timeout(options.create ? CREATE_TIMEOUT_MS : (options.timeoutMs as number));
   const signal = init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout;
 
   const timedOut = () => new ConnectorApiError("META", "Meta Graph API tidak merespons tepat waktu.", {});
@@ -115,6 +121,34 @@ function interpretGraphResponse<T>(response: Response, body: T & GraphErrorBody)
   }
 
   return body;
+}
+
+/** F-2a: timeout for the read-only readiness lookups. */
+const READINESS_TIMEOUT_MS = 10_000;
+/** Graph ad-account ids look like `act_<digits>`. Anything else is never put into a request path. */
+const AD_ACCOUNT_ID_PATTERN = /^act_\d{1,32}$/;
+
+function stripActPrefix(value: string): string {
+  return value.startsWith("act_") ? value.slice(4) : value;
+}
+
+/**
+ * Outcome of the read-only readiness lookup. Anything other than OK means the
+ * connector did NOT pick an account: more than one discoverable ad account is
+ * never resolved by taking the first.
+ */
+export type MetaReadinessLookup =
+  | { kind: "OK"; snapshot: MetaAdAccountSnapshot }
+  | { kind: "NONE" }
+  | { kind: "MULTIPLE" }
+  | { kind: "MISMATCH" };
+
+interface RawReadinessAdAccount {
+  id?: unknown;
+  account_status?: unknown;
+  currency?: unknown;
+  is_prepay_account?: unknown;
+  funding_source?: unknown;
 }
 
 /** optimization_goal -> billing_event pairs verified in Meta's docs. REACH only supports IMPRESSIONS. */
@@ -245,6 +279,83 @@ export class MetaConnector implements PlatformConnector {
       `/me/accounts?${new URLSearchParams({ fields: "id,name", access_token: accessToken })}`,
     );
     return result.data.map((p) => ({ id: p.id, name: p.name }));
+  }
+
+  /**
+   * F-2a — READ-ONLY ad-account readiness lookup. Two GET calls at most; it
+   * writes nothing, creates nothing and never touches budgets, so it is not a
+   * budget-write call site (see tests/unit/lib/budget-write-callsites.test.ts).
+   * Not part of the shared `PlatformConnector` interface, like `getPages`.
+   *
+   *  1. `GET /me/adaccounts?fields=id,account_status,currency,is_prepay_account,funding_source&limit=2`
+   *     — `limit=2` is enough to tell "exactly one" from "more than one"; a
+   *     `paging.next` also counts as more than one.
+   *  2. Only when exactly one account came back AND it is the account LINOE
+   *     stored at connection time: `GET /{act_id}?fields=min_daily_budget`, in
+   *     its own request because it is optional — if Meta does not offer that
+   *     field to this token the failure is swallowed and the value stays null,
+   *     instead of failing the whole check.
+   *
+   * `funding_source` is requested only to learn whether one exists; its ID is
+   * reduced to a boolean here and is never returned, stored or logged.
+   * `funding_source_details` is deliberately NOT requested (it needs the
+   * MANAGE task on the ad account and carries payment-method details).
+   *
+   * Errors propagate as `ConnectorApiError` (structured fields only matter:
+   * see `classifyGraphFailure`).
+   */
+  async getAccountReadinessSnapshot(accessToken: string, expectedAdAccountId: string): Promise<MetaReadinessLookup> {
+    this.requireConfig();
+
+    const list = await graphFetch<{ data?: RawReadinessAdAccount[]; paging?: { next?: unknown } }>(
+      `/me/adaccounts?${new URLSearchParams({
+        fields: "id,account_status,currency,is_prepay_account,funding_source",
+        limit: "2",
+        access_token: accessToken,
+      })}`,
+      undefined,
+      { timeoutMs: READINESS_TIMEOUT_MS },
+    );
+
+    const rows = Array.isArray(list.data) ? list.data : [];
+    if (rows.length === 0) return { kind: "NONE" };
+    if (rows.length > 1 || list.paging?.next) return { kind: "MULTIPLE" };
+
+    const row = rows[0];
+    const id = typeof row.id === "string" ? row.id : "";
+    if (
+      !AD_ACCOUNT_ID_PATTERN.test(id) ||
+      typeof expectedAdAccountId !== "string" ||
+      stripActPrefix(id) !== stripActPrefix(expectedAdAccountId)
+    ) {
+      return { kind: "MISMATCH" };
+    }
+
+    let minDailyBudgetRaw: number | null = null;
+    try {
+      const extra = await graphFetch<{ min_daily_budget?: unknown }>(
+        `/${id}?${new URLSearchParams({ fields: "min_daily_budget", access_token: accessToken })}`,
+        undefined,
+        { timeoutMs: READINESS_TIMEOUT_MS },
+      );
+      const raw = extra.min_daily_budget;
+      if (typeof raw === "number" && Number.isSafeInteger(raw) && raw >= 0) minDailyBudgetRaw = raw;
+      else if (typeof raw === "string" && /^\d{1,15}$/.test(raw)) minDailyBudgetRaw = Number(raw);
+    } catch {
+      // Optional and informational only: never affects the readiness state.
+      minDailyBudgetRaw = null;
+    }
+
+    return {
+      kind: "OK",
+      snapshot: {
+        accountStatus: typeof row.account_status === "number" ? row.account_status : null,
+        currency: typeof row.currency === "string" && /^[A-Z]{3}$/.test(row.currency) ? row.currency : null,
+        isPrepayAccount: typeof row.is_prepay_account === "boolean" ? row.is_prepay_account : null,
+        hasFundingSource: typeof row.funding_source === "string" && row.funding_source.length > 0 ? true : null,
+        minDailyBudgetRaw,
+      },
+    };
   }
 
   async createCampaign(
