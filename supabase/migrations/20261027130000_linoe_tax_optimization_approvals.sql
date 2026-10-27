@@ -102,7 +102,10 @@ begin
   new.decided_at := clock_timestamp();
   canon := concat_ws('|', new.id::text, new.subject_key, new.seq::text, coalesce(new.prev_hash, ''), new.decision,
     new.decision_by::text, to_char(new.decided_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
-    new.rules_version, new.calc_hash, new.reason);
+    new.rules_version, new.calc_hash, new.reason,
+    -- Everything a reviewer relies on is in the hash, so evidence or states cannot be swapped without detection.
+    new.recommendation_type, new.tax_year, array_to_string(new.evidence_refs, ','), coalesce(new.accountant_verification_ref, ''),
+    array_to_string(new.figure_states, ','), new.open_items::text, new.scope);
   new.event_hash := encode(sha256(convert_to(canon, 'UTF8')), 'hex');
   return new;
 end;
@@ -244,7 +247,9 @@ begin
   for r in select * from public.tax_opt_decisions where subject_key = p_subject_key order by seq loop
     if r.seq <> expected_seq or r.prev_hash is distinct from expected_prev then return false; end if;
     canon := concat_ws('|', r.id::text, r.subject_key, r.seq::text, coalesce(r.prev_hash, ''), r.decision, r.decision_by::text,
-      to_char(r.decided_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'), r.rules_version, r.calc_hash, r.reason);
+      to_char(r.decided_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'), r.rules_version, r.calc_hash, r.reason,
+      r.recommendation_type, r.tax_year, array_to_string(r.evidence_refs, ','), coalesce(r.accountant_verification_ref, ''),
+      array_to_string(r.figure_states, ','), r.open_items::text, r.scope);
     if r.event_hash <> encode(sha256(convert_to(canon, 'UTF8')), 'hex') then return false; end if;
     expected_prev := r.event_hash;
     expected_seq := expected_seq + 1;

@@ -140,6 +140,14 @@ select tt.ok((select count(*) from public.finance_audit_logs where entity_type =
 
 -- tamper evidence (needs a superuser to switch the guard off, to prove detection)
 alter table public.tax_opt_decisions disable trigger trg_tax_opt_decisions_immutable;
+create temp table tt_orig as select evidence_refs, accountant_verification_ref, figure_states, open_items from public.tax_opt_decisions where seq = 1 and subject_key = 'SCHEME_SELECTION:2026:PASAL_31E';
+update public.tax_opt_decisions set evidence_refs = array['PALSU-999'] where seq = 1 and subject_key = 'SCHEME_SELECTION:2026:PASAL_31E';
+select tt.ok(not public.tax_opt_verify_chain('SCHEME_SELECTION:2026:PASAL_31E'), 'silently replacing evidence references is detected');
+update public.tax_opt_decisions d set evidence_refs = o.evidence_refs from tt_orig o where d.seq = 1 and d.subject_key = 'SCHEME_SELECTION:2026:PASAL_31E';
+update public.tax_opt_decisions set accountant_verification_ref = 'AKT-PALSU' where seq = 1 and subject_key = 'SCHEME_SELECTION:2026:PASAL_31E';
+select tt.ok(not public.tax_opt_verify_chain('SCHEME_SELECTION:2026:PASAL_31E'), 'replacing the accountant verification reference is detected');
+update public.tax_opt_decisions d set accountant_verification_ref = o.accountant_verification_ref from tt_orig o where d.seq = 1 and d.subject_key = 'SCHEME_SELECTION:2026:PASAL_31E';
+select tt.ok(public.tax_opt_verify_chain('SCHEME_SELECTION:2026:PASAL_31E'), 'chain verifies again after restoring the original values');
 update public.tax_opt_decisions set reason = 'Dimanipulasi oleh superuser' where seq = 1 and subject_key = 'SCHEME_SELECTION:2026:PASAL_31E';
 alter table public.tax_opt_decisions enable trigger trg_tax_opt_decisions_immutable;
 select tt.ok(not public.tax_opt_verify_chain('SCHEME_SELECTION:2026:PASAL_31E'), 'tampering is detected by the hash chain');

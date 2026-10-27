@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { money, toDecimalString, zero } from "@/lib/finance/money";
 import {
-  claimCredits, evaluateSchemes, legalParametersFor, reviewCredits, reviewPpn, checkNotice,
+  finalWindow,   claimCredits, evaluateSchemes, legalParametersFor, reviewCredits, reviewPpn, checkNotice,
   simulate, tax31E, taxFinalUmkm, taxGeneral, validateSchemeSelection, reviewExpenses, expenseAdjustments, blocked, computed,
   type EntityProfile, type SchemeInput, type TaxCreditRecord,
 } from "@/lib/tax-opt";
@@ -35,12 +35,17 @@ describe("tax math", () => {
   it("PT biasa vs PT perorangan under PP 20/2026", () => {
     const fin = (o: Partial<EntityProfile>, year: string) =>
       get(evaluateSchemes(input({ taxYear: year, profile: profile(o), legal: legalParametersFor(year, V)! })), "PPH_FINAL_UMKM").eligibility;
-    // PT biasa registered 2022: PP 23/2018 Pasal 5 counts from the registration year -> 2022, 2023, 2024.
-    expect(fin({ registeredOn: "2022-03-01" }, "2024")).toBe("MEMENUHI_SYARAT");
-    expect(fin({ registeredOn: "2022-03-01" }, "2025")).toBe("PERLU_VERIFIKASI_AKUNTAN"); // PP 55/2022 Pasal 59 BLOCKED
-    expect(fin({ registeredOn: "2022-03-01" }, "2026")).toBe("TIDAK_MEMENUHI");
+    // PT biasa: the period came from the deleted Pasal 59 PP 55/2022 and no official example exists -> never automatic, any year.
+    for (const y of ["2024", "2025", "2026"]) expect(fin({ registeredOn: "2022-03-01" }, y)).toBe("PERLU_VERIFIKASI_AKUNTAN");
+    expect(get(evaluateSchemes(input({ profile: profile({ registeredOn: "2022-03-01" }) })), "PPH_FINAL_UMKM").tax.amount).toBeNull();
+    // CV: official example (Penjelasan Pasal II huruf e): registered 20 June 2023 -> final through Tahun Pajak 2026.
+    expect(fin({ legalForm: "CV", registeredOn: "2023-06-20" }, "2026")).toBe("MEMENUHI_SYARAT");
+    expect(fin({ legalForm: "CV", registeredOn: "2022-06-20" }, "2026")).toBe("TIDAK_MEMENUHI");
+    // Registered on/after 22 April 2026: no longer a subject.
+    expect(fin({ legalForm: "CV", registeredOn: "2026-05-01" }, "2026")).toBe("TIDAK_MEMENUHI");
     // A year without verified rules is never computed.
     expect(fin({ registeredOn: "2022-03-01" }, "2027")).toBe("BELUM_DAPAT_DIHITUNG");
+    expect(finalWindow("CV", "2023-06-20")).toEqual({ certainThrough: 2026, possiblyThrough: 2026 });
     // Perseroan perorangan (1 owner): no time window.
     expect(fin({ legalForm: "PT_PERORANGAN", registeredOn: "2020-01-01" }, "2026")).toBe("MEMENUHI_SYARAT");
     expect(fin({ legalForm: "PT_PERORANGAN", registeredOn: "2026-06-01", providesFreeProfessionServices: true }, "2026")).toBe("TIDAK_MEMENUHI");

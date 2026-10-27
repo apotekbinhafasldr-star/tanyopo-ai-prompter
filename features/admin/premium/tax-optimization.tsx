@@ -182,11 +182,12 @@ export function TaxOptimization({ result, paidTotalText, scenario, canApprove, d
       </Card>
 
       <Card title="Status verifikasi dasar hukum" sub={`Diperiksa ${LAW_VERIFIED_ON}. Pasal tanpa naskah primer tidak dianggap terverifikasi.`}>
-        <p className="fin-note" data-testid="provision-summary">{(() => { const v = verificationSummary(); return `Primer ${v.primary} · Sebagian ${v.partial} · Hanya DJP ${v.secondary} · BLOCKED ${v.blocked}`; })()}</p>
+        <p className="fin-note" data-testid="provision-summary">{(() => { const v = verificationSummary(); return `Primer ${v.primary} · Sebagian ${v.partial} · Hanya DJP ${v.secondary} · Historis/dihapus ${v.historical} · BLOCKED ${v.blocked}`; })()}</p>
         {PROVISION_CHECKS.map((p) => (
           <div key={p.id} data-testid={`provision-${p.id}`}>
             <div className="fin-row"><span>{p.provision}</span><Badge tone={p.status === "TERVERIFIKASI_PRIMER" ? "good" : p.status === "BLOCKED" ? "bad" : "warn"}>{p.status.replaceAll("_", " ")}</Badge></div>
             <p className="fin-note">{p.note}</p>
+            {p.needed ? <p className="fin-note warn">Dokumen yang dibutuhkan: {p.needed}</p> : null}
           </div>
         ))}
       </Card>

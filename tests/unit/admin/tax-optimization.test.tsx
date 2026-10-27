@@ -34,8 +34,10 @@ describe("Persetujuan Founder dan status verifikasi hukum", () => {
   it("blocked and DJP-only provisions are shown as such, never as verified", async () => {
     as("SUPER_ADMIN");
     render(await Page(SP()));
-    expect(screen.getByTestId("provision-P5")).toHaveTextContent("BLOCKED");
-    expect(screen.getByTestId("provision-P10")).toHaveTextContent("BLOCKED");
+    expect(screen.getByTestId("provision-P5")).toHaveTextContent("HISTORIS DIHAPUS");
+    expect(screen.getByTestId("provision-P5")).toHaveTextContent(/Dokumen yang dibutuhkan/);
+    expect(screen.getByTestId("provision-P9")).toHaveTextContent("BLOCKED");
+    expect(screen.getByTestId("provision-P10")).toHaveTextContent("TERVERIFIKASI SEBAGIAN");
     expect(screen.getByTestId("provision-P8")).toHaveTextContent("SEKUNDER DJP");
     expect(screen.getByTestId("provision-P1")).toHaveTextContent("TERVERIFIKASI PRIMER");
     expect(screen.getByTestId("provision-summary")).toHaveTextContent(/BLOCKED \d+/);

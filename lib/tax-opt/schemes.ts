@@ -89,8 +89,8 @@ export function taxFinalUmkm(turnover: Money, p: LegalParameters): Money {
 
 /**
  * Tax years the 0.5% final regime can still cover for an entity that was registered in
- * `registeredOn` (PP 55/2022 Pasal 59, kept as a transition by PP 20/2026). The counting rule is not
- * spelled out on the pages read, so the last year is given as a range: [inclusive, exclusive].
+ * `registeredOn`. Pasal 59 PP 55/2022 was deleted by PP 20/2026; only CV/firma (official example, PP 20/2026
+ * Penjelasan Pasal II huruf e) and koperasi (Pasal 57(2)f) are computed from it. PT biasa is never auto-computed.
  */
 export function finalWindow(form: LegalForm, registeredOn: string): { certainThrough: number; possiblyThrough: number } | null {
   const years = form === "PT" ? 3 : form === "CV" || form === "FIRMA" || form === "KOPERASI" ? 4 : null;
@@ -98,7 +98,8 @@ export function finalWindow(form: LegalForm, registeredOn: string): { certainThr
   let reg = Number(registeredOn.slice(0, 4));
   // Entities registered before PP 23/2018 are counted from 2018 (DJP page, 3 Jan 2024).
   if (reg < 2018) reg = 2018;
-  return { certainThrough: reg + years - 1, possiblyThrough: reg + years };
+  // Counting verified for CV by the official example (registered 20 June 2023 -> last year 2026).
+  return { certainThrough: reg + years - 1, possiblyThrough: reg + years - 1 };
 }
 
 const LABEL: Record<SchemeId, string> = {
@@ -242,23 +243,31 @@ function evalFinal(input: SchemeInput): SchemeResult {
   if (form !== "KOPERASI" && (p.registeredOn as string) >= "2026-04-22") {
     return no("PT/CV/firma yang terdaftar sejak 22 April 2026 bukan lagi subjek PPh final UMKM (PP 20/2026): hanya peralihan bagi yang sudah berjalan.");
   }
+  // PT biasa: the length of the transition period came from PP 55/2022 Pasal 59, which PP 20/2026 deleted.
+  // The remaining primary text (Pasal II ayat (1) huruf e) points to that period without stating it and has no
+  // example for a PT, so nothing is computed automatically from the historical rule.
+  if (form === "PT") {
+    const r = ["PT biasa hanya memiliki peralihan menurut PP 20/2026 Pasal II ayat (1) huruf e. Lama jangka waktunya berasal dari Pasal 59 PP 55/2022 yang telah dihapus dan tidak ada contoh resmi untuk PT: tidak dihitung otomatis. Perlu konfirmasi akuntan atau konsultan pajak."];
+    return { id: "PPH_FINAL_UMKM", name: LABEL.PPH_FINAL_UMKM, eligibility: "PERLU_VERIFIKASI_AKUNTAN", reasons: r, tax: uncertain(r, ["L3", "L4"]), sourceIds: ["L3", "L4"] };
+  }
   const w = finalWindow(form, p.registeredOn as string);
   if (!w) return unknownResult("PPH_FINAL_UMKM", ["Jangka waktu PPh final tidak dapat ditentukan dari data yang ada."], sources);
   const year = Number(input.taxYear);
-  const base = form === "KOPERASI" ? "Pasal 57 ayat (2) huruf f PP 20/2026" : "peralihan Pasal II angka 1 huruf e PP 20/2026";
+  const base = form === "KOPERASI" ? "Pasal 57 ayat (2) huruf f PP 20/2026" : "peralihan Pasal II angka 1 huruf e PP 20/2026 dan contoh Penjelasannya (CV AB)";
+  if (form === "KOPERASI" && year > w.certainThrough) {
+    // Koperasi may continue under conditions after the fourth year (Penjelasan Pasal II huruf b: extension 2027-2029). Conditions not modelled.
+    const r = [`Koperasi: tahun ${input.taxYear} melewati tahun pajak ke-4 (${w.certainThrough}). PP 20/2026 memberi kelanjutan bersyarat; syaratnya belum dimodelkan sehingga tidak dihitung otomatis.`];
+    return { id: "PPH_FINAL_UMKM", name: LABEL.PPH_FINAL_UMKM, eligibility: "PERLU_VERIFIKASI_AKUNTAN", reasons: r, tax: uncertain(r, sources), sourceIds: sources };
+  }
   if (year <= w.certainThrough) {
     return {
       id: "PPH_FINAL_UMKM",
       name: LABEL.PPH_FINAL_UMKM,
       eligibility: "MEMENUHI_SYARAT",
       reasons: [`Masih dalam jangka waktu final (${base}); tahun ${input.taxYear} <= ${w.certainThrough}.`],
-      tax: computed(amount, { ...c, sourceIds: sources, assumptions: [...assumptions, `Jangka waktu dihitung sejak terdaftar (${p.registeredOn}); PT/CV/firma bukan lagi subjek baru sejak 22 April 2026.`] }),
+      tax: computed(amount, { ...c, sourceIds: sources, assumptions: [...assumptions, `Jangka waktu dihitung sejak tahun terdaftar (${p.registeredOn}), tahun terdaftar dihitung sebagai tahun pertama; badan selain perseroan perorangan bukan lagi subjek baru sejak 22 April 2026.`] }),
       sourceIds: sources,
     };
-  }
-  if (year <= w.possiblyThrough) {
-    const r = [`Tahun ${input.taxYear} berada di tahun batas (${w.certainThrough} atau ${w.possiblyThrough}, tergantung cara menghitung tahun pertama). Tidak dihitung otomatis.`];
-    return { id: "PPH_FINAL_UMKM", name: LABEL.PPH_FINAL_UMKM, eligibility: "PERLU_VERIFIKASI_AKUNTAN", reasons: r, tax: uncertain(r, sources), sourceIds: sources };
   }
   return no(`Jangka waktu PPh final sejak terdaftar (${p.registeredOn}) sudah berakhir.`);
 }

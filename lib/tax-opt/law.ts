@@ -59,7 +59,7 @@ export const LEGAL_SOURCES: readonly LegalSource[] = [
     pageDate: "27 Oktober 2021",
     verifiedOn: V,
     caveat:
-      "Rumus porsi dan contoh angka diverifikasi dari materi tutorial resmi DJP (lihat L10), bukan dari teks pasal atau penjelasan UU yang tidak terbaca (PDF UU terpotong): BLOCKED untuk teks primer.",
+      "Teks Pasal 31E ayat (1) dan (2) (versi UU 36/2008) kini terbaca dari naskah resmi JDIH (lihat L11). Yang belum terbaca: Penjelasan Pasal 31E dan konfirmasi bahwa UU 11/2020 atau UU 7/2021 tidak mengubah pasal ini (ruang lingkup hanya dari artikel DJP). Rumus porsi dan contoh angka dari tutorial DJP (L10).",
   },
   {
     id: "L3",
@@ -92,20 +92,21 @@ export const LEGAL_SOURCES: readonly LegalSource[] = [
   {
     id: "L4",
     regulation: "PP Nomor 23 Tahun 2018 (salinan resmi di pajak.go.id) dan PP Nomor 55 Tahun 2022",
-    articles: ["Pasal 5 PP 23/2018 (jangka waktu)", "Pasal 59 PP 55/2022 (naskah tidak terbaca: BLOCKED)"],
+    articles: ["Pasal 5 PP 23/2018 (jangka waktu)", "Pasal 59 PP 55/2022 (ketentuan historis: DIHAPUS oleh PP 20/2026 Pasal I angka 6; naskah asli tidak terbaca)"],
     subject: "Jangka waktu PPh final 0,5% badan: PT 3 tahun pajak, CV/firma/koperasi 4 tahun pajak",
     effective: "PP 23/2018 sejak 2018; relevan sebagai ukuran peralihan menurut PP 20/2026 Pasal II(1)e",
     requirements: [
       "Dihitung mulai tahun pajak Wajib Pajak terdaftar (terdaftar setelah PP berlaku)",
       "Terdaftar sebelum PP berlaku: dihitung mulai tahun pajak 2018",
-      "Pasal 59 PP 55/2022 (aturan jangka waktu yang berlaku sejak 2022) belum terbaca: kesamaan dengan PP 23/2018 tidak dipastikan",
+      "Pasal 59 PP 55/2022 adalah ketentuan historis yang telah dihapus (PP 20/2026 Pasal I angka 6); naskah asli berkas biner tidak terbaca. Jangka waktu PT biasa tidak dihitung otomatis dari aturan historis",
+      "Satu-satunya contoh resmi peralihan (Penjelasan Pasal II ayat (1) huruf e): CV AB terdaftar 20 Juni 2023, final sampai Tahun Pajak 2026 (4 tahun pajak, tahun terdaftar dihitung). Tidak ada contoh untuk PT biasa",
     ],
     url: "https://www.pajak.go.id/sites/default/files/2019-05/PP%20Nomor%2023%20Tahun%202018.pdf",
     kind: "PERATURAN_RESMI_SALINAN",
     pageDate: null,
     verifiedOn: V,
     caveat:
-      "Pasal 59 PP 55/2022 berupa berkas biner yang tidak terbaca. Tahun pertama dihitung sejak tahun terdaftar menurut PP 23/2018; tahun batas tetap ditandai PERLU VERIFIKASI karena PP 55/2022 belum terbaca.",
+      "Pasal 59 PP 55/2022 historis (dihapus). Hanya CV/firma dihitung otomatis, berdasarkan contoh resmi Penjelasan Pasal II. PT biasa selalu PERLU VERIFIKASI AKUNTAN: lama jangka waktunya tidak terbaca dari naskah primer yang masih berlaku.",
   },
   {
     id: "L5",
@@ -193,6 +194,23 @@ export const LEGAL_SOURCES: readonly LegalSource[] = [
     pageDate: "Maret 2024 (menurut jalur berkas)",
     verifiedOn: V,
     caveat: "Materi tutorial, bukan peraturan. Cocok dengan rumus mesin dan dipakai sebagai tes.",
+  },
+  {
+    id: "L11",
+    regulation: "UU Nomor 36 Tahun 2008 (Perubahan Keempat UU PPh), naskah JDIH Kemenkeu",
+    articles: ["Pasal 31E ayat (1) dan (2)", "Pasal 17 ayat (1) huruf b dan ayat (2a) (versi 2008: 28% dan 25%, sudah tidak berlaku)"],
+    subject: "Teks Pasal 31E: pengurangan tarif 50% untuk peredaran bruto sampai Rp50 miliar atas bagian peredaran bruto sampai Rp4,8 miliar",
+    effective: "Naskah 2008; JDIH mencatat diubah UU 11/2020 dan UU 7/2021 (pasal yang berubah tidak dirinci di halaman)",
+    requirements: [
+      "Ayat (1): WP badan dalam negeri, peredaran bruto sampai Rp50.000.000.000, pengurangan tarif 50% dari tarif Pasal 17 ayat (1) huruf b dan ayat (2a) atas PKP dari bagian peredaran bruto sampai Rp4.800.000.000",
+      "Ayat (2): bagian peredaran bruto dapat dinaikkan dengan Peraturan Menteri Keuangan",
+    ],
+    url: "https://jdih.kemenkeu.go.id/api/download/fulltext/2008/36TAHUN2008UU.htm",
+    kind: "PERATURAN_RESMI_SALINAN",
+    pageDate: null,
+    verifiedOn: V,
+    caveat:
+      "Dibaca lewat alat yang meringkas halaman (kutipan terbatas). Ini teks asli 2008: tarif Pasal 17 di dalamnya (28%/25%) sudah diganti dan JANGAN dipakai. Tarif 22% perlu teks UU 7/2021 (naskah JDIH terpotong sebelum Pasal 17). Pasal 28 tidak ada di naskah ini.",
   },
 ];
 

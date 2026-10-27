@@ -58,7 +58,7 @@ Tahun pajak di luar 2022-2026: tidak dihitung. Parameter hukum selalu tanpa pemv
 ## Phase E.1: verifikasi hukum dan persetujuan Founder permanen
 
 ### Status verifikasi pasal
-Daftar P1-P12 ada di `lib/tax-opt/verification.ts` dan tampil di halaman Optimasi. Status: TERVERIFIKASI_PRIMER, TERVERIFIKASI_SEBAGIAN, SEKUNDER_DJP (hanya panduan DJP), BLOCKED (naskah tidak terbaca). Yang BLOCKED atau sekunder tidak pernah dianggap terverifikasi; angka yang bergantung padanya tetap SIMULASI atau PERLU VERIFIKASI AKUNTAN. Kelayakan PT Tanyopo tidak ditetapkan: data perusahaan belum terverifikasi.
+Daftar P1-P13 ada di `lib/tax-opt/verification.ts` dan tampil di halaman Optimasi. Status: TERVERIFIKASI_PRIMER, TERVERIFIKASI_SEBAGIAN, SEKUNDER_DJP (hanya panduan DJP), HISTORIS_DIHAPUS (ketentuan lama yang sudah dihapus; tidak pernah dipakai menghitung), BLOCKED (naskah tidak terbaca). Yang BLOCKED atau sekunder tidak pernah dianggap terverifikasi; angka yang bergantung padanya tetap SIMULASI atau PERLU VERIFIKASI AKUNTAN. Kelayakan PT Tanyopo tidak ditetapkan: data perusahaan belum terverifikasi.
 
 ### Penyimpanan persetujuan (migrasi 20261027130000, belum diterapkan)
 - Tabel `tax_opt_decisions`: append-only, berantai hash per subjek. Tidak ada grant INSERT/UPDATE/DELETE; UPDATE, DELETE, TRUNCATE ditolak trigger.
@@ -74,3 +74,11 @@ Daftar P1-P12 ada di `lib/tax-opt/verification.ts` dan tampil di halaman Optimas
 
 ### Pengujian
 `supabase/tests/tax-approvals/` (SQL, konkurensi, rollback, kontrol negatif) dijalankan di PostgreSQL 16 lokal dan di CI job `tax-approvals-pg17` (PostgreSQL 17). Tes TS: `tests/unit/tax-opt/approval.test.ts`, `tests/unit/migrations/tax-approvals.test.ts`, `tests/unit/admin/tax-decision-route.test.ts`.
+
+
+### E.1 remediasi akhir (27 Okt 2026)
+- **Pasal 59 PP 55/2022 historis**: PP 20/2026 Pasal I angka 6 berbunyi "Pasal 59 dihapus." (tanpa pengganti). Status P5 = HISTORIS_DIHAPUS. Peralihan hanya lewat Pasal II ayat (1) huruf e dan contoh Penjelasannya (CV AB terdaftar 20 Juni 2023, final sampai TP 2026; tahun terdaftar dihitung).
+- **Perubahan mesin**: PT biasa tidak lagi dihitung otomatis pada tahun mana pun (selalu PERLU VERIFIKASI AKUNTAN, tanpa angka), karena lama jangka waktunya berasal dari pasal yang dihapus dan tidak ada contoh resmi untuk PT. CV/firma dihitung otomatis berdasarkan contoh resmi itu (4 tahun pajak, tahun terdaftar dihitung). Koperasi melewati tahun ke-4 ditandai PERLU VERIFIKASI (kelanjutan bersyarat belum dimodelkan).
+- **Pasal 31E ayat (1) dan (2)** kini terbaca dari naskah resmi JDIH UU 36/2008 (L11). Belum: Penjelasan 31E dan konfirmasi tidak diubah UU 11/2020 atau UU 7/2021.
+- **Tetap BLOCKED/DJP-saja**: Pasal 28 (BLOCKED), tarif 22% Pasal 17 (naskah UU 7/2021 JDIH terpotong sebelum Pasal 17), PPN dan PMK 81/2024. Setiap butir menampilkan "Dokumen yang dibutuhkan".
+- **Keamanan**: hash peristiwa kini mencakup jenis rekomendasi, tahun, rujukan bukti, rujukan akuntan, status angka, butir terbuka, dan cakupan; mengganti bukti secara diam-diam terdeteksi `tax_opt_verify_chain`. Tes SQL 64 pemeriksaan.
