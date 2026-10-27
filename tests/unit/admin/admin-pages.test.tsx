@@ -31,6 +31,15 @@ import AdminOverviewPage from "@/app/admin/page";
 import AdminFinancePage from "@/app/admin/finance/page";
 import AdminTaxPage from "@/app/admin/finance/tax/page";
 import AdminStaffPage from "@/app/admin/staff/page";
+import AdminReportsPage from "@/app/admin/finance/reports/page";
+
+/** Text a reader sees: the scoped <style> block is not content. */
+const visibleText = (el: HTMLElement): string => {
+  const clone = el.cloneNode(true) as HTMLElement;
+  clone.querySelectorAll("style").forEach((n) => n.remove());
+  return clone.textContent ?? "";
+};
+const SP = (q: Record<string, string> = {}) => ({ searchParams: Promise.resolve(q) });
 
 function as(role: PlatformRole, permissions: string[] = []) {
   hoisted.principal = { userId: "actor", role, permissions: permissionsOf({ role, permissions }) };
@@ -38,7 +47,8 @@ function as(role: PlatformRole, permissions: string[] = []) {
 
 const PAGES: Array<[string, () => Promise<React.ReactElement>, Permission]> = [
   ["overview", () => AdminOverviewPage(), "admin.overview"],
-  ["finance", () => AdminFinancePage(), "finance.view"],
+  ["finance", () => AdminFinancePage(SP()), "finance.view"],
+  ["reports", () => AdminReportsPage(SP()), "accounting.view"],
   ["tax", () => AdminTaxPage(), "tax.view"],
   ["staff", () => AdminStaffPage(), "staff.view"],
 ];
@@ -71,7 +81,8 @@ describe("server rejects non-admins on every page (and on the layout)", () => {
 
   it("an employee without the permission is rejected by that page only", async () => {
     as("STAFF", ["finance.view"]);
-    await expect(AdminFinancePage()).resolves.toBeTruthy();
+    await expect(AdminFinancePage(SP())).resolves.toBeTruthy();
+    await expect(AdminReportsPage(SP())).rejects.toThrow("NEXT_NOT_FOUND");
     await expect(AdminTaxPage()).rejects.toThrow("NEXT_NOT_FOUND");
     await expect(AdminStaffPage()).rejects.toThrow("NEXT_NOT_FOUND");
   });
@@ -84,35 +95,68 @@ describe("demo data is labelled and nothing financial can be done", () => {
     expect(screen.getByTestId("demo-banner")).toHaveTextContent("DATA DEMO");
   });
 
-  it.each(PAGES)("%s page has no forms and every button is disabled", async (_n, page) => {
+  it.each(PAGES.filter(([n]) => n !== "tax"))("%s page has no forms and no inputs; no action button is enabled", async (_n, page) => {
     as("SUPER_ADMIN");
     const { container } = render(await page());
     expect(container.querySelectorAll("form")).toHaveLength(0);
     expect(container.querySelectorAll("input, textarea, select")).toHaveLength(0);
-    for (const b of container.querySelectorAll("button")) expect(b).toBeDisabled();
+    // The only enabled buttons are chart controls (view-only toggles).
+    for (const b of container.querySelectorAll("button")) {
+      if (!b.closest(".fin-chart")) expect(b).toBeDisabled();
+    }
   });
 
-  it("finance page shows the four layers separately and the sample statuses", async () => {
+  it("finance page shows KPI cards with a trend, the filters and the automatic checks", async () => {
     as("SUPER_ADMIN");
-    render(await AdminFinancePage());
+    render(await AdminFinancePage(SP({ period: "2026-11" })));
+    expect(screen.getByText("Pendapatan diakui")).toBeInTheDocument();
     expect(screen.getByText("Pembayaran terverifikasi")).toBeInTheDocument();
-    expect(screen.getAllByText("Pendapatan diakui").length).toBeGreaterThan(0);
-    expect(screen.getByText("Dana sudah settle")).toBeInTheDocument();
-    expect(screen.getByText("Belum settle")).toBeInTheDocument();
-    expect(screen.getAllByText("Settle terlambat").length).toBeGreaterThan(0);
-    expect(screen.getByText("Selisih jumlah")).toBeInTheDocument();
-    expect(screen.getByText("Invoice dibayar lebih dari sekali")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Setujui refund" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Ekspor CSV" })).toBeDisabled();
+    expect(screen.getByTestId("kpi-revenue")).toHaveTextContent("vs bulan lalu");
+    expect(screen.getByRole("navigation", { name: "Periode" })).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "Status" })).toBeInTheDocument();
+    expect(screen.getByText("Neraca seimbang")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Setujui refund/ })).not.toBeInTheDocument();
+  });
+
+  it("finance page ignores an invalid period or status instead of trusting the query string", async () => {
+    as("SUPER_ADMIN");
+    const { container } = render(await AdminFinancePage(SP({ period: "<script>", status: "DROP TABLE" })));
+    expect(container.innerHTML).not.toContain("<script>");
+    expect(screen.getByText(/November 2026/)).toBeInTheDocument();
   });
 
   it("tax page never shows a tax rate or amount while the configuration is unverified", async () => {
     as("SUPER_ADMIN");
     const { container } = render(await AdminTaxPage());
-    expect(screen.getByText("Belum terverifikasi")).toBeInTheDocument();
     expect(screen.getAllByText(/Belum dikonfigurasi/).length).toBeGreaterThan(0);
-    expect(container.textContent).not.toMatch(/%/);
-    expect(container.textContent).not.toMatch(/PPN:\s*Rp/);
+    expect(visibleText(container)).not.toMatch(/\d\s?%/);
+    expect(visibleText(container)).toMatch(/Segmen LINOE|segmen LINOE/);
+    expect(visibleText(container)).toMatch(/bukan SPT/i);
+  });
+
+  it("tax page: the Coretax button is a POST form, enabled only with tax.export", async () => {
+    as("SUPER_ADMIN");
+    const first = render(await AdminTaxPage());
+    const form = first.container.querySelector("form");
+    expect(form).not.toBeNull();
+    expect(form?.getAttribute("method")?.toLowerCase()).toBe("post");
+    expect(form?.getAttribute("action")).toBe("/admin/finance/tax/coretax-package");
+    expect(screen.getByRole("button", { name: "SIAPKAN PAKET CORETAX" })).toBeEnabled();
+    expect(first.container.querySelectorAll("input:not([type=hidden])")).toHaveLength(0);
+    first.unmount();
+    as("STAFF", ["tax.view"]);
+    render(await AdminTaxPage());
+    expect(screen.getByRole("button", { name: "SIAPKAN PAKET CORETAX" })).toBeDisabled();
+    expect(screen.getByText(/belum memiliki izin/)).toBeInTheDocument();
+  });
+
+  it("tax page never claims auto-import and says what the package is not", async () => {
+    as("SUPER_ADMIN");
+    const { container } = render(await AdminTaxPage());
+    const t = visibleText(container);
+    expect(t).toMatch(/tidak otomatis dapat diimpor/);
+    expect(t).toMatch(/tidak login, tidak mengirim SPT, dan tidak membayar pajak/);
+    expect(t).not.toMatch(/impor otomatis ke Coretax|langsung ke Coretax/i);
   });
 
   it("staff page is read-only and states the no-self-promotion rules", async () => {
@@ -160,7 +204,7 @@ describe("mobile-first layout and navigation", () => {
     expect(nav.className).toContain("fixed");
     expect(nav.className).toContain("bottom-0");
     const links = within(nav).getAllByRole("link");
-    expect(links.map((l) => l.getAttribute("href"))).toEqual(["/admin", "/admin/finance", "/admin/finance/tax", "/admin/staff"]);
+    expect(links.map((l) => l.getAttribute("href"))).toEqual(["/admin", "/admin/finance", "/admin/finance/reports", "/admin/finance/tax", "/admin/staff"]);
     for (const l of links) expect(l.className).toContain("min-h-14");
   });
 

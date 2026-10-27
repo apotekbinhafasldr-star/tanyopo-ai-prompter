@@ -58,8 +58,28 @@ describe("admin center isolation", () => {
   });
 
   it("every page and the layout go through requireAdminPage", () => {
-    for (const f of files.filter((p) => p.startsWith("app/admin/"))) {
+    for (const f of files.filter((p) => /^app\/admin\/(?:.*\/)?(page|layout)\.tsx$/.test(p))) {
       expect(code(f), f).toMatch(/requireAdminPage\(/);
+    }
+  });
+
+  it("route handlers re-check the flag, the origin and a server-side permission (POST only)", () => {
+    const routes = files.filter((p) => p.endsWith("/route.ts"));
+    expect(routes.length).toBeGreaterThan(0);
+    for (const f of routes) {
+      const src = code(f);
+      expect(src, f).toMatch(/isAdminCenterEnabled\(/);
+      expect(src, f).toMatch(/requireAdminPermission\(/);
+      expect(src, f).toMatch(/origin/);
+      expect(src, f).toMatch(/export async function POST/);
+      expect(src, f).not.toMatch(/export async function (GET|PUT|PATCH|DELETE)/);
+    }
+  });
+
+  it("the Coretax package never logs in, files an SPT, pays tax or calls a DJP endpoint", () => {
+    for (const f of [...files, "lib/coretax/package.ts", "lib/accounting/fiscal.ts"]) {
+      const src = code(f);
+      expect(src, f).not.toMatch(/coretax\.pajak\.go\.id|djponline|ereg|e-?filing|ntpn\s*=|bayar-?pajak/i);
     }
   });
 

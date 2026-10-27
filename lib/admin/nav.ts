@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { Banknote, LayoutGrid, Receipt, Users } from "lucide-react";
+import { Banknote, BookOpen, LayoutGrid, Receipt, Users } from "lucide-react";
 import type { AdminPrincipal, Permission } from "@/lib/admin/permissions";
 import { can } from "@/lib/admin/permissions";
 
@@ -25,6 +25,13 @@ export const ADMIN_NAV_ITEMS: readonly AdminNavItem[] = [
     icon: Banknote,
     permission: "finance.view",
     description: "Pembayaran, pendapatan, settlement, laba-rugi",
+  },
+  {
+    label: "Laporan",
+    href: "/admin/finance/reports",
+    icon: BookOpen,
+    permission: "accounting.view",
+    description: "Jurnal, buku besar, neraca, laba rugi, arus kas, rekonsiliasi",
   },
   {
     label: "Pajak",

@@ -30,8 +30,8 @@ alter table public.finance_platform_admins
   check (
     permissions <@ array[
       'admin.overview', 'finance.view', 'finance.export', 'finance.expense.write',
-      'finance.settlement.import', 'tax.view', 'tax.manage', 'refund.approve',
-      'bank.manage', 'staff.view'
+      'finance.settlement.import', 'tax.view', 'tax.manage', 'tax.export',
+      'accounting.view', 'bank.manage', 'staff.view'
     ]::text[]
   );
 
