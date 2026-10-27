@@ -26,7 +26,7 @@ font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;c
 .fin-card .sub{font-size:12px;color:var(--mute)}
 .fin-kpi{gap:4px}
 .fin-kpi .k{font-size:12px;color:var(--mute);font-weight:600}
-.fin-kpi .v{font-size:19px;font-weight:800;letter-spacing:-.02em;overflow-wrap:anywhere}
+.fin-kpi .v{font-size:17px;font-weight:800;letter-spacing:-.02em;white-space:nowrap}
 .fin-kpi .v.neg{color:var(--bad)}
 .fin-kpi .h{font-size:11px;color:var(--mute)}
 .fin-trend{display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:700;border-radius:999px;padding:2px 8px;width:fit-content}
