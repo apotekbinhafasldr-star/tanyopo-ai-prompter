@@ -10,6 +10,8 @@ interface AppShellProps {
   businessName: string;
   userName: string;
   userRole: string;
+  /** Show the "Admin Perusahaan" entry. Decided on the server; defaults to hidden. */
+  showAdminLink?: boolean;
   children: ReactNode;
 }
 
@@ -21,7 +23,7 @@ interface AppShellProps {
  * on small screens, opened from a slim top bar, and leaves the `lg:` docked
  * layout exactly as it was.
  */
-export function AppShell({ businessName, userName, userRole, children }: AppShellProps) {
+export function AppShell({ businessName, userName, userRole, showAdminLink = false, children }: AppShellProps) {
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -68,6 +70,7 @@ export function AppShell({ businessName, userName, userRole, children }: AppShel
           businessName={businessName}
           userName={userName}
           userRole={userRole}
+          showAdminLink={showAdminLink}
           onNavigate={() => setOpen(false)}
         />
       </div>

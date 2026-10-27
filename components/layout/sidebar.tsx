@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { HelpCircle, LogOut, ChevronsUpDown } from "lucide-react";
+import { Building2, HelpCircle, LogOut, ChevronsUpDown } from "lucide-react";
 import { NAV_ITEMS } from "@/lib/constants/nav";
 import { Avatar } from "@/components/ui/avatar";
 import { LinoeLogo } from "@/components/brand/linoe-logo";
@@ -13,12 +13,14 @@ interface SidebarProps {
   businessName: string;
   userName: string;
   userRole: string;
+  /** Show the "Admin Perusahaan" entry (server-decided; hidden unless true). */
+  showAdminLink?: boolean;
   /** Called after a nav link is activated — used by AppShell to close the
    * off-canvas drawer on mobile/tablet. No-op on the desktop docked sidebar. */
   onNavigate?: () => void;
 }
 
-export function Sidebar({ businessName, userName, userRole, onNavigate }: SidebarProps) {
+export function Sidebar({ businessName, userName, userRole, showAdminLink = false, onNavigate }: SidebarProps) {
   const pathname = usePathname();
 
   return (
@@ -63,6 +65,17 @@ export function Sidebar({ businessName, userName, userRole, onNavigate }: Sideba
           <span className="truncate font-medium text-foreground">{businessName}</span>
           <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" aria-hidden />
         </button>
+
+        {showAdminLink ? (
+          <Link
+            href="/admin"
+            onClick={onNavigate}
+            className="flex min-h-11 items-center gap-2 rounded-[var(--radius-md)] bg-brand-muted px-3 py-2 text-sm font-medium text-brand hover:bg-brand-muted/70"
+          >
+            <Building2 className="size-4" aria-hidden />
+            Admin Perusahaan
+          </Link>
+        ) : null}
 
         <Link
           href="/settings"
