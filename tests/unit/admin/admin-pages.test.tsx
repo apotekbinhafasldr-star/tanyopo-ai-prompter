@@ -32,6 +32,7 @@ import AdminFinancePage from "@/app/admin/finance/page";
 import AdminTaxPage from "@/app/admin/finance/tax/page";
 import AdminStaffPage from "@/app/admin/staff/page";
 import AdminReportsPage from "@/app/admin/finance/reports/page";
+import AdminTaxGuidePage from "@/app/admin/finance/tax/guide/page";
 
 /** Text a reader sees: the scoped <style> block is not content. */
 const visibleText = (el: HTMLElement): string => {
@@ -50,6 +51,7 @@ const PAGES: Array<[string, () => Promise<React.ReactElement>, Permission]> = [
   ["finance", () => AdminFinancePage(SP()), "finance.view"],
   ["reports", () => AdminReportsPage(SP()), "accounting.view"],
   ["tax", () => AdminTaxPage(), "tax.view"],
+  ["tax guide", () => AdminTaxGuidePage(SP({ jenis: "pph-badan" })), "tax.view"],
   ["staff", () => AdminStaffPage(), "staff.view"],
 ];
 
@@ -84,6 +86,7 @@ describe("server rejects non-admins on every page (and on the layout)", () => {
     await expect(AdminFinancePage(SP())).resolves.toBeTruthy();
     await expect(AdminReportsPage(SP())).rejects.toThrow("NEXT_NOT_FOUND");
     await expect(AdminTaxPage()).rejects.toThrow("NEXT_NOT_FOUND");
+    await expect(AdminTaxGuidePage(SP())).rejects.toThrow("NEXT_NOT_FOUND");
     await expect(AdminStaffPage()).rejects.toThrow("NEXT_NOT_FOUND");
   });
 });
@@ -95,7 +98,7 @@ describe("demo data is labelled and nothing financial can be done", () => {
     expect(screen.getByTestId("demo-banner")).toHaveTextContent("DATA DEMO");
   });
 
-  it.each(PAGES.filter(([n]) => n !== "tax"))("%s page has no forms and no inputs; no action button is enabled", async (_n, page) => {
+  it.each(PAGES.filter(([n]) => n !== "tax" && n !== "tax guide"))("%s page has no forms and no inputs; no action button is enabled", async (_n, page) => {
     as("SUPER_ADMIN");
     const { container } = render(await page());
     expect(container.querySelectorAll("form")).toHaveLength(0);

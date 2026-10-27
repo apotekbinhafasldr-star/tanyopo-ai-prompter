@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { BankReconciliation, FiscalReconciliation, TaxPaymentRecord } from "@/lib/accounting";
 import { formatRupiah, monthLabel } from "@/lib/admin/format";
 import type { TurnoverRecap } from "@/lib/finance";
@@ -23,6 +24,12 @@ export function TaxCenter({ recap, fiscal, taxPayments, checks, bank, canExport,
     <Frame>
       {demo ? <DemoNotice /> : null}
       <Hero title="Pajak dan paket Coretax" subtitle={`Tahun ${recap.year} · Data pendukung untuk akuntan · Segmen LINOE`} />
+
+      <Card title="Panduan lapor pajak" sub="Langkah demi langkah ke Coretax resmi: SPT Tahunan PPh Badan dan SPT Masa PPN (jika PKP).">
+        <Link className="fin-btn" style={{ display: "flex", alignItems: "center", justifyContent: "center" }} href="/admin/finance/tax/guide" prefetch={false} data-testid="guide-link">
+          BUKA PANDUAN LAPOR PAJAK
+        </Link>
+      </Card>
 
       <Card title="Kesiapan paket" sub="Paket boleh disiapkan sebagai draf, tetapi baru layak dibawa ke akuntan jika semua lulus.">
         {checks.map((c) => <Check key={c.label} ok={c.ok} label={c.label} detail={c.detail} />)}
