@@ -72,7 +72,7 @@ export interface VerifiedObligation {
   readonly verifiedBy: string;
   readonly verifiedAt: string;
 }
-export function usableObligations(list: readonly (Partial<VerifiedObligation> & { name: string })[]): VerifiedObligation[] {
+export function usableObligations(list: readonly { name: string; verifiedBy?: string | null; verifiedAt?: string | null }[]): VerifiedObligation[] {
   return list.filter((o): o is VerifiedObligation => Boolean(o.verifiedBy?.trim() && o.verifiedAt?.trim()));
 }
 

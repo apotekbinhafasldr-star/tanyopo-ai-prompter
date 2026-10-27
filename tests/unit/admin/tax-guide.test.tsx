@@ -195,7 +195,7 @@ describe("guide wizard — PPN", () => {
 describe("guide — security and sources", () => {
   it("has no password/OTP/text input anywhere and never asks for a credential", async () => {
     as("SUPER_ADMIN");
-    for (const q of [{}, { jenis: "pph-badan" }, { jenis: "ppn" }]) {
+    for (const q of [{}, { jenis: "pph-badan" }, { jenis: "ppn" }] as Array<Record<string, string>>) {
       const { container, unmount } = render(await AdminTaxGuidePage(SP(q)));
       expect(container.querySelectorAll('input[type="password"], input[type="text"], input[type="email"], textarea, [autocomplete="one-time-code"]').length).toBe(0);
       expect(visibleText(container)).toContain("tidak meminta atau menyimpan kata sandi, OTP, atau kode otorisasi");
