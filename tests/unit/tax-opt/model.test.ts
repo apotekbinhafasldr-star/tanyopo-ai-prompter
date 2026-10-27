@@ -16,6 +16,11 @@ describe("optimization model", () => {
     expect(r.readyToUse).toBe(false);
     expect(r.openItems).toContain("Masih data DEMO.");
   });
+  it("DEMO never shows TERVERIFIKASI, even in the complete fictional scenario", () => {
+    const r = runOptimization(buildDemoOptimization("contoh"));
+    for (const l of r.simulation.lines) expect(l.figure.state).not.toBe("TERVERIFIKASI");
+    expect(r.simulation.savingsTotal.state).toBe("SIMULASI");
+  });
   it("demo expenses: missing receipt flagged, nondeductible becomes separate adjustment only", () => {
     const r = runOptimization(buildDemoOptimization("nyata"));
     expect(r.findings.some((f) => f.text.includes("Iklan"))).toBe(true);

@@ -61,7 +61,8 @@ export function buildDemoOptimization(scenario: DemoScenario): OptimizationInput
         turnover: { amount: idr("1000000000"), complete: true, ...v },
         taxableIncome: idr("200000000"),
         taxableIncomeVerified: true,
-        legal: legalParametersFor(DEMO_YEAR, v),
+        // Parameters stay unverified even here: nothing in DEMO may read as TERVERIFIKASI.
+        legal: legalParametersFor(DEMO_YEAR),
       },
       profitBeforeAdjustments: idr("200000000"),
       pkpVerified: false,

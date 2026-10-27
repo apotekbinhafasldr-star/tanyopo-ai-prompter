@@ -80,7 +80,7 @@ export function TaxOptimization({ result, paidTotalText, scenario, canApprove, d
         </Card>
       )}
 
-      <Card title="Ringkasan" sub="Tiga status angka: terverifikasi, simulasi, atau belum dapat dihitung. Satu angka hanya sekuat bahan terlemahnya.">
+      <Card title="Ringkasan" sub="Status angka: terverifikasi, simulasi, perlu verifikasi akuntan, atau belum dapat dihitung. Satu angka hanya sekuat bahan terlemahnya.">
         <FigureBlock label="Estimasi kewajiban pajak (kurang/lebih bayar)" fig={finalFig} />
         <div className="fin-row"><span>Pajak yang telah dibayar (bukti terverifikasi)<br /><Badge tone="info">DARI CATATAN BERBUKTI</Badge></span><span className="n">{paidTotalText}</span></div>
         <FigureBlock label="Kredit pajak terverifikasi" fig={credits} />
