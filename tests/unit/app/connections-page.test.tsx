@@ -69,7 +69,7 @@ vi.mock("@/features/connections/meta-page-picker", () => ({
 
 vi.mock("@/features/connections/meta-ad-account-section", () => ({
   MetaAdAccountSection: ({ currentAccountName }: { currentAccountName: string | null }) => (
-    <div data-testid="meta-ad-account-section">{currentAccountName ?? "belum ada"}</div>
+    <div data-testid="meta-ad-account-section" data-current-account-name={currentAccountName ?? ""} />
   ),
 }));
 
@@ -236,7 +236,9 @@ describe("ConnectionsPage — Meta readiness check (F-2a/F-2b)", () => {
 
     await renderPage();
 
-    expect(screen.getByTestId("meta-ad-account-section")).toBeInTheDocument();
+    const section = screen.getByTestId("meta-ad-account-section");
+    expect(section).toBeInTheDocument();
+    expect(section).toHaveAttribute("data-current-account-name", "Akun Iklan Toko");
   });
 
   it("still offers it when the Page-selection read fails (independent of Track B)", async () => {

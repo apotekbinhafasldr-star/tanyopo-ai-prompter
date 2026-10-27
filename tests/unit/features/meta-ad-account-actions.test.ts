@@ -16,9 +16,9 @@ const hoisted = vi.hoisted(() => {
     regularLog: [] as Array<{ table: string; ops: Array<[string, unknown[]]> }>,
     adminLog: [] as Array<{ table: string; ops: Array<[string, unknown[]]> }>,
     results: {} as Record<string, unknown>,
-    listAdAccounts: (async (_token: string) => ({ accounts: [], truncated: false })) as (token: string) => Promise<unknown>,
-    readiness: (async (_t: string, _i: string, _o: unknown) => ({ kind: "NONE" })) as (t: string, i: string, o: unknown) => Promise<unknown>,
-    revalidatePath: (..._a: unknown[]): void => {},
+    listAdAccounts: (async () => ({ accounts: [], truncated: false })) as (token: string) => Promise<unknown>,
+    readiness: (async () => ({ kind: "NONE" })) as (t: string, i: string, o: unknown) => Promise<unknown>,
+    revalidatePath: ((): void => {}) as (...a: unknown[]) => void,
     makeClient(log: Array<{ table: string; ops: Array<[string, unknown[]]> }>) {
       return {
         from(table: string) {
@@ -103,7 +103,7 @@ beforeEach(() => {
   hoisted.regularLog = [];
   hoisted.adminLog = [];
   hoisted.revalidatePath = vi.fn() as unknown as typeof hoisted.revalidatePath;
-  hoisted.listAdAccounts = vi.fn(async (_t: string) => ({
+  hoisted.listAdAccounts = vi.fn(async () => ({
     accounts: [
       { id: "act_111", name: "Akun Lama", snapshot: SNAP },
       { id: "act_222", name: "PT Tanyopo", snapshot: SNAP },
@@ -178,7 +178,7 @@ describe("selectMetaAdAccountAction wiring", () => {
       data: { ...CONNECTION, id: "conn-B", external_account_id: "act_777" },
       error: null,
     };
-    hoisted.listAdAccounts = vi.fn(async (_t: string) => ({ accounts: [{ id: "act_777", name: "Toko B", snapshot: SNAP }], truncated: false }));
+    hoisted.listAdAccounts = vi.fn(async () => ({ accounts: [{ id: "act_777", name: "Toko B", snapshot: SNAP }], truncated: false }));
     const r = await selectMetaAdAccountAction("act_222"); // tenant A's account
     expect(r.error).toMatch(/tidak ditemukan atau sudah tidak dapat diakses/);
     expect(allLogs().every((l) => tenantFiltered(l, "tenant-B"))).toBe(true); // reads only: nothing was inserted
