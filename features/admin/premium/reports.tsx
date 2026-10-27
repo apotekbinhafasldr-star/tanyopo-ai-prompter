@@ -53,7 +53,6 @@ export function ReportsView(props: {
 }
 
 function Body({ tab, ledger, range, account, bank, openItems }: Parameters<typeof ReportsView>[0]) {
-  const cur = ledger.currency;
   const fmt = formatRupiah;
   if (tab === "laba-rugi") {
     const is = incomeStatement(ledger, range);

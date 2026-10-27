@@ -19,7 +19,7 @@ export const xmlEscape = (s: string): string =>
   s.replace(INVALID_XML, "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 export function sheetName(raw: string, used: Set<string>): string {
-  let base = raw.replace(/[[\]:*?/\\]/g, " ").trim().slice(0, 31) || "Sheet";
+  const base = raw.replace(/[[\]:*?/\\]/g, " ").trim().slice(0, 31) || "Sheet";
   let name = base;
   let i = 2;
   while (used.has(name.toLowerCase())) {
