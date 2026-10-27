@@ -24,6 +24,8 @@ export const PERMISSIONS = [
   "tax.manage",
   "tax.export",
   "accounting.view",
+  "tax.optimization.view",
+  "tax.optimization.approve",
   "refund.approve",
   "bank.manage",
   "staff.view",
@@ -38,6 +40,8 @@ export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
   "bank.manage",
   "tax.manage",
   "tax.export",
+  "tax.optimization.view",
+  "tax.optimization.approve",
   "finance.settlement.import",
   "staff.manage",
 ];
@@ -46,7 +50,7 @@ export const SENSITIVE_PERMISSIONS: readonly Permission[] = [
  * Held by the Founder (SUPER_ADMIN) only, at this initial stage. They cannot be granted to STAFF
  * and are not part of any legacy role. Widening this is a separate, explicit Founder decision.
  */
-export const FOUNDER_ONLY_PERMISSIONS: readonly Permission[] = ["refund.approve", "staff.manage"];
+export const FOUNDER_ONLY_PERMISSIONS: readonly Permission[] = ["refund.approve", "staff.manage", "tax.optimization.approve"];
 
 /** Can be granted to STAFF. Founder-only permissions (refund approval, staff management) never can. */
 export const GRANTABLE_PERMISSIONS: readonly Permission[] = PERMISSIONS.filter(

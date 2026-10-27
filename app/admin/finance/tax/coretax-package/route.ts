@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { buildDemoAccounting, buildDemoFiscal, DEMO_TODAY, DEMO_YEAR } from "@/lib/admin/demo-accounting";
 import { isAdminCenterEnabled } from "@/lib/admin/flag";
 import { UNVERIFIED_TAX_CONFIG, turnoverRecap } from "@/lib/finance";
+import { buildDemoOptimization } from "@/lib/admin/demo-optimization";
+import { runOptimization } from "@/lib/tax-opt";
 import { buildCoretaxPackage } from "@/lib/coretax/package";
 import { recordAdminAudit } from "@/services/admin-audit";
 import { requireAdminPermission } from "@/services/platform-admin";
@@ -57,6 +59,7 @@ export async function POST(request: NextRequest) {
     generatedBy: principal.userId,
     demo,
     entityName: "PT Tanyopo Future Technology",
+    optimization: runOptimization(buildDemoOptimization("nyata")),
   });
 
   return new NextResponse(Buffer.from(result.zip), {

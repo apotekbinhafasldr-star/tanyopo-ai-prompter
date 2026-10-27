@@ -39,6 +39,9 @@ describe("admin center access migration — additive, scoped, no hard-coded iden
     expect(list?.[1]).toContain("'tax.export'");
     expect(list?.[1]).toContain("'accounting.view'");
     expect(list?.[1]).toContain("'bank.manage'");
+    // Optimasi Pajak Legal: viewing can be granted; final approval is Founder-only and not storable.
+    expect(list?.[1]).toContain("'tax.optimization.view'");
+    expect(list?.[1]).not.toContain("tax.optimization.approve");
   });
 
   it("protects the last active SUPER_ADMIN and grants nothing to anon/authenticated", () => {

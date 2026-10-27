@@ -85,6 +85,18 @@ describe("roles and permissions", () => {
   it("staff.manage can never be granted", () => {
     expect(GRANTABLE_PERMISSIONS).not.toContain("staff.manage");
   });
+
+  it("tax optimization: view is grantable, final approval is Founder-only, legacy finance roles get neither", () => {
+    expect(GRANTABLE_PERMISSIONS).toContain("tax.optimization.view");
+    expect(GRANTABLE_PERMISSIONS).not.toContain("tax.optimization.approve");
+    expect(permissionsOf({ role: "SUPER_ADMIN" }).has("tax.optimization.approve")).toBe(true);
+    for (const role of ["FINANCE_ADMIN", "FINANCE_VIEWER"] as const) {
+      expect(permissionsOf({ role }).has("tax.optimization.view")).toBe(false);
+      expect(permissionsOf({ role }).has("tax.optimization.approve")).toBe(false);
+    }
+    expect(permissionsOf({ role: "STAFF", permissions: ["tax.optimization.approve"] }).has("tax.optimization.approve")).toBe(false);
+    expect(permissionsOf({ role: "STAFF", permissions: ["tax.optimization.view"] }).has("tax.optimization.view")).toBe(true);
+  });
 });
 
 describe("authorizePermission — non-admin access is rejected", () => {

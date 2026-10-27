@@ -226,3 +226,12 @@ describe("inputs, deadlines and other obligations", () => {
     expect(usableObligations([{ name: "PPh 23", verifiedBy: "akuntan", verifiedAt: "2026-01-01T00:00:00Z" }]).map((o) => o.name)).toEqual(["PPh 23"]);
   });
 });
+
+describe("optimization readiness blocker", () => {
+  const base = { kind: "PPH_BADAN" as const, demo: false, checks: [], bankFinal: true, entityComplete: true, statementsApproved: true, taxRateVerified: true, pendingAdjustments: 0, pkpVerified: true, invoiceDataAvailable: true };
+  it("blocks while the optimization result has open items, not when it is undefined or zero", () => {
+    expect(assessReadiness({ ...base, optimizationOpenItems: 2 }).blockers.map((b) => b.code)).toEqual(["OPTIMIZATION_OPEN"]);
+    expect(assessReadiness({ ...base, optimizationOpenItems: 0 }).blockers).toHaveLength(0);
+    expect(assessReadiness(base).blockers).toHaveLength(0);
+  });
+});

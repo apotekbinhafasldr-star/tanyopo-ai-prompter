@@ -170,6 +170,8 @@ export const PERMISSION_LABELS: Record<Permission, { label: string; sensitive: b
   "tax.manage": { label: "Mengubah konfigurasi pajak", sensitive: true },
   "tax.export": { label: "Menyiapkan paket Coretax (ekspor)", sensitive: true },
   "accounting.view": { label: "Melihat laporan akuntansi", sensitive: false },
+  "tax.optimization.view": { label: "Melihat optimasi pajak legal", sensitive: true },
+  "tax.optimization.approve": { label: "Menyetujui rekomendasi pajak final (khusus Founder)", sensitive: true },
   "refund.approve": { label: "Menyetujui refund (khusus Founder)", sensitive: true },
   "bank.manage": { label: "Mengubah rekening perusahaan", sensitive: true },
   "staff.view": { label: "Melihat hak akses staf", sensitive: false },

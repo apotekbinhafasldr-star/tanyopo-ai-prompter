@@ -28,6 +28,7 @@ export default async function AdminTaxPage() {
       checks={model.checks}
       bank={reconcileBank(demo.ledger, demo.bankStatement, { windowDays: 3 })}
       canExport={can(principal, "tax.export")}
+      canOptimize={can(principal, "tax.optimization.view")}
       demo
     />
   );

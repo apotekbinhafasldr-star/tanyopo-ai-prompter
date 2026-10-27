@@ -20,6 +20,8 @@ export interface ReadinessInput {
   readonly pkpVerified: boolean;
   /** Faktur Pajak data is held by LINOE. It is not (yet). */
   readonly invoiceDataAvailable: boolean;
+  /** Open items of the Optimasi Pajak Legal result; undefined = not assessed. */
+  readonly optimizationOpenItems?: number;
 }
 
 export interface Blocker {
@@ -46,6 +48,9 @@ export function assessReadiness(i: ReadinessInput): Readiness {
   if (i.kind === "PPH_BADAN") {
     if (!i.statementsApproved) b.push({ code: "STATEMENTS_DRAFT", text: "Laba rugi dan neraca masih draf; belum disahkan pengurus atau akuntan.", stepIds: ["laporan"] });
     if (i.pendingAdjustments > 0) b.push({ code: "ADJ_PENDING", text: `${i.pendingAdjustments} koreksi fiskal belum diverifikasi akuntan.`, stepIds: ["fiskal"] });
+    if (i.optimizationOpenItems !== undefined && i.optimizationOpenItems > 0) {
+      b.push({ code: "OPTIMIZATION_OPEN", text: `Hasil Optimasi Pajak Legal masih punya ${i.optimizationOpenItems} butir terbuka; belum boleh dipakai untuk mengisi SPT.`, stepIds: ["fiskal"] });
+    }
     if (!i.taxRateVerified) b.push({ code: "RATE_NOT_VERIFIED", text: "Tarif pajak badan belum dikonfigurasi dan diverifikasi akuntan.", stepIds: ["hitung"] });
   } else if (!i.invoiceDataAvailable) {
     b.push({ code: "INVOICE_DATA_MISSING", text: "Data Faktur Pajak belum ada di LINOE; pencocokan dilakukan manual di Coretax.", stepIds: ["faktur"] });
