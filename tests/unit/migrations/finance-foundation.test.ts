@@ -55,8 +55,8 @@ describe("finance foundation migration — additive and locked down", () => {
     expect(up).not.toMatch(/create policy/i);
   });
 
-  it("revokes every privilege from anon and authenticated, and grants no DELETE or TRUNCATE to anyone", () => {
-    for (const t of TABLES) expect(up).toContain(`revoke all on public.${t} from public, anon, authenticated`);
+  it("revokes every privilege from public, anon, authenticated AND service_role (Supabase default privileges hand new objects to service_role), and grants no DELETE or TRUNCATE to anyone", () => {
+    for (const t of TABLES) expect(up).toContain(`revoke all on public.${t} from public, anon, authenticated, service_role;`);
     expect(up).not.toMatch(/grant [^;]*(delete|truncate|all)[^;]* to/i);
     expect(up).not.toMatch(/grant [^;]* to (anon|authenticated|public)/i);
   });

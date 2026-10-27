@@ -69,7 +69,7 @@ describe("accounting ledger migration — additive, append-only, fail-closed", (
   it("RLS on with no policies, nothing for anon/authenticated, service_role without delete/truncate", () => {
     expect(up).toContain("enable row level security");
     expect(up).not.toMatch(/create policy/i);
-    expect(up).toContain("revoke all on public.%I from public, anon, authenticated");
+    expect(up).toContain("revoke all on public.%I from public, anon, authenticated, service_role");
     expect(up).toContain("grant select, insert on public.%I to service_role");
     expect(up).not.toMatch(/grant [^;]*\b(delete|truncate)\b[^;]* to/i);
     expect(up).not.toMatch(/grant [^;]* to (anon|authenticated|public)/i);

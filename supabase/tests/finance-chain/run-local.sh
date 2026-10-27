@@ -65,6 +65,23 @@ apply chain_a && pass "the whole chain re-applies cleanly (idempotent)" || bad "
 if P -d chain_a -f "$here/chain.sql" >/tmp/chain_tests_$$.txt 2>&1; then pass "chain suite: $(grep -c 'PASS:' /tmp/chain_tests_$$.txt) checks"
 else bad "chain suite"; grep -E "FAILED|ERROR" /tmp/chain_tests_$$.txt | head -8; fi
 
+# 2b) privileges. The migrations run on a database that carries Supabase-like DEFAULT PRIVILEGES (tax-approvals/support.sql), as in production,
+#     where a bare CREATE TABLE is handed to anon, authenticated and service_role. A GRANT alone would then leave service_role with
+#     DELETE/TRUNCATE/UPDATE; every object must be REVOKEd explicitly and granted only what it needs.
+mk chain_p; apply chain_p
+if P -d chain_p -f "$here/privileges.sql" >/tmp/chain_priv_$$.txt 2>&1; then pass "privilege suite: $(grep -c 'PASS:' /tmp/chain_priv_$$.txt) checks (anon, authenticated, PUBLIC, service_role on tables, sequences and functions; legitimate flows; append-only guards)"
+else bad "privilege suite"; grep -E "FAILED|ERROR|open:|service_role can|cannot" /tmp/chain_priv_$$.txt | head -8; fi
+if PA -d chain_p -f "$here/acl_matrix.sql" | diff -u "$here/acl_expected.txt" - >/tmp/chain_acl_$$.txt; then pass "privilege matrix of all 21 tables, 5 sequences and 15 functions equals the reviewed golden file ($(wc -l < "$here/acl_expected.txt") lines)"
+else bad "privilege matrix differs from acl_expected.txt (review every line before updating the golden file)"; head -30 /tmp/chain_acl_$$.txt; fi
+# negative controls: widening any one privilege must be noticed by BOTH the matrix and the behaviour suite
+for stmt in "grant delete on public.finance_settlements to service_role" "grant truncate on public.acct_journals to service_role" \
+            "grant update on sequence public.finance_audit_logs_id_seq to service_role" "grant execute on function public.fn_finance_audit() to anon" \
+            "grant select on public.finance_audit_logs to authenticated" "grant insert on public.tax_opt_decisions to service_role"; do
+  mk chain_n; apply chain_n; P -d chain_n -c "$stmt" >/dev/null
+  if PA -d chain_n -f "$here/acl_matrix.sql" | diff -q "$here/acl_expected.txt" - >/dev/null; then bad "matrix did not notice: $stmt"; else pass "negative control: matrix detects '$stmt'"; fi
+  if P -d chain_n -f "$here/privileges.sql" >/dev/null 2>&1; then bad "privilege suite did not notice: $stmt"; else pass "negative control: privilege suite fails on '$stmt'"; fi
+done
+
 # 3) approvals behaviour suite on top of the full chain (including the accounting migration)
 mk chain_b; apply chain_b
 if P -d chain_b -f "$root/supabase/tests/tax-approvals/tests.sql" >/tmp/chain_tax_$$.txt 2>&1; then pass "approvals suite on the full chain: $(grep -c 'PASS:' /tmp/chain_tax_$$.txt) checks"
@@ -80,5 +97,5 @@ apply chain_c && pass "the chain can be applied again after a rollback" || bad "
 P -d chain_c -c "insert into auth.users (id) values ('11111111-1111-4111-8111-111111111111')" -c "insert into public.acct_period_events (period_key,action,actor_id) values ('2026-09','CLOSE','11111111-1111-4111-8111-111111111111')" >/dev/null
 if P -d chain_c -f "$root/supabase/rollback/20261027120000_linoe_accounting_ledger.down.sql" >/dev/null 2>&1; then bad "accounting rollback ran although data exists"; else pass "accounting rollback refuses while data exists"; fi
 
-for d in chain_a chain_b chain_c; do P -d postgres -c "drop database if exists $d" >/dev/null; done
+for d in chain_a chain_b chain_c chain_p chain_n; do P -d postgres -c "drop database if exists $d" >/dev/null; done
 [ "$fail" = 0 ] && echo "ALL FINANCE CHAIN CHECKS PASSED" || { echo "SOME CHECKS FAILED"; exit 1; }
