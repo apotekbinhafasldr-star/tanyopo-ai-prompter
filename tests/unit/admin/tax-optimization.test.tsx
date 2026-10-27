@@ -28,7 +28,7 @@ describe("Persetujuan Founder dan status verifikasi hukum", () => {
     expect(card).toHaveTextContent("Tidak dapat disimpan: data masih DEMO");
     expect(card).toHaveTextContent(/Sidik perhitungan/);
     expect(card).toHaveTextContent(/taxopt-e1;law=2026-10-27/);
-    expect(card).toHaveTextContent(/bukan verifikasi akuntan|tidak membuat angka menjadi terverifikasi/i);
+    expect(card).toHaveTextContent(/tidak dapat diubah/);
     expect(container.querySelector("form")).toBeNull();
   });
   it("blocked and DJP-only provisions are shown as such, never as verified", async () => {
