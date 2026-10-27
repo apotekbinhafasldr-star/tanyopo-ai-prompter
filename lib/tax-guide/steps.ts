@@ -146,7 +146,10 @@ const BASE: readonly Base[] = [
       "Kompensasi kerugian hanya dipakai jika terverifikasi.",
       "Angka segmen LINOE tidak dipakai sebagai angka SPT seluruh PT.",
     ],
-    links: [{ label: "Buka rekap pajak", href: "/admin/finance/tax", kind: "internal" }],
+    links: [
+      { label: "Buka rekap pajak", href: "/admin/finance/tax", kind: "internal" },
+      { label: "Buka Optimasi Pajak Legal", href: "/admin/finance/tax/optimization", kind: "internal" },
+    ],
     sourceIds: [],
     verification: "TERVERIFIKASI",
     warning: null,

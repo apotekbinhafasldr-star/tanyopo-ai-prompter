@@ -31,7 +31,7 @@ alter table public.finance_platform_admins
     permissions <@ array[
       'admin.overview', 'finance.view', 'finance.export', 'finance.expense.write',
       'finance.settlement.import', 'tax.view', 'tax.manage', 'tax.export',
-      'accounting.view', 'bank.manage', 'staff.view'
+      'accounting.view', 'tax.optimization.view', 'bank.manage', 'staff.view'
     ]::text[]
   );
 

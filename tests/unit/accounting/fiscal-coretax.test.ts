@@ -10,6 +10,8 @@ import {
   type FiscalAdjustment,
 } from "@/lib/accounting";
 import { buildCoretaxPackage } from "@/lib/coretax/package";
+import { buildDemoOptimization } from "@/lib/admin/demo-optimization";
+import { runOptimization } from "@/lib/tax-opt";
 import { buildZip, crc32 } from "@/lib/coretax/zip";
 import { buildXlsx } from "@/lib/coretax/xlsx";
 import { buildPdf } from "@/lib/coretax/pdf";
@@ -151,6 +153,22 @@ describe("Coretax support package", () => {
     expect(a.checks.balanceSheetBalanced).toBe(true);
     expect(a.checks.entityLevelComplete).toBe(false);
     expect(a.checks.turnoverTaxConfigVerified).toBe(false);
+  });
+});
+
+describe("Coretax package + optimization", () => {
+  it("adds a separate optimasi-pajak.csv and says it is not ready; books files unchanged", () => {
+    const base = buildCoretaxPackage(buildInput());
+    const withOpt = buildCoretaxPackage({ ...buildInput(), optimization: runOptimization(buildDemoOptimization("nyata")) });
+    const baseNames = unzipNames(base.zip);
+    const optNames = unzipNames(withOpt.zip);
+    expect(baseNames).not.toContain("csv/optimasi-pajak.csv");
+    expect(optNames).toContain("csv/optimasi-pajak.csv");
+    const hash = (r: typeof base, n: string) => r.files.find((f) => f.name === n)?.sha256;
+    for (const n of ["laporan-keuangan.pdf", "laporan-akuntansi.xlsx", "csv/jurnal-umum.csv", "csv/laba-rugi.csv", "csv/rekonsiliasi-fiskal.csv"]) {
+      expect(hash(withOpt, n)).toBe(hash(base, n));
+    }
+    expect((withOpt.manifest.optimization as { ready: boolean }).ready).toBe(false);
   });
 });
 

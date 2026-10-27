@@ -10,6 +10,7 @@ import type { TurnoverRecap } from "@/lib/finance/tax";
 import { buildPdf, type PdfLine } from "./pdf";
 import { buildXlsx, type Sheet } from "./xlsx";
 import { buildZip } from "./zip";
+import { STATE_LABEL, type OptimizationResult } from "@/lib/tax-opt";
 
 /**
  * "Paket Coretax": a package of supporting files for the accountant.
@@ -34,6 +35,8 @@ export interface PackageInput {
   readonly generatedBy: string;
   readonly demo: boolean;
   readonly entityName: string;
+  /** Optional Phase E result. Included as a separate support file; never changes the books or the other files. */
+  readonly optimization?: OptimizationResult;
 }
 
 export interface PackageResult {
@@ -108,6 +111,17 @@ export function buildCoretaxPackage(input: PackageInput): PackageResult {
   ]));
   csv.set("csv/pajak-dibayar-bukti-potong.csv", toCsv(["id", "jenis", "tanggal", "uraian", "jumlah", "bukti"], taxReg.rows.map((r) => [r.id, r.kind, r.date, r.description, r.amount, r.evidenceRef])));
 
+  const opt = input.optimization;
+  if (opt) {
+    csv.set("csv/optimasi-pajak.csv", toCsv(["bagian", "uraian", "jumlah", "status", "catatan"], [
+      ...opt.simulation.lines.map((l) => ["Simulasi", l.label, l.figure.amount ? dec(l.figure.amount) : "BELUM DAPAT DIHITUNG", STATE_LABEL[l.figure.state], [...l.figure.reasons, ...l.figure.assumptions].join(" | ")]),
+      ...opt.expenses.findings.map((f) => ["Biaya", `${f.category} (${f.vendor})`, dec(f.amount), f.status, f.missing.join(", ")]),
+      ...opt.credits.findings.map((f) => ["Kredit pajak", `${f.kind} ${f.id}`, dec(f.amount), f.status, f.note]),
+      ...opt.openItems.map((o) => ["Butir terbuka", o, "", "BELUM SELESAI", ""]),
+      ["Catatan", "Simulasi bukan SPT, bukan jaminan hasil, dan tidak mengubah pembukuan. Penyesuaian fiskal dicatat terpisah.", "", "", ""],
+    ]));
+  }
+
   // ---- XLSX
   const sheets: Sheet[] = [
     { name: "Catatan", header: ["Catatan"], rows: [[banner], ["Lingkup: segmen LINOE, bukan SPT seluruh PT."], [XML_STATUS.reason], ...input.fiscal.warnings.map((w) => [w])] },
@@ -169,6 +183,7 @@ export function buildCoretaxPackage(input: PackageInput): PackageResult {
     "- Lingkup: segmen LINOE. Pajak badan PT Tanyopo harus direkonsiliasi dengan aktivitas PT lainnya oleh akuntan.",
     "- Tarif, status PKP, penyesuaian fiskal: hanya yang diverifikasi yang dihitung. Tidak ada tarif tebakan.",
     ...reportWarnings(ledger, range.to).map((w) => `- ${w}`),
+    opt ? `- csv/optimasi-pajak.csv: hasil Optimasi Pajak Legal (simulasi, ${opt.readyToUse ? "siap ditinjau" : "BELUM SIAP: ada butir terbuka"}). Bukan SPT dan bukan jaminan hasil.` : "",
     input.demo ? "- DATA DEMO: seluruh angka fiktif." : "",
     "",
   ].filter((x, i, a) => x !== "" || a[i - 1] !== "").join("\n");
@@ -191,6 +206,7 @@ export function buildCoretaxPackage(input: PackageInput): PackageResult {
     xml: XML_STATUS,
     autoActions: { login: false, fileSpt: false, payTax: false },
     checks,
+    optimization: opt ? { included: true, ready: opt.readyToUse, openItems: opt.openItems } : { included: false },
     warnings: [...reportWarnings(ledger, range.to), ...input.fiscal.warnings],
     files,
   };

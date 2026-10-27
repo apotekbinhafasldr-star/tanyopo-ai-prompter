@@ -4,6 +4,7 @@ import { formatRupiah, monthLabel } from "@/lib/admin/format";
 import type { TurnoverRecap } from "@/lib/finance";
 import type { DashboardModel } from "@/lib/admin/dashboard-model";
 import { Badge, Card, Check, DemoNotice, Empty, Frame, Hero, Row } from "./parts";
+import { TaxSubMenu } from "./tax-optimization";
 
 const fmt = formatRupiah;
 
@@ -14,16 +15,18 @@ export interface TaxCenterProps {
   checks: DashboardModel["checks"];
   bank: BankReconciliation;
   canExport: boolean;
+  canOptimize?: boolean;
   demo: boolean;
 }
 
-export function TaxCenter({ recap, fiscal, taxPayments, checks, bank, canExport, demo }: TaxCenterProps) {
+export function TaxCenter({ recap, fiscal, taxPayments, checks, bank, canExport, canOptimize = false, demo }: TaxCenterProps) {
   const seg = fiscal.segment;
   const pkp = recap.configVerified;
   return (
     <Frame>
       {demo ? <DemoNotice /> : null}
       <Hero title="Pajak dan paket Coretax" subtitle={`Tahun ${recap.year} · Data pendukung untuk akuntan · Segmen LINOE`} />
+      <TaxSubMenu current="rekap" canOptimize={canOptimize} />
 
       <Card title="Panduan lapor pajak" sub="Langkah demi langkah ke Coretax resmi: SPT Tahunan PPh Badan dan SPT Masa PPN (jika PKP).">
         <Link className="fin-btn" style={{ display: "flex", alignItems: "center", justifyContent: "center" }} href="/admin/finance/tax/guide" prefetch={false} data-testid="guide-link">

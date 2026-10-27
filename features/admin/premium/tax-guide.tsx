@@ -9,6 +9,7 @@ import {
   type ReturnKind,
 } from "@/lib/tax-guide";
 import { Badge, Card, Chip, DemoNotice, Empty, Frame, Hero } from "./parts";
+import { TaxSubMenu } from "./tax-optimization";
 import { GuideWizard } from "./guide-wizard";
 
 
@@ -26,6 +27,7 @@ export interface TaxGuideProps {
   readonly pkpVerified: boolean;
   readonly otherObligations: readonly string[];
   readonly canExport: boolean;
+  readonly canOptimize?: boolean;
   readonly demo: boolean;
   readonly initialStep?: number;
 }
@@ -35,6 +37,7 @@ export function TaxGuide(p: TaxGuideProps) {
     <Frame>
       {p.demo ? <DemoNotice /> : null}
       <Hero title="Panduan Lapor Pajak" subtitle="PT Tanyopo Future Technology · Langkah demi langkah di Coretax resmi" />
+      <TaxSubMenu current="panduan" canOptimize={p.canOptimize ?? false} />
 
       <Card>
         <p className="fin-note" data-testid="guide-safety">

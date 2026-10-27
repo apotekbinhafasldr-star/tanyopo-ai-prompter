@@ -33,6 +33,7 @@ import AdminTaxPage from "@/app/admin/finance/tax/page";
 import AdminStaffPage from "@/app/admin/staff/page";
 import AdminReportsPage from "@/app/admin/finance/reports/page";
 import AdminTaxGuidePage from "@/app/admin/finance/tax/guide/page";
+import AdminTaxOptimizationPage from "@/app/admin/finance/tax/optimization/page";
 
 /** Text a reader sees: the scoped <style> block is not content. */
 const visibleText = (el: HTMLElement): string => {
@@ -52,6 +53,7 @@ const PAGES: Array<[string, () => Promise<React.ReactElement>, Permission]> = [
   ["reports", () => AdminReportsPage(SP()), "accounting.view"],
   ["tax", () => AdminTaxPage(), "tax.view"],
   ["tax guide", () => AdminTaxGuidePage(SP({ jenis: "pph-badan" })), "tax.view"],
+  ["tax optimization", () => AdminTaxOptimizationPage(SP()), "tax.optimization.view"],
   ["staff", () => AdminStaffPage(), "staff.view"],
 ];
 
@@ -87,6 +89,7 @@ describe("server rejects non-admins on every page (and on the layout)", () => {
     await expect(AdminReportsPage(SP())).rejects.toThrow("NEXT_NOT_FOUND");
     await expect(AdminTaxPage()).rejects.toThrow("NEXT_NOT_FOUND");
     await expect(AdminTaxGuidePage(SP())).rejects.toThrow("NEXT_NOT_FOUND");
+    await expect(AdminTaxOptimizationPage(SP())).rejects.toThrow("NEXT_NOT_FOUND");
     await expect(AdminStaffPage()).rejects.toThrow("NEXT_NOT_FOUND");
   });
 });
@@ -184,7 +187,8 @@ describe("no sensitive data leaks into any rendered page", () => {
     as("SUPER_ADMIN");
     for (const [, page] of PAGES) {
       const { container, unmount } = render(await page());
-      const text = container.innerHTML;
+      // Official public law download links (JDIH Kemenkeu) carry a document id; that is a source citation, not a private id.
+      const text = container.innerHTML.replace(/https:\/\/jdih\.kemenkeu\.go\.id\/api\/download\/[0-9a-f-]{36}\/[A-Za-z0-9._-]+/g, "[sumber]");
       expect(text).not.toMatch(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
       expect(text).not.toMatch(/service_role|SUPABASE|secret|apikey|api_key|bearer/i);
       expect(text).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);

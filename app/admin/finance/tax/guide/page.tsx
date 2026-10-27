@@ -6,6 +6,8 @@ import { DEMO_LATE_AFTER_DAYS } from "@/lib/admin/demo-data";
 import { can } from "@/lib/admin/permissions";
 import { UNVERIFIED_TAX_CONFIG, turnoverRecap } from "@/lib/finance";
 import { assessReadiness, parseGuideYear, parseReturnKind, parseStepParam, usableObligations } from "@/lib/tax-guide";
+import { buildDemoOptimization } from "@/lib/admin/demo-optimization";
+import { runOptimization } from "@/lib/tax-opt";
 import { requireAdminPage } from "@/services/platform-admin";
 
 /** Years offered. DEMO has one year; real years come from the books once the ledger is live. */
@@ -50,6 +52,7 @@ export default async function AdminTaxGuidePage({
           pendingAdjustments: fiscal.pendingAdjustments.length,
           pkpVerified: recap.configVerified,
           invoiceDataAvailable: false,
+          optimizationOpenItems: runOptimization(buildDemoOptimization("nyata")).openItems.length,
         })
       : null;
 
@@ -62,6 +65,7 @@ export default async function AdminTaxGuidePage({
       pkpVerified={recap.configVerified}
       otherObligations={usableObligations([]).map((o) => o.name)}
       canExport={can(principal, "tax.export") && can(principal, "accounting.view")}
+      canOptimize={can(principal, "tax.optimization.view")}
       demo
       initialStep={parseStepParam(raw.langkah)}
     />
