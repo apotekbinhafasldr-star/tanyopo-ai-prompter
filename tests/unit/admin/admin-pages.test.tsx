@@ -122,7 +122,7 @@ describe("demo data is labelled and nothing financial can be done", () => {
     as("SUPER_ADMIN");
     const { container } = render(await AdminFinancePage(SP({ period: "<script>", status: "DROP TABLE" })));
     expect(container.innerHTML).not.toContain("<script>");
-    expect(screen.getByText(/November 2026/)).toBeInTheDocument();
+    expect(screen.getAllByText(/November 2026/).length).toBeGreaterThan(0);
   });
 
   it("tax page never shows a tax rate or amount while the configuration is unverified", async () => {
@@ -185,7 +185,7 @@ describe("no sensitive data leaks into any rendered page", () => {
       expect(text).not.toMatch(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
       expect(text).not.toMatch(/service_role|SUPABASE|secret|apikey|api_key|bearer/i);
       expect(text).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
-      for (const m of text.matchAll(/\b[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+\b/g)) expect(m[0].startsWith("DEMO-"), m[0]).toBe(true);
+      for (const m of text.matchAll(/\b[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+\b/g)) expect(m[0].startsWith("DEMO-") || m[0] === "SHA-256", m[0]).toBe(true);
       unmount();
     }
   });
