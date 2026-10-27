@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useState, useSyncExternalStore } from "react";
 import type { Blocker, GuideSource, GuideStep } from "@/lib/tax-guide";
 import { canMarkDone } from "@/lib/tax-guide/readiness";
 
@@ -59,6 +59,40 @@ interface Saved {
 }
 const EMPTY: Saved = { ticks: {}, index: 0, proofStatus: false, proofBpe: false, done: false };
 
+function subscribeStorage(cb: () => void): () => void {
+  window.addEventListener("storage", cb);
+  return () => window.removeEventListener("storage", cb);
+}
+function readStored(key: string): string | null {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null; // storage blocked: the wizard simply starts fresh
+  }
+}
+function writeStored(key: string, v: Saved): void {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(v));
+  } catch {
+    /* ignore */
+  }
+}
+function parseSaved(raw: string | null, clamp: (i: number) => number): Saved {
+  if (!raw) return EMPTY;
+  try {
+    const p = JSON.parse(raw) as Partial<Saved>;
+    return {
+      ticks: typeof p.ticks === "object" && p.ticks ? p.ticks : {},
+      index: Number.isInteger(p.index) ? clamp(p.index as number) : 0,
+      proofStatus: p.proofStatus === true,
+      proofBpe: p.proofBpe === true,
+      done: p.done === true,
+    };
+  } catch {
+    return EMPTY;
+  }
+}
+
 /**
  * Interactive checklist. Only booleans and a step index are remembered, in this browser only
  * (a per-viewer convenience): no document, no credential, no amount, nothing is sent to a server.
@@ -66,36 +100,18 @@ const EMPTY: Saved = { ticks: {}, index: 0, proofStatus: false, proofBpe: false,
 export function GuideWizard({ kind, year, steps, sources, blockers, canExport, demo, initialStep }: GuideWizardProps) {
   const storageKey = `linoe-tax-guide:v1:${kind}:${year}`;
   const startIndex = initialStep ? Math.min(Math.max(initialStep, 1), steps.length) - 1 : 0;
-  const [s, setS] = useState<Saved>({ ...EMPTY, index: startIndex });
-  const [ready, setReady] = useState(false);
-
-  useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(storageKey);
-      if (raw) {
-        const p = JSON.parse(raw) as Partial<Saved>;
-        setS({
-          ticks: typeof p.ticks === "object" && p.ticks ? p.ticks : {},
-          index: initialStep ? startIndex : Number.isInteger(p.index) ? Math.min(Math.max(p.index as number, 0), steps.length - 1) : 0,
-          proofStatus: p.proofStatus === true,
-          proofBpe: p.proofBpe === true,
-          done: p.done === true,
-        });
-      }
-    } catch {
-      /* storage blocked: the wizard simply starts fresh */
-    }
-    setReady(true);
-  }, [storageKey, steps.length, initialStep, startIndex]);
-
-  useEffect(() => {
-    if (!ready) return;
-    try {
-      window.localStorage.setItem(storageKey, JSON.stringify(s));
-    } catch {
-      /* ignore */
-    }
-  }, [s, ready, storageKey]);
+  // The remembered state is an external store (this browser's localStorage): it is read through
+  // useSyncExternalStore, so the server render and first client render agree (nothing remembered).
+  const stored = useSyncExternalStore(subscribeStorage, () => readStored(storageKey), () => null);
+  const [local, setLocal] = useState<Saved | null>(null);
+  const clamp = useCallback((i: number) => Math.min(Math.max(i, 0), steps.length - 1), [steps.length]);
+  const base = parseSaved(stored, clamp);
+  const s: Saved = local ?? (initialStep ? { ...base, index: startIndex } : base);
+  const setS = (fn: (p: Saved) => Saved) => {
+    const nextState = fn(s);
+    setLocal(nextState);
+    writeStored(storageKey, nextState);
+  };
 
   const step = steps[s.index];
   const tickKey = (id: string, i: number) => `${id}:${i}`;
