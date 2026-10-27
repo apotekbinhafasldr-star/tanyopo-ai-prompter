@@ -372,6 +372,8 @@ create trigger trg_acct_bank_rec_audit
 
 -- ---------------------------------------------------------------------------
 -- RLS: enabled, NO policies. Grants: service_role only, no DELETE, no TRUNCATE.
+-- service_role is revoked explicitly before it is granted: Supabase DEFAULT PRIVILEGES in schema public give every new table,
+-- sequence and function to anon, authenticated and service_role, so a GRANT alone would leave DELETE/TRUNCATE/UPDATE in place.
 -- ---------------------------------------------------------------------------
 do $$
 declare
@@ -384,24 +386,24 @@ begin
     'acct_corporate_tax_settings', 'acct_fiscal_adjustments', 'acct_other_activities', 'acct_tax_payments'
   ] loop
     execute format('alter table public.%I enable row level security', t);
-    execute format('revoke all on public.%I from public, anon, authenticated', t);
+    execute format('revoke all on public.%I from public, anon, authenticated, service_role', t);
     execute format('grant select, insert on public.%I to service_role', t);
   end loop;
 end
 $$;
 grant update on public.acct_bank_reconciliations to service_role;
 
-revoke all on sequence public.acct_period_events_id_seq from public, anon, authenticated;
-revoke all on sequence public.acct_journals_seq_seq from public, anon, authenticated;
-revoke all on sequence public.acct_journal_lines_id_seq from public, anon, authenticated;
-revoke all on sequence public.acct_bank_matches_id_seq from public, anon, authenticated;
+revoke all on sequence public.acct_period_events_id_seq from public, anon, authenticated, service_role;
+revoke all on sequence public.acct_journals_seq_seq from public, anon, authenticated, service_role;
+revoke all on sequence public.acct_journal_lines_id_seq from public, anon, authenticated, service_role;
+revoke all on sequence public.acct_bank_matches_id_seq from public, anon, authenticated, service_role;
 grant usage on sequence public.acct_period_events_id_seq to service_role;
 grant usage on sequence public.acct_journals_seq_seq to service_role;
 grant usage on sequence public.acct_journal_lines_id_seq to service_role;
 grant usage on sequence public.acct_bank_matches_id_seq to service_role;
 
-revoke all on function public.fn_acct_journal_balanced() from public, anon, authenticated;
-revoke all on function public.fn_acct_journal_has_lines() from public, anon, authenticated;
-revoke all on function public.fn_acct_period_open() from public, anon, authenticated;
-revoke all on function public.fn_acct_line_postable() from public, anon, authenticated;
-revoke all on function public.fn_acct_bank_rec_guard() from public, anon, authenticated;
+revoke all on function public.fn_acct_journal_balanced() from public, anon, authenticated, service_role;
+revoke all on function public.fn_acct_journal_has_lines() from public, anon, authenticated, service_role;
+revoke all on function public.fn_acct_period_open() from public, anon, authenticated, service_role;
+revoke all on function public.fn_acct_line_postable() from public, anon, authenticated, service_role;
+revoke all on function public.fn_acct_bank_rec_guard() from public, anon, authenticated, service_role;

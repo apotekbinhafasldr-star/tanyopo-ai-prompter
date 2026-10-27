@@ -1,0 +1,33 @@
+function fn_finance_admins_keep_super_admin() service_role EXECUTE
+function fn_finance_admins_no_escalation() service_role EXECUTE
+function fn_tax_opt_decision_guard() service_role EXECUTE
+function fn_tax_opt_refs_ok(refs text[]) service_role EXECUTE
+function tax_opt_effective_status(p_subject_key text, p_current_calc_hash text, p_current_rules_version text) service_role EXECUTE
+function tax_opt_record_decision(p_actor uuid, p_request_id uuid, p_subject_key text, p_recommendation_type text, p_tax_year text, p_decision text, p_reason text, p_rules_version text, p_viewed_rules_version text, p_calc_hash text, p_viewed_calc_hash text, p_figure_states text[], p_open_items integer, p_evidence_refs text[], p_accountant_ref text, p_expected_seq integer) service_role EXECUTE
+function tax_opt_verify_chain(p_subject_key text) service_role EXECUTE
+sequence acct_bank_matches_id_seq service_role USAGE
+sequence acct_journal_lines_id_seq service_role USAGE
+sequence acct_journals_seq_seq service_role USAGE
+sequence acct_period_events_id_seq service_role USAGE
+sequence finance_audit_logs_id_seq service_role USAGE
+table acct_accounts service_role INSERT,SELECT
+table acct_bank_matches service_role INSERT,SELECT
+table acct_bank_reconciliations service_role INSERT,SELECT,UPDATE
+table acct_bank_statement_lines service_role INSERT,SELECT
+table acct_corporate_tax_settings service_role INSERT,SELECT
+table acct_fiscal_adjustments service_role INSERT,SELECT
+table acct_journal_lines service_role INSERT,SELECT
+table acct_journals service_role INSERT,SELECT
+table acct_open_item_payments service_role INSERT,SELECT
+table acct_open_items service_role INSERT,SELECT
+table acct_other_activities service_role INSERT,SELECT
+table acct_period_events service_role INSERT,SELECT
+table acct_tax_payments service_role INSERT,SELECT
+table finance_audit_logs service_role INSERT,SELECT
+table finance_ledger_entries service_role INSERT,SELECT
+table finance_operating_expenses service_role INSERT,SELECT,UPDATE
+table finance_platform_admins service_role INSERT,SELECT,UPDATE
+table finance_refunds service_role INSERT,SELECT,UPDATE
+table finance_settlements service_role INSERT,SELECT
+table finance_tax_settings service_role INSERT,SELECT
+table tax_opt_decisions service_role SELECT

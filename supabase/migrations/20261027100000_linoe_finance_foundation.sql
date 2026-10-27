@@ -276,7 +276,10 @@ create trigger trg_finance_admins_audit
 
 -- ---------------------------------------------------------------------------
 -- Row level security: enabled, NO policies => anon/authenticated see nothing.
--- Grants: everything revoked from public/anon/authenticated; service_role only gets what it needs.
+-- Grants: everything revoked from public/anon/authenticated AND service_role, then service_role is granted only what it needs.
+-- service_role must be revoked explicitly: in Supabase the DEFAULT PRIVILEGES of schema public hand every new table, sequence and
+-- function to anon, authenticated and service_role, so a GRANT alone would leave service_role with DELETE/TRUNCATE/UPDATE.
+-- (Trigger functions need no EXECUTE for the role that fires them; the grant is checked when the trigger is created.)
 -- ---------------------------------------------------------------------------
 alter table public.finance_audit_logs enable row level security;
 alter table public.finance_platform_admins enable row level security;
@@ -286,14 +289,14 @@ alter table public.finance_settlements enable row level security;
 alter table public.finance_operating_expenses enable row level security;
 alter table public.finance_tax_settings enable row level security;
 
-revoke all on public.finance_audit_logs from public, anon, authenticated;
-revoke all on public.finance_platform_admins from public, anon, authenticated;
-revoke all on public.finance_ledger_entries from public, anon, authenticated;
-revoke all on public.finance_refunds from public, anon, authenticated;
-revoke all on public.finance_settlements from public, anon, authenticated;
-revoke all on public.finance_operating_expenses from public, anon, authenticated;
-revoke all on public.finance_tax_settings from public, anon, authenticated;
-revoke all on sequence public.finance_audit_logs_id_seq from public, anon, authenticated;
+revoke all on public.finance_audit_logs from public, anon, authenticated, service_role;
+revoke all on public.finance_platform_admins from public, anon, authenticated, service_role;
+revoke all on public.finance_ledger_entries from public, anon, authenticated, service_role;
+revoke all on public.finance_refunds from public, anon, authenticated, service_role;
+revoke all on public.finance_settlements from public, anon, authenticated, service_role;
+revoke all on public.finance_operating_expenses from public, anon, authenticated, service_role;
+revoke all on public.finance_tax_settings from public, anon, authenticated, service_role;
+revoke all on sequence public.finance_audit_logs_id_seq from public, anon, authenticated, service_role;
 
 grant select, insert on public.finance_audit_logs to service_role;
 grant select, insert, update on public.finance_platform_admins to service_role;
@@ -304,6 +307,6 @@ grant select, insert, update on public.finance_operating_expenses to service_rol
 grant select, insert on public.finance_tax_settings to service_role;
 grant usage on sequence public.finance_audit_logs_id_seq to service_role;
 
-revoke all on function public.fn_finance_block_mutation() from public, anon, authenticated;
-revoke all on function public.fn_finance_audit() from public, anon, authenticated;
-revoke all on function public.fn_finance_expense_guard() from public, anon, authenticated;
+revoke all on function public.fn_finance_block_mutation() from public, anon, authenticated, service_role;
+revoke all on function public.fn_finance_audit() from public, anon, authenticated, service_role;
+revoke all on function public.fn_finance_expense_guard() from public, anon, authenticated, service_role;
