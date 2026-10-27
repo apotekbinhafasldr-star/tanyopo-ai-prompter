@@ -17,7 +17,7 @@ import { d, expense, fee, idr, newBook, payment, settlement } from "../finance/h
 
 const V = { verifiedBy: "akuntan", verifiedAt: "2026-12-01T00:00:00Z" };
 const NV = { verifiedBy: null, verifiedAt: null };
-const adj = (id: string, direction: "POSITIVE" | "NEGATIVE", amount: string, v = V): FiscalAdjustment => ({
+const adj = (id: string, direction: "POSITIVE" | "NEGATIVE", amount: string, v: { verifiedBy: string | null; verifiedAt: string | null } = V): FiscalAdjustment => ({
   id, description: `adj ${id}`, direction, nature: "PERMANENT", amount: idr(amount), evidenceRef: null, ...v,
 });
 const cfgOk = { rateBps: 2200, ...V };
