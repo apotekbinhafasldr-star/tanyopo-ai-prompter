@@ -169,3 +169,12 @@ The Owner can choose which Meta ad account LINOE reads, from the Meta card on `/
 - Tokens, funding-source ids and provider messages never reach the browser or logs (same allowlist as F-2a).
 
 **Limits.** Field availability on the current Graph version is still unverified against a live account. More than 50 accounts: only the first 50 are shown (stated in the UI).
+
+**Consistency and concurrency (F-2b hardening).** There is no multi-statement transaction through PostgREST, so the order of writes carries the guarantee:
+1. The confirmation row is written **first** and is bound to the exact connect stamp (`context.connected_at` = the connection's `last_refreshed_at`) and to the chosen account. If it cannot be written, nothing has changed.
+2. The account is then changed with a **compare-and-set**: tenant, platform, `CONNECTED`, the same `last_refreshed_at` **and the account that was read earlier** must still match, and exactly one row must change. A reconnect or a concurrent selection in between yields a conflict message and leaves the account untouched (no lost updates; of two simultaneous selections exactly one wins).
+3. A confirmation counts only if it names the account stored now **and** carries the connection's current connect stamp. A row left behind by a failed or lost step is therefore harmless, and a reconnect (new stamp) invalidates every earlier confirmation. No clock comparison is involved.
+4. The readiness check re-reads the connection after asking Meta and drops its result (`CONNECTION_CHANGED`, UNKNOWN) if the connection, its status, the stored account or the connect stamp changed meanwhile.
+5. Switching accounts is refused when the tenant has any Facebook/Instagram campaign row beyond DRAFT / AWAITING_APPROVAL / SCHEDULED (including a launch in progress or failed half-way, whose Meta objects may exist without a recorded id), or any row with an `external_campaign_id`; unreadable or unknown => refused.
+
+Known gap for the phase that opens the Budget Gate: the launch path reads the stored account before its own claim, so a switch that lands exactly between that read and the claim could still create a campaign on the previous account, and a launch does not yet require a confirmed selection. Both belong to that phase (launch must re-verify the account and require a confirmed or unambiguous selection); no launch can start today because the gate is closed.

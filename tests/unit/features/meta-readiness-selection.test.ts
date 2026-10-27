@@ -83,3 +83,48 @@ describe("readiness check for the selected ad account (F-2b)", () => {
     expect(isSelectionConfirmed).not.toHaveBeenCalled();
   });
 });
+
+describe("readiness never reports for a connection that changed while Meta was being asked (F-2b consistency)", () => {
+  function changingConnection(second: Record<string, unknown> | null | "error") {
+    const first = {
+      id: "conn-A",
+      status: "CONNECTED",
+      external_account_id: "act_222",
+      expires_at: "2099-01-01T00:00:00.000Z",
+      last_refreshed_at: "2026-10-20T00:00:00.000Z",
+    };
+    let calls = 0;
+    return vi.fn(async () => {
+      calls += 1;
+      if (calls === 1) return { ok: true as const, connection: first };
+      if (second === "error") return { ok: false as const };
+      return { ok: true as const, connection: second === null ? null : { ...first, ...second } };
+    });
+  }
+
+  it("reports normally when nothing changed", async () => {
+    const h = makeDeps({ loadConnection: changingConnection({}) });
+    const r = await runMetaReadinessCheck(OWNER, h.deps);
+    if (r.error !== null) throw new Error("unexpected");
+    expect(r.result.state).toBe("READY");
+  });
+
+  it("drops the result (UNKNOWN, CONNECTION_CHANGED) when it was reconnected, re-selected, demoted, removed or unreadable", async () => {
+    for (const change of [
+      { last_refreshed_at: "2026-10-28T09:00:00.000Z" },
+      { external_account_id: "act_333" },
+      { status: "ACTION_REQUIRED" },
+      { id: "conn-NEW" },
+      null,
+      "error" as const,
+    ]) {
+      const h = makeDeps({ loadConnection: changingConnection(change) });
+      const r = await runMetaReadinessCheck(OWNER, h.deps);
+      if (r.error !== null) throw new Error("unexpected");
+      expect(r.result.state, JSON.stringify(change)).toBe("UNKNOWN");
+      expect(r.result.unavailableReason, JSON.stringify(change)).toBe("CONNECTION_CHANGED");
+      expect(r.result.checks).toEqual([]);
+      expect(h.logFailure).toHaveBeenCalledWith("connection_changed");
+    }
+  });
+});

@@ -64,7 +64,8 @@ export type ReadinessUnavailableReason =
   | "CREDENTIALS_UNAVAILABLE"
   | "NO_AD_ACCOUNT"
   | "MULTIPLE_AD_ACCOUNTS"
-  | "AD_ACCOUNT_MISMATCH";
+  | "AD_ACCOUNT_MISMATCH"
+  | "CONNECTION_CHANGED";
 
 export interface MetaReadinessResult {
   state: ReadinessState;
@@ -228,6 +229,8 @@ export function accountStatusLabel(code: number | null): string {
 }
 
 const UNAVAILABLE_MESSAGES: Readonly<Record<ReadinessUnavailableReason, string>> = Object.freeze({
+  CONNECTION_CHANGED:
+    "Koneksi Meta atau akun iklan yang dipilih berubah saat pemeriksaan berlangsung (mungkin disambungkan ulang atau dipilih ulang). Hasil tidak dipakai; periksa lagi.",
   NOT_CONFIGURED: "Koneksi Meta belum dikonfigurasi di server, sehingga akun iklan tidak dapat diperiksa.",
   NOT_CONNECTED: "Akun Meta belum terhubung. Hubungkan akun terlebih dahulu.",
   TOKEN_EXPIRED: "Akses ke Meta sudah kedaluwarsa atau dicabut. Klik “Sambungkan Ulang” lalu periksa lagi.",

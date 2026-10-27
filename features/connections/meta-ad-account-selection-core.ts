@@ -49,12 +49,25 @@ export interface MetaAdAccountSelectionDeps {
   };
   /** Has this Owner confirmed the stored account since the latest (re)connect? */
   isSelectionConfirmed(tenantId: string, connection: SelectionConnectionRow): Promise<{ ok: true; confirmed: boolean } | { ok: false }>;
-  /** Does this tenant already have ads created on Meta (an `external_campaign_id`)? */
-  hasMetaCampaigns(tenantId: string): Promise<{ ok: true; has: boolean } | { ok: false }>;
   /**
-   * Stores the choice. Must (1) update the connection row only when it still
-   * belongs to `tenantId`, is CONNECTED and still has `expectedLastRefreshedAt`
-   * (a reconnect in between => CONFLICT), and (2) record the confirmation.
+   * Has this tenant started, or possibly started, ads on Meta under the stored
+   * account? True for any Facebook/Instagram campaign row beyond the pre-launch
+   * states (including a launch in progress or one that failed half-way, whose
+   * Meta objects may exist without a recorded id) and for any row that already
+   * has an `external_campaign_id`. Unknown => the caller must refuse.
+   */
+  hasMetaAdActivity(tenantId: string): Promise<{ ok: true; has: boolean } | { ok: false }>;
+  /**
+   * Stores the choice. Implementations MUST keep the stored account and its
+   * confirmation consistent whatever fails:
+   *  (1) record the confirmation FIRST, bound to `expectedLastRefreshedAt` (the
+   *      exact connect stamp) — a failure here changes nothing;
+   *  (2) then change the connection row with a compare-and-set on tenant,
+   *      platform, CONNECTED, `expectedLastRefreshedAt` AND `previousAdAccountId`
+   *      (a reconnect or a concurrent selection in between => CONFLICT, the
+   *      account is not touched).
+   * A confirmation row without the matching change is harmless: it only counts
+   * when it names the stored account AND the current connect stamp.
    */
   persistSelection(input: {
     tenantId: string;
@@ -63,7 +76,7 @@ export interface MetaAdAccountSelectionDeps {
     expectedLastRefreshedAt: string;
     adAccountId: string;
     adAccountName: string;
-    previousAdAccountId: string | null;
+    previousAdAccountId: string;
   }): Promise<PersistSelectionOutcome>;
   now(): Date;
   /** Receives a stage name and the thrown value; must log only structured, non-sensitive fields. */
@@ -232,19 +245,23 @@ export async function selectMetaAdAccount(
     return fail("Koneksi Meta belum lengkap. Sambungkan ulang akun Meta lalu coba lagi.");
   }
 
+  // The compare-and-set below needs the account that is stored now.
   const previous = connection.external_account_id;
-  const changes = previous === null || bareId(previous) !== bareId(chosen.id);
-  if (changes) {
-    // Changing the account would orphan ads already created on the old one
-    // (pause / insights use the stored account). Refuse, and refuse when unsure.
-    const campaigns = await deps.hasMetaCampaigns(session.tenantId);
-    if (!campaigns.ok) {
+  if (!previous) {
+    return fail("Koneksi Meta belum lengkap. Sambungkan ulang akun Meta lalu coba lagi.");
+  }
+
+  if (bareId(previous) !== bareId(chosen.id)) {
+    // Changing the account would orphan ads that exist (or may exist) on the old
+    // one: pause and insights use the stored account. Refuse, and refuse when unsure.
+    const activity = await deps.hasMetaAdActivity(session.tenantId);
+    if (!activity.ok) {
       deps.logFailure("check_campaigns");
       return fail(UNREADABLE);
     }
-    if (campaigns.has) {
+    if (activity.has) {
       return fail(
-        "Sudah ada iklan yang dibuat di akun iklan saat ini, jadi akun tidak bisa diganti dari sini. Hubungi admin LINOE.",
+        "Sudah ada iklan (atau peluncuran iklan) di akun iklan saat ini, jadi akun tidak bisa diganti dari sini. Hubungi admin LINOE.",
       );
     }
   }
@@ -263,7 +280,7 @@ export async function selectMetaAdAccount(
     return fail(
       outcome.reason === "CONFLICT"
         ? "Koneksi Meta berubah saat Anda memilih (mungkin disambungkan ulang). Muat ulang daftar akun lalu pilih lagi."
-        : "Pilihan akun iklan gagal disimpan. Coba lagi.",
+        : "Pilihan akun iklan gagal disimpan. Muat ulang daftar untuk melihat akun yang sedang dipakai, lalu coba lagi.",
     );
   }
 

@@ -8,21 +8,23 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * the connection row's account fields and one audit row is ever written.
  */
 
-type Rec = { table: string; ops: Array<[string, unknown[]]> };
+type Rec = { table: string; seq: number; ops: Array<[string, unknown[]]> };
 
 const hoisted = vi.hoisted(() => {
   const h = {
     session: { tenantId: "tenant-A", userId: "user-A", role: "owner" } as { tenantId: string; userId: string; role: string },
-    regularLog: [] as Array<{ table: string; ops: Array<[string, unknown[]]> }>,
-    adminLog: [] as Array<{ table: string; ops: Array<[string, unknown[]]> }>,
+    regularLog: [] as Array<{ table: string; seq: number; ops: Array<[string, unknown[]]> }>,
+    adminLog: [] as Array<{ table: string; seq: number; ops: Array<[string, unknown[]]> }>,
+    seq: 0,
     results: {} as Record<string, unknown>,
     listAdAccounts: (async () => ({ accounts: [], truncated: false })) as (token: string) => Promise<unknown>,
     readiness: (async () => ({ kind: "NONE" })) as (t: string, i: string, o: unknown) => Promise<unknown>,
     revalidatePath: ((): void => {}) as (...a: unknown[]) => void,
-    makeClient(log: Array<{ table: string; ops: Array<[string, unknown[]]> }>) {
+    makeClient(log: Array<{ table: string; seq: number; ops: Array<[string, unknown[]]> }>) {
       return {
         from(table: string) {
-          const rec = { table, ops: [] as Array<[string, unknown[]]> };
+          h.seq += 1;
+          const rec = { table, seq: h.seq, ops: [] as Array<[string, unknown[]]> };
           log.push(rec);
           const chain: unknown = new Proxy(
             {},
@@ -102,6 +104,7 @@ beforeEach(() => {
   hoisted.session = { tenantId: "tenant-A", userId: "user-A", role: "owner" };
   hoisted.regularLog = [];
   hoisted.adminLog = [];
+  hoisted.seq = 0;
   hoisted.revalidatePath = vi.fn() as unknown as typeof hoisted.revalidatePath;
   hoisted.listAdAccounts = vi.fn(async () => ({
     accounts: [
@@ -138,6 +141,7 @@ describe("selectMetaAdAccountAction wiring", () => {
         "platform=META",
         "status=CONNECTED",
         `last_refreshed_at=${CONNECT_TS}`,
+        "external_account_id=act_111", // compare-and-set on the account read earlier
       ]),
     );
 
@@ -150,8 +154,15 @@ describe("selectMetaAdAccountAction wiring", () => {
       action: "connection.meta_ad_account_selected",
       resource_type: "prompter_connected_accounts",
       resource_id: "conn-A",
-      context: { platform: "META", external_account_id: "act_222", previous_external_account_id: "act_111" },
+      context: {
+        platform: "META",
+        external_account_id: "act_222",
+        previous_external_account_id: "act_111",
+        connected_at: CONNECT_TS, // the confirmation is bound to this exact connect stamp
+      },
     });
+    // The confirmation is recorded BEFORE the account changes.
+    expect(audit.seq).toBeLessThan(update.seq);
     expect(hoisted.revalidatePath).toHaveBeenCalledWith("/connections");
 
     // Nothing else was written anywhere.
@@ -195,23 +206,25 @@ describe("selectMetaAdAccountAction wiring", () => {
     expect(hoisted.revalidatePath).not.toHaveBeenCalled();
   });
 
-  it("reports a conflict and writes no audit row when the connection changed meanwhile (reconnect)", async () => {
+  it("reports a conflict and leaves the account untouched when the connection changed meanwhile (reconnect / concurrent selection)", async () => {
     hoisted.results["prompter_connected_accounts:update"] = { data: [], error: null };
     const r = await selectMetaAdAccountAction("act_222");
     expect(r.error).toMatch(/berubah saat Anda memilih/);
-    expect(hoisted.adminLog.some((l) => l.table === "prompter_audit_logs")).toBe(false);
+    expect(r.selected).toBeNull();
     expect(hoisted.revalidatePath).not.toHaveBeenCalled();
   });
 
-  it("does not claim success when the audit row cannot be written", async () => {
+  it("changes NOTHING when the confirmation cannot be written (no update is even attempted)", async () => {
     hoisted.results["prompter_audit_logs:insert"] = { data: null, error: { code: "XX000" } };
     const r = await selectMetaAdAccountAction("act_222");
     expect(r.error).toMatch(/gagal disimpan/);
+    expect(r.selected).toBeNull();
+    expect(allLogs().some((l) => l.table === "prompter_connected_accounts" && ops(l, "update").length > 0)).toBe(false);
     expect(hoisted.revalidatePath).not.toHaveBeenCalled();
   });
 
-  it("blocks a change when Meta ads already exist (checked per tenant, Facebook/Instagram, with an external id)", async () => {
-    hoisted.results["prompter_channel_campaigns:select"] = { data: [{ id: "cc-1" }], error: null };
+  it("blocks a change once Meta ads exist (checked per tenant, Facebook/Instagram only)", async () => {
+    hoisted.results["prompter_channel_campaigns:select"] = { data: [{ status: "ACTIVE", external_campaign_id: "123" }], error: null };
     const r = await selectMetaAdAccountAction("act_222");
     expect(r.error).toMatch(/Sudah ada iklan/);
     const q = hoisted.regularLog.find((l) => l.table === "prompter_channel_campaigns");
@@ -219,21 +232,50 @@ describe("selectMetaAdAccountAction wiring", () => {
     if (!q) return;
     expect(tenantFiltered(q, "tenant-A")).toBe(true);
     expect(ops(q, "in")[0]).toEqual(["channel", ["FACEBOOK", "INSTAGRAM"]]);
-    expect(ops(q, "not")[0]).toEqual(["external_campaign_id", "is", null]);
     expect(allLogs().some((l) => l.ops.some(([n]) => n === "update" || n === "insert"))).toBe(false);
   });
 
-  it("fails closed when the campaign check errors", async () => {
-    hoisted.results["prompter_channel_campaigns:select"] = { data: null, error: { code: "42P01" } };
-    const r = await selectMetaAdAccountAction("act_222");
-    expect(r.error).not.toBeNull();
-    expect(allLogs().some((l) => l.ops.some(([n]) => n === "update" || n === "insert"))).toBe(false);
+  it("also blocks a launch in progress or failed half-way (claimed FAILED row whose Meta id is not recorded yet)", async () => {
+    for (const status of ["FAILED", "ACTIVE", "PAUSED", "COMPLETED", "SOMETHING_NEW"]) {
+      hoisted.results["prompter_channel_campaigns:select"] = { data: [{ status, external_campaign_id: null }], error: null };
+      hoisted.regularLog = [];
+      hoisted.adminLog = [];
+      const r = await selectMetaAdAccountAction("act_222");
+      expect(r.error, status).toMatch(/Sudah ada iklan/);
+      expect(allLogs().some((l) => l.ops.some(([n]) => n === "update" || n === "insert")), status).toBe(false);
+    }
+  });
+
+  it("allows a change when every Meta campaign row is still pre-launch", async () => {
+    hoisted.results["prompter_channel_campaigns:select"] = {
+      data: [
+        { status: "DRAFT", external_campaign_id: null },
+        { status: "AWAITING_APPROVAL", external_campaign_id: null },
+        { status: "SCHEDULED", external_campaign_id: null },
+      ],
+      error: null,
+    };
+    expect((await selectMetaAdAccountAction("act_222")).error).toBeNull();
+  });
+
+  it("fails closed when the campaign check errors or returns nothing readable", async () => {
+    for (const result of [{ data: null, error: { code: "42P01" } }, { data: null, error: null }]) {
+      hoisted.results["prompter_channel_campaigns:select"] = result;
+      hoisted.regularLog = [];
+      hoisted.adminLog = [];
+      const r = await selectMetaAdAccountAction("act_222");
+      expect(r.error).not.toBeNull();
+      expect(allLogs().some((l) => l.ops.some(([n]) => n === "update" || n === "insert"))).toBe(false);
+    }
   });
 });
 
 describe("listMetaAdAccountsAction and the readiness action: confirmation marker", () => {
-  it("reads the marker for THIS connection after the latest connect, newest first, tenant-filtered", async () => {
-    hoisted.results["prompter_audit_logs:select"] = { data: { context: { external_account_id: "act_111" } }, error: null };
+  it("reads the marker for THIS connection, the stored account and the current connect stamp, tenant-filtered", async () => {
+    hoisted.results["prompter_audit_logs:select"] = {
+      data: { context: { external_account_id: "act_111", connected_at: CONNECT_TS } },
+      error: null,
+    };
     const r = await listMetaAdAccountsAction();
     if (r.error !== null) throw new Error("unexpected");
     expect(r.selectionConfirmed).toBe(true);
@@ -245,13 +287,28 @@ describe("listMetaAdAccountsAction and the readiness action: confirmation marker
     expect(eqs).toEqual(
       expect.arrayContaining(["tenant_id=tenant-A", "action=connection.meta_ad_account_selected", "resource_id=conn-A"]),
     );
-    expect(ops(q, "gte")[0]).toEqual(["created_at", CONNECT_TS]);
-    expect(ops(q, "order")[0][0]).toBe("created_at");
+    expect(ops(q, "filter")).toEqual([
+      ["context->>external_account_id", "eq", "act_111"],
+      ["context->>connected_at", "eq", CONNECT_TS],
+    ]);
     expect(ops(q, "limit")[0]).toEqual([1]);
   });
 
-  it("is NOT confirmed when the newest marker names a different account than the stored one (stale / changed)", async () => {
-    hoisted.results["prompter_audit_logs:select"] = { data: { context: { external_account_id: "act_222" } }, error: null };
+  it("is NOT confirmed when a marker names a different account than the stored one (stale / changed)", async () => {
+    hoisted.results["prompter_audit_logs:select"] = {
+      data: { context: { external_account_id: "act_222", connected_at: CONNECT_TS } },
+      error: null,
+    };
+    const r = await listMetaAdAccountsAction();
+    if (r.error !== null) throw new Error("unexpected");
+    expect(r.selectionConfirmed).toBe(false);
+  });
+
+  it("is NOT confirmed when the marker belongs to an earlier connection (reconnect changed the connect stamp)", async () => {
+    hoisted.results["prompter_audit_logs:select"] = {
+      data: { context: { external_account_id: "act_111", connected_at: "2026-09-01T00:00:00.000Z" } },
+      error: null,
+    };
     const r = await listMetaAdAccountsAction();
     if (r.error !== null) throw new Error("unexpected");
     expect(r.selectionConfirmed).toBe(false);
@@ -270,7 +327,10 @@ describe("listMetaAdAccountsAction and the readiness action: confirmation marker
     hoisted.regularLog = [];
     hoisted.adminLog = [];
     hoisted.results["prompter_connected_accounts:select"] = { data: { ...CONNECTION, last_refreshed_at: null }, error: null };
-    hoisted.results["prompter_audit_logs:select"] = { data: { context: { external_account_id: "act_111" } }, error: null };
+    hoisted.results["prompter_audit_logs:select"] = {
+      data: { context: { external_account_id: "act_111", connected_at: CONNECT_TS } },
+      error: null,
+    };
     const noTs = await listMetaAdAccountsAction();
     if (noTs.error !== null) throw new Error("unexpected");
     expect(noTs.selectionConfirmed).toBe(false);
@@ -278,7 +338,10 @@ describe("listMetaAdAccountsAction and the readiness action: confirmation marker
   });
 
   it("the readiness check evaluates the stored account with confirmed=true only when the marker matches", async () => {
-    hoisted.results["prompter_audit_logs:select"] = { data: { context: { external_account_id: "act_111" } }, error: null };
+    hoisted.results["prompter_audit_logs:select"] = {
+      data: { context: { external_account_id: "act_111", connected_at: CONNECT_TS } },
+      error: null,
+    };
     const ok = await checkMetaAdAccountReadinessAction();
     expect(ok.error).toBeNull();
     expect(hoisted.readiness).toHaveBeenCalledWith("plain-token", "act_111", { selectionConfirmed: true });

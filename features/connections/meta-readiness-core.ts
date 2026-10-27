@@ -146,8 +146,24 @@ export async function runMetaReadinessCheck(
       return unavailable("MULTIPLE_AD_ACCOUNTS");
     case "MISMATCH":
       return unavailable("AD_ACCOUNT_MISMATCH");
-    case "OK":
+    case "OK": {
+      // The connection (or the chosen account) may have changed while Meta was
+      // being asked: the token above could even belong to a newer connection.
+      // Re-read it and only report if it is exactly the one we evaluated.
+      const after = await deps.loadConnection(session.tenantId);
+      const same =
+        after.ok &&
+        after.connection !== null &&
+        after.connection.id === connection.id &&
+        after.connection.status === "CONNECTED" &&
+        after.connection.external_account_id === connection.external_account_id &&
+        (after.connection.last_refreshed_at ?? null) === (connection.last_refreshed_at ?? null);
+      if (!same) {
+        deps.logFailure("connection_changed");
+        return unavailable("CONNECTION_CHANGED");
+      }
       return { error: null, result: evaluateMetaReadiness(lookup.snapshot, now) };
+    }
     default:
       // Exhaustiveness guard: an unexpected shape is never READY.
       return unavailable("PROVIDER_ERROR");

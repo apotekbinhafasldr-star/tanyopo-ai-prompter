@@ -40,7 +40,7 @@ function makeDeps(over: Partial<MetaAdAccountSelectionDeps> = {}, listing: MetaA
   const loadEncryptedToken = vi.fn(async () => ({ ok: true as const, encrypted: "cipher" }));
   const decrypt = vi.fn((blob: string) => (blob === "cipher" ? TOKEN_PLAIN : "other"));
   const isSelectionConfirmed = vi.fn(async () => ({ ok: true as const, confirmed: false }));
-  const hasMetaCampaigns = vi.fn(async () => ({ ok: true as const, has: false }));
+  const hasMetaAdActivity = vi.fn(async () => ({ ok: true as const, has: false }));
   const persistSelection = vi.fn(async () => ({ ok: true as const }));
   const logFailure = vi.fn();
   const deps: MetaAdAccountSelectionDeps = {
@@ -49,13 +49,13 @@ function makeDeps(over: Partial<MetaAdAccountSelectionDeps> = {}, listing: MetaA
     decrypt,
     connector: { isConfigured: () => true, listAdAccounts },
     isSelectionConfirmed,
-    hasMetaCampaigns,
+    hasMetaAdActivity,
     persistSelection,
     now: () => NOW,
     logFailure,
     ...over,
   };
-  return { deps, listAdAccounts, loadConnection, loadEncryptedToken, decrypt, isSelectionConfirmed, hasMetaCampaigns, persistSelection, logFailure };
+  return { deps, listAdAccounts, loadConnection, loadEncryptedToken, decrypt, isSelectionConfirmed, hasMetaAdActivity, persistSelection, logFailure };
 }
 
 const OWNER = { tenantId: "tenant-A", userId: "user-A", role: "owner" };
@@ -236,7 +236,7 @@ describe("selectMetaAdAccount", () => {
   it("works with a single account and with confirming the already stored account", async () => {
     const one = makeDeps({}, { accounts: [A], truncated: false });
     expect((await selectMetaAdAccount(OWNER, "act_111", one.deps)).error).toBeNull();
-    expect(one.hasMetaCampaigns).not.toHaveBeenCalled(); // no change => no campaign check needed
+    expect(one.hasMetaAdActivity).not.toHaveBeenCalled(); // no change => no campaign check needed
   });
 
   it("rejects a non-owner before reading anything", async () => {
@@ -316,18 +316,18 @@ describe("selectMetaAdAccount", () => {
   });
 
   it("refuses to change the account once ads exist on the current one, and when that cannot be checked", async () => {
-    const has = makeDeps({ hasMetaCampaigns: vi.fn(async () => ({ ok: true as const, has: true })) });
+    const has = makeDeps({ hasMetaAdActivity: vi.fn(async () => ({ ok: true as const, has: true })) });
     const r1 = await selectMetaAdAccount(OWNER, "act_222", has.deps);
     expect(r1.error).toMatch(/Sudah ada iklan/);
     expect(has.persistSelection).not.toHaveBeenCalled();
 
-    const unknown = makeDeps({ hasMetaCampaigns: vi.fn(async () => ({ ok: false as const })) });
+    const unknown = makeDeps({ hasMetaAdActivity: vi.fn(async () => ({ ok: false as const })) });
     const r2 = await selectMetaAdAccount(OWNER, "act_222", unknown.deps);
     expect(r2.error).not.toBeNull();
     expect(unknown.persistSelection).not.toHaveBeenCalled();
 
     // Re-confirming the SAME account stays allowed even with campaigns.
-    const same = makeDeps({ hasMetaCampaigns: vi.fn(async () => ({ ok: true as const, has: true })) });
+    const same = makeDeps({ hasMetaAdActivity: vi.fn(async () => ({ ok: true as const, has: true })) });
     expect((await selectMetaAdAccount(OWNER, "act_111", same.deps)).error).toBeNull();
   });
 

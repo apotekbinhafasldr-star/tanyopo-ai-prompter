@@ -106,8 +106,9 @@ describe("runMetaReadinessCheck — tenant isolation", () => {
     const response = await runMetaReadinessCheck(OWNER_A, h.deps);
 
     expect(response.result?.state).toBe("READY");
-    expect(h.loadConnection).toHaveBeenCalledTimes(1);
-    expect(h.loadConnection).toHaveBeenCalledWith("tenant-A");
+    // Read once to evaluate and once more to confirm the connection did not change meanwhile (F-2b):
+    // both reads are for the session tenant only.
+    expect(h.loadConnection.mock.calls).toEqual([["tenant-A"], ["tenant-A"]]);
     expect(h.loadEncryptedToken).toHaveBeenCalledWith("tenant-A", "conn-A");
     expect(h.decrypt).toHaveBeenCalledWith("cipher-A");
     expect(h.getAccountReadinessSnapshot).toHaveBeenCalledWith("plain(cipher-A)", "act_111", { selectionConfirmed: false });

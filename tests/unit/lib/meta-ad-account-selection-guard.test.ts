@@ -52,6 +52,7 @@ describe("ad-account selection: no writes outside the two allowed ones", () => {
     expect(wiring).not.toMatch(/\.(upsert|delete|rpc)\(/);
 
     const update = between(wiring, ".update(", ".select(\"id\")");
+    expect(update).toContain('.eq("external_account_id", input.previousAdAccountId)');
     expect(update).toContain("external_account_id: input.adAccountId");
     expect(update).toContain("external_account_name: input.adAccountName");
     // Bound to the tenant, the platform, the CONNECTED state and the exact connect timestamp.
@@ -65,11 +66,19 @@ describe("ad-account selection: no writes outside the two allowed ones", () => {
   it("the audit insert records the choice for this tenant and connection and nothing sensitive", () => {
     const actions = read("features/connections/actions.ts");
     const wiring = between(actions, "function buildAdAccountSelectionDeps(", "export async function listMetaAdAccountsAction");
-    const insert = between(wiring, 'admin.from("prompter_audit_logs").insert(', "// Without the audit row");
+    const insert = between(wiring, 'admin.from("prompter_audit_logs").insert(', "// 2) Compare-and-set");
+    expect(insert).toContain("connected_at: input.expectedLastRefreshedAt");
     expect(insert).toContain("tenant_id: input.tenantId");
     expect(insert).toContain("action: AD_ACCOUNT_SELECTED_ACTION");
     expect(insert).toContain("resource_id: input.connectionId");
     expect(insert).not.toMatch(/token|funding|secret|encrypted/i);
+  });
+
+  it("records the confirmation BEFORE changing the account (a failed confirmation can never leave a changed, unconfirmed account)", () => {
+    const actions = read("features/connections/actions.ts");
+    const wiring = between(actions, "async persistSelection(input)", "now: () => new Date()");
+    expect(wiring.indexOf(".insert(")).toBeGreaterThan(-1);
+    expect(wiring.indexOf(".update(")).toBeGreaterThan(wiring.indexOf(".insert("));
   });
 
   it("the actions take no tenant or role from the client", () => {

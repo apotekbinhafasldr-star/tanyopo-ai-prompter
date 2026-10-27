@@ -279,14 +279,17 @@ export async function checkMetaAdAccountReadinessAction(): Promise<MetaReadiness
 
 /**
  * F-2b — "the Owner confirmed this ad account" marker. No new column: the
- * confirmation is the newest `connection.meta_ad_account_selected` audit row
- * for THIS connection that (a) was written after the latest (re)connect and
- * (b) names exactly the account that is stored now. A reconnect therefore
- * invalidates an older choice, and any change to the stored account that was
- * not made through the selection action leaves it unconfirmed (fail-closed).
+ * confirmation is a `connection.meta_ad_account_selected` audit row for THIS
+ * connection that names exactly the account stored now AND carries the
+ * connection's current connect stamp (`last_refreshed_at`). A reconnect
+ * changes the stamp, so it invalidates an older choice; any change to the
+ * stored account that was not made through the selection action leaves it
+ * unconfirmed (fail-closed).
  * Read with the admin client, filtered by tenant AND connection.
  */
 const AD_ACCOUNT_SELECTED_ACTION = "connection.meta_ad_account_selected";
+const PRE_LAUNCH_STATUSES: readonly string[] = ["DRAFT", "AWAITING_APPROVAL", "SCHEDULED"];
+const META_ACTIVITY_SCAN_LIMIT = 1000;
 
 async function readSelectionConfirmed(
   tenantId: string,
@@ -295,19 +298,27 @@ async function readSelectionConfirmed(
   if (!connection.external_account_id || !connection.last_refreshed_at) return { ok: true, confirmed: false };
   const admin = createAdminClient();
   if (!admin) return { ok: false };
+  // Bound to the stored account AND to the exact connect stamp the choice was
+  // made against (no clock comparison, so no skew): a reconnect changes the
+  // stamp, which invalidates every earlier confirmation at once.
   const { data, error } = await admin
     .from("prompter_audit_logs")
-    .select("context, created_at")
+    .select("context")
     .eq("tenant_id", tenantId)
     .eq("action", AD_ACCOUNT_SELECTED_ACTION)
     .eq("resource_id", connection.id)
-    .gte("created_at", connection.last_refreshed_at)
-    .order("created_at", { ascending: false })
+    .filter("context->>external_account_id", "eq", connection.external_account_id)
+    .filter("context->>connected_at", "eq", connection.last_refreshed_at)
     .limit(1)
     .maybeSingle();
   if (error) return { ok: false };
-  const context = data?.context as { external_account_id?: unknown } | null | undefined;
-  return { ok: true, confirmed: context?.external_account_id === connection.external_account_id };
+  const context = data?.context as { external_account_id?: unknown; connected_at?: unknown } | null | undefined;
+  return {
+    ok: true,
+    confirmed:
+      context?.external_account_id === connection.external_account_id &&
+      context?.connected_at === connection.last_refreshed_at,
+  };
 }
 
 function buildAdAccountSelectionDeps(
@@ -339,34 +350,28 @@ function buildAdAccountSelectionDeps(
     decrypt: decryptToken,
     connector: new MetaConnector(),
     isSelectionConfirmed: readSelectionConfirmed,
-    async hasMetaCampaigns(tenantId) {
+    async hasMetaAdActivity(tenantId) {
       const { data, error } = await supabase
         .from("prompter_channel_campaigns")
-        .select("id")
+        .select("status, external_campaign_id")
         .eq("tenant_id", tenantId)
         .in("channel", ["FACEBOOK", "INSTAGRAM"])
-        .not("external_campaign_id", "is", null)
-        .limit(1);
-      if (error) return { ok: false };
-      return { ok: true, has: (data ?? []).length > 0 };
+        .limit(META_ACTIVITY_SCAN_LIMIT);
+      if (error || !data) return { ok: false };
+      // Anything beyond the pre-launch states counts, an unknown status counts,
+      // and so does a full page (we cannot see the rest).
+      const has =
+        data.length >= META_ACTIVITY_SCAN_LIMIT ||
+        data.some((row) => row.external_campaign_id !== null || !PRE_LAUNCH_STATUSES.includes(row.status));
+      return { ok: true, has };
     },
     async persistSelection(input) {
-      // Tenant, platform, CONNECTED and the exact connect timestamp are all part
-      // of the WHERE clause; exactly one row must change.
-      const { data, error } = await supabase
-        .from("prompter_connected_accounts")
-        .update({ external_account_id: input.adAccountId, external_account_name: input.adAccountName })
-        .eq("id", input.connectionId)
-        .eq("tenant_id", input.tenantId)
-        .eq("platform", "META")
-        .eq("status", "CONNECTED")
-        .eq("last_refreshed_at", input.expectedLastRefreshedAt)
-        .select("id");
-      if (error) return { ok: false, reason: "ERROR" };
-      if (!data || data.length !== 1) return { ok: false, reason: "CONFLICT" };
-
       const admin = createAdminClient();
       if (!admin) return { ok: false, reason: "ERROR" };
+
+      // 1) Confirmation FIRST. If this fails nothing has changed. If a later
+      //    step fails, the row is harmless: it counts only when it names the
+      //    stored account AND the current connect stamp.
       const { error: auditError } = await admin.from("prompter_audit_logs").insert({
         tenant_id: input.tenantId,
         actor_user_id: input.userId,
@@ -377,11 +382,27 @@ function buildAdAccountSelectionDeps(
           platform: "META",
           external_account_id: input.adAccountId,
           previous_external_account_id: input.previousAdAccountId,
+          connected_at: input.expectedLastRefreshedAt,
         },
       });
-      // Without the audit row the choice stays UNCONFIRMED (readiness fails
-      // closed) and the Owner is told to retry; nothing else is left half-done.
       if (auditError) return { ok: false, reason: "ERROR" };
+
+      // 2) Compare-and-set. Tenant, platform, CONNECTED, the exact connect stamp
+      //    and the account read earlier are all part of the WHERE clause, and
+      //    exactly one row must change: a reconnect, or a concurrent selection
+      //    that got there first, yields CONFLICT and leaves the account alone.
+      const { data, error } = await supabase
+        .from("prompter_connected_accounts")
+        .update({ external_account_id: input.adAccountId, external_account_name: input.adAccountName })
+        .eq("id", input.connectionId)
+        .eq("tenant_id", input.tenantId)
+        .eq("platform", "META")
+        .eq("status", "CONNECTED")
+        .eq("last_refreshed_at", input.expectedLastRefreshedAt)
+        .eq("external_account_id", input.previousAdAccountId)
+        .select("id");
+      if (error) return { ok: false, reason: "ERROR" };
+      if (!data || data.length !== 1) return { ok: false, reason: "CONFLICT" };
       return { ok: true };
     },
     now: () => new Date(),
