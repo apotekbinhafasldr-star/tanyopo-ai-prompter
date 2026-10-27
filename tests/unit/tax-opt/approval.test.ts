@@ -27,7 +27,7 @@ const okStore = (calls: RpcArgs[] = []): DecisionStore => ({ record: async (a) =
 
 describe("hashes", () => {
   it("canonical JSON is key-order independent and handles bigint", () => {
-    expect(canonicalJson({ b: BigInt(1), a: [2, { d: 1, c: undefined }] })).toBe(canonicalJson({ a: [2, { d: 1 }], b: 1n }));
+    expect(canonicalJson({ b: BigInt(1), a: [2, { d: 1, c: undefined }] })).toBe(canonicalJson({ a: [2, { d: 1 }], b: BigInt(1) }));
   });
   it("calculation hash changes when any input or result changes", () => {
     const a = calculationHash({ input: { x: 1 }, result: { y: 2 } });
