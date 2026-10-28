@@ -10,7 +10,7 @@ import { getCapabilities, type CapabilityRow } from "@/lib/connectors/capability
 import { formatDate } from "@/lib/utils/format";
 import { DisconnectButton } from "@/features/connections/disconnect-button";
 import { MetaPagePicker } from "@/features/connections/meta-page-picker";
-import { MetaReadinessPanel } from "@/features/connections/meta-readiness-panel";
+import { MetaAdAccountSection } from "@/features/connections/meta-ad-account-section";
 import { isFeatureEnabled } from "@/lib/feature-flags";
 import type { ConnectorPlatform } from "@/types/database";
 
@@ -270,7 +270,9 @@ function ConnectorCard({
           )
         ) : null}
 
-        {platform === "META" && isOwner && status === "CONNECTED" ? <MetaReadinessPanel /> : null}
+        {platform === "META" && isOwner && status === "CONNECTED" ? (
+          <MetaAdAccountSection currentAccountName={account?.external_account_name ?? null} />
+        ) : null}
 
         {capabilities && capabilities.length > 0 ? (
           <div className="border-t border-border pt-3">

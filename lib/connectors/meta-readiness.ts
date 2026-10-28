@@ -64,7 +64,8 @@ export type ReadinessUnavailableReason =
   | "CREDENTIALS_UNAVAILABLE"
   | "NO_AD_ACCOUNT"
   | "MULTIPLE_AD_ACCOUNTS"
-  | "AD_ACCOUNT_MISMATCH";
+  | "AD_ACCOUNT_MISMATCH"
+  | "CONNECTION_CHANGED";
 
 export interface MetaReadinessResult {
   state: ReadinessState;
@@ -203,7 +204,33 @@ export function evaluateMetaReadiness(snapshot: MetaAdAccountSnapshot, now: Date
   };
 }
 
+/**
+ * F-2b — short, user-facing label for an `account_status` code in the account
+ * picker. Same verified codes as the readiness check; anything else is
+ * "Status tidak dikenal" rather than a guess.
+ */
+export function accountStatusLabel(code: number | null): string {
+  switch (code) {
+    case 1:
+      return "Aktif";
+    case 2:
+      return "Dinonaktifkan";
+    case 3:
+      return "Ada tagihan tertunda";
+    case 7:
+      return "Menunggu tinjauan Meta";
+    case 8:
+      return "Pembayaran diproses";
+    case 9:
+      return "Masa tenggang pembayaran";
+    default:
+      return "Status tidak dikenal";
+  }
+}
+
 const UNAVAILABLE_MESSAGES: Readonly<Record<ReadinessUnavailableReason, string>> = Object.freeze({
+  CONNECTION_CHANGED:
+    "Koneksi Meta atau akun iklan yang dipilih berubah saat pemeriksaan berlangsung (mungkin disambungkan ulang atau dipilih ulang). Hasil tidak dipakai; periksa lagi.",
   NOT_CONFIGURED: "Koneksi Meta belum dikonfigurasi di server, sehingga akun iklan tidak dapat diperiksa.",
   NOT_CONNECTED: "Akun Meta belum terhubung. Hubungkan akun terlebih dahulu.",
   TOKEN_EXPIRED: "Akses ke Meta sudah kedaluwarsa atau dicabut. Klik “Sambungkan Ulang” lalu periksa lagi.",
@@ -216,9 +243,9 @@ const UNAVAILABLE_MESSAGES: Readonly<Record<ReadinessUnavailableReason, string>>
   CREDENTIALS_UNAVAILABLE: "Kredensial koneksi tidak dapat dibaca. Coba sambungkan ulang akun Meta.",
   NO_AD_ACCOUNT: "Tidak ditemukan akun iklan pada akun Meta yang terhubung.",
   MULTIPLE_AD_ACCOUNTS:
-    "Ditemukan lebih dari satu akun iklan pada akun Meta ini. LINOE belum mendukung pemilihan akun iklan, jadi tidak memilih salah satunya secara otomatis dan kesiapan tidak dapat dipastikan.",
+    "Ditemukan lebih dari satu akun iklan pada akun Meta ini dan belum ada yang Anda pilih. LINOE tidak memilih salah satunya secara otomatis. Pilih akun iklan yang benar di bagian “Akun iklan” di atas, lalu periksa lagi.",
   AD_ACCOUNT_MISMATCH:
-    "Akun iklan yang ditemukan di Meta tidak sama dengan akun iklan yang tersimpan di LINOE. Sambungkan ulang akun Meta lalu periksa lagi.",
+    "Akun iklan yang tersimpan di LINOE tidak ditemukan di antara akun iklan yang dapat diakses koneksi Meta saat ini. Pilih ulang akun iklan di bagian “Akun iklan” di atas, atau sambungkan ulang akun Meta.",
 });
 
 /** The check could not run (or ran without a usable answer): always UNKNOWN, never READY. */

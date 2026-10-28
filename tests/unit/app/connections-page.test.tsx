@@ -67,8 +67,10 @@ vi.mock("@/features/connections/meta-page-picker", () => ({
   ),
 }));
 
-vi.mock("@/features/connections/meta-readiness-panel", () => ({
-  MetaReadinessPanel: () => <div data-testid="meta-readiness-panel">Periksa Kesiapan</div>,
+vi.mock("@/features/connections/meta-ad-account-section", () => ({
+  MetaAdAccountSection: ({ currentAccountName }: { currentAccountName: string | null }) => (
+    <div data-testid="meta-ad-account-section" data-current-account-name={currentAccountName ?? ""} />
+  ),
 }));
 
 import ConnectionsPage from "@/app/(app)/connections/page";
@@ -212,7 +214,7 @@ describe("ConnectionsPage — schema without Track B columns and failed reads", 
   });
 });
 
-describe("ConnectionsPage — Meta readiness check (F-2a)", () => {
+describe("ConnectionsPage — Meta readiness check (F-2a/F-2b)", () => {
   let consoleError: MockInstance;
 
   beforeEach(() => {
@@ -234,7 +236,9 @@ describe("ConnectionsPage — Meta readiness check (F-2a)", () => {
 
     await renderPage();
 
-    expect(screen.getByTestId("meta-readiness-panel")).toBeInTheDocument();
+    const section = screen.getByTestId("meta-ad-account-section");
+    expect(section).toBeInTheDocument();
+    expect(section).toHaveAttribute("data-current-account-name", "Akun Iklan Toko");
   });
 
   it("still offers it when the Page-selection read fails (independent of Track B)", async () => {
@@ -243,7 +247,7 @@ describe("ConnectionsPage — Meta readiness check (F-2a)", () => {
 
     await renderPage();
 
-    expect(screen.getByTestId("meta-readiness-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("meta-ad-account-section")).toBeInTheDocument();
   });
 
   it("does not offer it to a non-owner", async () => {
@@ -252,7 +256,7 @@ describe("ConnectionsPage — Meta readiness check (F-2a)", () => {
 
     await renderPage();
 
-    expect(screen.queryByTestId("meta-readiness-panel")).toBeNull();
+    expect(screen.queryByTestId("meta-ad-account-section")).toBeNull();
   });
 
   it("does not offer it when Meta is not connected", async () => {
@@ -260,7 +264,7 @@ describe("ConnectionsPage — Meta readiness check (F-2a)", () => {
 
     await renderPage();
 
-    expect(screen.queryByTestId("meta-readiness-panel")).toBeNull();
+    expect(screen.queryByTestId("meta-ad-account-section")).toBeNull();
   });
 
   it("does not offer it for an account that is not CONNECTED", async () => {
@@ -268,6 +272,6 @@ describe("ConnectionsPage — Meta readiness check (F-2a)", () => {
 
     await renderPage();
 
-    expect(screen.queryByTestId("meta-readiness-panel")).toBeNull();
+    expect(screen.queryByTestId("meta-ad-account-section")).toBeNull();
   });
 });

@@ -24,12 +24,18 @@ function connectorReadinessMethod(): string {
   return source.slice(start, end);
 }
 
-/** The server action, from its declaration to the end of the file. */
+/**
+ * The F-2a server action, from its declaration to where the F-2b selection
+ * code begins (that part legitimately writes the stored choice; it has its own
+ * guard in meta-ad-account-selection-guard.test.ts).
+ */
 function readinessAction(): string {
   const source = read("features/connections/actions.ts");
   const start = source.indexOf("export async function checkMetaAdAccountReadinessAction");
   expect(start).toBeGreaterThan(-1);
-  return source.slice(start);
+  const end = source.indexOf("const AD_ACCOUNT_SELECTED_ACTION", start);
+  expect(end).toBeGreaterThan(start);
+  return source.slice(start, end);
 }
 
 const WRITE_PATTERNS: Array<[string, RegExp]> = [
