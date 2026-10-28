@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { LinoeLogo } from "@/components/brand/linoe-logo";
 import { LegalHeader } from "@/features/legal/legal-header";
 import { LegalLinks } from "@/features/legal/legal-links";
@@ -21,6 +22,11 @@ export default function LegalLayout({ children }: { children: React.ReactNode })
           <LinoeLogo size="sm" href={null} />
           <div className="flex flex-col gap-3">
             <LegalLinks />
+            <p>
+              <Link href="/help" className="hover:text-foreground hover:underline">
+                Pusat Bantuan
+              </Link>
+            </p>
             <address className="not-italic">
               <p className="font-medium text-foreground">{LEGAL.operator}</p>
               <p>{LEGAL.location}</p>

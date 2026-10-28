@@ -68,7 +68,7 @@ describe("robots.txt", () => {
 });
 
 describe("sitemap.xml", () => {
-  it("lists exactly the landing and the four legal pages, absolute https URLs on the production origin", () => {
+  it("lists exactly the landing, the four legal pages and the Help Center, absolute https URLs on the production origin", () => {
     stubOrigin(undefined, undefined);
     const urls = sitemap().map((e) => e.url);
     expect(urls).toEqual([
@@ -77,8 +77,9 @@ describe("sitemap.xml", () => {
       `${PRODUCTION_ORIGIN}/terms`,
       `${PRODUCTION_ORIGIN}/refund`,
       `${PRODUCTION_ORIGIN}/data-deletion`,
+      `${PRODUCTION_ORIGIN}/help`,
     ]);
-    expect(urls.length).toBe(1 + LEGAL_LINKS.length);
+    expect(urls.length).toBe(1 + LEGAL_LINKS.length + 1);
   });
 
   it("never contains private, API, demo, auth, onboarding or tenant pages, and never localhost", () => {
