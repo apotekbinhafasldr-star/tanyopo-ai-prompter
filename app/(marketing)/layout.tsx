@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { MarketingHeader } from "@/features/marketing/marketing-header";
 import { LinoeLogo } from "@/components/brand/linoe-logo";
 import { brand } from "@/lib/brand";
@@ -16,6 +17,11 @@ export default function MarketingLayout({ children }: { children: React.ReactNod
           <LinoeLogo size="sm" />
           <div className="flex flex-col gap-3">
             <LegalLinks />
+            <p>
+              <Link href="/help" className="hover:text-foreground hover:underline">
+                Pusat Bantuan
+              </Link>
+            </p>
             <address className="not-italic">
               <p className="font-medium text-foreground">{LEGAL.operator}</p>
               <p>{LEGAL.location}</p>
