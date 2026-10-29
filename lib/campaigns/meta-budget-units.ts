@@ -12,10 +12,22 @@
  *
  * Pure: no network, database, environment or connector access.
  *
- * NOT YET WIRED into the launch path: that needs the ad account's currency as
- * evidence (a later phase), and the External Budget Safety Gate already denies
- * every launch without it. A tripwire test fails if the gate is ever opened
- * for META while the launch code does not call this function.
+ * Wired into the launch path through lib/campaigns/meta-launch-budget.ts
+ * (Phase 1C-A). The ad account's currency is not yet verifiable from the
+ * launch path, so every launch is refused, and the External Budget Safety Gate
+ * is closed as well. A tripwire test fails if the gate is ever opened for META
+ * while the launch code does not use the launch-budget validator.
+ *
+ * Evidence on the IDR unit (Meta developer docs, read in Phase 1C-A):
+ *  - Budgets page: "The amount you set for bid and budget is at ad account
+ *    currencies minimum denomination level, such as cents for USD."
+ *  - Currencies page: IDR is listed with offset 1, and "If a currency has an
+ *    offset of 1, then the minimum bid equals one base currency unit." That
+ *    page speaks of BIDS, not budgets.
+ *  Together they suggest 1 rupiah = 1 budget unit, but no page states the IDR
+ *  budget unit explicitly. That is an inference, not a proof, so IDR stays
+ *  `verified: false`. Verification needs a controlled check on a Meta test ad
+ *  account (separate Founder approval) and a reviewed change of BOTH fields.
  */
 
 export interface MetaCurrencyBudgetUnit {
