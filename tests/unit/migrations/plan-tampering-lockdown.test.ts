@@ -23,6 +23,10 @@ describe("plan-tampering migration: no client write path to prompter_subscriptio
     expect(sql).toMatch(/revoke update \(plan\) on public\.prompter_subscriptions from public, anon, authenticated;/);
   });
 
+  it("also revokes DELETE and TRUNCATE (idempotent with S1), so no client write path other than the first-trial INSERT remains", () => {
+    expect(sql).toMatch(/revoke delete, truncate on public\.prompter_subscriptions from public, anon, authenticated;/);
+  });
+
   it("adds a SECURITY INVOKER BEFORE UPDATE trigger that rejects anon/authenticated (defense in depth)", () => {
     expect(sql).toMatch(/create or replace function public\.fn_block_client_subscription_update\(\)[\s\S]*?security invoker/);
     expect(sql).toContain("if current_user in ('anon', 'authenticated') then");
@@ -30,7 +34,7 @@ describe("plan-tampering migration: no client write path to prompter_subscriptio
   });
 
   it("is DDL only: modifies no data and leaves the payment functions, other tables and service_role alone", () => {
-    expect(sql).not.toMatch(/\b(insert into|delete from|truncate)\b/i);
+    expect(sql).not.toMatch(/\b(insert into|delete from|truncate table|truncate public)\b/i);
     expect(sql).not.toMatch(/\bupdate public\.(?!prompter_subscriptions set plan = p_plan where tenant_id = v_tenant_id;)/i);
     expect(sql).not.toMatch(/fn_apply_verified_payment|fn_schedule_cancellation|fn_create_ai_job_if_entitled|service_role/);
     expect(sql).not.toMatch(/alter table|create policy|grant update/i);
@@ -90,14 +94,14 @@ describe("application code never writes prompter_subscriptions as the signed-in 
         else if (/\.(ts|tsx)$/.test(f)) out.push(f);
       }
     };
-    for (const d of ["services", "features", "lib", "app"]) if (existsSync(path.join(root, d))) walk(path.join(root, d));
+    for (const d of ["services", "features", "lib", "app", "components", "hooks", "middleware", "utils"]) if (existsSync(path.join(root, d))) walk(path.join(root, d));
     return out;
   };
 
   it("the only write to the table is the first-trial INSERT (everything else goes through an RPC or the service role)", () => {
     for (const f of files()) {
       const code = executable(readFileSync(f, "utf-8"));
-      expect(code, f).not.toMatch(/from\("prompter_subscriptions"\)\s*\.(update|upsert|delete)\(/);
+      expect(code, f).not.toMatch(/from\(\s*["'`]prompter_subscriptions["'`]\s*\)\s*\.(update|upsert|delete)\(/);
     }
   });
 

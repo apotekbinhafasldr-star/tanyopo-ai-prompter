@@ -83,6 +83,11 @@ select pg_temp.chk('non-Owner (marketing) cannot update either', pg_temp.dml_as(
 select pg_temp.chk('Owner of tenant A cannot touch tenant B by direct UPDATE (denied, B unchanged)',
   pg_temp.dml_as(:'oA', format('update prompter_subscriptions set plan=%L where tenant_id=%L','BUSINESS',:'tB'::text)) like '42501:%' and pg_temp.sub(:'tB') = 'FREE/TRIALING');
 select pg_temp.chk('anon has no UPDATE privilege on any column', not has_any_column_privilege('anon','public.prompter_subscriptions','UPDATE') and not has_any_column_privilege('authenticated','public.prompter_subscriptions','UPDATE'));
+select pg_temp.chk('no client can DELETE or TRUNCATE subscriptions (TRUNCATE ignores RLS; it would wipe every tenant)',
+  not has_table_privilege('authenticated','public.prompter_subscriptions','DELETE') and not has_table_privilege('authenticated','public.prompter_subscriptions','TRUNCATE')
+  and not has_table_privilege('anon','public.prompter_subscriptions','DELETE') and not has_table_privilege('anon','public.prompter_subscriptions','TRUNCATE')
+  and pg_temp.dml_as(:'oA','truncate prompter_subscriptions') like '42501:%'
+  and (select count(*) from prompter_subscriptions) = 4);
 select pg_temp.chk('SELECT still works: Owner sees only its own tenant row',
   pg_temp.q_as(:'oA', 'select count(*)::text from prompter_subscriptions') = '1');
 \else

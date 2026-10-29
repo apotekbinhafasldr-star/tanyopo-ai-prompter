@@ -2,6 +2,7 @@
 -- WARNING: this RE-OPENS the P0 hole (an Owner could change `plan` for free through REST).
 -- FAIL-CLOSED: it only runs when explicitly confirmed. Replace the placeholder below with exactly
 --   I_UNDERSTAND_THIS_REOPENS_PLAN_TAMPERING
+-- DELETE/TRUNCATE are deliberately NOT re-granted (re-granting would let any user wipe every tenant's subscription).
 -- Prefer a forward fix. If you must roll back, deploy the app version that still calls .update({ plan }) first.
 set local lock_timeout = '3s';
 

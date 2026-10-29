@@ -39,6 +39,11 @@ set local lock_timeout = '3s';
 drop policy if exists "Owner kelola subscription" on public.prompter_subscriptions;
 revoke update on public.prompter_subscriptions from public, anon, authenticated;
 revoke update (plan) on public.prompter_subscriptions from public, anon, authenticated;
+-- Same table, same class of hole (found in review): `authenticated`/`anon` also hold DELETE and TRUNCATE in
+-- production while the S1 migration that revokes them (20261019100100) is not applied there yet. TRUNCATE
+-- ignores RLS, so any signed-in user could wipe every tenant's subscription row and re-insert a free trial.
+-- The app never deletes (it only SELECTs and INSERTs the first trial row). Idempotent with S1: revoking twice is a no-op.
+revoke delete, truncate on public.prompter_subscriptions from public, anon, authenticated;
 
 -- 2) Defense in depth: clients can never UPDATE this table, whatever policies/grants exist.
 create or replace function public.fn_block_client_subscription_update()
