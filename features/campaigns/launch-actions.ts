@@ -8,6 +8,7 @@ import { getConnector } from "@/lib/connectors/get-connector";
 import { CHANNEL_TO_CONNECTOR } from "@/lib/connectors/channel-map";
 import { allocateDailyBudget } from "@/lib/campaigns/budget-allocation";
 import { statusAfterSuccessfulLaunch } from "@/lib/campaigns/launched-status";
+import { resolveMetaLaunchBudget } from "@/lib/campaigns/meta-launch-budget";
 import { checkBudgetGuard } from "@/lib/budget-guard";
 import {
   BUDGET_WRITE_DISABLED_MESSAGE,
@@ -488,6 +489,26 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
     return { error: gate.message };
   }
 
+  // Phase 1C-A: for META the number sent to Meta comes ONLY from this
+  // validator (Owner-approved ceiling, verified account currency, verified
+  // budget unit). The ad account's currency is not verifiable from the launch
+  // path yet, so it is null here and the launch is refused. Still before the
+  // claim: a refusal writes nothing and calls no platform API.
+  let metaBudgetMinorUnits: number | null = null;
+  if (connectorPlatform === "META") {
+    const metaBudget = resolveMetaLaunchBudget({
+      approvalContext,
+      masterDailyBudget: masterCampaign.daily_budget,
+      allocatedDailyBudget,
+      masterCurrency: masterCampaign.currency,
+      accountCurrency: null,
+    });
+    if (!metaBudget.ok) {
+      return { error: metaBudget.message };
+    }
+    metaBudgetMinorUnits = metaBudget.value.minorUnits;
+  }
+
   // Connection reads, still BEFORE the atomic claim: a failed read writes
   // nothing and calls no platform API (fail closed).
   //
@@ -607,10 +628,10 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
 
   const proposal = masterCampaign.ai_proposal as CampaignProposal | null;
   const adAccountId = connectedAccount.external_account_id;
-  // This row's own share of the master daily budget (validated above), in
-  // IDR whole units — IDR has no sub-unit in practice. Whether the platform
-  // API's budget unit matches is a separate gate before real ad launch.
-  const dailyBudgetMinorUnits = allocatedDailyBudget;
+  // This row's own share of the master daily budget (validated above).
+  // META: the unit-converted value from resolveMetaLaunchBudget (never the
+  // whole-IDR number). TikTok/X keep their existing behaviour.
+  const dailyBudgetMinorUnits = metaBudgetMinorUnits ?? allocatedDailyBudget;
   const budgetAuditContext = {
     allocated_daily_budget: allocatedDailyBudget,
     budget_percentage: channelRows.find((row) => row.id === channelCampaign.id)?.budget_percentage ?? null,

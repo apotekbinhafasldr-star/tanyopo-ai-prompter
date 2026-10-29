@@ -21,6 +21,18 @@ vi.mock("@/lib/campaigns/external-budget-guard", async (importOriginal) => {
     evaluateExternalBudgetWrite: () => ({ allowed: true as const }),
   };
 });
+// Phase 1C-A: the real Meta launch-budget validator refuses every launch today
+// (IDR unit and ad-account currency are unverified). These tests simulate an
+// open gate and exercise the claim/partial-failure logic PAST it, so the
+// validator's verdict is stubbed to pass the value through unchanged. The real
+// validator is covered in meta-launch-budget.test.ts and
+// launch-meta-budget-refusal.test.ts.
+vi.mock("@/lib/campaigns/meta-launch-budget", () => ({
+  resolveMetaLaunchBudget: (input: { allocatedDailyBudget: number }) => ({
+    ok: true as const,
+    value: { minorUnits: input.allocatedDailyBudget, wholeAmount: input.allocatedDailyBudget },
+  }),
+}));
 vi.mock("@/lib/campaigns/meta-objective-contracts", async (importOriginal) => {
   const helpers = await import("../helpers/meta-preflight-fixtures");
   return helpers.verifiedContracts(importOriginal as () => Promise<typeof import("@/lib/campaigns/meta-objective-contracts")>);

@@ -87,7 +87,7 @@ describe("tripwire — the launch path must convert units before the Budget Gate
   it("while the gate allowlist is empty nothing launches; if META is ever added, launch-actions must call the converter", () => {
     const launch = readFileSync("features/campaigns/launch-actions.ts", "utf8");
     if ((BUDGET_WRITE_ENABLED_PLATFORMS as readonly string[]).includes("META")) {
-      expect(launch).toContain("resolveMetaBudgetMinorUnits");
+      expect(launch).toContain("resolveMetaLaunchBudget");
     } else {
       expect(BUDGET_WRITE_ENABLED_PLATFORMS).toHaveLength(0);
     }
