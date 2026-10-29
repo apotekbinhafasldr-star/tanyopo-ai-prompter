@@ -491,7 +491,7 @@ describe("H2-C: every post-claim write is fenced by the attempt's own note", () 
       }
     }
     expect(Object.keys(rest.at(-1)!.patch).sort()).toEqual(["error", "status"]);
-    expect(rest.at(-1)!.patch).toEqual({ status: "ACTIVE", error: null });
+    expect(rest.at(-1)!.patch).toEqual({ status: "PAUSED", error: null });
   });
 
   it("no write after the claim ever filters on updated_at only, or resets status broadly", async () => {

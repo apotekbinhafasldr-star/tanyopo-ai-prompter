@@ -7,6 +7,7 @@ import { requireSessionContext } from "@/services/session";
 import { getConnector } from "@/lib/connectors/get-connector";
 import { CHANNEL_TO_CONNECTOR } from "@/lib/connectors/channel-map";
 import { allocateDailyBudget } from "@/lib/campaigns/budget-allocation";
+import { statusAfterSuccessfulLaunch } from "@/lib/campaigns/launched-status";
 import { checkBudgetGuard } from "@/lib/budget-guard";
 import {
   BUDGET_WRITE_DISABLED_MESSAGE,
@@ -734,14 +735,16 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
     });
     created.adId = requireCreatedId(ad, "createAd");
 
-    // Final write: only a CONFIRMED update to ACTIVE counts as success.
+    // Final write: only a CONFIRMED update counts as success. META records PAUSED
+    // (every Meta object is created PAUSED and nothing here activates it); only
+    // TikTok / X keep ACTIVE. See lib/campaigns/launched-status.ts.
     step = "saveResult";
     await persistLaunchProgress(
       supabase,
       session.tenantId,
       channelCampaignId,
       fence,
-      { status: "ACTIVE", error: null },
+      { status: statusAfterSuccessfulLaunch(connectorPlatform), error: null },
       "result",
     );
   } catch (err) {
@@ -903,12 +906,12 @@ async function persistLaunchProgress(
   tenantId: string,
   channelCampaignId: string,
   fence: LaunchFence,
-  patch: { status?: "ACTIVE"; external_campaign_id?: string; error: string | null },
+  patch: { status?: "ACTIVE" | "PAUSED"; external_campaign_id?: string; error: string | null },
   phase: "intent" | "result",
 ): Promise<void> {
   const outcome = await writeFenced(supabase, tenantId, channelCampaignId, fence, patch);
   if (outcome === "written") return;
-  const what = phase === "intent" ? "niat pembuatan" : patch.status === "ACTIVE" ? "status akhir" : "progres peluncuran";
+  const what = phase === "intent" ? "niat pembuatan" : patch.status !== undefined ? "status akhir" : "progres peluncuran";
   if (outcome === "lost") throw new LaunchFenceLostError(what);
   throw new LaunchDatabaseError(what, phase === "intent");
 }

@@ -11,6 +11,7 @@ import {
 } from "@/lib/campaigns/meta-campaign-spec";
 import { META_OBJECTIVE_CONTRACTS, META_UNSUPPORTED_OBJECTIVES } from "@/lib/campaigns/meta-objective-contracts";
 import { resolveMetaObjectivePlan } from "@/lib/campaigns/meta-launch-preflight";
+import { META_VERIFIED_BILLING_EVENTS } from "@/lib/connectors/meta-connector-contract";
 import { BUDGET_WRITE_ENABLED_PLATFORMS } from "@/lib/campaigns/external-budget-guard";
 
 /** The Founder's manual draft: Website Traffic, Indonesia, age 23–50. */
@@ -205,8 +206,8 @@ describe("Traffic Website contract — launch stays blocked (fail-closed)", () =
 
   it("the other locks stay closed: Budget Gate allowlist is empty and the connector only knows REACH", () => {
     expect(BUDGET_WRITE_ENABLED_PLATFORMS).toHaveLength(0);
-    const connector = readFileSync("lib/connectors/meta-connector.ts", "utf8");
-    expect(connector).toContain('VERIFIED_BILLING_EVENTS: Readonly<Record<string, string>> = Object.freeze({ REACH: "IMPRESSIONS" })');
+    expect(META_VERIFIED_BILLING_EVENTS).toEqual({ REACH: "IMPRESSIONS" });
+    expect(readFileSync("lib/connectors/meta-connector.ts", "utf8")).toContain("META_VERIFIED_BILLING_EVENTS");
   });
 });
 

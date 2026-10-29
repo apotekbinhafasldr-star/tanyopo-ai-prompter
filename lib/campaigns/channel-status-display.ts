@@ -7,6 +7,10 @@ import { campaignStatusLabel, campaignStatusVariant } from "@/lib/utils/format";
  * Pure presentation logic: nothing here reads or writes the database, and
  * the stored status values are never changed.
  *
+ * Phase 1B: a successful Meta launch is now recorded PAUSED (lib/campaigns/
+ * launched-status.ts), which the generic label already shows as "Dijeda". The
+ * ACTIVE branch below stays for rows recorded before that change.
+ *
  * Why this exists: the Meta connector creates every object (campaign, ad
  * set, ad) with `status: "PAUSED"` and nothing in this app ever activates
  * them. LINOE's own `ACTIVE` therefore only means "all objects were created
@@ -53,5 +57,12 @@ export function requiresManualCheck(channel: string, status: string): boolean {
 
 /** Whether the "Luncurkan" control may be rendered for this row at all. */
 export function canOfferLaunch(masterStatus: string, channel: string, channelStatus: string): boolean {
-  return masterStatus === "SCHEDULED" && channelStatus !== "ACTIVE" && !requiresManualCheck(channel, channelStatus);
+  // A Meta row recorded PAUSED after a launch (Phase 1B) is already launched: no control.
+  const metaLaunchedPaused = isMetaChannel(channel) && channelStatus === "PAUSED";
+  return (
+    masterStatus === "SCHEDULED" &&
+    channelStatus !== "ACTIVE" &&
+    !metaLaunchedPaused &&
+    !requiresManualCheck(channel, channelStatus)
+  );
 }

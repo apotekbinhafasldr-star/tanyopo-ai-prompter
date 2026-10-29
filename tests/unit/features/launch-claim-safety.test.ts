@@ -236,7 +236,7 @@ describe("exclusive launch claim", () => {
     expect(connectorMock.createAdSet).toHaveBeenCalledTimes(1);
     expect(connectorMock.createCreative).toHaveBeenCalledTimes(1);
     expect(connectorMock.createAd).toHaveBeenCalledTimes(1);
-    expect(db.row.status).toBe("ACTIVE");
+    expect(db.row.status).toBe("PAUSED");
     // exactly one claim applied
     const claims = db.updates.filter((u) => u.patch.status === "FAILED" && u.applied);
     expect(claims).toHaveLength(1);
@@ -308,8 +308,8 @@ describe("database failures stop the launch", () => {
     expect(db.row.status).not.toBe("ACTIVE");
   });
 
-  it("5c. a failed final ACTIVE write is never reported as success", async () => {
-    db.failUpdate = (patch) => patch.status === "ACTIVE";
+  it("5c. a failed final PAUSED write is never reported as success", async () => {
+    db.failUpdate = (patch) => patch.status === "PAUSED";
     const result = await launchChannelCampaignAction("cc1");
 
     expect(result.error).not.toBeNull();
@@ -397,11 +397,11 @@ describe("partial failures keep a trace and block relaunch", () => {
     expect(stored).not.toContain("provider message");
   });
 
-  it("a successful launch ends ACTIVE with no error and one launched audit", async () => {
+  it("a successful launch ends PAUSED (Meta objects are created PAUSED) with no error and one launched audit", async () => {
     const result = await launchChannelCampaignAction("cc1");
 
     expect(result.error).toBeNull();
-    expect(db.row).toMatchObject({ status: "ACTIVE", error: null, external_campaign_id: "ext_campaign_1" });
+    expect(db.row).toMatchObject({ status: "PAUSED", error: null, external_campaign_id: "ext_campaign_1" });
     expect(db.audits.filter((a) => a.action === "campaign.launched")).toHaveLength(1);
   });
 });
@@ -711,7 +711,7 @@ describe("Meta preflight (PR #36)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// PR #37 / A3 — audit trail of the Meta object ids. The final ACTIVE write
+// PR #37 / A3 — audit trail of the Meta object ids. The final PAUSED write
 // clears the row's progress note, so the audit row is the only place that
 // keeps the ad set, creative and ad ids of a successful launch.
 // ---------------------------------------------------------------------------
@@ -734,8 +734,8 @@ describe("audit trail of created Meta objects (PR #37 / A3)", () => {
         created_objects: "campaign=ext_campaign_1, adset=ext_adset_1, creative=ext_creative_1, ad=ext_ad_1",
       },
     });
-    // The row itself still ends ACTIVE with the note cleared (unchanged).
-    expect(db.row).toMatchObject({ status: "ACTIVE", error: null, external_campaign_id: "ext_campaign_1" });
+    // The row itself still ends PAUSED with the note cleared (unchanged).
+    expect(db.row).toMatchObject({ status: "PAUSED", error: null, external_campaign_id: "ext_campaign_1" });
   });
 
   it("the launched audit is written for the session's own tenant", async () => {
@@ -787,7 +787,7 @@ describe("audit trail of created Meta objects (PR #37 / A3)", () => {
       const result = await launchChannelCampaignAction("cc1");
 
       expect(result.error).toBeNull();
-      expect(db.row.status).toBe("ACTIVE");
+      expect(db.row.status).toBe("PAUSED");
       expect(connectorMock.createCampaign).toHaveBeenCalledTimes(1);
       expect(connectorMock.createAdSet).toHaveBeenCalledTimes(1);
       expect(connectorMock.createCreative).toHaveBeenCalledTimes(1);

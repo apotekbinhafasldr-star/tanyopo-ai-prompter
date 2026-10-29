@@ -4,6 +4,11 @@ import { serverEnv } from "@/lib/env";
 import { isConnectorConfigured } from "@/lib/env";
 import type { MetaAdAccountSnapshot } from "@/lib/connectors/meta-readiness";
 import {
+  META_VERIFIED_BILLING_EVENTS,
+  resolveMetaAgeTargeting,
+  resolveMetaCtaType,
+} from "@/lib/connectors/meta-connector-contract";
+import {
   ConnectorApiError,
   ConnectorConfigError,
   type AdInput,
@@ -188,8 +193,8 @@ function toSnapshot(row: RawReadinessAdAccount): Omit<MetaAdAccountSnapshot, "mi
   };
 }
 
-/** optimization_goal -> billing_event pairs verified in Meta's docs. REACH only supports IMPRESSIONS. */
-const VERIFIED_BILLING_EVENTS: Readonly<Record<string, string>> = Object.freeze({ REACH: "IMPRESSIONS" });
+/** optimization_goal -> billing_event pairs verified in Meta's docs (REACH only). Defined in the pure contract module. */
+const VERIFIED_BILLING_EVENTS = META_VERIFIED_BILLING_EVENTS;
 
 export class MetaConnector implements PlatformConnector {
   readonly platform = "META" as const;
@@ -468,6 +473,15 @@ export class MetaConnector implements PlatformConnector {
         "Optimization goal Meta belum ditentukan atau belum terverifikasi. Ad set tidak dibuat.",
       );
     }
+    // Optional age range (Phase 1B). Absent -> nothing added (unchanged). Present but
+    // invalid -> refuse before any request, like the goal check above.
+    const age = resolveMetaAgeTargeting(input.ageMin, input.ageMax);
+    if (!age.ok) {
+      throw new ConnectorConfigError(
+        this.platform,
+        "Rentang umur targeting tidak valid (harus bilangan bulat 18-65, minimum tidak melebihi maksimum). Ad set tidak dibuat.",
+      );
+    }
     return graphFetch(`/${adAccountId}/adsets`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -478,7 +492,7 @@ export class MetaConnector implements PlatformConnector {
         billing_event: billingEvent,
         optimization_goal: input.optimizationGoal,
         bid_strategy: "LOWEST_COST_WITHOUT_CAP",
-        targeting: { geo_locations: { countries: input.targetingCountries } },
+        targeting: { geo_locations: { countries: input.targetingCountries }, ...(age.value ?? {}) },
         status: "PAUSED",
         access_token: accessToken,
       }),
@@ -522,7 +536,7 @@ export class MetaConnector implements PlatformConnector {
             name: input.headline,
             link: input.linkUrl,
             picture: input.imageUrl,
-            call_to_action: { type: "LEARN_MORE", value: { link: input.linkUrl } },
+            call_to_action: { type: resolveMetaCtaType(input.cta), value: { link: input.linkUrl } },
           },
         },
         access_token: accessToken,
