@@ -81,6 +81,12 @@ export interface AdSetInput {
    * verified billing-event pairing) instead of defaulting.
    */
   optimizationGoal?: string;
+  /**
+   * Meta only (Phase 1B), both or neither: an inclusive age range for targeting.
+   * Other connectors ignore it. When omitted nothing is added to the request.
+   */
+  ageMin?: number;
+  ageMax?: number;
 }
 
 export interface CreativeInput {

@@ -101,6 +101,10 @@ describe("no misleading retry for a Meta FAILED row (PR #37 / A2)", () => {
     expect(canOfferLaunch("SCHEDULED", "FACEBOOK", "ACTIVE")).toBe(false);
   });
 
+  it("a Meta row recorded PAUSED after a launch never gets a launch control (Phase 1B)", () => {
+    for (const channel of ["FACEBOOK", "INSTAGRAM"]) expect(canOfferLaunch("SCHEDULED", channel, "PAUSED")).toBe(false);
+  });
+
   it("other channels keep their existing launch behaviour", () => {
     expect(canOfferLaunch("SCHEDULED", "TIKTOK", "SCHEDULED")).toBe(true);
     expect(canOfferLaunch("SCHEDULED", "TIKTOK", "FAILED")).toBe(true);
