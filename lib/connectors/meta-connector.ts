@@ -4,6 +4,11 @@ import { serverEnv } from "@/lib/env";
 import { isConnectorConfigured } from "@/lib/env";
 import type { MetaAdAccountSnapshot } from "@/lib/connectors/meta-readiness";
 import {
+  evaluateMetaAccountCurrencyEvidence,
+  isWellFormedMetaAdAccountId,
+  type MetaCurrencyEvidence,
+} from "@/lib/connectors/meta-account-evidence";
+import {
   META_VERIFIED_BILLING_EVENTS,
   resolveMetaAgeTargeting,
   resolveMetaCtaType,
@@ -433,6 +438,28 @@ export class MetaConnector implements PlatformConnector {
       accounts.push({ id, name: safeAccountName(row.name), snapshot: { ...toSnapshot(row), minDailyBudgetRaw: null } });
     }
     return { accounts, truncated: Boolean(list.paging?.next) };
+  }
+
+  /**
+   * Phase 1C-B — READ-ONLY currency evidence for ONE ad account: a single
+   * `GET /{act_id}?fields=id,currency,account_status`. It writes nothing,
+   * creates nothing and touches no budget, so it is not a budget-write call
+   * site. The id comes from the tenant's stored connection; a malformed id
+   * never reaches a request path. The response is judged by the pure
+   * `evaluateMetaAccountCurrencyEvidence`: any unexpected shape is UNVERIFIED
+   * and there is no default currency. Transport errors propagate as
+   * `ConnectorApiError`; the caller treats them as "not verified" and must not
+   * log the provider text.
+   */
+  async getAdAccountCurrencyEvidence(accessToken: string, adAccountId: string): Promise<MetaCurrencyEvidence> {
+    this.requireConfig();
+    if (!isWellFormedMetaAdAccountId(adAccountId)) return { kind: "UNVERIFIED", reason: "ACCOUNT_ID_INVALID" };
+    const raw = await graphFetch<unknown>(
+      `/${adAccountId}?${new URLSearchParams({ fields: "id,currency,account_status", access_token: accessToken })}`,
+      undefined,
+      { timeoutMs: READINESS_TIMEOUT_MS },
+    );
+    return evaluateMetaAccountCurrencyEvidence(raw, adAccountId);
   }
 
   async createCampaign(

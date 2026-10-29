@@ -9,6 +9,8 @@ import { CHANNEL_TO_CONNECTOR } from "@/lib/connectors/channel-map";
 import { allocateDailyBudget } from "@/lib/campaigns/budget-allocation";
 import { statusAfterSuccessfulLaunch } from "@/lib/campaigns/launched-status";
 import { resolveMetaLaunchBudget } from "@/lib/campaigns/meta-launch-budget";
+import { readSelectionConfirmed } from "@/features/connections/meta-selection-confirmation";
+import type { PlatformConnector } from "@/lib/connectors/types";
 import { checkBudgetGuard } from "@/lib/budget-guard";
 import {
   BUDGET_WRITE_DISABLED_MESSAGE,
@@ -60,6 +62,57 @@ import {
 } from "@/lib/campaigns/purchase-destination";
 import type { CampaignProposal } from "@/schemas/ai/campaign-proposal";
 import type { ConnectorPlatform, Database } from "@/types/database";
+
+// Phase 1C-B messages. None of them carries a token, an id, an amount or provider text.
+const EARLY_GATE_CODES: ReadonlySet<string> = new Set(["PLATFORM_DISABLED", "EMERGENCY_STOP_ACTIVE", "EMERGENCY_STOP_UNKNOWN"]);
+const ACCOUNT_UNCONFIRMED_MESSAGE =
+  "Akun iklan Meta belum dikonfirmasi Owner. Pilih dan konfirmasi akun iklan di halaman Connections. Tidak ada yang dikirim ke Meta.";
+const ACCOUNT_CONFIRMATION_UNREADABLE_MESSAGE =
+  "Konfirmasi akun iklan Meta tidak dapat diperiksa. Peluncuran dibatalkan, coba lagi. Tidak ada yang dikirim ke Meta.";
+const TOKEN_EXPIRED_MESSAGE =
+  "Token koneksi Meta sudah kedaluwarsa atau tidak valid. Hubungkan ulang akun di halaman Connections. Tidak ada yang dikirim ke Meta.";
+const CURRENCY_UNVERIFIED_MESSAGE =
+  "Mata uang akun iklan belum terverifikasi — peluncuran dibatalkan. Tidak ada yang dikirim ke Meta.";
+const ACCOUNT_MISMATCH_MESSAGE =
+  "Akun iklan yang dibaca dari Meta tidak sama dengan akun tersimpan — peluncuran dibatalkan. Tidak ada yang dikirim ke Meta.";
+const ACCOUNT_NOT_ACTIVE_MESSAGE =
+  "Akun iklan Meta belum aktif atau statusnya tidak terbaca — peluncuran dibatalkan. Tidak ada yang dikirim ke Meta.";
+
+type MetaAccountCurrencyRead = { ok: true; currency: string } | { ok: false; message: string };
+
+/**
+ * Phase 1C-B: the ONE read of the ad account's currency for a Meta launch. The
+ * result feeds BOTH the Budget Gate and the budget validator. READ-ONLY. Any
+ * failure, missing method, thrown error, unexpected shape or id mismatch is
+ * "not verified": there is no default currency. The thrown value is never
+ * inspected, logged or returned (provider text can echo request data).
+ */
+async function readMetaAccountCurrency(
+  connector: PlatformConnector,
+  accessToken: string,
+  adAccountId: string,
+): Promise<MetaAccountCurrencyRead> {
+  if (typeof connector.getAdAccountCurrencyEvidence !== "function") {
+    return { ok: false, message: CURRENCY_UNVERIFIED_MESSAGE };
+  }
+  let evidence: Awaited<ReturnType<NonNullable<PlatformConnector["getAdAccountCurrencyEvidence"]>>>;
+  try {
+    evidence = await connector.getAdAccountCurrencyEvidence(accessToken, adAccountId);
+  } catch {
+    return { ok: false, message: CURRENCY_UNVERIFIED_MESSAGE };
+  }
+  if (!evidence || evidence.kind !== "VERIFIED") {
+    const reason = evidence && evidence.kind === "UNVERIFIED" ? evidence.reason : null;
+    if (reason === "ACCOUNT_ID_MISMATCH") return { ok: false, message: ACCOUNT_MISMATCH_MESSAGE };
+    if (reason === "STATUS_NOT_ACTIVE" || reason === "STATUS_UNKNOWN") return { ok: false, message: ACCOUNT_NOT_ACTIVE_MESSAGE };
+    return { ok: false, message: CURRENCY_UNVERIFIED_MESSAGE };
+  }
+  if (evidence.accountId !== adAccountId) return { ok: false, message: ACCOUNT_MISMATCH_MESSAGE };
+  if (typeof evidence.currency !== "string" || !/^[A-Z]{3}$/.test(evidence.currency)) {
+    return { ok: false, message: CURRENCY_UNVERIFIED_MESSAGE };
+  }
+  return { ok: true, currency: evidence.currency };
+}
 
 export interface LaunchActionState {
   error: string | null;
@@ -317,6 +370,28 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
     return { error: BUDGET_WRITE_DISABLED_MESSAGE };
   }
 
+  // Phase 1C-B: Emergency Stop is read right after the static lock and BEFORE
+  // the approval, the account confirmation, the credentials and the currency
+  // read, so an active or unreadable Emergency Stop reaches none of them.
+  // The same gate decides (its own messages); only its platform / Emergency
+  // Stop verdicts count at this point, the evidence checks run later.
+  const emergencyStopActive = await readEmergencyStopStrict(supabase, session.tenantId);
+  const earlyGate = evaluateExternalBudgetWrite({
+    operation: "LAUNCH",
+    platform: connectorPlatform,
+    emergencyStopActive,
+    masterCurrency: null,
+    accountCurrency: null,
+    proposedDailyBudget: null,
+    currentExternalDailyBudget: null,
+    otherPaidChannelsDailyTotal: null,
+    masterDailyBudget: null,
+    budgetGuard: { allowed: true },
+  });
+  if (!earlyGate.allowed && EARLY_GATE_CODES.has(earlyGate.code)) {
+    return { error: earlyGate.message };
+  }
+
   const { data: masterCampaign, error: masterError } = await supabase
     .from("prompter_master_campaigns")
     .select(
@@ -468,47 +543,6 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
     return { error: guard.reason ?? "Peluncuran ditolak oleh Budget Guard." };
   }
 
-  // S1 External Budget Safety Gate, evidence layer: still before the claim,
-  // so a denial writes nothing (no claim, status update or audit) and calls
-  // no platform API. The ad-account currency and the current external budget
-  // are NOT VERIFIED anywhere yet (null), which the gate always denies.
-  const emergencyStopActive = await readEmergencyStopStrict(supabase, session.tenantId);
-  const gate = evaluateExternalBudgetWrite({
-    operation: "LAUNCH",
-    platform: connectorPlatform,
-    emergencyStopActive,
-    masterCurrency: masterCampaign.currency,
-    accountCurrency: null,
-    proposedDailyBudget: allocatedDailyBudget,
-    currentExternalDailyBudget: null,
-    otherPaidChannelsDailyTotal: null,
-    masterDailyBudget: masterCampaign.daily_budget,
-    budgetGuard: { allowed: true },
-  });
-  if (!gate.allowed) {
-    return { error: gate.message };
-  }
-
-  // Phase 1C-A: for META the number sent to Meta comes ONLY from this
-  // validator (Owner-approved ceiling, verified account currency, verified
-  // budget unit). The ad account's currency is not verifiable from the launch
-  // path yet, so it is null here and the launch is refused. Still before the
-  // claim: a refusal writes nothing and calls no platform API.
-  let metaBudgetMinorUnits: number | null = null;
-  if (connectorPlatform === "META") {
-    const metaBudget = resolveMetaLaunchBudget({
-      approvalContext,
-      masterDailyBudget: masterCampaign.daily_budget,
-      allocatedDailyBudget,
-      masterCurrency: masterCampaign.currency,
-      accountCurrency: null,
-    });
-    if (!metaBudget.ok) {
-      return { error: metaBudget.message };
-    }
-    metaBudgetMinorUnits = metaBudget.value.minorUnits;
-  }
-
   // Connection reads, still BEFORE the atomic claim: a failed read writes
   // nothing and calls no platform API (fail closed).
   //
@@ -519,7 +553,7 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
   // it aborts the launch. It is never replaced by a default or a guess.
   const { data: connectedAccount, error: connectedAccountError } = await supabase
     .from("prompter_connected_accounts")
-    .select("id, external_account_id, status")
+    .select("id, external_account_id, status, last_refreshed_at, expires_at")
     .eq("tenant_id", session.tenantId)
     .eq("platform", connectorPlatform)
     .maybeSingle();
@@ -532,6 +566,29 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
     return {
       error: `${connectorPlatform} belum terhubung. Hubungkan akun di halaman Connections terlebih dahulu.`,
     };
+  }
+
+  if (connectorPlatform === "META") {
+    // Phase 1C-B: only an ad account the Owner explicitly confirmed (F-2b)
+    // may be used. The OAuth callback stores the FIRST account Meta lists, and
+    // that choice alone is never enough. Uses the existing confirmation
+    // marker, bound to this tenant, this connection and the current connect.
+    const confirmation = await readSelectionConfirmed(session.tenantId, {
+      id: connectedAccount.id,
+      external_account_id: connectedAccount.external_account_id,
+      last_refreshed_at: connectedAccount.last_refreshed_at,
+    });
+    if (!confirmation.ok) return { error: ACCOUNT_CONFIRMATION_UNREADABLE_MESSAGE };
+    if (!confirmation.confirmed) return { error: ACCOUNT_UNCONFIRMED_MESSAGE };
+
+    // A token that has lapsed (or whose expiry cannot be read) is not used.
+    // No expiry stored = no expiry known (same rule as the readiness check).
+    if (connectedAccount.expires_at) {
+      const expiresAt = new Date(connectedAccount.expires_at);
+      if (Number.isNaN(expiresAt.getTime()) || expiresAt.getTime() <= Date.now()) {
+        return { error: TOKEN_EXPIRED_MESSAGE };
+      }
+    }
   }
 
   let selectedPageId: string | undefined;
@@ -566,6 +623,7 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
     .from("prompter_oauth_credentials")
     .select("encrypted_access_token")
     .eq("connected_account_id", connectedAccount.id)
+    .eq("tenant_id", session.tenantId)
     .maybeSingle();
 
   if (!credentials) {
@@ -582,6 +640,60 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
     accessToken = decryptToken(credentials.encrypted_access_token);
   } catch {
     return { error: "Gagal membaca kredensial. Coba hubungkan ulang akun." };
+  }
+
+  // Phase 1C-B: ONE currency read (META only; read-only, no write on Meta). Its
+  // result is used by the Budget Gate AND the budget validator below. Anything
+  // that is not VERIFIED stops here, before the claim.
+  let accountCurrency: string | null = null;
+  if (connectorPlatform === "META") {
+    const currencyRead = await readMetaAccountCurrency(connector, accessToken, connectedAccount.external_account_id);
+    if (!currencyRead.ok) {
+      return { error: currencyRead.message };
+    }
+    accountCurrency = currencyRead.currency;
+  }
+
+  // S1 External Budget Safety Gate, evidence layer: still before the claim,
+  // so a denial writes nothing (no claim, status update or audit). The ad
+  // account currency is the verified value above (null for platforms that
+  // never get that far); the current external budget stays unverified (null).
+  const gate = evaluateExternalBudgetWrite({
+    operation: "LAUNCH",
+    platform: connectorPlatform,
+    emergencyStopActive,
+    masterCurrency: masterCampaign.currency,
+    accountCurrency,
+    proposedDailyBudget: allocatedDailyBudget,
+    currentExternalDailyBudget: null,
+    otherPaidChannelsDailyTotal: null,
+    masterDailyBudget: masterCampaign.daily_budget,
+    budgetGuard: { allowed: true },
+  });
+  if (!gate.allowed) {
+    return { error: gate.message };
+  }
+
+  // For META the number sent to Meta comes ONLY from the budget validator
+  // (Owner-approved ceiling, the SAME verified account currency, verified
+  // budget unit). There is no fallback to the whole-IDR share: a META launch
+  // without a successful validator result returns above and never reaches
+  // the claim.
+  let launchDailyBudgetMinorUnits: number;
+  if (connectorPlatform === "META") {
+    const metaBudget = resolveMetaLaunchBudget({
+      approvalContext,
+      masterDailyBudget: masterCampaign.daily_budget,
+      allocatedDailyBudget,
+      masterCurrency: masterCampaign.currency,
+      accountCurrency,
+    });
+    if (!metaBudget.ok) {
+      return { error: metaBudget.message };
+    }
+    launchDailyBudgetMinorUnits = metaBudget.value.minorUnits;
+  } else {
+    launchDailyBudgetMinorUnits = allocatedDailyBudget;
   }
 
   // Meta preflight (PR #36): every remaining prerequisite is validated here,
@@ -631,7 +743,7 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
   // This row's own share of the master daily budget (validated above).
   // META: the unit-converted value from resolveMetaLaunchBudget (never the
   // whole-IDR number). TikTok/X keep their existing behaviour.
-  const dailyBudgetMinorUnits = metaBudgetMinorUnits ?? allocatedDailyBudget;
+  const dailyBudgetMinorUnits = launchDailyBudgetMinorUnits;
   const budgetAuditContext = {
     allocated_daily_budget: allocatedDailyBudget,
     budget_percentage: channelRows.find((row) => row.id === channelCampaign.id)?.budget_percentage ?? null,

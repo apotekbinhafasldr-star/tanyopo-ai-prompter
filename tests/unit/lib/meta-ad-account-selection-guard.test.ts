@@ -91,7 +91,7 @@ describe("ad-account selection: no writes outside the two allowed ones", () => {
 describe("ad-account selection: never touches ads, budgets or the Budget Gate", () => {
   it("has no reference to the gate, flags, billing or campaign/budget methods", () => {
     const actions = read("features/connections/actions.ts");
-    const f2b = actions.slice(actions.indexOf("const AD_ACCOUNT_SELECTED_ACTION"));
+    const f2b = actions.slice(actions.indexOf("const PRE_LAUNCH_STATUSES"));
     for (const text of [...PURE_AND_UI.map(read), f2b]) {
       expect(text).not.toContain("external-budget-guard");
       expect(text).not.toContain("BUDGET_WRITE_ENABLED_PLATFORMS");

@@ -6,6 +6,8 @@
  * `ConnectorConfigError`, never a simulated success.
  */
 
+import type { MetaCurrencyEvidence } from "@/lib/connectors/meta-account-evidence";
+
 export class ConnectorConfigError extends Error {
   constructor(
     public readonly platform: string,
@@ -143,6 +145,12 @@ export interface PlatformConnector {
    */
   getInsights(accessToken: string, adAccountId: string, externalCampaignId: string): Promise<ConnectorInsights>;
   pauseCampaign(accessToken: string, adAccountId: string, externalCampaignId: string): Promise<void>;
+
+  /**
+   * Meta only (Phase 1C-B). READ-ONLY currency evidence for one ad account.
+   * Optional: a connector without it can never produce VERIFIED evidence.
+   */
+  getAdAccountCurrencyEvidence?(accessToken: string, adAccountId: string): Promise<MetaCurrencyEvidence>;
   updateBudget(
     accessToken: string,
     adAccountId: string,

@@ -33,6 +33,12 @@ vi.mock("@/lib/connectors/get-connector", () => ({ getConnector: getConnectorMoc
 
 let harness: ReturnType<typeof buildLaunchHarness>;
 const { createAdminClientMock } = vi.hoisted(() => ({ createAdminClientMock: vi.fn() }));
+// Phase 1C-B: the Owner confirmation is covered in launch-meta-account-evidence.test.ts; here it says "confirmed"
+// so the evidence layer behind it (credentials -> currency read -> gate) can be exercised.
+vi.mock("@/features/connections/meta-selection-confirmation", () => ({
+  AD_ACCOUNT_SELECTED_ACTION: "connection.meta_ad_account_selected",
+  readSelectionConfirmed: vi.fn(async () => ({ ok: true as const, confirmed: true })),
+}));
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn(async () => ({ from: harness.from })) }));
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: createAdminClientMock }));
 
@@ -86,9 +92,16 @@ describe("launchChannelCampaignAction — gate evidence layer (META enabled for 
     ["Emergency Stop inactive", { data: { emergency_stop_active: false }, error: null }],
   ])("still denies with %s because the ad-account currency is unverified", async (_label, settings) => {
     harness = buildLaunchHarness({ settings });
+    // Credentials resolve (tenant-scoped), but this connector offers no currency evidence: not verified.
+    const credentials = { maybeSingle: async () => ({ data: { encrypted_access_token: "cipher" }, error: null }) };
+    createAdminClientMock.mockReturnValue({ from: () => ({ select: () => ({ eq: () => ({ ...credentials, eq: () => credentials }) }) }) });
     const result = await launchChannelCampaignAction("cc1");
     expect(result.error).toMatch(/Mata uang akun iklan belum terverifikasi/);
-    expectNoSideEffects();
+    // Denied before the claim and before any write on the platform.
+    expect(harness.claimUpdate).not.toHaveBeenCalled();
+    expect(harness.auditInsert).not.toHaveBeenCalled();
+    expect(connectorMock.createCampaign).not.toHaveBeenCalled();
+    expect(connectorMock.createAdSet).not.toHaveBeenCalled();
   });
 
   it("keeps other platforms denied by the platform lock even though META is enabled here", async () => {
