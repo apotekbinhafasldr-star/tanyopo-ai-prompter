@@ -135,6 +135,46 @@ jobs:
           REQUIRE_PG_MAJOR: "17"
         run: bash supabase/tests/s1-trial-quota/run-local.sh
 
+  # P0 plan tampering (supabase/tests/plan-tampering): an Owner must not change prompter_subscriptions.plan without a
+  # verified payment. PostgreSQL 17 (production is 17.x), SYNTHETIC data, throw-away database. Proves the hole BEFORE the
+  # migration, the fix AFTER it (every status, cross-tenant, defense in depth), the verified payment / cancellation /
+  # sweep paths, composition with the S1 migrations in both orders, and a fail-closed rollback. run-local.sh refuses
+  # any non-local host and any production credential variable. Nothing here touches Supabase.
+  plan-tampering-sql:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: linoe_ci
+          POSTGRES_PASSWORD: linoe_ci_password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U linoe_ci -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: linoe_ci
+      PGPASSWORD: linoe_ci_password
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ensure psql client
+        run: command -v psql || (sudo apt-get update && sudo apt-get install -y postgresql-client)
+
+      - name: Plan-tampering SQL regression tests (PostgreSQL 17 required)
+        env:
+          REQUIRE_PG_MAJOR: "17"
+        run: |
+          set -o pipefail
+          bash supabase/tests/plan-tampering/run-local.sh 2>&1 | tee "$RUNNER_TEMP/pt.txt"
+          grep -q '^ALL PASSED' "$RUNNER_TEMP/pt.txt"
+
   # PR #48's COMPLETE AI-jobs-guard suite on PostgreSQL 17 (production is 17.x; #48's own CI job runs 16).
   # Nothing of PR #48 is modified: its head is fetched read-only, its own run-local.sh is executed unchanged from the
   # fetched tree, together with its #31/#44/#45/#46 integration variants. Unlike the best-effort fetches above,

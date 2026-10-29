@@ -1458,6 +1458,12 @@ export interface Database {
         Args: { p_cancel: boolean };
         Returns: { allowed: boolean; reason: string | null }[];
       };
+      // P0 plan tampering -- supabase/migrations/20261029220000_prompter_p0_subscription_plan_tampering_lockdown.sql.
+      // Owner-only, TRIALING-only plan PREFERENCE (grants no paid access).
+      fn_set_trial_plan_preference: {
+        Args: { p_plan: string };
+        Returns: { out_ok: boolean; out_reason: string | null }[];
+      };
       // LINOE Demo Environment Phase 1 -- see
       // supabase/migrations/20260928161604_prompter_demo_ai_usage.sql.
       // Not tenant-scoped and not part of the tenant/RLS model above --
