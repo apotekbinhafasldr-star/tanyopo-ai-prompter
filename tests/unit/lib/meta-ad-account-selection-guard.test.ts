@@ -38,7 +38,7 @@ describe("ad-account selection: no writes outside the two allowed ones", () => {
 
   it("MetaConnector#listAdAccounts is a single read-only GET", () => {
     const source = read("lib/connectors/meta-connector.ts");
-    const method = between(source, "async listAdAccounts(", "async createCampaign(");
+    const method = between(source, "async listAdAccounts(", "async getAdAccountCurrencyEvidence(");
     expect(method).not.toMatch(/method:\s*["'](POST|DELETE|PUT|PATCH)["']/);
     expect(method).not.toContain("funding_source_details");
     expect(method.match(/graphFetch</g)).toHaveLength(1);
