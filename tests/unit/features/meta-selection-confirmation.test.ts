@@ -228,7 +228,7 @@ describe("readSelectionConfirmed: source guarantees", () => {
   const code = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 
   it("is not a server-action module and filters by the Owner set inside the query", () => {
-    expect(source).not.toMatch(/["']use server["']/);
+    expect(code).not.toMatch(/["']use server["']/);
     expect(code).toContain('.in("actor_user_id", ownerIds)');
     expect(code).toContain('.from("user_profiles")');
     expect(code).toContain('.eq("role", "owner")');
