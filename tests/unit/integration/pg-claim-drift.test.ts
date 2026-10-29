@@ -74,9 +74,9 @@ describe("PG test SQL mirrors the application", () => {
     expect(squash(stmt.fail("i", "t", "m", null, "n"))).not.toContain("external_campaign_id");
   });
 
-  it("the final ACTIVE write goes through the fenced progress helper", () => {
+  it("the final status write (PAUSED for Meta, via statusAfterSuccessfulLaunch) goes through the fenced progress helper", () => {
     expect(squash(launch)).toContain(
-      'await persistLaunchProgress( supabase, session.tenantId, channelCampaignId, fence, { status: "ACTIVE", error: null }, "result", );',
+      'await persistLaunchProgress( supabase, session.tenantId, channelCampaignId, fence, { status: statusAfterSuccessfulLaunch(connectorPlatform), error: null }, "result", );',
     );
   });
 

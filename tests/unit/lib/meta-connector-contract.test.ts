@@ -114,6 +114,7 @@ describe("scope guard — the contract module is pure", () => {
   it("imports nothing with side effects", () => {
     const src = readFileSync("lib/connectors/meta-connector-contract.ts", "utf8");
     expect(src).not.toMatch(/^import /m);
-    expect(src).not.toMatch(/\bfetch\(|process\.env|"server-only"|graph\.facebook/);
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    expect(code).not.toMatch(/\bfetch\(|process\.env|server-only|graph\.facebook/);
   });
 });

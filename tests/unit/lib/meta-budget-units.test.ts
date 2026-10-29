@@ -96,6 +96,7 @@ describe("tripwire — the launch path must convert units before the Budget Gate
   it("the module is pure", () => {
     const src = readFileSync("lib/campaigns/meta-budget-units.ts", "utf8");
     expect(src).not.toMatch(/^import /m);
-    expect(src).not.toMatch(/\bfetch\(|process\.env|"server-only"|graph\.facebook/);
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    expect(code).not.toMatch(/\bfetch\(|process\.env|server-only|graph\.facebook/);
   });
 });
