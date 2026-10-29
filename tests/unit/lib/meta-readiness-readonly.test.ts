@@ -33,7 +33,7 @@ function readinessAction(): string {
   const source = read("features/connections/actions.ts");
   const start = source.indexOf("export async function checkMetaAdAccountReadinessAction");
   expect(start).toBeGreaterThan(-1);
-  const end = source.indexOf("const AD_ACCOUNT_SELECTED_ACTION", start);
+  const end = source.indexOf("const PRE_LAUNCH_STATUSES", start);
   expect(end).toBeGreaterThan(start);
   return source.slice(start, end);
 }

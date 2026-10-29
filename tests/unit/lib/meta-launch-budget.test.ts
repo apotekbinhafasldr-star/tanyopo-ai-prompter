@@ -115,11 +115,12 @@ describe("Meta launch budget — isolation and wiring", () => {
     const call = launch.indexOf("resolveMetaLaunchBudget({");
     expect(call).toBeGreaterThan(-1);
     expect(call).toBeLessThan(launch.indexOf("claimChannelCampaignLaunch(supabase"));
-    expect(call).toBeGreaterThan(launch.indexOf("evaluateExternalBudgetWrite({"));
-    expect(launch).toContain("const dailyBudgetMinorUnits = metaBudgetMinorUnits ?? allocatedDailyBudget;");
+    expect(call).toBeGreaterThan(launch.lastIndexOf("evaluateExternalBudgetWrite({"));
+    expect(launch).toContain("const dailyBudgetMinorUnits = launchDailyBudgetMinorUnits;");
+    expect(launch).not.toContain("?? allocatedDailyBudget");
     expect(launch).not.toMatch(/const dailyBudgetMinorUnits = allocatedDailyBudget;/);
     expect(launch).toMatch(/connectorPlatform === "META"\) \{\s*const metaBudget = resolveMetaLaunchBudget/);
-    expect(launch).toContain("accountCurrency: null,\n    });\n    if (!metaBudget.ok)");
+    expect(launch).toContain("accountCurrency,\n    });\n    if (!metaBudget.ok)");
   });
   it("the Budget Gate stays closed", () => {
     expect(BUDGET_WRITE_ENABLED_PLATFORMS).toHaveLength(0);

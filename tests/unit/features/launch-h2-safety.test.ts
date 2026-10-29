@@ -21,6 +21,15 @@ vi.mock("@/lib/campaigns/external-budget-guard", async (importOriginal) => {
     evaluateExternalBudgetWrite: () => ({ allowed: true as const }),
   };
 });
+// Phase 1C-B: the Owner's ad-account confirmation (F-2b marker) and the Meta
+// currency read are covered in launch-meta-account-evidence.test.ts. These
+// tests exercise the claim / partial-failure logic PAST them, so the
+// confirmation says "confirmed" and the connector reports a VERIFIED IDR
+// account whose id echoes the one asked about.
+vi.mock("@/features/connections/meta-selection-confirmation", () => ({
+  AD_ACCOUNT_SELECTED_ACTION: "connection.meta_ad_account_selected",
+  readSelectionConfirmed: vi.fn(async () => ({ ok: true as const, confirmed: true })),
+}));
 // Phase 1C-A: the real Meta launch-budget validator refuses every launch today
 // (IDR unit and ad-account currency are unverified). These tests simulate an
 // open gate and exercise the claim/partial-failure logic PAST it, so the
@@ -55,7 +64,9 @@ const { connectorMock } = vi.hoisted(() => ({
     createAd: vi.fn(),
   },
 }));
-vi.mock("@/lib/connectors/get-connector", () => ({ getConnector: vi.fn(() => connectorMock) }));
+vi.mock("@/lib/connectors/get-connector", () => ({
+  getConnector: vi.fn(() => ({ ...connectorMock, getAdAccountCurrencyEvidence: async (...args: string[]) => ({ kind: "VERIFIED" as const, accountId: args[1], currency: "IDR" }) })),
+}));
 
 interface Row {
   id: string;
@@ -210,7 +221,10 @@ vi.mock("@/lib/supabase/admin", () => ({
     storage: makeAdminStorage(fx),
     from: () => ({
       select: () => ({
-        eq: () => ({ maybeSingle: async () => ({ data: { encrypted_access_token: "cipher" }, error: null }) }),
+        eq: () => ({
+          maybeSingle: async () => ({ data: { encrypted_access_token: "cipher" }, error: null }),
+          eq: () => ({ maybeSingle: async () => ({ data: { encrypted_access_token: "cipher" }, error: null }) }),
+        }),
       }),
     }),
   })),

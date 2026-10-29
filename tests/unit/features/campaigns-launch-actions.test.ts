@@ -23,6 +23,15 @@ vi.mock("@/lib/campaigns/external-budget-guard", async (importOriginal) => {
     evaluateExternalBudgetWrite: () => ({ allowed: true as const }),
   };
 });
+// Phase 1C-B: the Owner's ad-account confirmation (F-2b marker) and the Meta
+// currency read are covered in launch-meta-account-evidence.test.ts. These
+// tests exercise the claim / partial-failure logic PAST them, so the
+// confirmation says "confirmed" and the connector reports a VERIFIED IDR
+// account whose id echoes the one asked about.
+vi.mock("@/features/connections/meta-selection-confirmation", () => ({
+  AD_ACCOUNT_SELECTED_ACTION: "connection.meta_ad_account_selected",
+  readSelectionConfirmed: vi.fn(async () => ({ ok: true as const, confirmed: true })),
+}));
 // Phase 1C-A: the real Meta launch-budget validator refuses every launch today
 // (IDR unit and ad-account currency are unverified). These tests simulate an
 // open gate and exercise the claim/partial-failure logic PAST it, so the
@@ -59,7 +68,7 @@ const { connectorMock, getConnectorMock } = vi.hoisted(() => ({
     createCreative: vi.fn(async () => ({ id: "ext_creative_1" })),
     createAd: vi.fn(async () => ({ id: "ext_ad_1" })),
   },
-  getConnectorMock: vi.fn(() => connectorMock),
+  getConnectorMock: vi.fn(() => ({ ...connectorMock, getAdAccountCurrencyEvidence: async (...args: string[]) => ({ kind: "VERIFIED" as const, accountId: args[1], currency: "IDR" }) })),
 }));
 vi.mock("@/lib/connectors/get-connector", () => ({ getConnector: getConnectorMock }));
 
@@ -207,7 +216,7 @@ function buildHarness(
 
   const adminFrom = vi.fn((table: string) => {
     if (table === "prompter_oauth_credentials") {
-      return { select: () => ({ eq: () => ({ maybeSingle: credentialsMaybeSingle }) }) };
+      return { select: () => ({ eq: () => ({ maybeSingle: credentialsMaybeSingle, eq: () => ({ maybeSingle: credentialsMaybeSingle }) }) }) };
     }
     throw new Error(`Unexpected table on admin client: ${table}`);
   });
@@ -304,7 +313,7 @@ describe("launchChannelCampaignAction — schema without Track B columns / faile
     const result = await launchChannelCampaignAction("cc1");
 
     expect(result.error).toBeNull();
-    expect(harness.connectedAccountSelects).toEqual(["id, external_account_id, status", "selected_page_id"]);
+    expect(harness.connectedAccountSelects).toEqual(["id, external_account_id, status, last_refreshed_at, expires_at", "selected_page_id"]);
   });
 
   it("never reads selected_page_id for TikTok (the column is Meta-only)", async () => {
@@ -316,7 +325,7 @@ describe("launchChannelCampaignAction — schema without Track B columns / faile
     const result = await launchChannelCampaignAction("cc1");
 
     expect(result.error).toBeNull();
-    expect(harness.connectedAccountSelects).toEqual(["id, external_account_id, status"]);
+    expect(harness.connectedAccountSelects).toEqual(["id, external_account_id, status, last_refreshed_at, expires_at"]);
     expect(connectorMock.createCreative).toHaveBeenCalledWith(
       "access-token-abc",
       "act_123",

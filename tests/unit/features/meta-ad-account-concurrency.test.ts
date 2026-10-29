@@ -175,6 +175,8 @@ beforeEach(() => {
     prompter_oauth_credentials: [{ id: "cred-A", tenant_id: "tenant-A", connected_account_id: "conn-A", encrypted_access_token: "cipher" }],
     prompter_audit_logs: [],
     prompter_channel_campaigns: [],
+    // The confirmation marker only counts when its actor is a current Owner of the tenant.
+    user_profiles: [{ id: "user-A", tenant_id: "tenant-A", role: "owner" }],
   };
   hoisted.clock = 0;
   hoisted.faults = { auditInsertError: false, updateError: false, updateAppliedButErrors: false };

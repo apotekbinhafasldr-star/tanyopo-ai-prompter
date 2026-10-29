@@ -121,6 +121,7 @@ beforeEach(() => {
     "prompter_connected_accounts:update": { data: [{ id: "conn-A" }], error: null },
     "prompter_audit_logs:insert": { data: null, error: null },
     "prompter_audit_logs:select": { data: null, error: null },
+    "user_profiles:select": { data: [{ id: "user-A" }], error: null },
   };
 });
 
@@ -292,6 +293,13 @@ describe("listMetaAdAccountsAction and the readiness action: confirmation marker
       ["context->>connected_at", "eq", CONNECT_TS],
     ]);
     expect(ops(q, "limit")[0]).toEqual([1]);
+    // PR #73 remediation: only a marker authored by a current Owner of the tenant counts.
+    expect(ops(q, "in")).toEqual([["actor_user_id", ["user-A"]]]);
+    const owners = hoisted.adminLog.find((l) => l.table === "user_profiles");
+    expect(owners?.ops.filter(([n]) => n === "eq").map(([, a]) => a)).toEqual([
+      ["tenant_id", "tenant-A"],
+      ["role", "owner"],
+    ]);
   });
 
   it("is NOT confirmed when a marker names a different account than the stored one (stale / changed)", async () => {
