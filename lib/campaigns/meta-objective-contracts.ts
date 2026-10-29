@@ -18,6 +18,13 @@
  *   REACH with the bid strategy the connector sends. So `verified` stays
  *   `false` until a controlled test on a Meta test ad account (separate
  *   Founder approval) confirms it. Flipping it is a one-line change.
+ * - `WEBSITE_TRAFFIC` (Phase 1A) now HAS a contract (OUTCOME_TRAFFIC + LINK_CLICKS)
+ *   but it is `verified: false`: the values are the expected pair from Meta's
+ *   objective model, not yet confirmed by documentation re-check or a
+ *   controlled test on a Meta test ad account. It therefore launches nothing.
+ *   Two further locks stay closed even after it is verified: the connector's
+ *   VERIFIED_BILLING_EVENTS has no entry for LINK_CLICKS (the ad-set call
+ *   refuses it) and the External Budget Safety Gate is default-deny.
  * - Objectives that need conversion tracking (Pixel / promoted object),
  *   a lead form, an app, or an engagement destination have no supported
  *   launch path yet and are listed with a user-facing reason.
@@ -38,6 +45,11 @@ export const META_OBJECTIVE_CONTRACTS: Readonly<Record<string, MetaObjectiveCont
     optimizationGoal: "REACH",
     verified: false,
   }),
+  WEBSITE_TRAFFIC: Object.freeze({
+    campaignObjective: "OUTCOME_TRAFFIC",
+    optimizationGoal: "LINK_CLICKS",
+    verified: false,
+  }),
 });
 
 /** Known LINOE objectives that have no Meta launch path yet, with the reason shown to the user. */
@@ -48,8 +60,6 @@ export const META_UNSUPPORTED_OBJECTIVES: Readonly<Record<string, string>> = Obj
     "Objective Leads (GET_LEADS) belum didukung untuk peluncuran Meta: dibutuhkan formulir leads yang belum tersedia di LINOE. Campaign tidak dikirim ke Meta.",
   INCREASE_FOLLOWERS:
     "Objective Pengikut/Engagement (INCREASE_FOLLOWERS) belum memiliki kontrak Meta yang terverifikasi. Campaign tidak dikirim ke Meta.",
-  WEBSITE_TRAFFIC:
-    "Objective Traffic Website (WEBSITE_TRAFFIC) belum memiliki kontrak Meta yang terverifikasi. Campaign tidak dikirim ke Meta.",
   PROMOTE_APP:
     "Objective Promosi Aplikasi (PROMOTE_APP) belum didukung untuk peluncuran Meta. Campaign tidak dikirim ke Meta.",
 });

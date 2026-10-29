@@ -138,6 +138,11 @@ const ISO_3166_1_ALPHA2 = new Set(
   ).split(" "),
 );
 
+/** True only for an officially assigned ISO 3166-1 alpha-2 code (uppercase). Used by the MetaCampaignSpec. */
+export function isKnownCountryCode(value: unknown): boolean {
+  return typeof value === "string" && ISO_3166_1_ALPHA2.has(value);
+}
+
 function normalizeName(value: string): string {
   return value.normalize("NFKC").trim().replace(/\s+/g, " ").toLowerCase();
 }

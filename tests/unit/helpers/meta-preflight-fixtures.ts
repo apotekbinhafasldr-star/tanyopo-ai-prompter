@@ -100,6 +100,7 @@ export async function verifiedContracts(
   return {
     ...real,
     META_OBJECTIVE_CONTRACTS: {
+      ...real.META_OBJECTIVE_CONTRACTS,
       BRAND_AWARENESS: { ...real.META_OBJECTIVE_CONTRACTS.BRAND_AWARENESS, verified: true },
     },
   };
