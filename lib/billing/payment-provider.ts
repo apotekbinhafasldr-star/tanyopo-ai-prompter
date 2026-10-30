@@ -59,6 +59,23 @@ export interface CheckoutSessionResult {
  * it (via direct API polling — getPaymentStatus() — not a webhook). */
 export type RemotePaymentStatus = "PENDING" | "PAID" | "FAILED" | "EXPIRED" | "CANCELLED";
 
+/** Billing B3: what the gateway itself reports when the SERVER asks it (never taken from a webhook body or a browser
+ * redirect). REFUNDED / CHARGEBACK are money moving back to the customer; UNKNOWN is any status/combination this
+ * app does not recognise and therefore never treats as paid or as closed. */
+export type VerifiedPaymentStatus = RemotePaymentStatus | "REFUNDED" | "CHARGEBACK" | "UNKNOWN";
+
+export interface VerifiedPayment {
+  /** The merchant order id the gateway answered for (our internal prompter_payment_transactions.id). */
+  orderId: string;
+  /** The gateway's own id for the payment; null when the gateway did not return one. */
+  gatewayTransactionId: string | null;
+  status: VerifiedPaymentStatus;
+  amount: number;
+  currency: string;
+  /** The gateway's own status words, kept only for audit evidence — never branched on outside the adapter. */
+  rawStatus: string;
+}
+
 /** Normalized shape every real adapter's parseWebhookEvent() must
  * produce, regardless of that provider's own payload format. The
  * webhook route (services/payment-webhook.ts) only ever reads this
@@ -106,6 +123,12 @@ export interface PaymentProvider {
    * must return true, before parseWebhookEvent() or any webhook payload
    * field is trusted for anything. */
   verifyWebhookSignature(rawBody: string, signatureHeader: string | null): boolean;
+
+  /** Billing B3: asks the gateway SERVER-TO-SERVER for the authoritative state of one order. When an adapter
+   * implements this, the webhook core (services/payment-verification.ts) activates ONLY from this answer: the status,
+   * amount and currency in a webhook body or in a browser redirect are treated as untrusted claims and are never used
+   * to move a subscription. Must fail closed: any timeout, non-2xx, malformed or inconsistent answer THROWS. */
+  getVerifiedPayment?(orderId: string): Promise<VerifiedPayment>;
 
   /** Normalizes a verified webhook's raw body into ParsedWebhookEvent.
    * Only ever called after verifyWebhookSignature() has returned true —
