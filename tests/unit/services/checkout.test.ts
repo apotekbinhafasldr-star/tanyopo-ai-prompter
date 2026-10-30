@@ -13,13 +13,24 @@ import { startCheckout } from "@/services/checkout";
 type RpcRow = { out_transaction_id: string | null; out_amount: number | null; out_currency: string | null; out_outcome: string };
 
 /** Admin client double: rpc() for fn_begin_checkout, from().update().eq().eq() for the follow-up writes. */
-function mockAdmin(rpcResult: { data: RpcRow[] | null; error: { message: string } | null }) {
+function mockAdmin(
+  rpcResult: { data: RpcRow[] | null; error: { message: string } | null },
+  existing: { status: string; metadata: unknown } | null = null,
+) {
   const eq = vi.fn(() => ({ eq }));
   const update = vi.fn(() => ({ eq }));
-  const from = vi.fn(() => ({ update }));
+  const maybeSingle = vi.fn(async () => ({ data: existing, error: null }));
+  const selectEq: { eq: ReturnType<typeof vi.fn>; maybeSingle: typeof maybeSingle } = { eq: vi.fn(() => selectEq), maybeSingle };
+  const select = vi.fn(() => selectEq);
+  const from = vi.fn(() => ({ update, select }));
   const rpc = vi.fn(async () => rpcResult);
-  return { rpc, from, update, eq };
+  return { rpc, from, update, eq, select, maybeSingle };
 }
+
+const existingRow = (id = "txn_1"): { data: RpcRow[]; error: null } => ({
+  data: [{ out_transaction_id: id, out_amount: 99_000, out_currency: "IDR", out_outcome: "EXISTING" }],
+  error: null,
+});
 
 const created = (amount: number, id = "txn_1", currency = "IDR"): { data: RpcRow[]; error: null } => ({
   data: [{ out_transaction_id: id, out_amount: amount, out_currency: currency, out_outcome: "CREATED" }],
@@ -226,7 +237,7 @@ describe("startCheckout — Billing B1 (server-only, catalog-priced)", () => {
     await startCheckout(input("PRO"));
 
     expect(admin.from).toHaveBeenCalledWith("prompter_payment_transactions");
-    expect(admin.update).toHaveBeenCalledWith({ provider_payment_id: "xyz" });
+    expect(admin.update).toHaveBeenCalledWith({ provider_payment_id: "xyz", metadata: { checkout_url: "https://pay.example.com/x" } });
     expect(admin.eq).toHaveBeenCalledWith("id", "txn_99");
     expect(admin.eq).toHaveBeenCalledWith("status", "PENDING");
   });
@@ -240,6 +251,72 @@ describe("startCheckout — Billing B1 (server-only, catalog-priced)", () => {
 
     expect(result.ok).toBe(false);
     expect(admin.from).not.toHaveBeenCalledWith("prompter_subscriptions");
+    // Billing B2: the link-less invoice is closed so the next attempt creates a fresh one (never a dead "existing" invoice)
+    expect(admin.update).toHaveBeenCalledWith({ status: "FAILED", failure_reason: "PROVIDER_SESSION_FAILED" });
+    expect(admin.eq).toHaveBeenCalledWith("status", "PENDING");
+  });
+
+  it("Billing B2 — an identical request while an invoice is open returns the SAME payment link and creates no second session", async () => {
+    const admin = mockAdmin(existingRow("txn_open"), { status: "PENDING", metadata: { checkout_url: "https://pay.example.com/session/open" } });
+    createAdminClientMock.mockReturnValue(admin);
+    const provider = mockProvider();
+    getPaymentProviderMock.mockReturnValue(provider);
+
+    const result = await startCheckout(input("STARTER"));
+
+    expect(result).toEqual({ ok: true, checkoutUrl: "https://pay.example.com/session/open" });
+    expect(provider.createCheckoutSession).not.toHaveBeenCalled();
+    expect(admin.update).not.toHaveBeenCalled();
+  });
+
+  it("Billing B2 — an open invoice whose link is not stored yet (another request is still creating it) is NOT duplicated", async () => {
+    const admin = mockAdmin(existingRow(), { status: "PENDING", metadata: {} });
+    createAdminClientMock.mockReturnValue(admin);
+    const provider = mockProvider();
+    getPaymentProviderMock.mockReturnValue(provider);
+
+    const result = await startCheckout(input("STARTER"));
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/masih disiapkan/);
+    expect(provider.createCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it("Billing B2 — a non-https stored link is never reused", async () => {
+    const admin = mockAdmin(existingRow(), { status: "PENDING", metadata: { checkout_url: "javascript:alert(1)" } });
+    createAdminClientMock.mockReturnValue(admin);
+    getPaymentProviderMock.mockReturnValue(mockProvider());
+
+    const result = await startCheckout(input("STARTER"));
+
+    expect(result.ok).toBe(false);
+    expect(result.checkoutUrl).toBeUndefined();
+  });
+
+  it("Billing B2 — an EXISTING invoice that is no longer PENDING is never reused", async () => {
+    const admin = mockAdmin(existingRow(), { status: "PAID", metadata: { checkout_url: "https://pay.example.com/session/old" } });
+    createAdminClientMock.mockReturnValue(admin);
+    getPaymentProviderMock.mockReturnValue(mockProvider());
+
+    const result = await startCheckout(input("STARTER"));
+
+    expect(result.ok).toBe(false);
+  });
+
+  it("Billing B2 — changing plan during a paid period is refused with a clear message and no provider call", async () => {
+    const admin = mockAdmin({
+      data: [{ out_transaction_id: null, out_amount: null, out_currency: null, out_outcome: "PLAN_CHANGE_NOT_ALLOWED" }],
+      error: null,
+    });
+    createAdminClientMock.mockReturnValue(admin);
+    const provider = mockProvider();
+    getPaymentProviderMock.mockReturnValue(provider);
+
+    const result = await startCheckout(input("PRO"));
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/Paket Anda masih aktif/);
+    expect(provider.createCheckoutSession).not.toHaveBeenCalled();
   });
 
   it("every ACTIVE paid tier has a positive price and FREE is 0 (catalog sanity)", () => {

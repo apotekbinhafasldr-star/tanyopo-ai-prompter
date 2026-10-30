@@ -26,7 +26,16 @@ const RPC_ERRORS: Record<string, string> = {
   PLAN_NOT_AVAILABLE: "Paket ini belum dapat dibeli saat ini.",
   NO_SUBSCRIPTION: "Langganan belum siap. Silakan muat ulang halaman lalu coba lagi.",
   TOO_MANY_PENDING: "Terlalu banyak percobaan pembayaran yang belum selesai. Silakan coba lagi nanti.",
+  PLAN_CHANGE_NOT_ALLOWED:
+    "Paket Anda masih aktif. Pergantian paket dapat dilakukan setelah periode berbayar berakhir. Anda tetap dapat memperpanjang paket yang sama.",
 };
+
+/** Billing B2: only an https URL previously stored by this module on the transaction may be reused. */
+function readStoredCheckoutUrl(metadata: unknown): string | null {
+  if (!metadata || typeof metadata !== "object") return null;
+  const url = (metadata as Record<string, unknown>).checkout_url;
+  return typeof url === "string" && url.startsWith("https://") ? url : null;
+}
 
 /**
  * Billing B1 — checkout core. The one and only place a checkout can be started, and it can no longer be
@@ -76,6 +85,19 @@ export async function startCheckout(input: StartCheckoutInput): Promise<StartChe
   if (rpcError || !row) {
     return { ok: false, error: "Gagal memulai proses pembayaran. Silakan coba lagi." };
   }
+  if (row.out_outcome === "EXISTING" && row.out_transaction_id) {
+    // Billing B2: one open invoice per tenant. An identical request within 30 minutes gets the SAME invoice back; reuse
+    // its stored payment link instead of opening a second invoice (a double click can no longer create two charges).
+    const { data: existing } = await admin
+      .from("prompter_payment_transactions")
+      .select("status, metadata")
+      .eq("id", row.out_transaction_id)
+      .eq("tenant_id", input.tenantId)
+      .maybeSingle();
+    const storedUrl = existing?.status === "PENDING" ? readStoredCheckoutUrl(existing.metadata) : null;
+    if (storedUrl) return { ok: true, checkoutUrl: storedUrl };
+    return { ok: false, error: "Pembayaran sebelumnya masih disiapkan. Tunggu sebentar lalu coba lagi." };
+  }
   if (row.out_outcome !== "CREATED" || !row.out_transaction_id) {
     return { ok: false, error: RPC_ERRORS[row.out_outcome] ?? "Gagal memulai proses pembayaran. Silakan coba lagi." };
   }
@@ -110,12 +132,20 @@ export async function startCheckout(input: StartCheckoutInput): Promise<StartChe
     // write this table. Best-effort — the webhook remains the sole path that ever activates anything.
     await admin
       .from("prompter_payment_transactions")
-      .update({ provider_payment_id: session.externalSessionId })
+      .update({ provider_payment_id: session.externalSessionId, metadata: { checkout_url: session.checkoutUrl } })
       .eq("id", txnId)
       .eq("status", "PENDING");
 
     return { ok: true, checkoutUrl: session.checkoutUrl };
   } catch {
+    // Billing B2: close the invoice that never got a payment link, so the next attempt creates a fresh one instead of
+    // being handed a link-less "existing" invoice. If the gateway did create something and is paid later, the webhook
+    // records it as REVIEW (never lost, never auto-activated).
+    await admin
+      .from("prompter_payment_transactions")
+      .update({ status: "FAILED", failure_reason: "PROVIDER_SESSION_FAILED" })
+      .eq("id", txnId)
+      .eq("status", "PENDING");
     return { ok: false, error: "Gagal memulai proses pembayaran. Silakan coba lagi." };
   }
 }

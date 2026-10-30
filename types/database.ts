@@ -92,7 +92,7 @@ export type InvoiceStatus = "DRAFT" | "OPEN" | "PAID" | "VOID" | "UNCOLLECTIBLE"
 /** Batch B10 -- deliberately spelled "CANCELLED" (two Ls), unlike
  * SubscriptionStatus's "CANCELED" -- see the B10 migration's header
  * comment for why these two enums are not spelled the same way. */
-export type PaymentTransactionStatus = "PENDING" | "PAID" | "FAILED" | "EXPIRED" | "CANCELLED";
+export type PaymentTransactionStatus = "PENDING" | "PAID" | "FAILED" | "EXPIRED" | "CANCELLED" | "REVIEW";
 export type JobType =
   | "AI_GENERATION"
   | "CONTENT_GENERATION"
