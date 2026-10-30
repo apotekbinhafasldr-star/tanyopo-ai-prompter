@@ -226,35 +226,30 @@ export async function recordInvoiceFromProvider(
  * had a real, paid subscription (still TRIALING). Only ever changes the
  * stored `plan` column, never `status`.
  *
- * Deliberately never writes `status`. This used to unconditionally set
- * `status: "ACTIVE"`, which let anyone self-activate for free with no
- * payment, permanently bypassing the 14-day trial cutoff simply by saving
- * a plan on this page. Moving a subscription to ACTIVE is a real billing
- * event and belongs exclusively to fn_apply_verified_payment() (Batch
- * B10, supabase/migrations/20260915051359_prompter_b10_payment_billing_core.sql),
- * called only from the payment webhook route after a verified payment —
- * never to this self-service action.
+ * P0 plan-tampering fix: this no longer writes `prompter_subscriptions`
+ * itself. Clients (anon/authenticated) hold NO UPDATE privilege on that
+ * table (supabase/migrations/20261029220000_prompter_p0_subscription_plan_
+ * tampering_lockdown.sql), so an app-level "is it TRIALING?" check here
+ * could never be the security boundary — a direct REST call skips it. The
+ * write goes through the SECURITY DEFINER RPC fn_set_trial_plan_preference,
+ * which derives the tenant from the signed-in user (not from a parameter),
+ * requires the Owner role, requires status TRIALING and an ACTIVE plan, and
+ * records a PREFERENCE only: entitlement for TRIALING is always the FREE
+ * numbers, so this grants no paid access.
+ *
+ * A paying tenant's plan can only change through a verified payment
+ * (fn_apply_verified_payment, called by the payment webhook with the
+ * service role) or fn_schedule_cancellation() (downgrade at period end) —
+ * never through this self-service action.
  *
  * Batch B9 P1-1: rejects any plan whose lib/billing/plans.ts availability
- * is not "ACTIVE" (e.g. Agency, still COMING_SOON) before ever reaching
- * the database — backstopped by the DB-level
- * fn_guard_subscription_plan_availability trigger on
- * prompter_subscriptions, so the rule holds even for a write that bypasses
- * this function entirely.
- *
- * Batch B10 A.2: rejects the change entirely once the tenant has a real
- * paid subscription (status ACTIVE or PAST_DUE). Without this, a tenant
- * already paying for Starter could call this to set `plan: "BUSINESS"`
- * and instantly receive Business's entitlement (per B9's
- * prompter_plan_entitlements lookup) with no new payment ever verified —
- * this function only ever changes a *preference* while nothing has been
- * paid for yet (TRIALING); a paying tenant's plan can only change via a
- * verified checkout (upgrade) or fn_schedule_cancellation() (downgrade at
- * period end).
+ * is not "ACTIVE" (e.g. Agency, still COMING_SOON) before reaching the
+ * database — backstopped by the DB-level plan-availability trigger and by
+ * the RPC itself, so the rule holds even for a call that bypasses this
+ * function entirely.
  */
 export async function changePlan(
   supabase: SupabaseClient<Database>,
-  tenantId: string,
   plan: SubscriptionPlan,
 ): Promise<{ error: string | null }> {
   // findPlanTier() deliberately excludes UMKMPRO_BUNDLE (a separate
@@ -267,23 +262,29 @@ export async function changePlan(
     return { error: "Paket ini belum dapat dipilih (segera hadir)." };
   }
 
-  const { data: existing } = await supabase
-    .from("prompter_subscriptions")
-    .select("status")
-    .eq("tenant_id", tenantId)
-    .maybeSingle();
-
-  if (existing && existing.status !== "TRIALING") {
-    return {
-      error: "Paket Anda sudah aktif berdasarkan pembayaran. Gunakan Upgrade atau Downgrade untuk mengubah paket.",
-    };
-  }
-
-  const { error } = await supabase.from("prompter_subscriptions").update({ plan }).eq("tenant_id", tenantId);
+  const { data, error } = await supabase.rpc("fn_set_trial_plan_preference", { p_plan: plan });
 
   if (error) {
     return { error: "Gagal mengubah paket." };
   }
 
+  const result = Array.isArray(data) ? data[0] : data;
+  if (!result?.out_ok) {
+    return { error: planPreferenceErrorMessage(result?.out_reason ?? null) };
+  }
+
   return { error: null };
+}
+
+function planPreferenceErrorMessage(reason: string | null): string {
+  switch (reason) {
+    case "NOT_TRIALING":
+      return "Paket Anda sudah aktif berdasarkan pembayaran. Gunakan Upgrade atau Downgrade untuk mengubah paket.";
+    case "NOT_OWNER":
+      return "Hanya Owner yang dapat mengubah paket.";
+    case "PLAN_NOT_AVAILABLE":
+      return "Paket ini belum dapat dipilih (segera hadir).";
+    default:
+      return "Gagal mengubah paket.";
+  }
 }

@@ -45,7 +45,7 @@ export async function changePlanAction(
   }
 
   const supabase = await createClient();
-  const result = await changePlan(supabase, session.tenantId, plan as SubscriptionPlan);
+  const result = await changePlan(supabase, plan as SubscriptionPlan);
 
   if (result.error) {
     return result;
