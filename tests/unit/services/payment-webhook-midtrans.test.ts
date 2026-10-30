@@ -294,6 +294,91 @@ describe("Billing B3 — attack scenarios against the Midtrans webhook", () => {
       expect(db.txns[0].status).toBe("PAID");
       expect(db.alerts.map((a) => a.kind)).toEqual(["REFUND"]);
     });
+    describe("repeated refund / chargeback events (B4.1: a new verified event reopens, a replay does not)", () => {
+      const refundAnswer = (amount: string) => ({ transaction_status: "partial_refund", refund_amount: amount });
+      const notify = () => deliver(signedNotification({ transaction_status: "partial_refund" }));
+      const operatorResolves = () => {
+        db.alerts[0].state = "RESOLVED";
+      };
+
+      it("first refund -> RESOLVE -> a DIFFERENT second refund reopens the same alert exactly once", async () => {
+        addTxn(db, { status: "PAID" });
+        gateway.answer(TXN_A, refundAnswer("10000"));
+        await notify();
+        expect(db.alerts).toHaveLength(1);
+        operatorResolves();
+
+        gateway.answer(TXN_A, refundAnswer("25000")); // cumulative refund grew: new verified state
+        await notify();
+        expect(db.alerts).toHaveLength(1);
+        expect(db.alerts[0]).toMatchObject({ state: "OPEN", reopened_count: 1, repeat_count: 0 });
+        expect(db.txns[0].status).toBe("PAID");
+      });
+
+      it("a replay of the first refund (same verified state) leaves the RESOLVED alert RESOLVED and only counts the repeat", async () => {
+        addTxn(db, { status: "PAID" });
+        gateway.answer(TXN_A, refundAnswer("10000"));
+        await notify();
+        operatorResolves();
+        await notify();
+        await notify();
+        expect(db.alerts[0]).toMatchObject({ state: "RESOLVED", reopened_count: 0, repeat_count: 2 });
+      });
+
+      it("after reopening and resolving again, replaying EITHER earlier state still does not reopen", async () => {
+        addTxn(db, { status: "PAID" });
+        gateway.answer(TXN_A, refundAnswer("10000"));
+        await notify();
+        operatorResolves();
+        gateway.answer(TXN_A, refundAnswer("25000"));
+        await notify();
+        operatorResolves();
+        // the gateway's CURRENT state is the second one: replaying the first notification verifies the current state again
+        await notify();
+        expect(db.alerts[0]).toMatchObject({ state: "RESOLVED", reopened_count: 1, repeat_count: 1 });
+        expect(db.alerts).toHaveLength(1);
+      });
+
+      it("parallel notifications for two different new refunds never duplicate the alert", async () => {
+        addTxn(db, { status: "PAID" });
+        gateway.answer(TXN_A, refundAnswer("10000"));
+        await notify();
+        operatorResolves();
+        gateway.answer(TXN_A, refundAnswer("25000"));
+        await Promise.all([1, 2, 3, 4].map(() => notify()));
+        expect(db.alerts).toHaveLength(1);
+        expect(db.alerts[0]).toMatchObject({ state: "OPEN", reopened_count: 1 });
+      });
+
+      it("a chargeback after a refund is a separate alert and does not touch the refund alert", async () => {
+        addTxn(db, { status: "PAID" });
+        gateway.answer(TXN_A, refundAnswer("10000"));
+        await notify();
+        operatorResolves();
+        gateway.answer(TXN_A, { transaction_status: "chargeback" });
+        await deliver(signedNotification({ transaction_status: "chargeback" }));
+        expect(db.alerts.map((a) => [a.kind, a.state])).toEqual([
+          ["REFUND", "RESOLVED"],
+          ["CHARGEBACK", "OPEN"],
+        ]);
+      });
+
+      it("the event row keeps the verified evidence identity (never a webhook-body value)", async () => {
+        addTxn(db, { status: "PAID" });
+        gateway.answer(TXN_A, refundAnswer("10000"));
+        await notify();
+        const ref = db.alerts[0].refs.values().next().value as string;
+        expect(ref).toMatch(/^gw:[0-9a-f]{40}$/);
+        expect(db.events[0].payload).toMatchObject({ orderId: TXN_A, evidenceRef: ref });
+        // a notification body cannot choose the ref: only the gateway answer feeds it
+        db = createFakeDb();
+        addTxn(db, { status: "PAID" });
+        gateway.answer(TXN_A, refundAnswer("10000"));
+        await deliver(signedNotification({ transaction_status: "partial_refund", evidenceRef: "evil" }));
+        expect(JSON.stringify(db.alerts[0].refs.size)).toBe("1");
+        expect([...db.alerts[0].refs][0]).not.toBe("evil");
+      });
+    });
     it("a forged tenant audit row cannot suppress the alert (the audit table is never consulted)", async () => {
       addTxn(db, { status: "PAID" });
       db.audit.push({ tenant_id: TENANT_A, action: "payment.refund_reported", resource_id: TXN_A, context: { forged: true } });

@@ -107,12 +107,12 @@ err=$(cat "$W"/s_* | grep -vcE '^(true|false):[0-9]+:[0-9]+:[0-9]+$'); made=$(ca
 sleep 1; r=$(SVC b4_conc "select skipped::text from public.fn_sync_payment_alerts()"); wait $HOLD
 [ "$r" = true ] && pass "3b: a run that finds another sync in progress returns skipped=true" || bad "3b lock (got: $r)"
 # 3c. 15 parallel identical direct records -> 1 CREATED + 14 EXISTING
-rm -f "$W"/r_*; for i in $(seq 1 15); do ( SVC b4_conc "select public.fn_record_payment_alarm('00000000-0000-0000-0000-0000000c40b1','CHARGEBACK','{}'::jsonb)" > "$W/r_$i" ) & done; wait
+rm -f "$W"/r_*; for i in $(seq 1 15); do ( SVC b4_conc "select public.fn_record_payment_alarm('00000000-0000-0000-0000-0000000c40b1','CHARGEBACK','{}'::jsonb,'gw:p')" > "$W/r_$i" ) & done; wait
 [ "$(cat "$W"/r_* | grep -c '^CREATED$')" = 1 ] && [ "$(cat "$W"/r_* | grep -c '^EXISTING$')" = 14 ] && [ "$(PA -d b4_conc -c "select count(*) from prompter_payment_alerts where kind='CHARGEBACK'")" = 1 ] \
   && pass "3c: 15 parallel identical alarm records -> 1 CREATED + 14 EXISTING, one alert" || bad "3c parallel record ($(cat "$W"/r_* | sort | uniq -c | tr '\n' ' '))"
 # 3d. record racing a sync for the same alarm (webhook event + direct call) -> still one alert
 PA -d b4_conc -c "insert into prompter_webhook_events(source_system,external_event_id,event_type,payload,status,error) values ('midtrans','mid-cb1:refund','payment.refunded','{\"orderId\":\"00000000-0000-0000-0000-0000000c40b1\"}','FAILED','ALARM_REFUND')" >/dev/null
-rm -f "$W"/m_*; for i in $(seq 1 6); do ( SVC b4_conc "select public.fn_record_payment_alarm('00000000-0000-0000-0000-0000000c40b1','REFUND','{}'::jsonb)" > "$W/m_r$i" ) & ( SVC b4_conc "select skipped::text from public.fn_sync_payment_alerts()" > "$W/m_s$i" ) & done; wait
+rm -f "$W"/m_*; for i in $(seq 1 6); do ( SVC b4_conc "select public.fn_record_payment_alarm('00000000-0000-0000-0000-0000000c40b1','REFUND','{}'::jsonb,'gw:p')" > "$W/m_r$i" ) & ( SVC b4_conc "select skipped::text from public.fn_sync_payment_alerts()" > "$W/m_s$i" ) & done; wait
 [ "$(PA -d b4_conc -c "select count(*) from prompter_payment_alerts where kind='REFUND'")" = 1 ] && ! grep -qiE "error|deadlock" "$W"/m_* \
   && pass "3d: direct record racing syncs for the same refund -> exactly one alert, no error / deadlock" || bad "3d record vs sync race"
 # 3e. ACK / RESOLVE races
@@ -123,6 +123,26 @@ rm -f "$W"/k_*; for i in $(seq 1 10); do ( SVC b4_conc "select public.fn_ack_pay
 rm -f "$W"/k_*; for i in $(seq 1 10); do ( SVC b4_conc "select public.fn_resolve_payment_alert('$A1','$OP','selesai dicek manual')" > "$W/k_$i" ) & ( SVC b4_conc "select public.fn_ack_payment_alert('$A1','$OP')" > "$W/ka_$i" ) & done; wait
 [ "$(cat "$W"/k_* | grep -c '^RESOLVED$')" = 1 ] && [ "$(PA -d b4_conc -c "select state from prompter_payment_alerts where id='$A1'")" = RESOLVED ] && [ "$(PA -d b4_conc -c "select count(*) from prompter_payment_alert_actions where alert_id='$A1' and action='RESOLVE'")" = 1 ] \
   && pass "3e: parallel RESOLVE (+ late ACKs) -> exactly one RESOLVE, final state RESOLVED" || bad "3e parallel resolve"
+
+# 3h. reopening under parallelism (alert from 3d is OPEN with ref gw:p): resolve it, then race NEW and REPLAYED events
+RA=$(PA -d b4_conc -c "select id from prompter_payment_alerts where kind='REFUND' and transaction_id='00000000-0000-0000-0000-0000000c40b1'")
+SVC b4_conc "select public.fn_resolve_payment_alert('$RA','$OP','refund pertama dicek')" >/dev/null
+REC() { SVC b4_conc "select public.fn_record_payment_alarm('00000000-0000-0000-0000-0000000c40b1','REFUND','{}'::jsonb,'$1')"; }
+rm -f "$W"/o_*; for i in $(seq 1 10); do ( REC gw:n1 > "$W/o_$i" ) & done; wait
+[ "$(cat "$W"/o_* | grep -c '^REOPENED$')" = 1 ] && [ "$(cat "$W"/o_* | grep -c '^EXISTING$')" = 9 ] \
+  && [ "$(PA -d b4_conc -c "select reopened_count||'/'||state||'/'||(select count(*) from prompter_payment_alerts where kind='REFUND' and transaction_id='00000000-0000-0000-0000-0000000c40b1') from prompter_payment_alerts where id='$RA'")" = "1/OPEN/1" ] \
+  && pass "3h: 10 parallel identical NEW refunds on a RESOLVED alert -> exactly 1 REOPENED, 9 EXISTING, one alert, reopened_count=1" || bad "3h identical new event ($(cat "$W"/o_* | sort | uniq -c | tr '\n' ' '))"
+SVC b4_conc "select public.fn_resolve_payment_alert('$RA','$OP','refund kedua dicek')" >/dev/null
+rm -f "$W"/o_*; for i in $(seq 1 4); do ( REC gw:n2 > "$W/o_a$i" ) & ( REC gw:n3 > "$W/o_b$i" ) & done; wait
+[ "$(cat "$W"/o_* | grep -c '^REOPENED$')" = 1 ] && [ "$(cat "$W"/o_* | grep -c '^EXISTING$')" = 7 ] \
+  && [ "$(PA -d b4_conc -c "select reopened_count||'/'||state from prompter_payment_alerts where id='$RA'")" = "2/OPEN" ] \
+  && [ "$(PA -d b4_conc -c "select count(*) from prompter_payment_alerts where kind='REFUND' and transaction_id='00000000-0000-0000-0000-0000000c40b1'")" = 1 ] \
+  && [ "$(PA -d b4_conc -c "select count(*) from prompter_payment_alert_evidence where alert_id='$RA'")" = 5 ] \
+  && pass "3h: two different parallel refunds -> one alert, one reopen, BOTH event identities registered (nothing lost)" || bad "3h two different new events ($(cat "$W"/o_* | sort | uniq -c | tr '\n' ' '))"
+SVC b4_conc "select public.fn_resolve_payment_alert('$RA','$OP','refund ketiga dicek')" >/dev/null
+rm -f "$W"/o_*; for i in $(seq 1 10); do ( REC gw:n2 > "$W/o_$i" ) & done; wait
+[ "$(cat "$W"/o_* | grep -c '^REPEAT$')" = 10 ] && [ "$(PA -d b4_conc -c "select state||'/'||reopened_count||'/'||repeat_count from prompter_payment_alerts where id='$RA'")" = "RESOLVED/2/10" ] \
+  && pass "3h: 10 parallel replays of an old refund on a RESOLVED alert -> all REPEAT, still RESOLVED, nothing reopened" || bad "3h replay storm"
 
 # 3f. job fails midway, then retries: nothing lost, nothing duplicated, failure visible
 mk b4_fail && m4 b4_fail || bad "mk b4_fail"
@@ -160,5 +180,8 @@ if P -d b4_rb -f "$D4" >/dev/null 2>&1; then pass "rollback applies when the que
   && [ "$(PA -d b4_rb -c "select count(*) from pg_proc where proname in ('fn_sync_payment_alerts','fn_record_payment_alarm','fn_ack_payment_alert','fn_resolve_payment_alert','fn_is_payment_operator','fn_note_payment_alert_sync_failure')")" = 0 ] \
   && [ "$(PA -d b4_rb -c "select count(*) from pg_proc where proname in ('fn_apply_verified_payment','fn_resolve_review_payment','fn_begin_checkout')")" -ge 3 ] \
   && pass "rollback removed only the B4 objects (B1 / B2 functions intact)" || bad "rollback left or removed the wrong objects"
+m4 b4_rb && [ "$(PA -d b4_rb -c "select count(*) from pg_class where relnamespace='public'::regnamespace and relname like 'prompter_payment_alert%' and relkind='r'")" = 4 ] && [ "$(PA -d b4_rb -c "select count(*) from pg_proc where pronamespace='public'::regnamespace and proname in ('fn_sync_payment_alerts','fn_record_payment_alarm','fn_ack_payment_alert','fn_resolve_payment_alert','fn_is_payment_operator','fn_note_payment_alert_sync_failure')")" = 6 ] \
+  && pass "migration re-applies cleanly after a rollback" || bad "re-migrate after rollback"
+if (cd "$here" && PGOPTIONS="-c client_min_messages=notice" P -d b4_rb -f scenarios.sql >"$W/o2.txt" 2>&1); then pass "full scenarios pass after rollback + re-migrate: $(grep -c 'PASS:' "$W/o2.txt") checks"; else bad "scenarios after rollback + re-migrate"; grep -E "FAIL|ERROR" "$W/o2.txt" | head -5; fi
 [ "$(grep -cE '^[[:space:]]*\\' "$D4")" = 0 ] && [ "$(grep -cE '^[[:space:]]*\\' "$M4")" = 0 ] && pass "migration and rollback are plain SQL" || bad "meta-commands in SQL files"
 [ "$fail" = 0 ] && echo "ALL PASSED" || { echo "SOME FAILED"; exit 1; }

@@ -58,6 +58,50 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+const EVENT_REF_SCALAR_KEYS = [
+  "transaction_status",
+  "status_code",
+  "fraud_status",
+  "refund_amount",
+  "refund_count",
+  "refund_chargeback_count",
+  "chargeback_amount",
+  "chargeback_count",
+  "partial_refund_count",
+] as const;
+const EVENT_REF_DETAIL_KEYS = ["refund_amount", "refund_count", "refund_chargeback_count", "chargeback_amount", "chargeback_count", "partial_refund_count"] as const;
+const EVENT_REF_ITEM_KEYS = ["refund_key", "refund_chargeback_id", "refund_chargeback_uuid", "chargeback_id", "refund_amount", "chargeback_amount", "created_at"] as const;
+const EVENT_REF_LIST_KEYS = ["refunds", "chargebacks"] as const;
+
+function refScalar(value: unknown): string {
+  if (typeof value === "string") return value.slice(0, 80);
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return "-";
+}
+
+/**
+ * Billing B4.1 — identity of the gateway state in a Get Status answer. Midtrans does not give a unique id per
+ * notification, and the notification id we build (transaction_id:status:code:fraud) is IDENTICAL for two partial
+ * refunds, so it cannot be used. This hash covers the status words plus whatever refund / chargeback counters and ids the
+ * answer carries, so a second refund changes it while a replay of the same state does not. Exported for tests.
+ */
+export function buildMidtransEventRef(data: Record<string, unknown>): { ref: string; basis: "detailed" | "status_only" } {
+  const parts: string[] = EVENT_REF_SCALAR_KEYS.map((k) => `${k}=${refScalar(data[k])}`);
+  let detailed = EVENT_REF_DETAIL_KEYS.some((k) => data[k] !== undefined && data[k] !== null);
+  for (const listKey of EVENT_REF_LIST_KEYS) {
+    const list = data[listKey];
+    if (!Array.isArray(list)) continue;
+    detailed = detailed || list.length > 0;
+    parts.push(`${listKey}#${list.length}`);
+    for (const item of list.slice(0, 50)) {
+      if (!isRecord(item)) continue;
+      parts.push(`${listKey}:` + EVENT_REF_ITEM_KEYS.map((k) => refScalar(item[k])).join(","));
+    }
+  }
+  const digest = createHash("sha256").update(parts.join("|")).digest("hex").slice(0, 40);
+  return { ref: `gw:${digest}`, basis: detailed ? "detailed" : "status_only" };
+}
+
 function asString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
@@ -264,8 +308,11 @@ export class MidtransPaymentProvider implements PaymentProvider {
       }
     }
 
+    const eventRef = buildMidtransEventRef(data);
     return {
       orderId: responseOrderId,
+      eventRef: eventRef.ref,
+      eventRefBasis: eventRef.basis,
       gatewayTransactionId: asString(data.transaction_id) ?? null,
       status: mapMidtransStatus(transactionStatus, fraudStatus, statusCode),
       amount,

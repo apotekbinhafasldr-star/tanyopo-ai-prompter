@@ -1205,6 +1205,10 @@ export interface Database {
           resolved_at: string | null;
           resolution: "OPERATOR" | "AUTO" | null;
           resolution_note: string | null;
+          reopened_count: number;
+          last_reopened_at: string | null;
+          repeat_count: number;
+          last_repeat_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -1213,7 +1217,13 @@ export interface Database {
         Relationships: [];
       };
       prompter_payment_alert_actions: {
-        Row: { id: string; alert_id: string; action: "ACK" | "RESOLVE" | "AUTO_RESOLVE"; actor_user_id: string | null; note: string | null; created_at: string };
+        Row: { id: string; alert_id: string; action: "ACK" | "RESOLVE" | "AUTO_RESOLVE" | "REOPEN"; actor_user_id: string | null; note: string | null; created_at: string };
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
+        Relationships: [];
+      };
+      prompter_payment_alert_evidence: {
+        Row: { alert_id: string; evidence_ref: string; source: "VERIFIED_CALL" | "WEBHOOK_EVENT"; evidence: Json; seen_at: string };
         Insert: Record<string, never>;
         Update: Record<string, never>;
         Relationships: [];
@@ -1257,6 +1267,8 @@ export interface Database {
           status: WebhookEventStatus;
           error: string | null;
           processed_at: string | null;
+          // Billing B4.1: the verified path adds `orderId` / `evidenceRef` to the server-written payload.
+          payload: Json;
         }>;
         Relationships: [];
       };
@@ -1515,7 +1527,7 @@ export interface Database {
       };
       // Billing B4.1 -- all service_role ONLY. They write alert rows and history, never a transaction or a subscription.
       fn_is_payment_operator: { Args: { p_user_id: string }; Returns: boolean };
-      fn_record_payment_alarm: { Args: { p_transaction_id: string; p_kind: string; p_evidence?: Json }; Returns: string };
+      fn_record_payment_alarm: { Args: { p_transaction_id: string; p_kind: string; p_evidence?: Json; p_evidence_ref: string }; Returns: string };
       fn_sync_payment_alerts: {
         Args: { p_lookback?: string };
         Returns: { skipped: boolean; review_created: number; alarm_created: number; auto_resolved: number }[];

@@ -45,7 +45,7 @@ describe("Billing B4.1 — static guards", () => {
     expect(sql).not.toMatch(/cron\.|pg_net|net\.http|create extension|finance_|linoe_accounting/i);
     expect(sql).not.toMatch(/drop table|alter table public\.prompter_(payment_transactions|subscriptions|webhook_events|audit_logs)/i);
     expect(sql).not.toMatch(/(update|delete from|insert into)\s+public\.(prompter_payment_transactions|prompter_subscriptions)/i);
-    for (const t of ["prompter_payment_operators", "prompter_payment_alerts", "prompter_payment_alert_actions", "prompter_payment_alert_sync_state"]) {
+    for (const t of ["prompter_payment_operators", "prompter_payment_alerts", "prompter_payment_alert_actions", "prompter_payment_alert_evidence", "prompter_payment_alert_sync_state"]) {
       expect(sql).toContain(`alter table public.${t} enable row level security`);
       expect(sql).toMatch(new RegExp(`revoke all on table public\\.${t} from public, anon, authenticated`));
     }
@@ -53,6 +53,25 @@ describe("Billing B4.1 — static guards", () => {
     expect(sql).not.toMatch(/grant [^;]*to (anon|authenticated|public)/i);
     const created = [...sql.matchAll(/create (?:table|index|or replace function|trigger)(?: if not exists)? (?:public\.)?([a-z_0-9]+)/gi)].map((m) => m[1]);
     for (const name of created) expect(name, name).toMatch(/^(prompter_|fn_|idx_|trg_|uq_)/);
+  });
+
+  it("every function in the migration pins search_path to `public, pg_temp` (pg_temp LAST) and none uses a bare `public`", () => {
+    const sql = strip(read(MIGRATION).replace(/^--.*$/gm, ""));
+    const functions = [...sql.matchAll(/create or replace function public\.([a-z_0-9]+)\(/gi)].map((m) => m[1]);
+    expect(functions.length).toBe(8);
+    expect([...sql.matchAll(/set search_path = public, pg_temp\s/g)].length).toBe(functions.length);
+    expect(sql).not.toMatch(/set search_path = public\s*(\n|;|\$)/);
+    expect(sql).not.toMatch(/set search_path to|search_path = (pg_temp|""|'')/i);
+  });
+
+  it("a SECURITY DEFINER function is never granted to a client role, and every one is explicitly revoked first", () => {
+    const sql = strip(read(MIGRATION).replace(/^--.*$/gm, ""));
+    const chunks = sql.split(/create or replace function public\./i).slice(1);
+    const definers = chunks.filter((c) => /security definer/i.test(c.split(/\bas \$\$/i)[0])).map((c) => c.slice(0, c.indexOf("(")));
+    expect(definers.sort()).toEqual(
+      ["fn_ack_payment_alert", "fn_is_payment_operator", "fn_note_payment_alert_sync_failure", "fn_record_payment_alarm", "fn_resolve_payment_alert", "fn_sync_payment_alerts"].sort(),
+    );
+    for (const name of definers) expect(sql, name).toMatch(new RegExp(`revoke all on function public\\.${name}\\([^)]*\\) from public, anon, authenticated;`));
   });
 
   it("B4.1 is the migration right after B2 (no other new schema change rides along)", () => {

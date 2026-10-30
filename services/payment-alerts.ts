@@ -89,19 +89,27 @@ export async function resolvePaymentAlert(admin: Admin, alertId: string, operato
   return describeAlertActionOutcome(error ? "ERROR" : String(data));
 }
 
-/** Direct, idempotent record of a gateway-VERIFIED refund / chargeback / reversal (called from verifyAndSettle). */
+export type RecordAlarmOutcome = "CREATED" | "REOPENED" | "REPEAT" | "EXISTING";
+
+/**
+ * Direct create-or-reopen of a gateway-VERIFIED refund / chargeback / reversal (called from verifyAndSettle).
+ * `evidenceRef` is the identity of the verified gateway state (never a webhook body): a ref the alert has not seen
+ * reopens a RESOLVED alert exactly once; a known ref (replay) only bumps a counter.
+ */
 export async function recordPaymentAlarm(
   admin: Admin,
   transactionId: string,
   kind: "REFUND" | "CHARGEBACK" | "REVERSAL",
   evidence: Record<string, Json>,
-): Promise<{ ok: true; outcome: "CREATED" | "EXISTING" } | { ok: false; message: string }> {
+  evidenceRef: string,
+): Promise<{ ok: true; outcome: RecordAlarmOutcome } | { ok: false; message: string }> {
   const { data, error } = await admin.rpc("fn_record_payment_alarm", {
     p_transaction_id: transactionId,
     p_kind: kind,
     p_evidence: evidence,
+    p_evidence_ref: evidenceRef,
   });
   if (error) return { ok: false, message: "ALARM_RECORD_FAILED" };
-  if (data === "CREATED" || data === "EXISTING") return { ok: true, outcome: data };
+  if (data === "CREATED" || data === "REOPENED" || data === "REPEAT" || data === "EXISTING") return { ok: true, outcome: data };
   return { ok: false, message: `ALARM_RECORD_${String(data)}` };
 }

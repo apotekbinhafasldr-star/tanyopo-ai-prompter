@@ -27,12 +27,26 @@ Semua baru, berawalan `prompter_`/`fn_`, aditif. Tidak menyentuh PUBLOE, UMKMpro
 
 - `prompter_payment_operators` — allowlist operator (user id). Diisi Founder lewat SQL Editor. Bukan Admin Center / Finance Hub.
 - `prompter_payment_alerts` — satu baris per (transaksi, jenis): `REVIEW | REFUND | CHARGEBACK | REVERSAL`; status `OPEN → ACKED → RESOLVED`. Tidak ada FK ke transaksi (penghapusan tenant tidak boleh terblokir atau menghapus bukti). Tidak bisa DELETE/TRUNCATE.
-- `prompter_payment_alert_actions` — riwayat append-only (ACK, RESOLVE, AUTO_RESOLVE); UPDATE/DELETE/TRUNCATE diblok trigger.
+- `prompter_payment_alert_actions` — riwayat append-only (ACK, RESOLVE, AUTO_RESOLVE, REOPEN); UPDATE/DELETE/TRUNCATE diblok trigger.
+- `prompter_payment_alert_evidence` — registri append-only identitas kejadian (`evidence_ref`) yang sudah dilihat per alarm + cuplikan buktinya. Inilah pembeda "kejadian BARU" vs "replay kejadian lama".
 - `prompter_payment_alert_sync_state` — satu baris: sinkron terakhir, error terakhir, jumlah gagal beruntun.
 - Fungsi (hanya `service_role`): `fn_sync_payment_alerts`, `fn_record_payment_alarm`, `fn_ack_payment_alert`, `fn_resolve_payment_alert`, `fn_note_payment_alert_sync_failure`, `fn_is_payment_operator`.
 - RLS aktif tanpa policy + `revoke all` dari `public/anon/authenticated`: tenant tidak bisa membaca, menulis, atau memanggil apa pun.
 
 Fungsi operator hanya menulis baris alarm dan riwayat. **Tidak ada** yang menyentuh transaksi, langganan, atau uang (dibuktikan tes: sidik jari tabel transaksi dan langganan identik sebelum/sesudah).
+
+## 3b. Alarm dibuka ulang (perbaikan P1) dan hardening P2
+
+**Aturan.** Satu alarm per (transaksi, jenis). `fn_record_payment_alarm(txn, jenis, bukti, evidence_ref)` dipanggil server setelah jawaban Get Status Midtrans:
+- ref belum pernah dilihat + alarm RESOLVED → `REOPENED` (OPEN lagi, `reopened_count+1`, riwayat `REOPEN`, resolusi lama dibersihkan, riwayat RESOLVE tetap);
+- ref sudah dikenal + RESOLVED → `REPEAT` (tetap RESOLVED, hanya `repeat_count+1`; replay webhook lama tidak membuka ulang);
+- alarm belum RESOLVED → `EXISTING` (ref baru tetap dicatat, tidak hilang); belum ada → `CREATED`.
+- Aman paralel: baris alarm dikunci `FOR UPDATE`, pembuatan lewat `ON CONFLICT`, registri ber-PK (alarm, ref). Hasil tes: 10 panggilan identik → tepat 1 REOPENED; 2 refund berbeda paralel → 1 alarm, 1 reopen, kedua identitas tercatat.
+- Sinkron periodik hanya MEMBUAT alarm yang hilang, tidak pernah membuka ulang. Tabel audit milik tenant tidak dipakai.
+
+**Identitas kejadian.** Midtrans tidak memberi ID per notifikasi. `evidence_ref` diturunkan server dari jawaban Get Status itu sendiri (`buildMidtransEventRef`): status + kode + bidang refund/chargeback yang ada (jumlah, id/kunci refund, waktu), bukan dari body webhook. **Batasan:** bila jawaban hanya memuat status tanpa rincian (`event_ref_basis = status_only`), refund kedua yang tampak identik tidak bisa dibedakan dari replay; ia dihitung di `repeat_count` dan ditampilkan di halaman ("Sinyal serupa"), tidak hilang diam-diam. Nama bidang refund/chargeback Midtrans harus dikonfirmasi di sandbox sebelum live.
+
+**P2 `search_path`.** Semua 8 fungsi (6 SECURITY DEFINER + 2 trigger) memakai `set search_path = public, pg_temp`, dan semuanya di-revoke dari public/anon/authenticated. Tes: kontrol (fungsi `search_path = public` biasa) TERTIPU tabel temp bayangan, fungsi B4 tidak; penyerang bukan operator dan tidak bisa ACK/RESOLVE.
 
 ## 4. Alur deteksi
 
@@ -62,7 +76,7 @@ Catatan perilaku (disengaja): alarm yang sudah di-RESOLVE operator **tidak dibuk
 ## 7. Rencana penerapan aman (setelah Founder menyetujui; Founder yang menjalankan SQL)
 
 1. Merge PR (kode inert: halaman 404 bagi semua orang sampai ada operator; `recordAlarm` memanggil fungsi yang belum ada → **jangan merge/deploy kode sebelum migrasi diterapkan**, atau webhook alarm akan 500 dan Midtrans mencoba ulang; Midtrans masih nonaktif karena `PAYMENT_PROVIDER_NAME` belum diisi).
-   Urutan aman: **(a)** preflight read-only → **(b)** apply SQL Editor → **(c)** verify read-only → **(d)** ledger → **(e)** baru merge + deploy.
+   Urutan aman (6 file SQL dibuat ulang dari migrasi final, checksum di header): **(a)** preflight read-only → **(b)** apply SQL Editor → **(c)** verify read-only → **(d)** ledger → **(e)** baru merge + deploy.
 2. Tambah operator pertama (Founder, SQL Editor): `insert into prompter_payment_operators(user_id,label,created_by) select id,'Founder','founder' from auth.users where email = '<email Founder>'`.
 3. (Opsional) audit read-only `pg_cron`; jika ada dan disetujui, jadwalkan `select public.fn_sync_payment_alerts();` tiap 5–15 menit. Tanpa pg_cron, halaman operator tetap menyinkronkan sendiri saat dibuka, dan jalur langsung tetap bekerja.
 4. Rollback: `supabase/rollback/20261031100000_prompter_b4_payment_alerts.down.sql` menolak jalan bila ada baris alarm/riwayat (bukti).

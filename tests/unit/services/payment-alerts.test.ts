@@ -99,14 +99,17 @@ describe("Billing B4.1 — payment alert service", () => {
     await expect(syncIfStale(broken.client)).resolves.toBeUndefined();
   });
 
-  it("recordPaymentAlarm distinguishes CREATED / EXISTING and fails loudly otherwise", async () => {
-    for (const outcome of ["CREATED", "EXISTING"] as const) {
+  it("recordPaymentAlarm passes the evidence ref and distinguishes CREATED / REOPENED / REPEAT / EXISTING", async () => {
+    for (const outcome of ["CREATED", "REOPENED", "REPEAT", "EXISTING"] as const) {
       const a = admin({ fn_record_payment_alarm: () => ({ data: outcome, error: null }) });
-      expect(await recordPaymentAlarm(a.client, ID, "REFUND", { a: 1 })).toEqual({ ok: true, outcome });
+      expect(await recordPaymentAlarm(a.client, ID, "REFUND", { a: 1 }, "gw:abc")).toEqual({ ok: true, outcome });
+      expect(a.calls[0].args).toEqual({ p_transaction_id: ID, p_kind: "REFUND", p_evidence: { a: 1 }, p_evidence_ref: "gw:abc" });
     }
-    const missing = admin({ fn_record_payment_alarm: () => ({ data: "TRANSACTION_NOT_FOUND", error: null }) });
-    expect((await recordPaymentAlarm(missing.client, ID, "REFUND", {})).ok).toBe(false);
+    for (const bad of ["TRANSACTION_NOT_FOUND", "INVALID_EVIDENCE_REF", "INVALID_KIND"]) {
+      const a = admin({ fn_record_payment_alarm: () => ({ data: bad, error: null }) });
+      expect((await recordPaymentAlarm(a.client, ID, "REFUND", {}, "gw:abc")).ok).toBe(false);
+    }
     const err = admin({ fn_record_payment_alarm: () => ({ data: null, error: { message: "x" } }) });
-    expect((await recordPaymentAlarm(err.client, ID, "CHARGEBACK", {})).ok).toBe(false);
+    expect((await recordPaymentAlarm(err.client, ID, "CHARGEBACK", {}, "gw:abc")).ok).toBe(false);
   });
 });

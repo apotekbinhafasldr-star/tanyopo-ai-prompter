@@ -1,5 +1,6 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { PaymentProvider, VerifiedPayment, VerifiedPaymentStatus } from "@/lib/billing/payment-provider";
 import { recordPaymentAlarm } from "@/services/payment-alerts";
@@ -23,7 +24,7 @@ export type SettleOutcome =
   | { kind: "NEEDS_REVIEW" }
   | { kind: "NOT_APPLIED"; reason: string }
   | { kind: "NOT_PAID"; status: VerifiedPaymentStatus; closed: boolean }
-  | { kind: "ALARM"; alarm: PaymentAlarmKind }
+  | { kind: "ALARM"; alarm: PaymentAlarmKind; evidenceRef: string }
   | { kind: "NOT_FOUND" }
   | { kind: "WRONG_PROVIDER" }
   | { kind: "UNVERIFIABLE"; message: string }
@@ -164,16 +165,32 @@ async function recordAlarm(
   alarm: PaymentAlarmKind,
   verified: VerifiedPayment,
 ): Promise<SettleOutcome> {
-  const result = await recordPaymentAlarm(admin, txn.id, alarm, {
-    gateway_status: verified.rawStatus,
-    gateway_transaction_id: verified.gatewayTransactionId,
-    reported_amount: verified.amount,
-    reported_currency: verified.currency,
-    transaction_status: txn.status,
-    transaction_amount: txn.amount,
-    plan: txn.plan,
-    subscription_changed: false,
-  } satisfies Record<string, Json>);
+  // Identity of the verified gateway state. The adapter derives it from the gateway's own answer; if an adapter does
+  // not, fall back to a hash of the verified fields so the ref is still never taken from a webhook body.
+  const evidenceRef =
+    verified.eventRef ??
+    `gw:${createHash("sha256")
+      .update([alarm, verified.rawStatus, verified.gatewayTransactionId ?? "-", verified.amount, verified.currency].join("|"))
+      .digest("hex")
+      .slice(0, 40)}`;
+
+  const result = await recordPaymentAlarm(
+    admin,
+    txn.id,
+    alarm,
+    {
+      gateway_status: verified.rawStatus,
+      gateway_transaction_id: verified.gatewayTransactionId,
+      reported_amount: verified.amount,
+      reported_currency: verified.currency,
+      transaction_status: txn.status,
+      transaction_amount: txn.amount,
+      plan: txn.plan,
+      event_ref_basis: verified.eventRefBasis ?? "status_only",
+      subscription_changed: false,
+    } satisfies Record<string, Json>,
+    evidenceRef,
+  );
   if (!result.ok) return { kind: "RPC_ERROR", message: result.message };
-  return { kind: "ALARM", alarm };
+  return { kind: "ALARM", alarm, evidenceRef };
 }

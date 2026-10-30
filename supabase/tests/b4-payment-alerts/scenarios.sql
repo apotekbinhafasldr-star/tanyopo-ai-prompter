@@ -14,8 +14,8 @@ create or replace function pg_temp.ack(a uuid, op uuid, note text default null) 
 begin return pg_temp.as_service(format($q$select public.fn_ack_payment_alert(%L::uuid,%L::uuid,%L)$q$, a, op, note)); end $$;
 create or replace function pg_temp.res(a uuid, op uuid, note text) returns text language plpgsql as $$
 begin return pg_temp.as_service(format($q$select public.fn_resolve_payment_alert(%L::uuid,%L::uuid,%L)$q$, a, op, note)); end $$;
-create or replace function pg_temp.rec(txn uuid, k text) returns text language plpgsql as $$
-begin return pg_temp.as_service(format($q$select public.fn_record_payment_alarm(%L::uuid,%L,'{"gateway_status":"refund"}'::jsonb)$q$, txn, k)); end $$;
+create or replace function pg_temp.rec(txn uuid, k text, ref text default 'gw:A') returns text language plpgsql as $$
+begin return pg_temp.as_service(format($q$select public.fn_record_payment_alarm(%L::uuid,%L,'{"gateway_status":"refund"}'::jsonb,%L)$q$, txn, k, ref)); end $$;
 create or replace function pg_temp.fingerprint() returns text language plpgsql as $$
 declare a text; b text;
 begin
@@ -54,11 +54,11 @@ insert into public.prompter_payment_operators(user_id,label,active) values
   ('00000000-0000-0000-0000-0000000b4099','former operator',false);
 
 select pg_temp.chk('B4 objects exist and are service_role-only: no anon / authenticated table or function privilege',
-  not exists (select 1 from information_schema.role_table_grants g where g.table_name in ('prompter_payment_alerts','prompter_payment_operators','prompter_payment_alert_actions','prompter_payment_alert_sync_state') and g.grantee in ('anon','authenticated','PUBLIC'))
+  not exists (select 1 from information_schema.role_table_grants g where g.table_name in ('prompter_payment_alerts','prompter_payment_operators','prompter_payment_alert_actions','prompter_payment_alert_evidence','prompter_payment_alert_sync_state') and g.grantee in ('anon','authenticated','PUBLIC'))
   and not exists (select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname in ('fn_sync_payment_alerts','fn_record_payment_alarm','fn_ack_payment_alert','fn_resolve_payment_alert','fn_is_payment_operator','fn_note_payment_alert_sync_failure')
         and (has_function_privilege('anon',p.oid,'execute') or has_function_privilege('authenticated',p.oid,'execute'))));
 select pg_temp.chk('RLS is enabled with no policy on every B4 table',
-  (select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname like 'prompter_payment_alert%' || '' and c.relkind='r' and c.relrowsecurity) = 3
+  (select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname like 'prompter_payment_alert%' and c.relkind='r' and c.relrowsecurity) = 4
   and (select relrowsecurity from pg_class where oid='public.prompter_payment_operators'::regclass)
   and not exists (select 1 from pg_policies where tablename like 'prompter_payment_alert%' or tablename='prompter_payment_operators'));
 
@@ -97,7 +97,7 @@ select pg_temp.chk('direct record: CREATED once, then EXISTING; sync afterwards 
 select pg_temp.chk('direct record rejects unknown kind, REVIEW kind, unknown transaction, oversized evidence',
   pg_temp.rec('00000000-0000-0000-0000-0000000b40b3','NOPE') = 'INVALID_KIND' and pg_temp.rec('00000000-0000-0000-0000-0000000b40b3','REVIEW') = 'INVALID_KIND'
   and pg_temp.rec('00000000-0000-0000-0000-0000000b4fff','REFUND') = 'TRANSACTION_NOT_FOUND'
-  and pg_temp.svc(format($q$select public.fn_record_payment_alarm('00000000-0000-0000-0000-0000000b40b3','REFUND',%L::jsonb)$q$, jsonb_build_object('x', repeat('a',5000)))) = 'EVIDENCE_TOO_LARGE');
+  and pg_temp.svc(format($q$select public.fn_record_payment_alarm('00000000-0000-0000-0000-0000000b40b3','REFUND',%L::jsonb,'gw:big')$q$, jsonb_build_object('x', repeat('a',5000)))) = 'EVIDENCE_TOO_LARGE');
 select pg_temp.chk('a direct-record alert also keeps the verified evidence', (select evidence->>'gateway_status' from public.prompter_payment_alerts where kind='REVERSAL') = 'refund');
 
 -- ===== 4. tenant isolation + forged audit log =====
@@ -105,6 +105,8 @@ select pg_temp.chk('tenant can read/insert/update/delete NONE of the B4 tables',
   pg_temp.q_as('00000000-0000-0000-0000-0000000b4011','select count(*)::text from public.prompter_payment_alerts') like '42501%'
   and pg_temp.q_as('00000000-0000-0000-0000-0000000b4011','select count(*)::text from public.prompter_payment_operators') like '42501%'
   and pg_temp.q_as('00000000-0000-0000-0000-0000000b4011','select count(*)::text from public.prompter_payment_alert_actions') like '42501%'
+  and pg_temp.q_as('00000000-0000-0000-0000-0000000b4011','select count(*)::text from public.prompter_payment_alert_evidence') like '42501%'
+  and pg_temp.dml_as('00000000-0000-0000-0000-0000000b4011',$q$insert into public.prompter_payment_alert_evidence(alert_id,evidence_ref,source) values (gen_random_uuid(),'gw:forged','VERIFIED_CALL')$q$) like '42501%'
   and pg_temp.q_as('00000000-0000-0000-0000-0000000b4011','select count(*)::text from public.prompter_payment_alert_sync_state') like '42501%'
   and pg_temp.dml_as('00000000-0000-0000-0000-0000000b4011',$q$insert into public.prompter_payment_alerts(kind,severity,transaction_id,tenant_id,source) values ('REFUND','HIGH','00000000-0000-0000-0000-0000000b40b3','00000000-0000-0000-0000-0000000b4001','VERIFIED_CALL')$q$) like '42501%'
   and pg_temp.dml_as('00000000-0000-0000-0000-0000000b4011',$q$update public.prompter_payment_alerts set state='RESOLVED'$q$) like '42501%'
@@ -113,7 +115,7 @@ select pg_temp.chk('tenant can read/insert/update/delete NONE of the B4 tables',
   and pg_temp.dml_as(null,$q$select 1 from public.prompter_payment_alerts$q$,'anon') like '42501%');
 select pg_temp.chk('tenant and anon cannot call any B4 function (incl. fabricating an operator ack / resolve / sync / record)',
   pg_temp.q_as('00000000-0000-0000-0000-0000000b4011',format($q$select public.fn_resolve_payment_alert(%L::uuid,'00000000-0000-0000-0000-0000000b4011','self service resolve')$q$, pg_temp.aid('00000000-0000-0000-0000-0000000b40a1','REVIEW'))) like '42501%'
-  and pg_temp.q_as('00000000-0000-0000-0000-0000000b4011','select public.fn_record_payment_alarm(''00000000-0000-0000-0000-0000000b40b3'',''REFUND'')') like '42501%'
+  and pg_temp.q_as('00000000-0000-0000-0000-0000000b4011','select public.fn_record_payment_alarm(''00000000-0000-0000-0000-0000000b40b3'',''REFUND'',''{}'',''gw:x'')') like '42501%'
   and pg_temp.q_as('00000000-0000-0000-0000-0000000b4011','select count(*)::text from public.fn_sync_payment_alerts()') like '42501%'
   and pg_temp.q_as('00000000-0000-0000-0000-0000000b4011','select public.fn_is_payment_operator(''00000000-0000-0000-0000-0000000b4011'')::text') like '42501%'
   and pg_temp.q_as(null,'select count(*)::text from public.fn_sync_payment_alerts()','anon') like '42501%');
@@ -179,6 +181,70 @@ select pg_temp.chk('REVIEW -> PAID elsewhere: sync auto-resolves the OPEN REVIEW
   and pg_temp.sc($q$select count(*)::text from public.prompter_payment_alert_actions where action='AUTO_RESOLVE'$q$) = '1'
   and pg_temp.sync() = 'false:0:0:0');
 select pg_temp.chk('auto-resolve never touches refund / chargeback alerts', pg_temp.astate('00000000-0000-0000-0000-0000000b40b2','CHARGEBACK') = 'OPEN/-');
+
+-- ===== 8b. repeated events: a NEW verified event reopens, a replay never does =====
+create temp table fp1 as select pg_temp.fingerprint() f;
+select pg_temp.chk('replay of the first refund (our own gw ref and the sync-registered event ref) on the RESOLVED alert -> REPEAT, stays RESOLVED, counted, sync does not reopen',
+  pg_temp.astate('00000000-0000-0000-0000-0000000b40b1','REFUND') = 'RESOLVED/OPERATOR'
+  and pg_temp.rec('00000000-0000-0000-0000-0000000b40b1','REFUND','gw:A') = 'REPEAT'
+  and pg_temp.rec('00000000-0000-0000-0000-0000000b40b1','REFUND','evt:mid-p1:refund:200:-') = 'REPEAT'
+  and pg_temp.sync() = 'false:0:0:0'
+  and pg_temp.astate('00000000-0000-0000-0000-0000000b40b1','REFUND') = 'RESOLVED/OPERATOR'
+  and pg_temp.sc($q$select repeat_count||'/'||reopened_count from public.prompter_payment_alerts where kind='REFUND' and transaction_id='00000000-0000-0000-0000-0000000b40b1'$q$) = '2/0');
+select pg_temp.chk('a second, DIFFERENT refund reopens the SAME alert once: OPEN, reopened_count 1, resolution cleared, REOPEN + earlier RESOLVE history kept, evidence registry grows',
+  pg_temp.rec('00000000-0000-0000-0000-0000000b40b1','REFUND','gw:B') = 'REOPENED'
+  and pg_temp.astate('00000000-0000-0000-0000-0000000b40b1','REFUND') = 'OPEN/-'
+  and pg_temp.sc($q$select (reopened_count = 1 and last_reopened_at is not null and resolved_at is null and resolved_by is null and resolution_note is null and acked_at is null)::text from public.prompter_payment_alerts where kind='REFUND' and transaction_id='00000000-0000-0000-0000-0000000b40b1'$q$) = 'true'
+  and pg_temp.sc($q$select count(*)::text from public.prompter_payment_alert_actions x join public.prompter_payment_alerts a on a.id=x.alert_id where a.kind='REFUND' and a.transaction_id='00000000-0000-0000-0000-0000000b40b1' and x.action in ('RESOLVE','REOPEN')$q$) = '2'
+  and pg_temp.sc($q$select count(*)::text from public.prompter_payment_alert_evidence e join public.prompter_payment_alerts a on a.id=e.alert_id where a.kind='REFUND' and a.transaction_id='00000000-0000-0000-0000-0000000b40b1'$q$) = '3'
+  and pg_temp.sc($q$select count(*)::text from public.prompter_payment_alerts where kind='REFUND' and transaction_id='00000000-0000-0000-0000-0000000b40b1'$q$) = '1');
+select pg_temp.chk('replay of the second while OPEN is EXISTING; after the second RESOLVE, replaying the first or second is REPEAT; a third different refund reopens again (count 2)',
+  pg_temp.rec('00000000-0000-0000-0000-0000000b40b1','REFUND','gw:B') = 'EXISTING'
+  and pg_temp.ack(pg_temp.aid('00000000-0000-0000-0000-0000000b40b1','REFUND'),'00000000-0000-0000-0000-0000000b4011') = 'ACKED'
+  and pg_temp.res(pg_temp.aid('00000000-0000-0000-0000-0000000b40b1','REFUND'),'00000000-0000-0000-0000-0000000b4011','refund kedua dicek di dashboard') = 'RESOLVED'
+  and pg_temp.rec('00000000-0000-0000-0000-0000000b40b1','REFUND','gw:B') = 'REPEAT'
+  and pg_temp.rec('00000000-0000-0000-0000-0000000b40b1','REFUND','gw:A') = 'REPEAT'
+  and pg_temp.astate('00000000-0000-0000-0000-0000000b40b1','REFUND') = 'RESOLVED/OPERATOR'
+  and pg_temp.rec('00000000-0000-0000-0000-0000000b40b1','REFUND','gw:C') = 'REOPENED'
+  and pg_temp.sc($q$select reopened_count::text from public.prompter_payment_alerts where kind='REFUND' and transaction_id='00000000-0000-0000-0000-0000000b40b1'$q$) = '2');
+select pg_temp.chk('a chargeback after a refund is a separate CHARGEBACK alert; the refund alert is not touched or merged',
+  pg_temp.rec('00000000-0000-0000-0000-0000000b40b1','CHARGEBACK','gw:cb1') = 'CREATED'
+  and pg_temp.astate('00000000-0000-0000-0000-0000000b40b1','CHARGEBACK') = 'OPEN/-'
+  and pg_temp.astate('00000000-0000-0000-0000-0000000b40b1','REFUND') = 'OPEN/-'
+  and pg_temp.sc($q$select count(*)::text from public.prompter_payment_alerts where transaction_id='00000000-0000-0000-0000-0000000b40b1'$q$) = '2');
+select pg_temp.chk('a chargeback alert reopens by the same rule (resolve, replay -> REPEAT, new ref -> REOPENED)',
+  pg_temp.res(pg_temp.aid('00000000-0000-0000-0000-0000000b40b1','CHARGEBACK'),'00000000-0000-0000-0000-0000000b4011','chargeback ditangani via Midtrans') = 'RESOLVED'
+  and pg_temp.rec('00000000-0000-0000-0000-0000000b40b1','CHARGEBACK','gw:cb1') = 'REPEAT'
+  and pg_temp.rec('00000000-0000-0000-0000-0000000b40b1','CHARGEBACK','gw:cb2') = 'REOPENED');
+select pg_temp.chk('a missing / blank / oversized evidence ref is refused (no alert is created or reopened without an event identity)',
+  pg_temp.rec('00000000-0000-0000-0000-0000000b40b1','REFUND',null) = 'INVALID_EVIDENCE_REF'
+  and pg_temp.rec('00000000-0000-0000-0000-0000000b40b1','REFUND','   ') = 'INVALID_EVIDENCE_REF'
+  and pg_temp.rec('00000000-0000-0000-0000-0000000b40b1','REFUND',repeat('x',201)) = 'INVALID_EVIDENCE_REF');
+select pg_temp.chk('reopening and replays never touched a transaction or a subscription',
+  (select f from fp1) = pg_temp.fingerprint());
+select pg_temp.chk('the evidence registry is append-only, unique per (alert, ref), and closed to clients',
+  pg_temp.dml_as(null,$q$update public.prompter_payment_alert_evidence set source='WEBHOOK_EVENT'$q$,session_user::text) like 'P0001%'
+  and pg_temp.dml_as(null,$q$delete from public.prompter_payment_alert_evidence$q$,session_user::text) like 'P0001%'
+  and pg_temp.dml_as(null,$q$truncate public.prompter_payment_alert_evidence$q$,session_user::text) ~ '^(P0001|0A000)'
+  and pg_temp.dml_as(null,$q$insert into public.prompter_payment_alert_evidence(alert_id,evidence_ref,source) select alert_id,evidence_ref,source from public.prompter_payment_alert_evidence limit 1$q$,session_user::text) like '23505%');
+
+-- ===== 8c. SECURITY DEFINER hardening =====
+select pg_temp.chk('all 8 B4 functions pin search_path = public, pg_temp',
+  (select count(*) from pg_proc where pronamespace='public'::regnamespace and proname in ('fn_sync_payment_alerts','fn_record_payment_alarm','fn_ack_payment_alert','fn_resolve_payment_alert','fn_is_payment_operator','fn_note_payment_alert_sync_failure','fn_prompter_payment_alert_protect','fn_prompter_payment_alert_actions_immutable')
+     and proconfig @> array['search_path=public, pg_temp']) = 8);
+create temp table prompter_payment_operators(user_id uuid, label text, active boolean);
+insert into pg_temp.prompter_payment_operators values ('00000000-0000-0000-0000-0000000b4bad','attacker',true);
+grant select on pg_temp.prompter_payment_operators to service_role;
+create function public.zz_ctl_is_op(u uuid) returns boolean language sql security definer set search_path = public as
+  $$ select exists (select 1 from prompter_payment_operators where user_id = u and active) $$;
+select pg_temp.chk('control: a definer function with a BARE search_path = public IS fooled by a temp-table shadow (the attack is real) ...',
+  public.zz_ctl_is_op('00000000-0000-0000-0000-0000000b4bad') = true);
+select pg_temp.chk('... but the B4 functions are not: the attacker is no operator, cannot ACK / RESOLVE, and the temp shadow is never read',
+  pg_temp.as_service($q$select public.fn_is_payment_operator('00000000-0000-0000-0000-0000000b4bad')::text$q$) = 'false'
+  and pg_temp.ack(pg_temp.aid('00000000-0000-0000-0000-0000000b40b3','REVERSAL'),'00000000-0000-0000-0000-0000000b4bad') = 'NOT_OPERATOR'
+  and pg_temp.res(pg_temp.aid('00000000-0000-0000-0000-0000000b40b3','REVERSAL'),'00000000-0000-0000-0000-0000000b4bad','tidak berwenang sama sekali') = 'NOT_OPERATOR');
+drop function public.zz_ctl_is_op(uuid);
+drop table pg_temp.prompter_payment_operators;
 
 -- ===== 9. sync state =====
 select pg_temp.chk('sync state: success recorded; failure note increments and a later success resets it',

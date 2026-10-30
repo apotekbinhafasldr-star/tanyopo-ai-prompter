@@ -122,6 +122,9 @@ export default async function PaymentQueuePage({ searchParams }: { searchParams:
                   {a.severity === "CRITICAL" ? "Kritis" : "Tinggi"}
                 </span>
                 <span className="text-sm font-semibold">{PAYMENT_ALERT_KIND_LABEL[a.kind]}</span>
+                {a.reopened_count > 0 ? (
+                  <span className="rounded-full bg-info-muted px-2 py-0.5 text-xs font-medium text-info">Dibuka ulang {a.reopened_count}×</span>
+                ) : null}
                 <span className="ml-auto text-xs text-muted-foreground">{PAYMENT_ALERT_STATE_LABEL[a.state]}</span>
               </div>
               <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
@@ -139,6 +142,14 @@ export default async function PaymentQueuePage({ searchParams }: { searchParams:
                 <dd className="break-words">{a.reason ?? "-"}</dd>
                 <dt className="text-muted-foreground">Terdeteksi</dt>
                 <dd>{when(a.first_seen_at)}</dd>
+                {a.repeat_count > 0 ? (
+                  <>
+                    <dt className="text-muted-foreground">Sinyal serupa</dt>
+                    <dd>
+                      Muncul lagi {a.repeat_count}× setelah selesai (kemungkinan kirim ulang). Terakhir {when(a.last_repeat_at)}.
+                    </dd>
+                  </>
+                ) : null}
                 {a.state === "RESOLVED" ? (
                   <>
                     <dt className="text-muted-foreground">Selesai</dt>
