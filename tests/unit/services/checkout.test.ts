@@ -1,7 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { PLAN_TIERS, findPlanTier } from "@/lib/billing/plans";
-import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Database } from "@/types/database";
 
 const { getPaymentProviderMock, createAdminClientMock } = vi.hoisted(() => ({
   getPaymentProviderMock: vi.fn(),
@@ -12,16 +10,21 @@ vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: createAdminClientMoc
 
 import { startCheckout } from "@/services/checkout";
 
-function mockSupabase(insertResult: { data: { id: string } | null; error: { message: string } | null }) {
-  const single = vi.fn(async () => insertResult);
-  const select = vi.fn(() => ({ single }));
-  const insert = vi.fn(() => ({ select }));
-  const from = vi.fn(() => ({ insert }));
-  return { from, insert, select, single } as unknown as SupabaseClient<Database> & {
-    from: typeof from;
-    insert: typeof insert;
-  };
+type RpcRow = { out_transaction_id: string | null; out_amount: number | null; out_currency: string | null; out_outcome: string };
+
+/** Admin client double: rpc() for fn_begin_checkout, from().update().eq().eq() for the follow-up writes. */
+function mockAdmin(rpcResult: { data: RpcRow[] | null; error: { message: string } | null }) {
+  const eq = vi.fn(() => ({ eq }));
+  const update = vi.fn(() => ({ eq }));
+  const from = vi.fn(() => ({ update }));
+  const rpc = vi.fn(async () => rpcResult);
+  return { rpc, from, update, eq };
 }
+
+const created = (amount: number, id = "txn_1", currency = "IDR"): { data: RpcRow[]; error: null } => ({
+  data: [{ out_transaction_id: id, out_amount: amount, out_currency: currency, out_outcome: "CREATED" }],
+  error: null,
+});
 
 function mockProvider(overrides: Partial<{ isConfigured: boolean; createCheckoutSession: ReturnType<typeof vi.fn> }> = {}) {
   return {
@@ -37,157 +40,174 @@ function mockProvider(overrides: Partial<{ isConfigured: boolean; createCheckout
   };
 }
 
+const input = (plan: string, extra: Record<string, unknown> = {}) =>
+  ({
+    tenantId: "t1",
+    userId: "u1",
+    plan,
+    successUrl: "https://app.example.com/billing?checkout=success",
+    cancelUrl: "https://app.example.com/billing?checkout=cancelled",
+    ...extra,
+  }) as Parameters<typeof startCheckout>[0];
+
 beforeEach(() => {
   getPaymentProviderMock.mockReset();
   createAdminClientMock.mockReset();
   createAdminClientMock.mockReturnValue(null);
 });
 
-describe("startCheckout — Batch B10 checkout core", () => {
-  it("Bagian G.2/G.3 — never accepts an amount from the caller; always uses the server-side canonical price from PLAN_TIERS", async () => {
+describe("startCheckout — Billing B1 (server-only, catalog-priced)", () => {
+  it("creates the transaction ONLY through fn_begin_checkout with the service-role client, and sends no amount or currency", async () => {
+    const admin = mockAdmin(created(99_000));
+    createAdminClientMock.mockReturnValue(admin);
+    getPaymentProviderMock.mockReturnValue(mockProvider());
+
+    const result = await startCheckout(input("STARTER"));
+
+    expect(result.ok).toBe(true);
+    expect(admin.rpc).toHaveBeenCalledTimes(1);
+    expect(admin.rpc).toHaveBeenCalledWith("fn_begin_checkout", {
+      p_tenant_id: "t1",
+      p_user_id: "u1",
+      p_plan: "STARTER",
+      p_provider: "midtrans",
+    });
+    const args = (admin.rpc.mock.calls[0] as unknown as [string, Record<string, unknown>])[1];
+    expect(Object.keys(args).join(",")).not.toMatch(/amount|price|currency/i);
+    // the table is never inserted into from the application any more
+    expect(admin.from).not.toHaveBeenCalledWith("prompter_subscriptions");
+  });
+
+  it("charges the amount the DATABASE returned (equal to the code catalog) and passes it to the provider", async () => {
+    const admin = mockAdmin(created(399_000, "txn_pro"));
+    createAdminClientMock.mockReturnValue(admin);
     const provider = mockProvider();
     getPaymentProviderMock.mockReturnValue(provider);
-    const supabase = mockSupabase({ data: { id: "txn_1" }, error: null });
 
-    const starterTier = PLAN_TIERS.find((t) => t.id === "STARTER")!;
-    await startCheckout(supabase, {
-      tenantId: "t1",
-      userId: "u1",
-      plan: "STARTER",
-      successUrl: "https://app.example.com/success",
-      cancelUrl: "https://app.example.com/cancel",
-    });
+    await startCheckout(input("PRO"));
 
-    expect(supabase.insert).toHaveBeenCalledWith(
-      expect.objectContaining({ amount: starterTier.priceIDR, currency: "IDR", plan: "STARTER" }),
-    );
     expect(provider.createCheckoutSession).toHaveBeenCalledWith(
-      expect.objectContaining({ amountIDR: starterTier.priceIDR }),
+      expect.objectContaining({ amountIDR: 399_000, internalTransactionId: "txn_pro", plan: "PRO" }),
     );
   });
 
-  it("Bagian G.5 — rejects Agency (COMING_SOON) before creating any transaction or calling the provider", async () => {
+  it("fails closed on catalog drift: DB price != code price marks the transaction FAILED and never calls the provider", async () => {
+    const admin = mockAdmin(created(1, "txn_bad"));
+    createAdminClientMock.mockReturnValue(admin);
     const provider = mockProvider();
     getPaymentProviderMock.mockReturnValue(provider);
-    const supabase = mockSupabase({ data: { id: "txn_1" }, error: null });
 
-    const result = await startCheckout(supabase, {
-      tenantId: "t1",
-      userId: "u1",
-      plan: "AGENCY",
-      successUrl: "https://app.example.com/success",
-      cancelUrl: "https://app.example.com/cancel",
-    });
+    const result = await startCheckout(input("BUSINESS"));
 
     expect(result.ok).toBe(false);
-    expect(supabase.insert).not.toHaveBeenCalled();
+    expect(provider.createCheckoutSession).not.toHaveBeenCalled();
+    expect(admin.update).toHaveBeenCalledWith({ status: "FAILED", failure_reason: "PRICE_CATALOG_MISMATCH" });
+    expect(admin.eq).toHaveBeenCalledWith("id", "txn_bad");
+  });
+
+  it("fails closed when the DB reports a non-IDR currency", async () => {
+    const admin = mockAdmin(created(99_000, "txn_usd", "USD"));
+    createAdminClientMock.mockReturnValue(admin);
+    const provider = mockProvider();
+    getPaymentProviderMock.mockReturnValue(provider);
+
+    expect((await startCheckout(input("STARTER"))).ok).toBe(false);
     expect(provider.createCheckoutSession).not.toHaveBeenCalled();
   });
 
-  it("rejects an invalid/unknown plan string before touching the database", async () => {
-    const provider = mockProvider();
-    getPaymentProviderMock.mockReturnValue(provider);
-    const supabase = mockSupabase({ data: { id: "txn_1" }, error: null });
+  it("rejects Agency (COMING_SOON), FREE and unknown plans BEFORE any database call", async () => {
+    const admin = mockAdmin(created(1));
+    createAdminClientMock.mockReturnValue(admin);
+    getPaymentProviderMock.mockReturnValue(mockProvider());
 
-    const result = await startCheckout(supabase, {
-      // @ts-expect-error deliberately invalid for the test
-      plan: "NOT_A_REAL_PLAN",
-      tenantId: "t1",
-      userId: "u1",
-      successUrl: "https://app.example.com/success",
-      cancelUrl: "https://app.example.com/cancel",
-    });
-
-    expect(result.ok).toBe(false);
-    expect(supabase.insert).not.toHaveBeenCalled();
+    for (const plan of ["AGENCY", "FREE", "NOT_A_REAL_PLAN", "UMKMPRO_BUNDLE"]) {
+      expect((await startCheckout(input(plan))).ok).toBe(false);
+    }
+    expect(admin.rpc).not.toHaveBeenCalled();
   });
 
-  it("rejects FREE (no payment needed) without creating a transaction", async () => {
-    const provider = mockProvider();
-    getPaymentProviderMock.mockReturnValue(provider);
-    const supabase = mockSupabase({ data: { id: "txn_1" }, error: null });
+  it("fails closed when the provider isn't configured: no RPC, no transaction row", async () => {
+    const admin = mockAdmin(created(199_000));
+    createAdminClientMock.mockReturnValue(admin);
+    getPaymentProviderMock.mockReturnValue(mockProvider({ isConfigured: false }));
 
-    const result = await startCheckout(supabase, {
-      tenantId: "t1",
-      userId: "u1",
-      plan: "FREE",
-      successUrl: "https://app.example.com/success",
-      cancelUrl: "https://app.example.com/cancel",
-    });
-
-    expect(result.ok).toBe(false);
-    expect(supabase.insert).not.toHaveBeenCalled();
-  });
-
-  it("Bagian G.8 / H — fails closed when the provider isn't configured, and never creates a transaction row", async () => {
-    const provider = mockProvider({ isConfigured: false });
-    getPaymentProviderMock.mockReturnValue(provider);
-    const supabase = mockSupabase({ data: { id: "txn_1" }, error: null });
-
-    const result = await startCheckout(supabase, {
-      tenantId: "t1",
-      userId: "u1",
-      plan: "GROWTH",
-      successUrl: "https://app.example.com/success",
-      cancelUrl: "https://app.example.com/cancel",
-    });
+    const result = await startCheckout(input("GROWTH"));
 
     expect(result.ok).toBe(false);
     expect(result.error).toMatch(/dipersiapkan/i);
-    expect(supabase.insert).not.toHaveBeenCalled();
+    expect(admin.rpc).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the service-role client isn't configured (no silent fallback to the tenant client)", async () => {
+    createAdminClientMock.mockReturnValue(null);
+    const provider = mockProvider();
+    getPaymentProviderMock.mockReturnValue(provider);
+
+    const result = await startCheckout(input("PRO"));
+
+    expect(result.ok).toBe(false);
+    expect(provider.createCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["NOT_OWNER", /Owner/],
+    ["NOT_MEMBER", /Owner/],
+    ["PLAN_NOT_PURCHASABLE", /belum dapat dibeli/],
+    ["PLAN_NOT_AVAILABLE", /belum dapat dibeli/],
+    ["NO_SUBSCRIPTION", /Langganan/],
+    ["TOO_MANY_PENDING", /Terlalu banyak/],
+    ["INVALID", /Gagal memulai/],
+  ])("maps database outcome %s to a safe message and never calls the provider", async (outcome, message) => {
+    const admin = mockAdmin({
+      data: [{ out_transaction_id: null, out_amount: null, out_currency: null, out_outcome: outcome }],
+      error: null,
+    });
+    createAdminClientMock.mockReturnValue(admin);
+    const provider = mockProvider();
+    getPaymentProviderMock.mockReturnValue(provider);
+
+    const result = await startCheckout(input("STARTER"));
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(message);
+    expect(provider.createCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it("an RPC error (e.g. migration not applied yet) fails closed", async () => {
+    const admin = mockAdmin({ data: null, error: { message: "function fn_begin_checkout does not exist" } });
+    createAdminClientMock.mockReturnValue(admin);
+    const provider = mockProvider();
+    getPaymentProviderMock.mockReturnValue(provider);
+
+    const result = await startCheckout(input("STARTER"));
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/Gagal memulai/);
+    expect(provider.createCheckoutSession).not.toHaveBeenCalled();
   });
 
   it("with the real NullPaymentProvider (no mocking), checkout always fails closed end-to-end", async () => {
     vi.doUnmock("@/lib/billing/get-payment-provider");
     const { getPaymentProvider } = await import("@/lib/billing/get-payment-provider");
     getPaymentProviderMock.mockImplementation(getPaymentProvider);
+    const admin = mockAdmin(created(99_000));
+    createAdminClientMock.mockReturnValue(admin);
 
-    const supabase = mockSupabase({ data: { id: "txn_1" }, error: null });
-    const result = await startCheckout(supabase, {
-      tenantId: "t1",
-      userId: "u1",
-      plan: "STARTER",
-      successUrl: "https://app.example.com/success",
-      cancelUrl: "https://app.example.com/cancel",
-    });
+    const result = await startCheckout(input("STARTER"));
 
     expect(result.ok).toBe(false);
-    expect(supabase.insert).not.toHaveBeenCalled();
+    expect(admin.rpc).not.toHaveBeenCalled();
   });
 
-  it("returns a checkout URL and does not itself grant any entitlement", async () => {
+  it("returns a checkout URL and carries the transaction id into the success/cancel URLs", async () => {
+    const admin = mockAdmin(created(399_000, "txn_42"));
+    createAdminClientMock.mockReturnValue(admin);
     const provider = mockProvider();
     getPaymentProviderMock.mockReturnValue(provider);
-    const supabase = mockSupabase({ data: { id: "txn_1" }, error: null });
 
-    const result = await startCheckout(supabase, {
-      tenantId: "t1",
-      userId: "u1",
-      plan: "PRO",
-      successUrl: "https://app.example.com/success",
-      cancelUrl: "https://app.example.com/cancel",
-    });
+    const result = await startCheckout(input("PRO"));
 
-    expect(result.ok).toBe(true);
     expect(result.checkoutUrl).toBe("https://pay.example.com/session/abc");
-    // startCheckout never touches prompter_subscriptions at all.
-    expect(supabase.from).toHaveBeenCalledWith("prompter_payment_transactions");
-    expect(supabase.from).not.toHaveBeenCalledWith("prompter_subscriptions");
-  });
-
-  it("Payment Remediation M — carries the transaction id through to the success/cancel URLs so a return trip can reconcile against the real transaction", async () => {
-    const provider = mockProvider();
-    getPaymentProviderMock.mockReturnValue(provider);
-    const supabase = mockSupabase({ data: { id: "txn_42" }, error: null });
-
-    await startCheckout(supabase, {
-      tenantId: "t1",
-      userId: "u1",
-      plan: "PRO",
-      successUrl: "https://app.example.com/billing?checkout=success",
-      cancelUrl: "https://app.example.com/billing?checkout=cancelled",
-    });
-
     expect(provider.createCheckoutSession).toHaveBeenCalledWith(
       expect.objectContaining({
         successUrl: "https://app.example.com/billing?checkout=success&txn=txn_42",
@@ -196,59 +216,36 @@ describe("startCheckout — Batch B10 checkout core", () => {
     );
   });
 
-  it("Payment Remediation — checkout still succeeds when the admin client isn't configured (best-effort provider_payment_id write only)", async () => {
-    createAdminClientMock.mockReturnValue(null);
-    const provider = mockProvider();
-    getPaymentProviderMock.mockReturnValue(provider);
-    const supabase = mockSupabase({ data: { id: "txn_1" }, error: null });
+  it("records the provider's session id on the transaction via the admin client, scoped to that PENDING row only", async () => {
+    const admin = mockAdmin(created(399_000, "txn_99"));
+    createAdminClientMock.mockReturnValue(admin);
+    getPaymentProviderMock.mockReturnValue(
+      mockProvider({ createCheckoutSession: vi.fn(async () => ({ checkoutUrl: "https://pay.example.com/x", externalSessionId: "xyz" })) }),
+    );
 
-    const result = await startCheckout(supabase, {
-      tenantId: "t1",
-      userId: "u1",
-      plan: "PRO",
-      successUrl: "https://app.example.com/billing",
-      cancelUrl: "https://app.example.com/billing",
-    });
+    await startCheckout(input("PRO"));
 
-    expect(result.ok).toBe(true);
+    expect(admin.from).toHaveBeenCalledWith("prompter_payment_transactions");
+    expect(admin.update).toHaveBeenCalledWith({ provider_payment_id: "xyz" });
+    expect(admin.eq).toHaveBeenCalledWith("id", "txn_99");
+    expect(admin.eq).toHaveBeenCalledWith("status", "PENDING");
   });
 
-  it("Payment Remediation — records the provider's checkout session id onto the transaction via the admin client, scoped to that PENDING row only", async () => {
-    const eq = vi.fn(() => ({ eq }));
-    const update = vi.fn(() => ({ eq }));
-    const adminFrom = vi.fn(() => ({ update }));
-    createAdminClientMock.mockReturnValue({ from: adminFrom } as unknown);
+  it("a provider failure after the transaction exists returns an error (the PENDING row stays recoverable, nothing is activated)", async () => {
+    const admin = mockAdmin(created(99_000));
+    createAdminClientMock.mockReturnValue(admin);
+    getPaymentProviderMock.mockReturnValue(mockProvider({ createCheckoutSession: vi.fn(async () => { throw new Error("gateway down"); }) }));
 
-    const provider = mockProvider({
-      createCheckoutSession: vi.fn(async () => ({
-        checkoutUrl: "https://pay.example.com/session/xyz",
-        externalSessionId: "xyz",
-      })),
-    });
-    getPaymentProviderMock.mockReturnValue(provider);
-    const supabase = mockSupabase({ data: { id: "txn_99" }, error: null });
+    const result = await startCheckout(input("STARTER"));
 
-    await startCheckout(supabase, {
-      tenantId: "t1",
-      userId: "u1",
-      plan: "PRO",
-      successUrl: "https://app.example.com/billing",
-      cancelUrl: "https://app.example.com/billing",
-    });
-
-    expect(adminFrom).toHaveBeenCalledWith("prompter_payment_transactions");
-    expect(update).toHaveBeenCalledWith({ provider_payment_id: "xyz" });
-    expect(eq).toHaveBeenCalledWith("id", "txn_99");
-    expect(eq).toHaveBeenCalledWith("status", "PENDING");
+    expect(result.ok).toBe(false);
+    expect(admin.from).not.toHaveBeenCalledWith("prompter_subscriptions");
   });
 
-  it("findPlanTier sanity check used by startCheckout — every ACTIVE tier has a positive price except FREE", () => {
+  it("every ACTIVE paid tier has a positive price and FREE is 0 (catalog sanity)", () => {
     for (const tier of PLAN_TIERS) {
-      if (tier.id === "FREE") {
-        expect(tier.priceIDR).toBe(0);
-      } else if (tier.availability === "ACTIVE") {
-        expect(tier.priceIDR).toBeGreaterThan(0);
-      }
+      if (tier.id === "FREE") expect(tier.priceIDR).toBe(0);
+      else if (tier.availability === "ACTIVE") expect(tier.priceIDR).toBeGreaterThan(0);
     }
     expect(findPlanTier("STARTER")?.availability).toBe("ACTIVE");
   });
