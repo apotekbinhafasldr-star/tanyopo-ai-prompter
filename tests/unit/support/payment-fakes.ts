@@ -14,10 +14,12 @@ export interface FakeDb {
   txns: Row[];
   events: Row[];
   audit: Row[];
+  /** B4.1 payment alert queue (one row per transaction + kind, like the database unique constraint). */
+  alerts: Row[];
   rpcCalls: Array<{ name: string; args: Row }>;
   /** Number of paid periods granted per tenant (what fn_apply_verified_payment would have added). */
   periods: Record<string, number>;
-  failAuditInsert: boolean;
+  failAlarmRecord: boolean;
   rpcError: boolean;
   from: (table: string) => any;
   rpc: (name: string, args: Row) => Promise<{ data: unknown; error: { message: string } | null }>;
@@ -34,9 +36,10 @@ export function createFakeDb(): FakeDb {
     txns: [],
     events: [],
     audit: [],
+    alerts: [],
     rpcCalls: [],
     periods: {},
-    failAuditInsert: false,
+    failAlarmRecord: false,
     rpcError: false,
     from: () => undefined,
     rpc: async () => ({ data: null, error: null }),
@@ -62,9 +65,6 @@ export function createFakeDb(): FakeDb {
             (r) => r.source_system === payload.source_system && r.external_event_id === payload.external_event_id,
           );
           if (dup) return { data: null, error: { code: "23505", message: "duplicate key" } };
-        }
-        if (name === "prompter_audit_logs" && db.failAuditInsert) {
-          return { data: null, error: { message: "audit insert failed" } };
         }
         const row = { id: `${name}-${++seq}`, ...payload };
         rows.push(row);
@@ -97,6 +97,14 @@ export function createFakeDb(): FakeDb {
   db.rpc = async (name: string, args: Row) => {
     db.rpcCalls.push({ name, args });
     if (db.rpcError) return { data: null, error: { message: "boom" } };
+    if (name === "fn_record_payment_alarm") {
+      if (db.failAlarmRecord) return { data: null, error: { message: "alarm insert failed" } };
+      const txn = db.txns.find((r) => r.id === args.p_transaction_id);
+      if (!txn) return { data: "TRANSACTION_NOT_FOUND", error: null };
+      if (db.alerts.some((a) => a.transaction_id === txn.id && a.kind === args.p_kind)) return { data: "EXISTING", error: null };
+      db.alerts.push({ transaction_id: txn.id, tenant_id: txn.tenant_id, kind: args.p_kind, evidence: args.p_evidence });
+      return { data: "CREATED", error: null };
+    }
     const t = db.txns.find((r) => r.id === args.p_transaction_id);
     if (!t) return { data: [{ allowed: false, reason: "TRANSACTION_NOT_FOUND" }], error: null };
     if (t.status === "PAID") return { data: [{ allowed: true, reason: "ALREADY_PROCESSED" }], error: null };

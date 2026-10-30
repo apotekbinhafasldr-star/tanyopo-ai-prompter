@@ -219,67 +219,68 @@ describe("Billing B3 — attack scenarios against the Midtrans webhook", () => {
   });
 
   describe("refund and chargeback: evidence + alarm signal, never an automatic revocation", () => {
-    it("a refund after PAID writes ONE audit row marked for B4, leaves the paid transaction untouched, and calls no activation", async () => {
+    it("a refund after PAID creates ONE alert in the B4 queue, leaves the paid transaction untouched, and calls no activation", async () => {
       addTxn(db, { status: "PAID" });
       gateway.answer(TXN_A, { transaction_status: "refund" });
       const result = await deliver(signedNotification({ transaction_status: "refund" }));
       expect(result.status).toBe(200);
       expect(result.message).toMatch(/subscription unchanged/i);
-      expect(db.rpcCalls).toEqual([]);
+      expect(db.rpcCalls.map((c) => c.name)).toEqual(["fn_record_payment_alarm"]);
       expect(db.txns[0].status).toBe("PAID");
-      expect(db.audit).toHaveLength(1);
-      expect(db.audit[0]).toMatchObject({
-        action: "payment.refund_reported",
+      expect(db.audit).toEqual([]); // the tenant-writable audit table is no longer used for alarms
+      expect(db.alerts).toHaveLength(1);
+      expect(db.alerts[0]).toMatchObject({
+        kind: "REFUND",
         tenant_id: TENANT_A,
-        resource_id: TXN_A,
-        context: expect.objectContaining({ alarm: "PENDING_B4", subscription_changed: false }),
+        transaction_id: TXN_A,
+        evidence: expect.objectContaining({ subscription_changed: false }),
       });
       expect(db.events[0]).toMatchObject({ status: "FAILED", error: "ALARM_REFUND" });
     });
-    it("replaying the refund notification does not duplicate the audit row", async () => {
+    it("replaying the refund notification does not duplicate the alert", async () => {
       addTxn(db, { status: "PAID" });
       gateway.answer(TXN_A, { transaction_status: "refund" });
       await deliver(signedNotification({ transaction_status: "refund" }));
       await deliver(signedNotification({ transaction_status: "refund" }));
       await Promise.all([1, 2, 3].map(() => deliver(signedNotification({ transaction_status: "refund" }))));
-      expect(db.audit).toHaveLength(1);
+      expect(db.alerts).toHaveLength(1);
     });
     it("partial_refund, chargeback and partial_chargeback are recorded with their own action", async () => {
       for (const [raw, action] of [
-        ["partial_refund", "payment.refund_reported"],
-        ["chargeback", "payment.chargeback_reported"],
-        ["partial_chargeback", "payment.chargeback_reported"],
+        ["partial_refund", "REFUND"],
+        ["chargeback", "CHARGEBACK"],
+        ["partial_chargeback", "CHARGEBACK"],
       ] as const) {
         db = createFakeDb();
         addTxn(db, { status: "PAID" });
         gateway.answer(TXN_A, { transaction_status: raw });
         await deliver(signedNotification({ transaction_status: raw }));
-        expect(db.audit.map((a) => a.action)).toEqual([action]);
+        expect(db.alerts.map((a) => a.kind)).toEqual([action]);
         expect(db.txns[0].status).toBe("PAID");
-        expect(db.rpcCalls).toEqual([]);
+        expect(db.rpcCalls.map((c) => c.name)).toEqual(["fn_record_payment_alarm"]);
       }
     });
     it("a cancel/void arriving for an already PAID invoice is a reversal alarm, not a silent close", async () => {
       addTxn(db, { status: "PAID" });
       gateway.answer(TXN_A, { transaction_status: "cancel" });
       await deliver(signedNotification({ transaction_status: "cancel" }));
-      expect(db.audit.map((a) => a.action)).toEqual(["payment.reversal_reported"]);
+      expect(db.alerts.map((a) => a.kind)).toEqual(["REVERSAL"]);
       expect(db.txns[0].status).toBe("PAID");
     });
     it("a refund on a REVIEW row is also recorded (the operator must know the money went back)", async () => {
       addTxn(db, { status: "REVIEW" });
       gateway.answer(TXN_A, { transaction_status: "refund" });
       await deliver(signedNotification({ transaction_status: "refund" }));
-      expect(db.audit).toHaveLength(1);
+      expect(db.alerts).toHaveLength(1);
       expect(db.txns[0].status).toBe("REVIEW");
     });
     it("if the alarm evidence cannot be written the webhook asks for a retry (500) instead of losing it", async () => {
       addTxn(db, { status: "PAID" });
-      db.failAuditInsert = true;
+      db.failAlarmRecord = true;
       gateway.answer(TXN_A, { transaction_status: "refund" });
       const result = await deliver(signedNotification({ transaction_status: "refund" }));
       expect(result.status).toBe(500);
-      expect(db.audit).toEqual([]);
+      expect(db.alerts).toEqual([]);
     });
     it("a replayed OLD settlement after a refund does not rewrite the PROCESSED event or revoke anything", async () => {
       addTxn(db);
@@ -291,7 +292,20 @@ describe("Billing B3 — attack scenarios against the Midtrans webhook", () => {
       await deliver(signedNotification());
       expect(db.events[0].status).toBe("PROCESSED");
       expect(db.txns[0].status).toBe("PAID");
-      expect(db.audit.map((a) => a.action)).toEqual(["payment.refund_reported"]);
+      expect(db.alerts.map((a) => a.kind)).toEqual(["REFUND"]);
+    });
+    it("a forged tenant audit row cannot suppress the alert (the audit table is never consulted)", async () => {
+      addTxn(db, { status: "PAID" });
+      db.audit.push({ tenant_id: TENANT_A, action: "payment.refund_reported", resource_id: TXN_A, context: { forged: true } });
+      gateway.answer(TXN_A, { transaction_status: "refund" });
+      await deliver(signedNotification({ transaction_status: "refund" }));
+      expect(db.alerts).toHaveLength(1);
+    });
+    it("the webhook event row carries our transaction reference so the periodic sync can re-derive the alert", async () => {
+      addTxn(db, { status: "PAID" });
+      gateway.answer(TXN_A, { transaction_status: "refund" });
+      await deliver(signedNotification({ transaction_status: "refund" }));
+      expect(db.events[0]).toMatchObject({ error: "ALARM_REFUND", payload: expect.objectContaining({ orderId: TXN_A }) });
     });
   });
 
@@ -377,7 +391,7 @@ describe("Billing B3 — attack scenarios against the Midtrans webhook", () => {
       await deliver(signedNotification({ transaction_status: "refund" })),
       await deliver(signedNotification({}, "SB-Mid-server-ATTACKER")),
     ];
-    const everything = JSON.stringify({ results, events: db.events, audit: db.audit, txns: db.txns });
+    const everything = JSON.stringify({ results, events: db.events, audit: db.audit, alerts: db.alerts, txns: db.txns });
     expect(everything).not.toContain(SERVER_KEY);
   });
 });

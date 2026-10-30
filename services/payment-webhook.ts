@@ -78,6 +78,8 @@ export async function processPaymentWebhook(
   // false success recorded ahead of finding out.
   const eventPayload = {
     externalPaymentId: event.externalPaymentId,
+    // Our own transaction reference (from the signed order_id): lets the B4 alert sync map an ALARM_* event to its transaction.
+    orderId: event.internalTransactionId ?? null,
     status: event.status,
     amount: event.amount,
     currency: event.currency,
