@@ -73,7 +73,7 @@ describe("startCheckoutAction — Batch B10 Bagian G/I", () => {
 
     await expect(startCheckoutAction({ error: null }, fd)).rejects.toThrow("REDIRECT:https://pay.example.com/x");
 
-    const callArgs = startCheckoutMock.mock.calls[0][1];
+    const callArgs = startCheckoutMock.mock.calls[0][0];
     expect(callArgs).not.toHaveProperty("amount");
     expect(callArgs).not.toHaveProperty("amountIDR");
   });
@@ -108,7 +108,7 @@ describe("startCheckoutAction — Batch B10 Bagian G/I", () => {
 
       await expect(startCheckoutAction({ error: null }, fd)).rejects.toThrow("REDIRECT:https://checkout.xendit.co/x");
 
-      const callArgs = startCheckoutMock.mock.calls[0][1];
+      const callArgs = startCheckoutMock.mock.calls[0][0];
       expect(callArgs.successUrl).toBe("https://deploy-preview-11--tanyopo-ai-prompter.netlify.app/billing?checkout=success");
       expect(callArgs.cancelUrl).toBe("https://deploy-preview-11--tanyopo-ai-prompter.netlify.app/billing?checkout=cancelled");
     });
@@ -121,7 +121,7 @@ describe("startCheckoutAction — Batch B10 Bagian G/I", () => {
 
       await expect(startCheckoutAction({ error: null }, fd)).rejects.toThrow("REDIRECT:https://checkout.xendit.co/y");
 
-      const callArgs = startCheckoutMock.mock.calls[0][1];
+      const callArgs = startCheckoutMock.mock.calls[0][0];
       expect(callArgs.successUrl).toBe(`${publicEnv.appUrl}/billing?checkout=success`);
     });
 
@@ -133,7 +133,7 @@ describe("startCheckoutAction — Batch B10 Bagian G/I", () => {
 
       await expect(startCheckoutAction({ error: null }, fd)).rejects.toThrow("REDIRECT:https://checkout.xendit.co/z");
 
-      const callArgs = startCheckoutMock.mock.calls[0][1];
+      const callArgs = startCheckoutMock.mock.calls[0][0];
       expect(callArgs.successUrl).toBe(`${publicEnv.appUrl}/billing?checkout=success`);
     });
   });

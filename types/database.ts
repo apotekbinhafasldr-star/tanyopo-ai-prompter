@@ -1460,6 +1460,12 @@ export interface Database {
       };
       // P0 plan tampering -- supabase/migrations/20261029220000_prompter_p0_subscription_plan_tampering_lockdown.sql.
       // Owner-only, TRIALING-only plan PREFERENCE (grants no paid access).
+      // Billing B1 -- supabase/migrations/20261030100000_prompter_b1_server_only_checkout.sql.
+      // service_role ONLY (called from services/checkout.ts with the admin client). No amount / currency argument.
+      fn_begin_checkout: {
+        Args: { p_tenant_id: string; p_user_id: string; p_plan: string; p_provider: string };
+        Returns: { out_transaction_id: string | null; out_amount: number | null; out_currency: string | null; out_outcome: string }[];
+      };
       fn_set_trial_plan_preference: {
         Args: { p_plan: string };
         Returns: { out_ok: boolean; out_reason: string | null }[];

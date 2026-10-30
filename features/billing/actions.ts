@@ -114,8 +114,7 @@ export async function startCheckoutAction(
   }
 
   const origin = await resolveCheckoutOrigin();
-  const supabase = await createClient();
-  const result = await startCheckout(supabase, {
+  const result = await startCheckout({
     tenantId: session.tenantId,
     userId: session.userId,
     plan: plan as SubscriptionPlan,
