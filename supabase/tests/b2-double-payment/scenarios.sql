@@ -36,7 +36,7 @@ create temp table a3 as select pg_temp.co('0001','GROWTH') r;
 select pg_temp.chk('A2 different plan supersedes: new invoice CREATED', (select r from a3) like 'CREATED:%');
 select pg_temp.chk('A2 old invoice CANCELLED/SUPERSEDED, still exactly one PENDING', pg_temp.st(pg_temp.cid((select r from a1))) = 'CANCELLED/SUPERSEDED_BY_NEWER_CHECKOUT' and pg_temp.npending('0001') = 1);
 select pg_temp.chk('A3 DB itself refuses a second PENDING (unique index, even for the table owner)',
-  (select (pg_temp.dml_as(null, format($q$insert into public.prompter_payment_transactions(tenant_id,user_id,provider,plan,amount,currency) values (%L,%L,'midtrans','GROWTH',199000,'IDR')$q$, pg_temp.t('0001'), pg_temp.u('0001')), 'postgres')) like '23505:%'));
+  (select (pg_temp.dml_as(null, format($q$insert into public.prompter_payment_transactions(tenant_id,user_id,provider,plan,amount,currency) values (%L,%L,'midtrans','GROWTH',199000,'IDR')$q$, pg_temp.t('0001'), pg_temp.u('0001')), session_user::text)) like '23505:%'));
 create temp table a4 as select pg_temp.co('0001','STARTER') r;
 select pg_temp.chk('A4 provider/plan switching never leaves two PENDING', pg_temp.npending('0001') = 1);
 do $$ declare i int; r text; last_ text; begin
