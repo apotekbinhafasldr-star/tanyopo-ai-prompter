@@ -161,15 +161,15 @@ select pg_temp.chk('no B4 function calls fn_apply_verified_payment / fn_resolve_
 
 -- ===== 7. evidence is protected =====
 select pg_temp.chk('history is append-only; alerts cannot be deleted or truncated (even as the table owner)',
-  pg_temp.dml_as(null,$q$update public.prompter_payment_alert_actions set note='x'$q$,'postgres') like 'P0001%'
-  and pg_temp.dml_as(null,$q$delete from public.prompter_payment_alert_actions$q$,'postgres') like 'P0001%'
-  and pg_temp.dml_as(null,$q$truncate public.prompter_payment_alert_actions$q$,'postgres') like 'P0001%'
-  and pg_temp.dml_as(null,$q$delete from public.prompter_payment_alerts$q$,'postgres') like 'P0001%'
-  and pg_temp.dml_as(null,$q$truncate public.prompter_payment_alerts$q$,'postgres') ~ '^(P0001|0A000)');
+  pg_temp.dml_as(null,$q$update public.prompter_payment_alert_actions set note='x'$q$,session_user::text) like 'P0001%'
+  and pg_temp.dml_as(null,$q$delete from public.prompter_payment_alert_actions$q$,session_user::text) like 'P0001%'
+  and pg_temp.dml_as(null,$q$truncate public.prompter_payment_alert_actions$q$,session_user::text) like 'P0001%'
+  and pg_temp.dml_as(null,$q$delete from public.prompter_payment_alerts$q$,session_user::text) like 'P0001%'
+  and pg_temp.dml_as(null,$q$truncate public.prompter_payment_alerts$q$,session_user::text) ~ '^(P0001|0A000)');
 select pg_temp.chk('unique (transaction_id, kind) and the check constraints back the application rules',
-  pg_temp.dml_as(null,$q$insert into public.prompter_payment_alerts(kind,severity,transaction_id,tenant_id,source) values ('REFUND','HIGH','00000000-0000-0000-0000-0000000b40b1','00000000-0000-0000-0000-0000000b4001','VERIFIED_CALL')$q$,'postgres') like '23505%'
-  and pg_temp.dml_as(null,$q$update public.prompter_payment_alerts set state='RESOLVED' where kind='CHARGEBACK'$q$,'postgres') like '23514%'
-  and pg_temp.dml_as(null,$q$update public.prompter_payment_alerts set kind='OTHER' where kind='CHARGEBACK'$q$,'postgres') like '23514%');
+  pg_temp.dml_as(null,$q$insert into public.prompter_payment_alerts(kind,severity,transaction_id,tenant_id,source) values ('REFUND','HIGH','00000000-0000-0000-0000-0000000b40b1','00000000-0000-0000-0000-0000000b4001','VERIFIED_CALL')$q$,session_user::text) like '23505%'
+  and pg_temp.dml_as(null,$q$update public.prompter_payment_alerts set state='RESOLVED' where kind='CHARGEBACK'$q$,session_user::text) like '23514%'
+  and pg_temp.dml_as(null,$q$update public.prompter_payment_alerts set kind='OTHER' where kind='CHARGEBACK'$q$,session_user::text) like '23514%');
 
 -- ===== 8. auto-resolve of REVIEW (last: this changes a transaction, simulating the gateway-verified resolver) =====
 select pg_temp.chk('REVIEW -> PAID elsewhere: sync auto-resolves the OPEN REVIEW alert once, with history; a second sync does nothing',
