@@ -8,7 +8,7 @@ Status: Draft PR. **Not applied to any database. Live payments stay HOLD.**
 3. At most **one PENDING invoice per tenant** (partial unique index → race-proof). Identical request within 30 min → same invoice (`EXISTING`, stored payment link reused). A different plan/provider supersedes the old invoice (`CANCELLED`).
 4. The subscription UPDATE must affect **exactly one row**, else the whole call fails (nothing stays `PAID`) and the gateway retries. Idempotency per transaction is unchanged; the trial-remainder bonus (carryover trigger) still applies once, only on TRIALING → ACTIVE.
 5. A paid notification for an EXPIRED / CANCELLED / FAILED invoice, with a wrong amount, with no subscription or with a plan conflict is **never dropped and never auto-trusted**: status `REVIEW`, reason in `failure_reason`, provider ids + reported amount in `metadata.review`, audit row `payment.needs_review`. HTTP 200 only means "recorded"; the webhook event row is `FAILED / NEEDS_REVIEW`, never `PROCESSED`.
-6. `fn_resolve_review_payment(txn, gateway_amount, gateway_currency)` (service_role) re-runs the guarded activation **only after the caller verified the payment with the gateway** (B3). Until then the transaction stays `REVIEW`.
+6. `fn_resolve_review_payment(txn, gateway_amount, gateway_currency, gateway_reference, gateway_status)` (service_role) re-runs the guarded activation **only with gateway evidence**: the same payment reference the webhook recorded, status `PAID`, matching amount/currency; it writes an audit row. No application route calls it yet. Until then the transaction stays `REVIEW`.
 
 ## Files
 - `supabase/migrations/20261030140000_prompter_b2_double_payment_safety.sql` (+ rollback `supabase/rollback/…down.sql`, fail-closed while any REVIEW row exists)

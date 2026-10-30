@@ -11,7 +11,7 @@ do $$ begin
   end if;
 end $$;
 
-drop function if exists public.fn_resolve_review_payment(uuid, numeric, text);
+drop function if exists public.fn_resolve_review_payment(uuid, numeric, text, text, text);
 drop index if exists public.uq_prompter_payment_txn_one_pending_per_tenant;
 
 create or replace function public.fn_apply_verified_payment(

@@ -19,8 +19,8 @@
 --   * The subscription UPDATE must affect exactly one row, otherwise the whole call fails and nothing is marked PAID.
 --   * A paid notification that cannot be applied safely is never ignored and never trusted blindly: the transaction
 --     becomes REVIEW (new status) with the reason, the provider ids and the reported amount kept as evidence.
---     fn_resolve_review_payment() (service_role) applies a REVIEW transaction only after the caller has verified the
---     payment with the gateway (B3). Without that verification it stays REVIEW for manual reconciliation.
+--     fn_resolve_review_payment() (service_role) applies a REVIEW transaction only when the caller supplies gateway evidence
+--     (same payment reference, status PAID, matching amount) obtained from the gateway status API (B3). Without that verification it stays REVIEW for manual reconciliation.
 --
 -- Compatible with #74 (client cannot write subscriptions), #75 (txns only via fn_begin_checkout) and the carryover
 -- trigger. No PUBLOE / UMKMpro object is touched. Does not modify any existing row.
@@ -192,7 +192,9 @@ end $$;
 create or replace function public.fn_resolve_review_payment(
   p_transaction_id uuid,
   p_gateway_verified_amount numeric,
-  p_gateway_verified_currency text
+  p_gateway_verified_currency text,
+  p_gateway_reference text,
+  p_gateway_status text
 )
 returns table(allowed boolean, reason text)
 language plpgsql
@@ -211,6 +213,19 @@ begin
     return query select false, 'NOT_IN_REVIEW'::text;
     return;
   end if;
+  -- The evidence must refer to THE payment the webhook recorded on this transaction, and the gateway must say PAID.
+  if v_txn.provider_payment_id is null or coalesce(p_gateway_reference, '') = '' then
+    return query select false, 'NO_RECORDED_PAYMENT_REFERENCE'::text;
+    return;
+  end if;
+  if p_gateway_reference <> v_txn.provider_payment_id then
+    return query select false, 'GATEWAY_REFERENCE_MISMATCH'::text;
+    return;
+  end if;
+  if p_gateway_status is distinct from 'PAID' then
+    return query select false, 'GATEWAY_NOT_PAID'::text;
+    return;
+  end if;
   if v_txn.amount <> p_gateway_verified_amount or v_txn.currency <> p_gateway_verified_currency then
     return query select false, 'AMOUNT_OR_CURRENCY_MISMATCH'::text;
     return;
@@ -220,6 +235,12 @@ begin
     return;
   end if;
 
+  insert into public.prompter_audit_logs (tenant_id, actor_user_id, action, resource_type, resource_id, context)
+  values (v_txn.tenant_id, null, 'payment.review_resolution_attempted', 'prompter_payment_transactions', v_txn.id,
+          jsonb_build_object('gateway_reference', p_gateway_reference, 'gateway_status', p_gateway_status,
+                             'gateway_amount', p_gateway_verified_amount, 'currency', p_gateway_verified_currency,
+                             'review_reason', v_txn.failure_reason));
+
   -- Re-run the normal, fully guarded activation path (it may legitimately send it back to REVIEW).
   update public.prompter_payment_transactions set status = 'PENDING', failure_reason = null where id = v_txn.id;
   return query select * from public.fn_apply_verified_payment(
@@ -227,13 +248,13 @@ begin
 end;
 $$;
 
-comment on function public.fn_resolve_review_payment(uuid, numeric, text) is
-  'Billing B2: applies a REVIEW transaction after the CALLER verified amount/currency with the payment gateway. Re-runs fn_apply_verified_payment (so every safety rule still holds). service_role only.';
+comment on function public.fn_resolve_review_payment(uuid, numeric, text, text, text) is
+  'Billing B2: applies a REVIEW transaction ONLY when the caller supplies gateway evidence (the same payment reference the webhook recorded, status PAID, matching amount/currency) obtained from the gateway status API (B3), never from the webhook body. Writes an audit row, then re-runs fn_apply_verified_payment so every safety rule still holds. service_role only; no application route calls it yet.';
 
-revoke all on function public.fn_resolve_review_payment(uuid, numeric, text) from public, anon, authenticated;
+revoke all on function public.fn_resolve_review_payment(uuid, numeric, text, text, text) from public, anon, authenticated;
 do $$ begin
   if exists (select 1 from pg_roles where rolname = 'service_role') then
-    grant execute on function public.fn_resolve_review_payment(uuid, numeric, text) to service_role;
+    grant execute on function public.fn_resolve_review_payment(uuid, numeric, text, text, text) to service_role;
   end if;
 end $$;
 

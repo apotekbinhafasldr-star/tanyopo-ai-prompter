@@ -63,11 +63,21 @@ describe("B2 migration: checkout", () => {
   });
 });
 
+describe("B2 resolver", () => {
+  it("demands gateway evidence: recorded reference, status PAID, matching amount, and leaves an audit row", () => {
+    expect(sql).toContain("'NO_RECORDED_PAYMENT_REFERENCE'");
+    expect(sql).toContain("p_gateway_reference <> v_txn.provider_payment_id");
+    expect(sql).toContain("'GATEWAY_REFERENCE_MISMATCH'");
+    expect(sql).toContain("p_gateway_status is distinct from 'PAID'");
+    expect(sql).toContain("'payment.review_resolution_attempted'");
+  });
+});
+
 describe("B2 migration: privileges and scope", () => {
   it("all three functions are service_role only", () => {
     for (const fn of [
       "fn_apply_verified_payment(uuid, text, text, numeric, text)",
-      "fn_resolve_review_payment(uuid, numeric, text)",
+      "fn_resolve_review_payment(uuid, numeric, text, text, text)",
       "fn_begin_checkout(uuid, uuid, text, text)",
     ]) {
       expect(sql).toContain(`revoke all on function public.${fn} from public, anon, authenticated;`);
@@ -89,9 +99,13 @@ describe("B2 migration: privileges and scope", () => {
 
 describe("B2 rollback", () => {
   const down = executable(read(DOWN));
+  it("never modifies or deletes a transaction, subscription or audit row (evidence and customer data untouched)", () => {
+    const outsideFunctions = down.replace(/create or replace function[\s\S]*?\n\$\$;/g, "");
+    expect(outsideFunctions).not.toMatch(/\b(delete from|truncate|insert into)\b|\bupdate\s+public\./i);
+  });
   it("is fail-closed while any REVIEW transaction exists and restores the v1 functions", () => {
     expect(down).toMatch(/where status = 'REVIEW'[\s\S]*?rollback refused/);
-    expect(down).toContain("drop function if exists public.fn_resolve_review_payment(uuid, numeric, text);");
+    expect(down).toContain("drop function if exists public.fn_resolve_review_payment(uuid, numeric, text, text, text);");
     expect(down).toContain("drop index if exists public.uq_prompter_payment_txn_one_pending_per_tenant;");
     expect(down).toMatch(/create or replace function public\.fn_apply_verified_payment/);
     expect(down).toMatch(/create or replace function public\.fn_begin_checkout/);
