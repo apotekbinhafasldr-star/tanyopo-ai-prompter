@@ -133,11 +133,13 @@ rm -f "$W"/o_*; for i in $(seq 1 10); do ( REC gw:n1 > "$W/o_$i" ) & done; wait
   && [ "$(PA -d b4_conc -c "select reopened_count||'/'||state||'/'||(select count(*) from prompter_payment_alerts where kind='REFUND' and transaction_id='00000000-0000-0000-0000-0000000c40b1') from prompter_payment_alerts where id='$RA'")" = "1/OPEN/1" ] \
   && pass "3h: 10 parallel identical NEW refunds on a RESOLVED alert -> exactly 1 REOPENED, 9 EXISTING, one alert, reopened_count=1" || bad "3h identical new event ($(cat "$W"/o_* | sort | uniq -c | tr '\n' ' '))"
 SVC b4_conc "select public.fn_resolve_payment_alert('$RA','$OP','refund kedua dicek')" >/dev/null
+# The sync-registered event ref of 3d exists only if the sync (not the direct call) created the alert first: a race. Count relative to now.
+EV0=$(PA -d b4_conc -c "select count(*) from prompter_payment_alert_evidence where alert_id='$RA'")
 rm -f "$W"/o_*; for i in $(seq 1 4); do ( REC gw:n2 > "$W/o_a$i" ) & ( REC gw:n3 > "$W/o_b$i" ) & done; wait
 [ "$(cat "$W"/o_* | grep -c '^REOPENED$')" = 1 ] && [ "$(cat "$W"/o_* | grep -c '^EXISTING$')" = 7 ] \
   && [ "$(PA -d b4_conc -c "select reopened_count||'/'||state from prompter_payment_alerts where id='$RA'")" = "2/OPEN" ] \
   && [ "$(PA -d b4_conc -c "select count(*) from prompter_payment_alerts where kind='REFUND' and transaction_id='00000000-0000-0000-0000-0000000c40b1'")" = 1 ] \
-  && [ "$(PA -d b4_conc -c "select count(*) from prompter_payment_alert_evidence where alert_id='$RA'")" = 5 ] \
+  && [ "$(PA -d b4_conc -c "select count(*) from prompter_payment_alert_evidence where alert_id='$RA'")" = $((EV0+2)) ] \
   && pass "3h: two different parallel refunds -> one alert, one reopen, BOTH event identities registered (nothing lost)" || bad "3h two different new events ($(cat "$W"/o_* | sort | uniq -c | tr '\n' ' '))"
 SVC b4_conc "select public.fn_resolve_payment_alert('$RA','$OP','refund ketiga dicek')" >/dev/null
 rm -f "$W"/o_*; for i in $(seq 1 10); do ( REC gw:n2 > "$W/o_$i" ) & done; wait
