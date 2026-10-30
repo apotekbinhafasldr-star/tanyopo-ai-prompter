@@ -14,10 +14,12 @@ export interface FakeDb {
   txns: Row[];
   events: Row[];
   audit: Row[];
+  /** B4.1 payment alert queue (one row per transaction + kind, like the database unique constraint). */
+  alerts: Row[];
   rpcCalls: Array<{ name: string; args: Row }>;
   /** Number of paid periods granted per tenant (what fn_apply_verified_payment would have added). */
   periods: Record<string, number>;
-  failAuditInsert: boolean;
+  failAlarmRecord: boolean;
   rpcError: boolean;
   from: (table: string) => any;
   rpc: (name: string, args: Row) => Promise<{ data: unknown; error: { message: string } | null }>;
@@ -34,9 +36,10 @@ export function createFakeDb(): FakeDb {
     txns: [],
     events: [],
     audit: [],
+    alerts: [],
     rpcCalls: [],
     periods: {},
-    failAuditInsert: false,
+    failAlarmRecord: false,
     rpcError: false,
     from: () => undefined,
     rpc: async () => ({ data: null, error: null }),
@@ -62,9 +65,6 @@ export function createFakeDb(): FakeDb {
             (r) => r.source_system === payload.source_system && r.external_event_id === payload.external_event_id,
           );
           if (dup) return { data: null, error: { code: "23505", message: "duplicate key" } };
-        }
-        if (name === "prompter_audit_logs" && db.failAuditInsert) {
-          return { data: null, error: { message: "audit insert failed" } };
         }
         const row = { id: `${name}-${++seq}`, ...payload };
         rows.push(row);
@@ -97,6 +97,42 @@ export function createFakeDb(): FakeDb {
   db.rpc = async (name: string, args: Row) => {
     db.rpcCalls.push({ name, args });
     if (db.rpcError) return { data: null, error: { message: "boom" } };
+    if (name === "fn_record_payment_alarm") {
+      // Same contract as the database function: create / reopen (new ref on RESOLVED) / repeat (known ref on RESOLVED) / existing.
+      if (db.failAlarmRecord) return { data: null, error: { message: "alarm insert failed" } };
+      const txn = db.txns.find((r) => r.id === args.p_transaction_id);
+      if (!txn) return { data: "TRANSACTION_NOT_FOUND", error: null };
+      if (!args.p_evidence_ref) return { data: "INVALID_EVIDENCE_REF", error: null };
+      const alert = db.alerts.find((a) => a.transaction_id === txn.id && a.kind === args.p_kind);
+      if (!alert) {
+        db.alerts.push({
+          transaction_id: txn.id,
+          tenant_id: txn.tenant_id,
+          kind: args.p_kind,
+          state: "OPEN",
+          refs: new Set([args.p_evidence_ref]),
+          reopened_count: 0,
+          repeat_count: 0,
+          evidence: args.p_evidence,
+        });
+        return { data: "CREATED", error: null };
+      }
+      if (alert.refs.has(args.p_evidence_ref)) {
+        if (alert.state === "RESOLVED") {
+          alert.repeat_count += 1;
+          return { data: "REPEAT", error: null };
+        }
+        return { data: "EXISTING", error: null };
+      }
+      alert.refs.add(args.p_evidence_ref);
+      if (alert.state === "RESOLVED") {
+        alert.state = "OPEN";
+        alert.reopened_count += 1;
+        alert.evidence = args.p_evidence;
+        return { data: "REOPENED", error: null };
+      }
+      return { data: "EXISTING", error: null };
+    }
     const t = db.txns.find((r) => r.id === args.p_transaction_id);
     if (!t) return { data: [{ allowed: false, reason: "TRANSACTION_NOT_FOUND" }], error: null };
     if (t.status === "PAID") return { data: [{ allowed: true, reason: "ALREADY_PROCESSED" }], error: null };

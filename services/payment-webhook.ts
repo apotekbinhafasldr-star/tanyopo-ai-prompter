@@ -78,6 +78,8 @@ export async function processPaymentWebhook(
   // false success recorded ahead of finding out.
   const eventPayload = {
     externalPaymentId: event.externalPaymentId,
+    // Our own transaction reference (from the signed order_id): lets the B4 alert sync map an ALARM_* event to its transaction.
+    orderId: event.internalTransactionId ?? null,
     status: event.status,
     amount: event.amount,
     currency: event.currency,
@@ -131,11 +133,21 @@ export async function processPaymentWebhook(
     }
 
     // Never downgrade an event already recorded as PROCESSED (a replayed old notification must not rewrite history).
-    const markVerifiedEvent = async (status: "PROCESSED" | "FAILED" | "IGNORED", error: string | null) => {
+    const markVerifiedEvent = async (
+      status: "PROCESSED" | "FAILED" | "IGNORED",
+      error: string | null,
+      extraPayload?: Record<string, Json>,
+    ) => {
       if (!eventRowId) return;
       let query = admin
         .from("prompter_webhook_events")
-        .update({ status, error, processed_at: new Date().toISOString() })
+        .update({
+          status,
+          error,
+          processed_at: new Date().toISOString(),
+          // B4.1: keep the verified event identity on the (server-written) event row so the alert sync can re-derive it.
+          ...(extraPayload ? { payload: { ...(eventPayload as Record<string, Json>), ...extraPayload } as Json } : {}),
+        })
         .eq("id", eventRowId);
       if (status !== "PROCESSED") query = query.neq("status", "PROCESSED");
       await query;
@@ -165,7 +177,7 @@ export async function processPaymentWebhook(
       }
 
       case "ALARM":
-        await markVerifiedEvent("FAILED", `ALARM_${outcome.alarm}`);
+        await markVerifiedEvent("FAILED", `ALARM_${outcome.alarm}`, { evidenceRef: outcome.evidenceRef });
         return {
           ok: true,
           status: 200,

@@ -122,6 +122,8 @@ export type FeatureFlagKey =
   | "global_billing"
   | "global_analytics_dimensions";
 export type HandoffStatus = "PENDING" | "CONSUMED" | "EXPIRED";
+export type PaymentAlertKind = "REVIEW" | "REFUND" | "CHARGEBACK" | "REVERSAL";
+export type PaymentAlertState = "OPEN" | "ACKED" | "RESOLVED";
 export type WebhookEventStatus = "RECEIVED" | "PROCESSED" | "FAILED" | "IGNORED";
 
 /** Social platforms Growth tracks follower goals/history for — Channel minus SEO. */
@@ -168,7 +170,7 @@ export interface Database {
           logo_url: string | null;
           created_at: string;
         };
-        Insert: never; // provisioned only via the shared handle_new_user trigger
+        Insert: Record<string, never>; // provisioned only via the shared handle_new_user trigger
         Update: {
           nama_usaha?: string;
           email?: string | null;
@@ -184,7 +186,7 @@ export interface Database {
           role: TenantRole;
           created_at: string;
         };
-        Insert: never; // provisioned only via the shared handle_new_user trigger
+        Insert: Record<string, never>; // provisioned only via the shared handle_new_user trigger
         Update: {
           nama?: string;
         };
@@ -300,7 +302,7 @@ export interface Database {
           after_data?: Json | null;
           context?: Json;
         };
-        Update: never; // audit logs are append-only, see migration comment
+        Update: Record<string, never>; // audit logs are append-only, see migration comment
         Relationships: [];
       };
       prompter_products: {
@@ -367,7 +369,7 @@ export interface Database {
           media_type: MediaType;
           position?: number;
         };
-        Update: never; // media rows are replaced by delete+insert, not edited in place
+        Update: Record<string, never>; // media rows are replaced by delete+insert, not edited in place
         Relationships: [];
       };
       prompter_ai_jobs: {
@@ -1038,8 +1040,8 @@ export interface Database {
           created_at: string;
           updated_at: string;
         };
-        Insert: never; // seeded by migration only — no INSERT policy exists
-        Update: never; // no UPDATE policy exists — capability changes are migrations
+        Insert: Record<string, never>; // seeded by migration only — no INSERT policy exists
+        Update: Record<string, never>; // no UPDATE policy exists — capability changes are migrations
         Relationships: [];
       };
       prompter_connected_accounts: {
@@ -1144,7 +1146,7 @@ export interface Database {
           snapshot_at?: string;
           source_updated_at?: string | null;
         };
-        Update: never; // append-only — see migration comment on this table
+        Update: Record<string, never>; // append-only — see migration comment on this table
         Relationships: [];
       };
       prompter_promotion_handoffs: {
@@ -1176,6 +1178,60 @@ export interface Database {
           status?: HandoffStatus;
           consumed_at?: string | null;
         };
+        Relationships: [];
+      };
+      // Billing B4.1 -- supabase/migrations/20261031100000_prompter_b4_payment_alerts.sql. service_role ONLY (never tenant-readable).
+      prompter_payment_operators: {
+        Row: { user_id: string; label: string; active: boolean; created_at: string; created_by: string | null };
+        Insert: { user_id: string; label: string; active?: boolean; created_by?: string | null };
+        Update: Partial<{ label: string; active: boolean }>;
+        Relationships: [];
+      };
+      prompter_payment_alerts: {
+        Row: {
+          id: string;
+          kind: PaymentAlertKind;
+          severity: "HIGH" | "CRITICAL";
+          state: PaymentAlertState;
+          transaction_id: string;
+          tenant_id: string;
+          source: "TXN_REVIEW" | "WEBHOOK_EVENT" | "VERIFIED_CALL";
+          reason: string | null;
+          evidence: Json;
+          first_seen_at: string;
+          acked_by: string | null;
+          acked_at: string | null;
+          resolved_by: string | null;
+          resolved_at: string | null;
+          resolution: "OPERATOR" | "AUTO" | null;
+          resolution_note: string | null;
+          reopened_count: number;
+          last_reopened_at: string | null;
+          repeat_count: number;
+          last_repeat_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
+        Relationships: [];
+      };
+      prompter_payment_alert_actions: {
+        Row: { id: string; alert_id: string; action: "ACK" | "RESOLVE" | "AUTO_RESOLVE" | "REOPEN"; actor_user_id: string | null; note: string | null; created_at: string };
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
+        Relationships: [];
+      };
+      prompter_payment_alert_evidence: {
+        Row: { alert_id: string; evidence_ref: string; source: "VERIFIED_CALL" | "WEBHOOK_EVENT"; evidence: Json; seen_at: string };
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
+        Relationships: [];
+      };
+      prompter_payment_alert_sync_state: {
+        Row: { id: number; last_attempt_at: string | null; last_success_at: string | null; last_error: string | null; consecutive_failures: number; last_counts: Json };
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
         Relationships: [];
       };
       prompter_webhook_events: {
@@ -1211,6 +1267,8 @@ export interface Database {
           status: WebhookEventStatus;
           error: string | null;
           processed_at: string | null;
+          // Billing B4.1: the verified path adds `orderId` / `evidenceRef` to the server-written payload.
+          payload: Json;
         }>;
         Relationships: [];
       };
@@ -1256,7 +1314,7 @@ export interface Database {
           recorded_at?: string;
           source?: FollowerSnapshotSource;
         };
-        Update: never; // corrections go through upsert (onConflict tenant_id,platform,recorded_at), not edit-in-place
+        Update: Record<string, never>; // corrections go through upsert (onConflict tenant_id,platform,recorded_at), not edit-in-place
         Relationships: [];
       };
       prompter_seo_projects: {
@@ -1467,6 +1525,16 @@ export interface Database {
         Args: { p_tenant_id: string; p_user_id: string; p_plan: string; p_provider: string };
         Returns: { out_transaction_id: string | null; out_amount: number | null; out_currency: string | null; out_outcome: string }[];
       };
+      // Billing B4.1 -- all service_role ONLY. They write alert rows and history, never a transaction or a subscription.
+      fn_is_payment_operator: { Args: { p_user_id: string }; Returns: boolean };
+      fn_record_payment_alarm: { Args: { p_transaction_id: string; p_kind: string; p_evidence?: Json; p_evidence_ref: string }; Returns: string };
+      fn_sync_payment_alerts: {
+        Args: { p_lookback?: string };
+        Returns: { skipped: boolean; review_created: number; alarm_created: number; auto_resolved: number }[];
+      };
+      fn_note_payment_alert_sync_failure: { Args: { p_error: string }; Returns: undefined };
+      fn_ack_payment_alert: { Args: { p_alert_id: string; p_operator: string; p_note?: string | null }; Returns: string };
+      fn_resolve_payment_alert: { Args: { p_alert_id: string; p_operator: string; p_note: string }; Returns: string };
       fn_set_trial_plan_preference: {
         Args: { p_plan: string };
         Returns: { out_ok: boolean; out_reason: string | null }[];

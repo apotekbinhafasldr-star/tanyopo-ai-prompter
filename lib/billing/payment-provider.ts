@@ -74,6 +74,15 @@ export interface VerifiedPayment {
   currency: string;
   /** The gateway's own status words, kept only for audit evidence — never branched on outside the adapter. */
   rawStatus: string;
+  /**
+   * Identity of the verified gateway STATE this answer describes (a hash of the gateway's own status words and, when
+   * the gateway returns them, refund / chargeback counters and ids). Same state => same ref; a new refund or chargeback
+   * changes it. Used by the B4 alert queue to tell a NEW event from a replay. Never derived from a webhook body.
+   */
+  eventRef?: string;
+  /** "detailed" when the answer carried refund / chargeback specifics, "status_only" when only the status words
+   * were available (a second identical-looking event cannot then be told apart from a replay — see docs). */
+  eventRefBasis?: "detailed" | "status_only";
 }
 
 /** Normalized shape every real adapter's parseWebhookEvent() must
