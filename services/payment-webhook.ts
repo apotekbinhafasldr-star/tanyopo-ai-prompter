@@ -2,6 +2,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getPaymentProvider } from "@/lib/billing/get-payment-provider";
+import { canVerifyServerSide, verifyAndSettle } from "@/services/payment-verification";
 import type { Database, Json } from "@/types/database";
 
 const UNIQUE_VIOLATION = "23505";
@@ -120,6 +121,90 @@ export async function processPaymentWebhook(
       .update({ status, error, processed_at: new Date().toISOString() })
       .eq("id", eventRowId);
   };
+
+  if (canVerifyServerSide(provider)) {
+    // Billing B3: this provider can be asked directly. Nothing below the signature check is taken from the webhook
+    // body any more — status, amount, currency and the payment reference all come from the gateway's own answer.
+    if (!event.internalTransactionId) {
+      await markEvent("FAILED", "NO_INTERNAL_TRANSACTION_REFERENCE");
+      return { ok: false, status: 400, message: "Webhook event has no internal transaction reference." };
+    }
+
+    // Never downgrade an event already recorded as PROCESSED (a replayed old notification must not rewrite history).
+    const markVerifiedEvent = async (status: "PROCESSED" | "FAILED" | "IGNORED", error: string | null) => {
+      if (!eventRowId) return;
+      let query = admin
+        .from("prompter_webhook_events")
+        .update({ status, error, processed_at: new Date().toISOString() })
+        .eq("id", eventRowId);
+      if (status !== "PROCESSED") query = query.neq("status", "PROCESSED");
+      await query;
+    };
+
+    const outcome = await verifyAndSettle(admin, provider, event.internalTransactionId, {
+      eventId: event.externalEventId,
+    });
+
+    switch (outcome.kind) {
+      case "APPLIED":
+        await markVerifiedEvent("PROCESSED", null);
+        return {
+          ok: true,
+          status: 200,
+          message: outcome.reason === "ALREADY_PROCESSED" ? "Already processed." : "Payment applied.",
+        };
+
+      case "NEEDS_REVIEW":
+        await markVerifiedEvent("FAILED", "NEEDS_REVIEW");
+        return { ok: true, status: 200, message: "Payment recorded for manual review; subscription not activated." };
+
+      case "NOT_APPLIED": {
+        await markVerifiedEvent("FAILED", outcome.reason);
+        const status = outcome.reason === "TRANSACTION_NOT_FOUND" ? 400 : 200;
+        return { ok: status === 200, status, message: outcome.reason };
+      }
+
+      case "ALARM":
+        await markVerifiedEvent("FAILED", `ALARM_${outcome.alarm}`);
+        return {
+          ok: true,
+          status: 200,
+          message: "Refund/chargeback recorded for review; subscription unchanged.",
+        };
+
+      case "NOT_PAID":
+        if (event.status === "PAID" && (outcome.status === "PENDING" || outcome.status === "UNKNOWN")) {
+          // The notification claims PAID but the gateway does not (yet) agree: could be gateway lag — ask for a retry,
+          // activate nothing.
+          await markVerifiedEvent("FAILED", "VERIFIED_STATUS_NOT_PAID");
+          return { ok: false, status: 503, message: "Payment not confirmed by gateway yet." };
+        }
+        if (event.status === "PAID") {
+          // Claimed PAID, gateway says cancelled/expired/denied: a manipulated or stale notification. Nothing activates.
+          await markVerifiedEvent("FAILED", "STATUS_MISMATCH_CLAIMED_PAID");
+          return { ok: true, status: 200, message: "Notification does not match the gateway status; ignored." };
+        }
+        await markVerifiedEvent("IGNORED", null);
+        return { ok: true, status: 200, message: `Recorded ${outcome.status} event, no activation needed.` };
+
+      case "NOT_FOUND":
+        await markVerifiedEvent("FAILED", "TRANSACTION_NOT_FOUND");
+        return { ok: false, status: 400, message: "Unknown transaction reference." };
+
+      case "WRONG_PROVIDER":
+        await markVerifiedEvent("FAILED", "WRONG_PROVIDER");
+        return { ok: false, status: 400, message: "Transaction was not created for this provider." };
+
+      case "UNVERIFIABLE":
+        // Gateway timeout / error / inconsistent answer: fail closed and let the gateway retry.
+        await markVerifiedEvent("FAILED", outcome.message);
+        return { ok: false, status: 503, message: "Could not verify payment with the gateway." };
+
+      case "RPC_ERROR":
+        await markVerifiedEvent("FAILED", outcome.message);
+        return { ok: false, status: 500, message: "Failed to apply verified payment." };
+    }
+  }
 
   if (event.status !== "PAID") {
     await markEvent("IGNORED", null);

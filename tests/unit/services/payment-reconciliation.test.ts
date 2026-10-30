@@ -4,6 +4,8 @@ import type { Database } from "@/types/database";
 
 const { getPaymentProviderMock } = vi.hoisted(() => ({ getPaymentProviderMock: vi.fn() }));
 vi.mock("@/lib/billing/get-payment-provider", () => ({ getPaymentProvider: getPaymentProviderMock }));
+// Billing B3: the service now also imports the admin client (verified return trip); these legacy-provider tests never use it.
+vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => null }));
 
 import { reconcileCheckoutReturn } from "@/services/payment-reconciliation";
 

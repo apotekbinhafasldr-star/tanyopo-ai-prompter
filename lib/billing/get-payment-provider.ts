@@ -3,10 +3,12 @@ import "server-only";
 import { serverEnv } from "@/lib/env";
 import type { PaymentProvider } from "@/lib/billing/payment-provider";
 import { NullPaymentProvider } from "@/lib/billing/providers/null-payment-provider";
+import { MidtransPaymentProvider } from "@/lib/billing/providers/midtrans-payment-provider";
 import { XenditPaymentProvider } from "@/lib/billing/providers/xendit-payment-provider";
 
 const nullPaymentProvider = new NullPaymentProvider();
 const xenditPaymentProvider = new XenditPaymentProvider();
+const midtransPaymentProvider = new MidtransPaymentProvider();
 
 /**
  * Resolves the payment provider the same way lib/connectors/get-connector.ts
@@ -23,6 +25,11 @@ const xenditPaymentProvider = new XenditPaymentProvider();
  * actual gate, same as NullPaymentProvider always being unconfigured.
  */
 export function getPaymentProvider(): PaymentProvider {
+  // Billing B3: Midtrans, SANDBOX ONLY (see MidtransPaymentProvider.isConfigured(): a production-shaped key makes it
+  // report itself unconfigured, so every caller fails closed exactly as with no provider at all).
+  if (serverEnv.payment.providerName === "midtrans") {
+    return midtransPaymentProvider;
+  }
   if (serverEnv.payment.providerName === "xendit") {
     return xenditPaymentProvider;
   }
