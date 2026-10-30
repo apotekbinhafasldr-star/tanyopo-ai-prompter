@@ -4,7 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { getPaymentProvider } from "@/lib/billing/get-payment-provider";
 import type { Database } from "@/types/database";
 
-export type ReconciledPaymentStatus = "PAID" | "PENDING" | "FAILED" | "EXPIRED" | "CANCELLED" | "NOT_FOUND";
+export type ReconciledPaymentStatus = "PAID" | "PENDING" | "FAILED" | "EXPIRED" | "CANCELLED" | "REVIEW" | "NOT_FOUND";
 
 export interface ReconciliationResult {
   status: ReconciledPaymentStatus;

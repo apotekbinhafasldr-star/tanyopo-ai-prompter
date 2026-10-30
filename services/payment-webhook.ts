@@ -153,6 +153,17 @@ export async function processPaymentWebhook(
     return { ok: false, status: 500, message: "Failed to apply verified payment." };
   }
 
+  if (!activation.allowed && activation.reason === "NEEDS_REVIEW") {
+    // Billing B2: the payment notification could not be applied safely (late payment on a closed invoice, wrong
+    // amount, plan conflict during a paid period, missing subscription). The database has ALREADY recorded it durably
+    // as a REVIEW transaction (provider ids + reported amount kept as evidence) and written an audit row, so asking the
+    // gateway to retry would change nothing. The event row is FAILED/NEEDS_REVIEW, never PROCESSED: the subscription was
+    // NOT activated and a person (or the gateway-verified resolver, B3) must settle it. HTTP 200 here only means
+    // "received and durably recorded", not "resolved".
+    await markEvent("FAILED", "NEEDS_REVIEW");
+    return { ok: true, status: 200, message: "Payment recorded for manual review; subscription not activated." };
+  }
+
   if (!activation.allowed) {
     // A real, permanent mismatch (wrong amount/currency, or a
     // transaction that wasn't PENDING) — recorded server-side by the RPC

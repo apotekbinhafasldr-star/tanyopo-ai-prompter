@@ -197,6 +197,22 @@ describe("processPaymentWebhook — Batch B10 webhook core", () => {
     expect(admin.updateCalls).toContainEqual({ status: "PROCESSED", error: null });
   });
 
+  it("Billing B2 — a payment the database recorded as NEEDS_REVIEW is NOT activated, NOT marked PROCESSED, and is explicit about it", async () => {
+    getPaymentProviderMock.mockReturnValue(mockProvider());
+    const admin = mockAdmin({
+      insertResult: { data: { id: "row_1" }, error: null },
+      rpcResult: { data: [{ allowed: false, reason: "NEEDS_REVIEW" }], error: null },
+    });
+
+    const result = await processPaymentWebhook(admin, "{}", "sig");
+
+    expect(result.status).toBe(200);
+    expect(result.message).toMatch(/manual review/i);
+    expect(result.message).toMatch(/not activated/i);
+    expect(admin.updateCalls).toContainEqual({ status: "FAILED", error: "NEEDS_REVIEW" });
+    expect(admin.updateCalls.some((c) => c.status === "PROCESSED")).toBe(false);
+  });
+
   it("Bagian K.9/K.10 — wrong amount/currency is rejected by the RPC and never treated as a hard error", async () => {
     getPaymentProviderMock.mockReturnValue(mockProvider());
     const admin = mockAdmin({

@@ -83,6 +83,10 @@ const RECONCILIATION_COPY: Record<ReconciledPaymentStatus, { variant: "success" 
   FAILED: { variant: "danger", text: "Pembayaran tidak berhasil diverifikasi. Silakan coba lagi." },
   EXPIRED: { variant: "danger", text: "Sesi pembayaran ini sudah kedaluwarsa. Silakan mulai pembayaran baru." },
   CANCELLED: { variant: "warning", text: "Pembayaran dibatalkan." },
+  REVIEW: {
+    variant: "warning",
+    text: "Pembayaran Anda tercatat dan sedang diperiksa tim kami. Paket belum diubah. Anda tidak perlu membayar ulang; kami akan menghubungi Anda jika diperlukan.",
+  },
   NOT_FOUND: { variant: "danger", text: "Referensi pembayaran tidak ditemukan." },
 };
 
