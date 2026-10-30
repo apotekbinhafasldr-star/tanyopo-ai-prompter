@@ -278,7 +278,7 @@ jobs:
       - name: Ensure psql client
         run: command -v psql || (sudo apt-get update && sudo apt-get install -y postgresql-client)
 
-      - name: Billing B4.1 SQL tests (alert queue: duplicates, parallel sync, retry, tenant isolation, operators, forged audit) (PostgreSQL 17 required)
+      - name: Billing B4.1 SQL tests (alert queue - duplicates, parallel sync, retry, tenant isolation, operators, forged audit) (PostgreSQL 17 required)
         env:
           REQUIRE_PG_MAJOR: "17"
         run: |
