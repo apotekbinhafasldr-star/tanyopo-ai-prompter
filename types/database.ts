@@ -710,6 +710,7 @@ export interface Database {
           provider_event_id: string | null;
           failure_reason: string | null;
           paid_at: string | null;
+          metadata: Json;
         }>;
         Relationships: [];
       };

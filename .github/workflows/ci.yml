@@ -246,7 +246,9 @@ jobs:
           REQUIRE_PG_MAJOR: "17"
         run: |
           set -o pipefail
-          bash supabase/tests/b2-double-payment/run-local.sh 2>&1 | tee "$RUNNER_TEMP/b2.txt"
+          bash supabase/tests/b2-double-payment/run-local.sh 2>&1 | tee "$RUNNER_TEMP/b2.txt" || true
+          # surface failures as annotations (job logs are not always downloadable)
+          grep -E '^(FAIL|SOME|REFUSED)|ERROR' "$RUNNER_TEMP/b2.txt" | head -20 | sed 's/^/::error::/' || true
           grep -q '^ALL PASSED' "$RUNNER_TEMP/b2.txt"
 
   # PR #48's COMPLETE AI-jobs-guard suite on PostgreSQL 17 (production is 17.x; #48's own CI job runs 16).
