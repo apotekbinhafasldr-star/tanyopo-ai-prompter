@@ -69,3 +69,14 @@ export function isSyncStale(lastSuccessAt: string | null, now: number = Date.now
   const t = Date.parse(lastSuccessAt);
   return Number.isNaN(t) || now - t > PAYMENT_ALERT_STALE_AFTER_MS;
 }
+
+/** B4.2: how the e-mail sender looks from the queue page. `NEVER_RAN` is also what a disabled sender looks like. */
+export type NotifyHealth = "NEVER_RAN" | "STALE" | "FAILING" | "OK";
+export const NOTIFY_STALE_AFTER_MS = 20 * 60 * 1000; // the sender runs every 5 minutes
+
+export function notifyHealth(state: { last_run_at: string | null; consecutive_failures: number } | null, now: number = Date.now()): NotifyHealth {
+  if (!state?.last_run_at) return "NEVER_RAN";
+  const t = Date.parse(state.last_run_at);
+  if (Number.isNaN(t) || now - t > NOTIFY_STALE_AFTER_MS) return "STALE";
+  return state.consecutive_failures > 0 ? "FAILING" : "OK";
+}

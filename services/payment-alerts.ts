@@ -38,6 +38,19 @@ export async function getSyncState(admin: Admin): Promise<PaymentAlertSyncState 
   return (data as PaymentAlertSyncState | null) ?? null;
 }
 
+/** B4.2: sender heartbeat + number of batches that gave up. Read-only, never throws. */
+export async function getNotifyStatus(admin: Admin) {
+  try {
+    const [state, dead] = await Promise.all([
+      admin.from("prompter_payment_alert_notify_state").select("*").eq("id", 1).maybeSingle(),
+      admin.from("prompter_payment_alert_notification_batches").select("id", { count: "exact", head: true }).eq("status", "DEAD"),
+    ]);
+    return { state: (state.data as { last_run_at: string | null; last_claim_result: string | null; last_success_at: string | null; last_error: string | null; consecutive_failures: number } | null) ?? null, dead: dead.count ?? 0 };
+  } catch {
+    return { state: null, dead: 0 };
+  }
+}
+
 export type SyncResult =
   | { ok: true; skipped: boolean; reviewCreated: number; alarmCreated: number; autoResolved: number }
   | { ok: false; message: string };

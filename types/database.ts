@@ -1234,6 +1234,18 @@ export interface Database {
         Update: Record<string, never>;
         Relationships: [];
       };
+      prompter_payment_alert_notify_state: {
+        Row: { id: number; last_run_at: string | null; last_claim_result: string | null; last_success_at: string | null; last_error: string | null; consecutive_failures: number };
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
+        Relationships: [];
+      };
+      prompter_payment_alert_notification_batches: {
+        Row: { id: string; status: "READY" | "SENT" | "DEAD"; item_count: number; top_severity: "HIGH" | "CRITICAL"; attempts: number; last_error: string | null; created_at: string; sent_at: string | null };
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
+        Relationships: [];
+      };
       prompter_webhook_events: {
         Row: {
           id: string;

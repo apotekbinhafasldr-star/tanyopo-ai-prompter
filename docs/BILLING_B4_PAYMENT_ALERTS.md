@@ -109,3 +109,6 @@ Rancangan: kolom `notified_at/notify_attempts/next_notify_at` di **tabel alarm B
 4. `user_profiles` grants luas (dibagi dengan UMKMpro) — perlu persetujuan terpisah.
 5. Origin allowlist untuk redirect URL (B6) belum.
 6. Resolver `fn_resolve_review_payment` belum punya pemanggil aplikasi; alarm REVIEW diselesaikan operator manual atau otomatis bila resolver dijalankan.
+
+## B4.2
+E-mail notifications for these alerts (outbox, Netlify Scheduled Function, off by default): see `docs/BILLING_B4_2_EMAIL_NOTIFICATIONS.md`.
