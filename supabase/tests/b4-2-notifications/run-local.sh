@@ -110,7 +110,7 @@ TX b42_conc 00000000-0000-0000-0000-0000000d40b1 "$T" "$U" PAID mid-db1 ""
 SVC b42_conc "select skipped::text from public.fn_sync_payment_alerts()" >/dev/null
 SVC b42_conc "select public.fn_record_payment_alarm('00000000-0000-0000-0000-0000000d40b1','CHARGEBACK','{}'::jsonb,'gw:x')" >/dev/null
 FP0=$(PA -d b42_conc -c "$LEG")$(PA -d b42_conc -c "$SUBS")
-CLAIM="select public.fn_claim_payment_notification_batch(20,5,20,interval '5 minutes','https://app.example.test/ops')::text"
+CLAIM="select public.fn_claim_payment_notification_batch(20,5,20,interval '5 minutes','https://app.example.test/ops','LINOE Alerts <alerts@example.test>')::text"
 # 3a. 12 parallel claims -> exactly one batch for the 4 alerts
 rm -f "$W"/c_*; for i in $(seq 1 12); do ( SVC b42_conc "$CLAIM" > "$W/c_$i" ) & done; wait
 CL=$(cat "$W"/c_* | grep -c '"result": "CLAIMED"'); BS=$(cat "$W"/c_* | grep -c '"result": "BUSY"'); NO=$(cat "$W"/c_* | grep -c '"result": "NOTHING"'); ER=$(cat "$W"/c_* | grep -ci 'error\|deadlock')
@@ -145,6 +145,18 @@ SVC b42_conc "$CLAIM" >/dev/null; SVC b42_conc "$CLAIM" >/dev/null
 PA -d b42_conc -c "begin; lock table prompter_payment_alert_notifications in access exclusive mode; select pg_sleep(3); commit" >/dev/null 2>&1 & HOLD=$!
 sleep 1; r=$(SVC b42_conc "select public.fn_record_payment_alarm('00000000-0000-0000-0000-0000000d40b1','REVERSAL','{}'::jsonb,'gw:lock')"); wait $HOLD
 [ "$r" = CREATED ] && pass "3g: while the whole outbox table is exclusively locked the alarm path still answers CREATED (no coupling to the outbox)" || bad "3g outbox lock blocked the alarm path (got: $r)"
+# 3h. two (many) senders in parallel can never exceed the daily cap: 8 separate alerts, 1 item per batch, cap = used + 3, 4 rounds of 10 parallel claims
+for i in 1 2 3 4 5 6 7 8; do
+  TX b42_conc "00000000-0000-0000-0000-0000000d41b$i" "$T" "$U" PAID "mid-dx$i" ""
+  SVC b42_conc "select public.fn_record_payment_alarm('00000000-0000-0000-0000-0000000d41b$i','CHARGEBACK','{}'::jsonb,'gw:cap$i')" >/dev/null
+done
+FP0=$(PA -d b42_conc -c "$LEG")$(PA -d b42_conc -c "$SUBS")  # baseline after the test itself inserted its synthetic transactions
+USED0=$(SVC b42_conc "select public.fn_payment_notification_budget_used()")
+CAPQ="select public.fn_claim_payment_notification_batch($((USED0+3)),0,1,interval '5 minutes','https://app.example.test/ops','LINOE Alerts <alerts@example.test>')::text"
+rm -f "$W"/p_*; for r in 1 2 3 4; do for i in $(seq 1 10); do ( SVC b42_conc "$CAPQ" > "$W/p_${r}_$i" ) & done; wait; done
+CAPN=$(PA -d b42_conc -c "select public.fn_payment_notification_budget_used()")
+[ "$CAPN" = "$((USED0+3))" ] && ! grep -qiE "error|deadlock" "$W"/p_* && [ "$(cat "$W"/p_* | grep -c '"result": "CLAIMED"')" = 3 ] && [ "$(cat "$W"/p_* | grep -c '"result": "DAILY_LIMIT"')" -ge 1 ] \
+  && pass "3h: 40 parallel claims with 8 pending alerts and cap=used+3 -> exactly 3 e-mails created (used $USED0 -> $CAPN), the rest DAILY_LIMIT / BUSY, no error" || bad "3h daily cap under parallelism (used0=$USED0 now=$CAPN claimed=$(cat "$W"/p_* | grep -c '"result": "CLAIMED"'))"
 [ "$FP0" = "$(PA -d b42_conc -c "$LEG")$(PA -d b42_conc -c "$SUBS")" ] && pass "money tables unchanged by the whole concurrency run" || bad "money tables changed"
 
 # 4) rollback: refused while rows exist; clean when empty; re-migrate; B4.1 intact
@@ -156,6 +168,10 @@ P -1 -d b42_rb -f "$D42" >/dev/null && pass "rollback runs on an empty outbox" |
   && [ "$D0" = "$(PA -d b42_rb -c "$B41DEF")" ] && pass "rollback removes every B4.2 object and leaves B4.1 functions identical" || bad "rollback left objects / changed B4.1"
 m42 b42_rb && pass "B4.2 re-applies after a rollback" || bad "re-apply after rollback"
 PA -d b42_rb -c "set role service_role; select public.fn_preview_payment_notifications()" >/dev/null 2>&1 && pass "functions work after rollback + re-apply" || bad "post re-apply call failed"
+
+# 5) the B4.1 suite itself (its RLS / privilege / count checks) must not false-FAIL when the B4.2 tables exist
+mk b42_b41 && m4 b42_b41 && m42 b42_b41 || bad "mk b42_b41"
+if (cd "$root/supabase/tests/b4-payment-alerts" && PGOPTIONS="-c client_min_messages=notice" P -d b42_b41 -f scenarios.sql >"$W/o41.txt" 2>&1); then pass "B4.1 sequential scenarios still pass with B4.2 installed: $(grep -c 'PASS:' "$W/o41.txt") checks (no false FAIL from the new tables)"; else bad "B4.1 scenarios fail when B4.2 is installed"; grep -E "FAIL|ERROR" "$W/o41.txt" | head -5; fi
 
 rm -rf "$W"
 if [ "$fail" = 0 ]; then echo "ALL B4.2 LOCAL TESTS PASSED"; else echo "SOME B4.2 TESTS FAILED"; exit 1; fi

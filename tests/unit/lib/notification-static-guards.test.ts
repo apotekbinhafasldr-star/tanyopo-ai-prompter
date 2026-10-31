@@ -20,6 +20,29 @@ describe("Billing B4.2 — static guards", () => {
     }
   });
 
+  it("dry run is the fail-safe default: only the exact string 'false' can ever send; no key rotation exists", () => {
+    const core = strip(read(SENDER[0]));
+    expect(core).toMatch(/const dryRun = rawDry !== "false";/);
+    expect(core).not.toMatch(/rotate|p_rotate_key|key_generation/i);
+    // recipients / sender are never rebuilt at send time
+    expect(core).not.toMatch(/recipient_emails|fn_payment_notification_recipient/);
+    const sql = strip(read(MIG));
+    expect(sql).not.toMatch(/key_generation|p_rotate_key|fn_payment_notification_recipient_emails/);
+    expect(sql).toMatch(/new\.sender is distinct from old\.sender[\s\S]*new\.recipient_emails is distinct from old\.recipient_emails[\s\S]*new\.idempotency_key is distinct from old\.idempotency_key/);
+  });
+
+  it("each run writes one safe summary line", () => {
+    const fn = strip(read(SENDER[1]));
+    expect(fn).toMatch(/console\.log\(`\[payment-alert-notify\] \$\{summarize\(result\)\}`\)/);
+    expect(fn).not.toMatch(/console\.log\([^)]*(env|process|JSON\.stringify)/);
+  });
+
+  it("the B4.1 verification no longer counts tables by prefix (B4.2 adds prompter_payment_alert_* tables)", () => {
+    for (const f of ["supabase/tests/b4-payment-alerts/scenarios.sql", "supabase/tests/b4-payment-alerts/run-local.sh"]) {
+      expect(read(f), f).not.toMatch(/like 'prompter_payment_alert%'/);
+    }
+  });
+
   it("is OFF by default: only the exact string 'true' enables it, and the schedule file only calls the core", () => {
     const core = strip(read(SENDER[0]));
     expect(core).toMatch(/ALERT_EMAIL_ENABLED[\s\S]{0,40}!==\s*"true"/);
@@ -79,6 +102,7 @@ describe("Billing B4.2 — static guards", () => {
   it("the env template carries placeholders only and the e-mail feature defaults to disabled", () => {
     const env = read(".env.example");
     expect(env).toMatch(/^ALERT_EMAIL_ENABLED=false$/m);
+    expect(env).toMatch(/^ALERT_EMAIL_DRY_RUN=true$/m);
     expect(env).toMatch(/^RESEND_ALERT_API_KEY=$/m);
     expect(env).toMatch(/^ALERT_EMAIL_FROM=$/m);
     expect(env).not.toMatch(/re_[A-Za-z0-9]{8,}/);

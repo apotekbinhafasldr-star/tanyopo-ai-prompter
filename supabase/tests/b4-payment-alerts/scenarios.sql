@@ -58,9 +58,9 @@ select pg_temp.chk('B4 objects exist and are service_role-only: no anon / authen
   and not exists (select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname in ('fn_sync_payment_alerts','fn_record_payment_alarm','fn_ack_payment_alert','fn_resolve_payment_alert','fn_is_payment_operator','fn_note_payment_alert_sync_failure')
         and (has_function_privilege('anon',p.oid,'execute') or has_function_privilege('authenticated',p.oid,'execute'))));
 select pg_temp.chk('RLS is enabled with no policy on every B4 table',
-  (select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname like 'prompter_payment_alert%' and c.relkind='r' and c.relrowsecurity) = 4
+  (select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname in ('prompter_payment_alerts','prompter_payment_alert_actions','prompter_payment_alert_evidence','prompter_payment_alert_sync_state') and c.relkind='r' and c.relrowsecurity) = 4
   and (select relrowsecurity from pg_class where oid='public.prompter_payment_operators'::regclass)
-  and not exists (select 1 from pg_policies where tablename like 'prompter_payment_alert%' or tablename='prompter_payment_operators'));
+  and not exists (select 1 from pg_policies where tablename in ('prompter_payment_alerts','prompter_payment_alert_actions','prompter_payment_alert_evidence','prompter_payment_alert_sync_state') or tablename='prompter_payment_operators'));
 
 create temp table fp0 as select pg_temp.fingerprint() f;
 

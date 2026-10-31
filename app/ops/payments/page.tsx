@@ -103,6 +103,9 @@ export default async function PaymentQueuePage({ searchParams }: { searchParams:
           </strong>
           {notify.state?.last_run_at ? ` (jalan terakhir ${when(notify.state.last_run_at)})` : ""}
         </p>
+        {notify.state?.last_claim_result === "NO_RECIPIENT" ? (
+          <p className="mt-1 text-warning">Tidak ada operator aktif dengan email terkonfirmasi: email alarm belum dikirim. Alarm tetap tercatat di antrean ini.</p>
+        ) : null}
         {mailHealth === "STALE" || mailHealth === "FAILING" || notify.dead > 0 ? (
           <p className="mt-1 text-warning">
             Email alarm mungkin tidak terkirim{notify.dead > 0 ? ` (${notify.dead} kiriman menyerah)` : ""}. Pantau antrean ini langsung; alarm tidak hilang.

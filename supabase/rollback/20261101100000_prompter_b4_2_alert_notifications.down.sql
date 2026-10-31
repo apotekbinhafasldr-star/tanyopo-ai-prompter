@@ -13,10 +13,10 @@ do $$ begin
 end $$;
 
 drop function if exists public.fn_preview_payment_notifications();
-drop function if exists public.fn_fail_payment_notification_batch(uuid, integer, text, integer, boolean, boolean);
+drop function if exists public.fn_fail_payment_notification_batch(uuid, integer, text, integer, boolean);
 drop function if exists public.fn_complete_payment_notification_batch(uuid, text);
-drop function if exists public.fn_claim_payment_notification_batch(integer, integer, integer, interval, text);
-drop function if exists public.fn_payment_notification_recipient_emails(uuid[]);
+drop function if exists public.fn_claim_payment_notification_batch(integer, integer, integer, interval, text, text);
+drop function if exists public.fn_payment_notification_budget_used();
 drop function if exists public.fn_payment_notification_recipient_ids();
 drop table if exists public.prompter_payment_alert_notification_attempts;
 drop table if exists public.prompter_payment_alert_notifications;

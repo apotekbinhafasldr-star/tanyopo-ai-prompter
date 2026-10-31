@@ -18,17 +18,17 @@ begin return pg_temp.as_service(format($q$select public.fn_resolve_payment_alert
 create or replace function pg_temp.aid(txn uuid, k text) returns uuid language plpgsql as $$
 declare r uuid; begin select id into r from public.prompter_payment_alerts where transaction_id = txn and kind = k; return r; end $$;
 -- claim as service_role; remembers the answer (jsonb) in lastc; errors come back as {"error": ...}
-create or replace function pg_temp.cl(lim int default 20, res int default 5, mx int default 20, link text default null) returns jsonb language plpgsql as $$
+create or replace function pg_temp.cl(lim int default 20, res int default 5, mx int default 20, link text default null, frm text default 'LINOE Alerts <alerts@example.test>') returns jsonb language plpgsql as $$
 declare r text; j jsonb;
 begin
-  r := pg_temp.as_service(format($q$select public.fn_claim_payment_notification_batch(%L::int,%L::int,%L::int,interval '5 minutes',%L)::text$q$, lim, res, mx, link));
+  r := pg_temp.as_service(format($q$select public.fn_claim_payment_notification_batch(%L::int,%L::int,%L::int,interval '5 minutes',%L,%L)::text$q$, lim, res, mx, link, frm));
   j := case when left(r, 1) = '{' then r::jsonb else jsonb_build_object('error', r) end;
   delete from lastc; insert into lastc values (j);
   return j;
 end $$;
 create or replace function pg_temp.lastj(k text) returns text language plpgsql as $$ declare r text; begin select j ->> k into r from lastc; return r; end $$;
-create or replace function pg_temp.fl(b uuid, att int, code text, st int default null, rot boolean default false, perm boolean default false) returns text language plpgsql as $$
-begin return pg_temp.as_service(format($q$select public.fn_fail_payment_notification_batch(%L::uuid,%L::int,%L,%L::int,%L::boolean,%L::boolean)$q$, b, att, code, st, rot, perm)); end $$;
+create or replace function pg_temp.fl(b uuid, att int, code text, st int default null, perm boolean default false) returns text language plpgsql as $$
+begin return pg_temp.as_service(format($q$select public.fn_fail_payment_notification_batch(%L::uuid,%L::int,%L,%L::int,%L::boolean)$q$, b, att, code, st, perm)); end $$;
 create or replace function pg_temp.dn(b uuid, pid text) returns text language plpgsql as $$
 begin return pg_temp.as_service(format($q$select public.fn_complete_payment_notification_batch(%L::uuid,%L)$q$, b, pid)); end $$;
 create or replace function pg_temp.due(b uuid) returns void language plpgsql as $$
@@ -62,7 +62,10 @@ insert into seed_txn values
   ('00000000-0000-0000-0000-0000000b40a2','00000000-0000-0000-0000-0000000b4002','00000000-0000-0000-0000-0000000b4012','mid-r2','REVIEW','AMOUNT_OR_CURRENCY_MISMATCH'),
   ('00000000-0000-0000-0000-0000000b40b1','00000000-0000-0000-0000-0000000b4001','00000000-0000-0000-0000-0000000b4011','mid-p1','PAID',null),
   ('00000000-0000-0000-0000-0000000b40b2','00000000-0000-0000-0000-0000000b4002','00000000-0000-0000-0000-0000000b4012','mid-p2','PAID',null),
-  ('00000000-0000-0000-0000-0000000b40b3','00000000-0000-0000-0000-0000000b4001','00000000-0000-0000-0000-0000000b4011','mid-p3','PAID',null);
+  ('00000000-0000-0000-0000-0000000b40b3','00000000-0000-0000-0000-0000000b4001','00000000-0000-0000-0000-0000000b4011','mid-p3','PAID',null),
+  ('00000000-0000-0000-0000-0000000b40b4','00000000-0000-0000-0000-0000000b4001','00000000-0000-0000-0000-0000000b4011','mid-p4','PAID',null),
+  ('00000000-0000-0000-0000-0000000b40b5','00000000-0000-0000-0000-0000000b4002','00000000-0000-0000-0000-0000000b4012','mid-p5','PAID',null),
+  ('00000000-0000-0000-0000-0000000b40b6','00000000-0000-0000-0000-0000000b4002','00000000-0000-0000-0000-0000000b4012','mid-p6','PAID',null);
 do $$ declare r record; begin
   for r in select * from seed_txn loop
     insert into public.prompter_payment_transactions(id,tenant_id,user_id,provider,plan,amount,currency) values (r.id,r.tenant,r.usr,'midtrans','STARTER',99000,'IDR');
@@ -88,10 +91,10 @@ select pg_temp.chk('B4.2 service_role has SELECT only on its tables (writes go t
   not exists (select 1 from information_schema.role_table_grants g where g.table_schema='public' and g.grantee='service_role' and g.privilege_type in ('INSERT','UPDATE','DELETE','TRUNCATE')
               and (g.table_name like 'prompter_payment_alert_notif%' or g.table_name = 'prompter_payment_alert_notify_state')));
 select pg_temp.chk('B4.2 functions: EXECUTE for service_role only (no anon / authenticated / PUBLIC)',
-  (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname in ('fn_claim_payment_notification_batch','fn_complete_payment_notification_batch','fn_fail_payment_notification_batch','fn_payment_notification_recipient_emails','fn_payment_notification_recipient_ids','fn_preview_payment_notifications')) = 6
-  and not exists (select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname in ('fn_claim_payment_notification_batch','fn_complete_payment_notification_batch','fn_fail_payment_notification_batch','fn_payment_notification_recipient_emails','fn_payment_notification_recipient_ids','fn_preview_payment_notifications')
+  (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname in ('fn_claim_payment_notification_batch','fn_complete_payment_notification_batch','fn_fail_payment_notification_batch','fn_payment_notification_budget_used','fn_payment_notification_recipient_ids','fn_preview_payment_notifications')) = 6
+  and not exists (select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname in ('fn_claim_payment_notification_batch','fn_complete_payment_notification_batch','fn_fail_payment_notification_batch','fn_payment_notification_budget_used','fn_payment_notification_recipient_ids','fn_preview_payment_notifications')
         and (has_function_privilege('anon',p.oid,'execute') or has_function_privilege('authenticated',p.oid,'execute') or has_function_privilege('public',p.oid,'execute')))
-  and not exists (select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname in ('fn_claim_payment_notification_batch','fn_complete_payment_notification_batch','fn_fail_payment_notification_batch','fn_payment_notification_recipient_emails','fn_payment_notification_recipient_ids','fn_preview_payment_notifications') and not (p.prosecdef and p.proconfig::text like '%search_path=public, pg_temp%')));
+  and not exists (select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname in ('fn_claim_payment_notification_batch','fn_complete_payment_notification_batch','fn_fail_payment_notification_batch','fn_payment_notification_budget_used','fn_payment_notification_recipient_ids','fn_preview_payment_notifications') and not (p.prosecdef and p.proconfig::text like '%search_path=public, pg_temp%')));
 select pg_temp.chk('RLS enabled with NO policy on every B4.2 table',
   (select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname in ('prompter_payment_alert_notifications','prompter_payment_alert_notification_batches','prompter_payment_alert_notification_attempts','prompter_payment_alert_notify_state') and c.relkind='r' and c.relrowsecurity) = 4
   and not exists (select 1 from pg_policies where tablename like 'prompter_payment_alert_notif%' or tablename = 'prompter_payment_alert_notify_state'));
@@ -99,7 +102,7 @@ select pg_temp.chk('authenticated / anon cannot read the tables nor call the fun
   pg_temp.q_as('00000000-0000-0000-0000-0000000b4011','select count(*)::text from public.prompter_payment_alert_notifications') like '42501%'
   and pg_temp.q_as(null,'select count(*)::text from public.prompter_payment_alert_notification_batches','anon') like '42501%'
   and pg_temp.q_as('00000000-0000-0000-0000-0000000b4011','select public.fn_claim_payment_notification_batch()::text') like '42501%'
-  and pg_temp.q_as('00000000-0000-0000-0000-0000000b4011','select public.fn_payment_notification_recipient_emails(array[''00000000-0000-0000-0000-0000000b4021''::uuid])::text') like '42501%'
+  and pg_temp.q_as('00000000-0000-0000-0000-0000000b4011','select public.fn_payment_notification_budget_used()::text') like '42501%'
   and pg_temp.q_as(null,'select public.fn_preview_payment_notifications()::text','anon') like '42501%');
 select pg_temp.chk('the new tables are not exposed to a tenant owner even as an operator-owner (no policy)',
   pg_temp.dml_as('00000000-0000-0000-0000-0000000b4011','insert into public.prompter_payment_alert_notification_batches(subject,body,payload_hash,item_count,top_severity,recipient_user_ids) values (''x'',''y'',repeat(''a'',64),1,''HIGH'',array[gen_random_uuid()])') like '42501%');
@@ -113,16 +116,17 @@ select pg_temp.chk('creating alarms did not create a single notification row (re
 select pg_temp.chk('preview (dry run) reports 4 open alerts without notification, 1 recipient, and writes nothing',
   pg_temp.as_service('select (public.fn_preview_payment_notifications()->>''open_alerts_without_notification'')||'':''||(public.fn_preview_payment_notifications()->>''recipients'')') = '4:1' and pg_temp.nn() = '0');
 select pg_temp.chk('recipient resolution: only the active + confirmed + not banned operator (by UUID)',
-  pg_temp.as_service('select public.fn_payment_notification_recipient_ids()::text') = '{00000000-0000-0000-0000-0000000b4021}'
-  and pg_temp.as_service($q$select public.fn_payment_notification_recipient_emails(array['00000000-0000-0000-0000-0000000b4021','00000000-0000-0000-0000-0000000b4022','00000000-0000-0000-0000-0000000b4023','00000000-0000-0000-0000-0000000b4024']::uuid[])::text$q$) = '{op1@example.test}'
-  and pg_temp.as_service($q$select public.fn_payment_notification_recipient_emails(array['00000000-0000-0000-0000-0000000b4022','00000000-0000-0000-0000-0000000b4023']::uuid[])::text$q$) = '{}');
+  pg_temp.as_service('select public.fn_payment_notification_recipient_ids()::text') = '{00000000-0000-0000-0000-0000000b4021}');
 
 -- ===== 3. claim: derive, merge, freeze =====
 create temp table afp as select pg_temp.alerts_fp() f;
-select pg_temp.cl(0) a, pg_temp.cl(20,21) b, pg_temp.cl(20,5,20,'http://x.test/ops') c, pg_temp.cl(20,5,20,'https://x.test/a b') d \gset
+select pg_temp.cl(0) a, pg_temp.cl(21) a2, pg_temp.cl(20,21) b, pg_temp.cl(20,5,20,'http://x.test/ops') c, pg_temp.cl(20,5,20,'https://x.test/a b') d, pg_temp.cl(20,5,20,null,'not an address') e, pg_temp.cl(20,5,20,null,E'a@b.test\r\nBcc: x@y.test') e2 \gset
 select pg_temp.chk('claim parameters are validated; a non-https / spaced link is rejected; nothing was written',
   :'a'::jsonb ->> 'error' like '%invalid notification claim parameters%' and :'b'::jsonb ->> 'error' like '%invalid notification claim parameters%'
-  and :'c'::jsonb ->> 'error' like '%invalid notification link%' and :'d'::jsonb ->> 'error' like '%invalid notification link%' and pg_temp.nn() = '0');
+  and :'c'::jsonb ->> 'error' like '%invalid notification link%' and :'d'::jsonb ->> 'error' like '%invalid notification link%'
+  and :'a2'::jsonb ->> 'error' like '%invalid notification claim parameters%'  -- hard cap: never more than 20 e-mails/day, whatever the caller asks
+  and :'e'::jsonb ->> 'error' like '%invalid notification sender%' and :'e2'::jsonb ->> 'error' like '%invalid notification sender%' and pg_temp.nn() = '0');
+select pg_temp.chk('a new batch cannot be created without a sender', pg_temp.cl(20,5,20,null,null) ->> 'error' like '%sender required%' and pg_temp.nb() = '0');
 select pg_temp.cl(20,5,20,'https://app.example.test/ops/payments') ->> 'result' r \gset
 select pg_temp.chk('claim #1 derives 4 notifications and merges them into ONE batch, CRITICAL first, attempt 1',
   :'r' = 'CLAIMED' and pg_temp.lastj('item_count') = '4' and pg_temp.lastj('top_severity') = 'CRITICAL'
@@ -132,7 +136,11 @@ select pg_temp.chk('claim #1 derives 4 notifications and merges them into ONE ba
   and split_part(pg_temp.lastj('text'), E'\n', 5) like '- [KRITIS] CHARGEBACK · id %'
   and pg_temp.lastj('text') like '%Buka antrean: https://app.example.test/ops/payments%'
   and pg_temp.nn() = '4' and pg_temp.nn($$status='BATCHED'$$) = '4' and pg_temp.nb() = '1');
-select pg_temp.setv('b1', pg_temp.lastj('batch_id')), pg_temp.setv('t1', pg_temp.lastj('text')), pg_temp.setv('s1', pg_temp.lastj('subject'));
+select pg_temp.setv('b1', pg_temp.lastj('batch_id')), pg_temp.setv('t1', pg_temp.lastj('text')), pg_temp.setv('s1', pg_temp.lastj('subject')),
+       pg_temp.setv('f1', pg_temp.lastj('from')), pg_temp.setv('to1', (select j -> 'to' ->> 0 from lastc));
+select pg_temp.chk('the claim freezes sender, recipient ADDRESSES and the idempotency key in the batch (P2-1)',
+  pg_temp.getv('f1') = 'LINOE Alerts <alerts@example.test>' and pg_temp.getv('to1') = 'op1@example.test'
+  and pg_temp.sc(format($q$select (sender||'|'||recipient_emails::text||'|'||(idempotency_key = id::text||'-1')) from public.prompter_payment_alert_notification_batches where id=%L$q$, pg_temp.getv('b1'))) = 'LINOE Alerts <alerts@example.test>|{op1@example.test}|true');
 select pg_temp.chk('payload carries no customer data: no tenant name, amount, e-mail, transaction id, provider id',
   pg_temp.getv('t1') !~* '(T1|T2|99000|@|mid-|0000000b40)' and pg_temp.getv('s1') !~* '(@|mid-)'
   and pg_temp.sc(format($q$select recipient_user_ids::text from public.prompter_payment_alert_notification_batches where id = %L$q$, pg_temp.getv('b1'))) = '{00000000-0000-0000-0000-0000000b4021}');
@@ -142,6 +150,9 @@ select pg_temp.chk('while the lease is held a second claim does nothing (no seco
 select pg_temp.chk('payload is frozen (subject / body / recipients / hash), the batch and its notifications cannot be deleted or truncated',
   pg_temp.try(format('update public.prompter_payment_alert_notification_batches set body = ''x'' where id = %L', pg_temp.getv('b1'))) like '%frozen%'
   and pg_temp.try(format('update public.prompter_payment_alert_notification_batches set recipient_user_ids = array[gen_random_uuid()] where id = %L', pg_temp.getv('b1'))) like '%frozen%'
+  and pg_temp.try(format('update public.prompter_payment_alert_notification_batches set sender = ''x@y.test'' where id = %L', pg_temp.getv('b1'))) like '%frozen%'
+  and pg_temp.try(format('update public.prompter_payment_alert_notification_batches set recipient_emails = array[''x@y.test''] where id = %L', pg_temp.getv('b1'))) like '%frozen%'
+  and pg_temp.try(format('update public.prompter_payment_alert_notification_batches set idempotency_key = ''other'' where id = %L', pg_temp.getv('b1'))) like '%frozen%'
   and pg_temp.try('delete from public.prompter_payment_alert_notification_batches') like '%not deletable%'
   and (pg_temp.try('truncate public.prompter_payment_alert_notification_batches') like '%not deletable%' or pg_temp.try('truncate public.prompter_payment_alert_notification_batches') like '%foreign key%')
   and pg_temp.try('delete from public.prompter_payment_alert_notifications') like '%not deletable%'
@@ -154,9 +165,13 @@ select pg_temp.chk('transient failure #1 -> RETRY with ~1 minute backoff, lease 
 select pg_temp.cl() ->> 'result' r \gset
 select pg_temp.chk('a batch that is not due yet is not claimed (and no new batch is made)', :'r' = 'NOTHING' and pg_temp.nb() = '1');
 select pg_temp.due(pg_temp.getv('b1')::uuid);
-select pg_temp.cl() ->> 'result' r \gset
-select pg_temp.chk('retry claims the SAME batch with the SAME idempotency key and the SAME text, attempt 2',
+-- between the attempts the sender setting AND the operator's e-mail address change: the frozen batch must still win
+update auth.users set email = 'changed@example.test' where id = '00000000-0000-0000-0000-0000000b4021';
+select pg_temp.cl(20,5,20,null,'Other <other@example.test>') ->> 'result' r \gset
+update auth.users set email = 'op1@example.test' where id = '00000000-0000-0000-0000-0000000b4021';
+select pg_temp.chk('retry claims the SAME batch with the SAME idempotency key, text, sender and recipient addresses (identical payload), attempt 2',
   :'r' = 'CLAIMED' and pg_temp.lastj('retry') = 'true' and pg_temp.lastj('batch_id') = pg_temp.getv('b1') and pg_temp.lastj('attempt_no') = '2'
+  and pg_temp.lastj('from') = pg_temp.getv('f1') and pg_temp.sc('select j -> ''to'' ->> 0 from lastc') = pg_temp.getv('to1') and pg_temp.sc('select jsonb_array_length(j -> ''to'')::text from lastc') = '1'
   and pg_temp.lastj('idempotency_key') = pg_temp.getv('b1') || '-1' and pg_temp.lastj('text') = pg_temp.getv('t1') and pg_temp.lastj('subject') = pg_temp.getv('s1') and pg_temp.nb() = '1');
 -- crash: attempt 2 never reports back; lease runs out
 select pg_temp.lease_over(pg_temp.getv('b1')::uuid);
@@ -167,13 +182,14 @@ select pg_temp.chk('crashed attempt: lease expiry is audited (LEASE_EXPIRED) and
 select pg_temp.fl(pg_temp.getv('b1')::uuid, 2, 'HTTP_500', 500) r \gset
 select pg_temp.chk('a late report from the dead attempt 2 is STALE and does not touch the live attempt 3',
   :'r' = 'STALE' and pg_temp.sc(format($q$select (lease_until is not null)::text from public.prompter_payment_alert_notification_batches where id=%L$q$, pg_temp.getv('b1'))) = 'true');
-select pg_temp.fl(pg_temp.getv('b1')::uuid, 3, 'HTTP_409_INVALID_IDEMPOTENT', 409, true) r \gset
-select pg_temp.chk('attempt 3 fails with rotate_key -> backoff ~15 min, key_generation 2, payload unchanged',
-  :'r' = 'RETRY' and pg_temp.sc(format($q$select (key_generation||':'||(next_attempt_at between now()+interval '14 minutes' and now()+interval '16 minutes')||':'||(body = %L))::text from public.prompter_payment_alert_notification_batches where id=%L$q$, pg_temp.getv('t1'), pg_temp.getv('b1'))) = '2:true:true');
+select pg_temp.fl(pg_temp.getv('b1')::uuid, 3, 'HTTP_409_INVALID_IDEMPOTENT', 409) r \gset
+select pg_temp.chk('a 409 key conflict never rotates the key (no second e-mail): backoff ~15 min, key and payload unchanged',
+  :'r' = 'RETRY' and pg_temp.sc(format($q$select ((idempotency_key = id::text||'-1')||':'||(next_attempt_at between now()+interval '14 minutes' and now()+interval '16 minutes')||':'||(body = %L))::text from public.prompter_payment_alert_notification_batches where id=%L$q$, pg_temp.getv('t1'), pg_temp.getv('b1'))) = 'true:true:true'
+  and pg_temp.sc(format($q$select maybe_delivered::text from public.prompter_payment_alert_notification_batches where id=%L$q$, pg_temp.getv('b1'))) = 'true');
 select pg_temp.due(pg_temp.getv('b1')::uuid);
 select pg_temp.cl() ->> 'result' r \gset
-select pg_temp.chk('after a rotation the key is <batch>-2, still the same batch and text',
-  :'r' = 'CLAIMED' and pg_temp.lastj('idempotency_key') = pg_temp.getv('b1') || '-2' and pg_temp.lastj('attempt_no') = '4' and pg_temp.lastj('text') = pg_temp.getv('t1'));
+select pg_temp.chk('the 4th attempt still uses the original key and text',
+  :'r' = 'CLAIMED' and pg_temp.lastj('idempotency_key') = pg_temp.getv('b1') || '-1' and pg_temp.lastj('attempt_no') = '4' and pg_temp.lastj('text') = pg_temp.getv('t1'));
 select pg_temp.chk('error codes are sanitised: free text / secrets can never reach the audit trail',
   pg_temp.fl(pg_temp.getv('b1')::uuid, 4, 're_secret_key sk-abc 123', 500) = 'RETRY'
   and pg_temp.na($$error_code='UNKNOWN' and attempt_no=4$$) = '1' and pg_temp.na($$error_code ~ '[a-z ]'$$) = '0');
@@ -226,7 +242,7 @@ select pg_temp.chk('an alert acknowledged before the sender ran is SKIPPED, not 
 select pg_temp.rec('00000000-0000-0000-0000-0000000b40b1','REFUND','gw:rf9') r \gset
 select pg_temp.cl() ->> 'result' r2 \gset
 select pg_temp.setv('b3', pg_temp.lastj('batch_id')), pg_temp.lastj('top_severity') ts \gset
-select pg_temp.fl(pg_temp.getv('b3')::uuid, 1, 'HTTP_422', 422, false, true) r \gset
+select pg_temp.fl(pg_temp.getv('b3')::uuid, 1, 'HTTP_422', 422, true) r \gset
 select pg_temp.chk('permanent provider rejection -> DEAD at once, notifications FAILED, never re-derived into a retry loop',
   :'r' = 'DEAD' and :'ts' = 'HIGH' and pg_temp.nn($$status='FAILED'$$) = '1' and pg_temp.nb($$status='DEAD'$$) = '1'
   and pg_temp.na($$batch_id='$$ || pg_temp.getv('b3') || $$' and outcome='EXPIRED'$$) = '1');
@@ -253,7 +269,8 @@ select pg_temp.setv('b5', pg_temp.lastj('batch_id'));
 update public.prompter_payment_alert_notification_batches set first_attempt_at = now() - interval '23 hours 30 minutes', lease_until = now() - interval '1 second' where id = pg_temp.getv('b5')::uuid;
 select pg_temp.cl() ->> 'result' r \gset
 select pg_temp.chk('a batch older than 23h is marked DEAD (EXPIRED) and is NEVER re-sent with the old key',
-  :'r' = 'NOTHING' and pg_temp.nb($$id='$$ || pg_temp.getv('b5') || $$' and status='DEAD'$$) = '1' and pg_temp.na($$batch_id='$$ || pg_temp.getv('b5') || $$' and outcome='EXPIRED'$$) = '1');
+  :'r' = 'NOTHING' and pg_temp.nb($$id='$$ || pg_temp.getv('b5') || $$' and status='DEAD'$$) = '1' and pg_temp.na($$batch_id='$$ || pg_temp.getv('b5') || $$' and outcome='EXPIRED'$$) = '1'
+  and pg_temp.nb($$id='$$ || pg_temp.getv('b5') || $$' and maybe_delivered$$) = '1');  -- claimed but never reported: delivery is uncertain
 
 -- ===== 8. daily budget, CRITICAL reserve, priority =====
 select pg_temp.rec('00000000-0000-0000-0000-0000000b40b3','REFUND','gw:rf3') r \gset
@@ -285,9 +302,140 @@ select pg_temp.cl() ->> 'result' r \gset
 select pg_temp.chk('once an operator is active again the pending alert is sent', :'r' = 'CLAIMED');
 select pg_temp.setv('b9', pg_temp.lastj('batch_id'));
 update public.prompter_payment_operators set active = false where user_id = pg_temp.getv('op1')::uuid;
-select pg_temp.chk('an operator deactivated AFTER the batch was frozen is dropped at send time (emails list empty)',
-  pg_temp.as_service(format($q$select public.fn_payment_notification_recipient_emails(recipient_user_ids)::text from public.prompter_payment_alert_notification_batches where id=%L$q$, pg_temp.getv('b9'))) = '{}');
+select pg_temp.chk('recipients are frozen with the batch: a later deactivation does not change THIS batch (it applies to the next one)',
+  pg_temp.sc(format($q$select recipient_emails::text from public.prompter_payment_alert_notification_batches where id=%L$q$, pg_temp.getv('b9'))) = '{op1@example.test}');
 update public.prompter_payment_operators set active = true where user_id = pg_temp.getv('op1')::uuid;
+
+-- ===== 11. recovery (P1-1): a bad key / domain, a dead batch or a crash must never leave an OPEN alert un-mailed =====
+select pg_temp.dn(pg_temp.getv('b9')::uuid, 'msg_9');
+-- start a new UTC day for the budget: shift everything created so far to yesterday
+update public.prompter_payment_alert_notification_batches set created_day = created_day - 1, sent_at = sent_at - interval '1 day';
+create or replace function pg_temp.bat(a uuid) returns uuid language plpgsql as $$
+declare r uuid; begin select n.batch_id into r from public.prompter_payment_alert_notifications n where n.alert_id = a order by n.sequence desc limit 1; return r; end $$;
+create or replace function pg_temp.cur(a uuid, col text) returns text language plpgsql as $$
+declare r text; begin execute format('select %I::text from public.prompter_payment_alert_notification_batches where id = %L', col, pg_temp.bat(a)) into r; return r; end $$;
+
+-- 11a. provider says 401 over and over (wrong API key): nothing is sent, no attempt is used up, the batch survives and is sent once the key works
+select pg_temp.rec('00000000-0000-0000-0000-0000000b40b4','CHARGEBACK','gw:h1') r \gset
+select pg_temp.cl() ->> 'result' r \gset
+select pg_temp.setv('h1', pg_temp.lastj('batch_id'));
+do $$ declare i int; r text; begin
+  for i in 1..8 loop
+    r := pg_temp.fl(pg_temp.getv('h1')::uuid, i, 'HTTP_401', 401);
+    if r <> 'HELD' then raise exception 'hold % expected HELD got %', i, r; end if;
+    perform pg_temp.due(pg_temp.getv('h1')::uuid);
+    perform pg_temp.cl();
+  end loop; end $$;
+select pg_temp.chk('8 consecutive provider 401s: batch stays READY (not DEAD), attempts used up = 0, alarm notification still BATCHED, e-mail not marked delivered',
+  :'r' = 'CLAIMED' and pg_temp.sc(format($q$select (status||':'||held_count||':'||attempts||':'||maybe_delivered)::text from public.prompter_payment_alert_notification_batches where id=%L$q$, pg_temp.getv('h1'))) = 'READY:8:9:false'
+  and pg_temp.nn($$batch_id='$$ || pg_temp.getv('h1') || $$' and status='BATCHED'$$) = '1');
+select pg_temp.fl(pg_temp.getv('h1')::uuid, 9, 'HTTP_403', 403) r \gset
+select pg_temp.chk('a hold waits ~30 minutes between tries',
+  :'r' = 'HELD' and pg_temp.sc(format($q$select (next_attempt_at between now()+interval '29 minutes' and now()+interval '31 minutes')::text from public.prompter_payment_alert_notification_batches where id=%L$q$, pg_temp.getv('h1'))) = 'true');
+select pg_temp.due(pg_temp.getv('h1')::uuid);
+select pg_temp.cl() ->> 'result' r \gset
+select pg_temp.lastj('batch_id') bb, pg_temp.lastj('idempotency_key') kk \gset
+select pg_temp.dn(pg_temp.getv('h1')::uuid, 'msg_h1') d \gset
+select pg_temp.chk('after the key is fixed the SAME batch is sent with the SAME key; nothing duplicated',
+  :'r' = 'CLAIMED' and :'bb' = pg_temp.getv('h1') and :'kk' = pg_temp.getv('h1') || '-1' and :'d' = 'SENT'
+  and pg_temp.nb($$id='$$ || pg_temp.getv('h1') || $$'$$) = '1'
+  and pg_temp.nn($$status='SENT' and batch_id='$$ || pg_temp.getv('h1') || $$'$$) = '1');
+
+-- 11b. the hold lasts past the 23 h hard stop (provider never accepted anything): the alert is re-queued AT ONCE in a NEW batch, not marked reminder
+select pg_temp.rec('00000000-0000-0000-0000-0000000b40b5','CHARGEBACK','gw:h2') r \gset
+select pg_temp.cl() ->> 'result' r \gset
+select pg_temp.setv('h2', pg_temp.lastj('batch_id'));
+select pg_temp.fl(pg_temp.getv('h2')::uuid, 1, 'HTTP_401', 401) r \gset
+update public.prompter_payment_alert_notification_batches set first_attempt_at = now() - interval '23 hours 40 minutes' where id = pg_temp.getv('h2')::uuid;
+select pg_temp.due(pg_temp.getv('h2')::uuid);
+select pg_temp.cl() ->> 'result' r \gset
+select pg_temp.chk('dead after 23 h of 401s -> old batch DEAD, alert re-queued (count 1) into a NEW batch with a NEW key, no reminder wording, alert still OPEN',
+  :'r' = 'CLAIMED' and pg_temp.lastj('retry') = 'false' and pg_temp.lastj('batch_id') <> pg_temp.getv('h2')
+  and pg_temp.lastj('text') not like '%pengingat%'
+  and pg_temp.sc(format($q$select status from public.prompter_payment_alert_notification_batches where id=%L$q$, pg_temp.getv('h2'))) = 'DEAD'
+  and pg_temp.sc(format($q$select (requeue_count||':'||status||':'||is_reminder)::text from public.prompter_payment_alert_notifications where alert_id=%L$q$, pg_temp.aid('00000000-0000-0000-0000-0000000b40b5','CHARGEBACK'))) = '1:BATCHED:false'
+  and pg_temp.sc(format($q$select state from public.prompter_payment_alerts where id=%L$q$, pg_temp.aid('00000000-0000-0000-0000-0000000b40b5','CHARGEBACK'))) = 'OPEN');
+select pg_temp.dn(pg_temp.lastj('batch_id')::uuid, 'msg_h2');
+
+-- 11c. uncertain delivery (timeout): never re-sent inside the provider's 24 h idempotency window; afterwards sent ONCE as a clearly marked reminder
+select pg_temp.rec('00000000-0000-0000-0000-0000000b40b6','CHARGEBACK','gw:h3') r \gset
+select pg_temp.cl() ->> 'result' r \gset
+select pg_temp.setv('h3', pg_temp.lastj('batch_id'));
+select pg_temp.fl(pg_temp.getv('h3')::uuid, 1, 'TIMEOUT') r \gset
+update public.prompter_payment_alert_notification_batches set first_attempt_at = now() - interval '23 hours 10 minutes' where id = pg_temp.getv('h3')::uuid;
+select pg_temp.due(pg_temp.getv('h3')::uuid);
+select pg_temp.cl() ->> 'result' r \gset
+select pg_temp.chk('uncertain batch past 23 h is DEAD and is NOT re-queued while the 24 h window is open (no possible duplicate)',
+  :'r' = 'NOTHING' and pg_temp.cur(pg_temp.aid('00000000-0000-0000-0000-0000000b40b6','CHARGEBACK'), 'status') = 'DEAD'
+  and pg_temp.cur(pg_temp.aid('00000000-0000-0000-0000-0000000b40b6','CHARGEBACK'), 'maybe_delivered') = 'true'
+  and pg_temp.sc(format($q$select status from public.prompter_payment_alert_notifications where alert_id=%L$q$, pg_temp.aid('00000000-0000-0000-0000-0000000b40b6','CHARGEBACK'))) = 'FAILED');
+update public.prompter_payment_alert_notification_batches set first_attempt_at = now() - interval '25 hours' where id = pg_temp.getv('h3')::uuid;
+select pg_temp.cl() ->> 'result' r \gset
+select pg_temp.chk('after 24 h the alert is sent once more, marked as a reminder (pengingat), in a new batch',
+  :'r' = 'CLAIMED' and pg_temp.lastj('batch_id') <> pg_temp.getv('h3') and pg_temp.lastj('text') like '%CHARGEBACK · id %· pengingat%'
+  and pg_temp.sc(format($q$select (requeue_count||':'||is_reminder)::text from public.prompter_payment_alert_notifications where alert_id=%L$q$, pg_temp.aid('00000000-0000-0000-0000-0000000b40b6','CHARGEBACK'))) = '1:true');
+select pg_temp.dn(pg_temp.lastj('batch_id')::uuid, 'msg_h3');
+select pg_temp.cl() ->> 'result' r \gset
+select pg_temp.chk('and then nothing more is sent for it', :'r' = 'NOTHING' and pg_temp.nn($$status='SENT'$$)::int >= 3);
+
+-- 11d. the provider REJECTED the e-mail itself (4xx): never re-queued automatically, never looped
+select pg_temp.rec('00000000-0000-0000-0000-0000000b40b4','REFUND','gw:h4') r \gset
+select pg_temp.cl() ->> 'result' r \gset
+select pg_temp.setv('h4', pg_temp.lastj('batch_id'));
+select pg_temp.fl(pg_temp.getv('h4')::uuid, 1, 'HTTP_422', 422, true) r \gset
+select pg_temp.cl() ->> 'result' r2 \gset
+select pg_temp.chk('permanent provider rejection is DEAD, flagged permanent, and not re-queued', :'r' = 'DEAD' and :'r2' = 'NOTHING'
+  and pg_temp.cur(pg_temp.aid('00000000-0000-0000-0000-0000000b40b4','REFUND'), 'permanent') = 'true'
+  and pg_temp.sc(format($q$select (requeue_count||':'||status)::text from public.prompter_payment_alert_notifications where alert_id=%L$q$, pg_temp.aid('00000000-0000-0000-0000-0000000b40b4','REFUND'))) = '0:FAILED');
+
+-- 11e. re-queue is capped (3), so a permanently broken setup cannot loop forever
+select pg_temp.rec('00000000-0000-0000-0000-0000000b40b5','REFUND','gw:h5') r \gset
+select pg_temp.cl() ->> 'result' r \gset
+select pg_temp.setv('h5', pg_temp.lastj('batch_id'));
+select pg_temp.fl(pg_temp.getv('h5')::uuid, 1, 'HTTP_401', 401) r \gset
+update public.prompter_payment_alert_notifications set requeue_count = 3 where batch_id = pg_temp.getv('h5')::uuid;
+update public.prompter_payment_alert_notification_batches set first_attempt_at = now() - interval '23 hours 40 minutes' where id = pg_temp.getv('h5')::uuid;
+select pg_temp.due(pg_temp.getv('h5')::uuid);
+select pg_temp.cl() ->> 'result' r \gset
+select pg_temp.chk('after 3 re-queues the notification stays FAILED (visible in the UI count) instead of looping', :'r' = 'NOTHING'
+  and pg_temp.sc(format($q$select (requeue_count||':'||status)::text from public.prompter_payment_alert_notifications where alert_id=%L$q$, pg_temp.aid('00000000-0000-0000-0000-0000000b40b5','REFUND'))) = '3:FAILED');
+
+-- 11f. an alert that was acknowledged meanwhile is not re-queued
+select pg_temp.rec('00000000-0000-0000-0000-0000000b40b6','REFUND','gw:h6') r \gset
+select pg_temp.cl() ->> 'result' r \gset
+select pg_temp.setv('h6', pg_temp.lastj('batch_id'));
+select pg_temp.fl(pg_temp.getv('h6')::uuid, 1, 'HTTP_401', 401) r \gset
+select pg_temp.ack(pg_temp.aid('00000000-0000-0000-0000-0000000b40b6','REFUND'), pg_temp.getv('op1')::uuid) r2 \gset
+update public.prompter_payment_alert_notification_batches set first_attempt_at = now() - interval '23 hours 40 minutes' where id = pg_temp.getv('h6')::uuid;
+select pg_temp.due(pg_temp.getv('h6')::uuid);
+select pg_temp.cl() ->> 'result' r \gset
+select pg_temp.chk('an alert acknowledged by an operator meanwhile is not mailed again after its batch died', :'r' = 'NOTHING'
+  and pg_temp.sc(format($q$select status from public.prompter_payment_alert_notifications where alert_id=%L$q$, pg_temp.aid('00000000-0000-0000-0000-0000000b40b6','REFUND'))) = 'FAILED');
+
+-- ===== 12. daily budget across midnight (P2-4) =====
+update public.prompter_payment_alert_notification_batches set created_day = created_day - 1, sent_at = sent_at - interval '1 day' where created_day = (now() at time zone 'utc')::date;
+select pg_temp.chk('after the day shift no batch is created or sent today: budget used = 0 (nothing READY)', pg_temp.as_service('select public.fn_payment_notification_budget_used()::text') = '0'
+  and not exists (select 1 from public.prompter_payment_alert_notification_batches where status = 'READY'));
+select pg_temp.rec('00000000-0000-0000-0000-0000000b40b4','REVERSAL','gw:m1') r \gset
+select pg_temp.cl(20,0) ->> 'result' r \gset
+select pg_temp.setv('m1', pg_temp.lastj('batch_id'));
+-- the batch was created just before midnight and is still being retried after midnight
+update public.prompter_payment_alert_notification_batches set created_day = (now() at time zone 'utc')::date - 1 where id = pg_temp.getv('m1')::uuid;
+select pg_temp.lease_over(pg_temp.getv('m1')::uuid);
+select pg_temp.chk('a READY batch created yesterday still uses one slot of TODAY', pg_temp.as_service('select public.fn_payment_notification_budget_used()::text') = '1');
+select pg_temp.rec('00000000-0000-0000-0000-0000000b40b5','REVERSAL','gw:m2') r \gset
+select pg_temp.cl(1,0) ->> 'result' r \gset
+select pg_temp.chk('the retry of that batch is allowed even though the day is "full" (the e-mail is already owed) and keeps its key',
+  :'r' = 'CLAIMED' and pg_temp.lastj('retry') = 'true' and pg_temp.lastj('batch_id') = pg_temp.getv('m1'));
+select pg_temp.cl(1,0) ->> 'result' r \gset
+select pg_temp.chk('a NEW batch is refused: the day is full because of the batch carried over midnight', :'r' = 'DAILY_LIMIT' and pg_temp.nn($$status='PENDING'$$) = '1');
+select pg_temp.dn(pg_temp.getv('m1')::uuid, 'msg_m1');
+select pg_temp.cl(1,0) ->> 'result' r \gset
+select pg_temp.chk('after it is SENT today it still counts today (sent_at day): still DAILY_LIMIT, so retries cannot exceed the cap', :'r' = 'DAILY_LIMIT'
+  and pg_temp.as_service('select public.fn_payment_notification_budget_used()::text') = '1');
+select pg_temp.cl(2,0) ->> 'result' r \gset
+select pg_temp.chk('with one more slot the pending alert goes out', :'r' = 'CLAIMED');
+select pg_temp.chk('the recorded daily total never exceeds the limit that was in force', pg_temp.as_service('select public.fn_payment_notification_budget_used()::text') = '2');
 
 -- ===== 10. isolation: nothing outside B4.2 changed =====
 select pg_temp.chk('transactions and subscriptions are byte-identical after the whole B4.2 flow', pg_temp.fingerprint() = (select f from fp0));
