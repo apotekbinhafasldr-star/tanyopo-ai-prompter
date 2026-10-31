@@ -1,12 +1,13 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getPaymentOperator } from "@/services/payment-operator";
-import { getSyncState, listPaymentAlerts, syncIfStale, type PaymentAlertRow } from "@/services/payment-alerts";
+import { getNotifyStatus, getSyncState, listPaymentAlerts, syncIfStale, type PaymentAlertRow } from "@/services/payment-alerts";
 import {
   PAYMENT_ALERT_KIND_LABEL,
   PAYMENT_ALERT_NOTE_MIN,
   PAYMENT_ALERT_STATE_LABEL,
   isSyncStale,
+  notifyHealth,
 } from "@/lib/billing/payment-alerts";
 import { formatCurrency } from "@/lib/utils/format";
 import { ackAlertAction, resolveAlertAction, syncAlertsAction } from "./actions";
@@ -51,9 +52,10 @@ export default async function PaymentQueuePage({ searchParams }: { searchParams:
   const showDone = str(params.view) === "selesai";
 
   await syncIfStale(operator.admin);
-  const [alerts, state] = await Promise.all([
+  const [alerts, state, notify] = await Promise.all([
     listPaymentAlerts(operator.admin, { states: showDone ? ["RESOLVED"] : ["OPEN", "ACKED"], limit: 100 }),
     getSyncState(operator.admin),
+    getNotifyStatus(operator.admin),
   ]);
 
   const tenantIds = [...new Set(alerts.map((a) => a.tenant_id))];
@@ -67,6 +69,7 @@ export default async function PaymentQueuePage({ searchParams }: { searchParams:
   const messageOk = str(params.ok) === "1";
   const stale = isSyncStale(state?.last_success_at ?? null);
   const failing = (state?.consecutive_failures ?? 0) > 0;
+  const mailHealth = notifyHealth(notify.state);
 
   return (
     <main className="mx-auto w-full max-w-2xl space-y-4 px-4 py-6">
@@ -91,6 +94,21 @@ export default async function PaymentQueuePage({ searchParams }: { searchParams:
           <p className="mt-1 text-warning">
             {failing ? `Sinkronisasi gagal ${state?.consecutive_failures}x berturut-turut (${state?.last_error ?? "?"}).` : "Data mungkin belum terbaru."}{" "}
             Alarm yang sudah tercatat tidak hilang.
+          </p>
+        ) : null}
+        <p className="mt-1">
+          Pengirim email alarm:{" "}
+          <strong>
+            {mailHealth === "NEVER_RAN" ? "belum aktif" : mailHealth === "OK" ? "aktif" : mailHealth === "FAILING" ? "ada kegagalan" : "tidak berjalan"}
+          </strong>
+          {notify.state?.last_run_at ? ` (jalan terakhir ${when(notify.state.last_run_at)})` : ""}
+        </p>
+        {notify.state?.last_claim_result === "NO_RECIPIENT" ? (
+          <p className="mt-1 text-warning">Tidak ada operator aktif dengan email terkonfirmasi: email alarm belum dikirim. Alarm tetap tercatat di antrean ini.</p>
+        ) : null}
+        {mailHealth === "STALE" || mailHealth === "FAILING" || notify.dead > 0 ? (
+          <p className="mt-1 text-warning">
+            Email alarm mungkin tidak terkirim{notify.dead > 0 ? ` (${notify.dead} kiriman menyerah)` : ""}. Pantau antrean ini langsung; alarm tidak hilang.
           </p>
         ) : null}
         <form action={syncAlertsAction} className="mt-2">

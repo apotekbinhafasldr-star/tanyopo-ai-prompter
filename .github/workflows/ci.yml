@@ -288,6 +288,43 @@ jobs:
           grep -E '^(FAIL|SOME|REFUSED)|ERROR' "$RUNNER_TEMP/b4.txt" | head -20 | sed 's/^/::error::/' || true
           grep -q '^ALL PASSED' "$RUNNER_TEMP/b4.txt"
 
+  billing-b42-sql:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: linoe_ci
+          POSTGRES_PASSWORD: linoe_ci_password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U linoe_ci -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: linoe_ci
+      PGPASSWORD: linoe_ci_password
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ensure psql client
+        run: command -v psql || (sudo apt-get update && sudo apt-get install -y postgresql-client)
+
+      - name: Billing B4.2 SQL tests (notification outbox - dedupe, replay, reopen, parallel claims, crash and retry, daily budget, RLS, rollback) (PostgreSQL 17 required)
+        env:
+          REQUIRE_PG_MAJOR: "17"
+        run: |
+          set -o pipefail
+          bash supabase/tests/b4-2-notifications/run-local.sh 2>&1 | tee "$RUNNER_TEMP/b42.txt" || true
+          # surface failures as annotations (job logs are not always downloadable)
+          grep -E '^(FAIL|SOME|REFUSED)|ERROR' "$RUNNER_TEMP/b42.txt" | head -20 | sed 's/^/::error::/' || true
+          grep -q '^ALL B4.2 LOCAL TESTS PASSED' "$RUNNER_TEMP/b42.txt"
+
   # PR #48's COMPLETE AI-jobs-guard suite on PostgreSQL 17 (production is 17.x; #48's own CI job runs 16).
   # Nothing of PR #48 is modified: its head is fetched read-only, its own run-local.sh is executed unchanged from the
   # fetched tree, together with its #31/#44/#45/#46 integration variants. Unlike the best-effort fetches above,

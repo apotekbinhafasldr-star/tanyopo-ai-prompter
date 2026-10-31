@@ -7,6 +7,7 @@ import {
   describeAlertActionOutcome,
   isSyncStale,
   isUuid,
+  notifyHealth,
 } from "@/lib/billing/payment-alerts";
 
 describe("Billing B4.1 — alert helpers", () => {
@@ -38,5 +39,19 @@ describe("Billing B4.1 — alert helpers", () => {
     expect(isSyncStale("garbage", now)).toBe(true);
     expect(isSyncStale(new Date(now - PAYMENT_ALERT_STALE_AFTER_MS + 1000).toISOString(), now)).toBe(false);
     expect(isSyncStale(new Date(now - PAYMENT_ALERT_STALE_AFTER_MS - 1000).toISOString(), now)).toBe(true);
+  });
+});
+
+describe("B4.2 notifyHealth", () => {
+  const now = Date.parse("2026-11-01T10:00:00Z");
+  it("is NEVER_RAN without a heartbeat (also what a disabled sender looks like)", () => {
+    expect(notifyHealth(null, now)).toBe("NEVER_RAN");
+    expect(notifyHealth({ last_run_at: null, consecutive_failures: 0 }, now)).toBe("NEVER_RAN");
+  });
+  it("is STALE after 20 minutes without a run, FAILING on recent failures, OK otherwise", () => {
+    expect(notifyHealth({ last_run_at: "2026-11-01T09:30:00Z", consecutive_failures: 0 }, now)).toBe("STALE");
+    expect(notifyHealth({ last_run_at: "2026-11-01T09:58:00Z", consecutive_failures: 2 }, now)).toBe("FAILING");
+    expect(notifyHealth({ last_run_at: "2026-11-01T09:58:00Z", consecutive_failures: 0 }, now)).toBe("OK");
+    expect(notifyHealth({ last_run_at: "garbage", consecutive_failures: 0 }, now)).toBe("STALE");
   });
 });
