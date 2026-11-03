@@ -1,0 +1,4 @@
+-- LINOE P0-2 - S. DETEKSI KEADAAN READ-ONLY (hanya SELECT). Dipakai runner untuk memilih pemeriksaan yang sesuai (pre-apply / pasca-apply).
+select coalesce((select md5(regexp_replace(p.prosrc,'\s+','','g')) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='fn_apply_verified_payment' and pg_get_function_identity_arguments(p.oid)='p_transaction_id uuid, p_provider_payment_id text, p_provider_event_id text, p_verified_amount numeric, p_verified_currency text'),'none') as fn_hash,
+       (select count(*) from information_schema.columns where table_schema='public' and table_name='prompter_invoices' and column_name='transaction_id' and data_type='uuid' and is_nullable='YES') as kolom_transaction_id,
+       (select count(*) from supabase_migrations.schema_migrations where version='20261103170000') as ledger_p02;

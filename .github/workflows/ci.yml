@@ -531,3 +531,42 @@ jobs:
           bash supabase/tests/finance-chain/run-local.sh 2>&1 | tee "$RUNNER_TEMP/chain.txt"
           grep -q '^ALL FINANCE CHAIN CHECKS PASSED' "$RUNNER_TEMP/chain.txt"
           if grep -q '^FAIL' "$RUNNER_TEMP/chain.txt"; then exit 1; fi
+
+  # Production-migration automation: unit tests of the runner/approval checker and a full REHEARSAL of the P0-2 package
+  # (A -> B -> C -> D -> F, STOP paths, rollback, tamper cases, catalog diff) on a throw-away postgres:17 with synthetic data.
+  # No secret, no Supabase connection: the rehearsal script refuses non-local hosts and any credential variable.
+  prod-migration-rehearsal:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: linoe_ci
+          POSTGRES_PASSWORD: linoe_ci_password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U linoe_ci -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: linoe_ci
+      PGPASSWORD: linoe_ci_password
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ensure psql client
+        run: command -v psql || (sudo apt-get update && sudo apt-get install -y postgresql-client)
+
+      - name: Production-migration rehearsal (PostgreSQL 17 required)
+        env:
+          REQUIRE_PG_MAJOR: "17"
+        run: |
+          set -o pipefail
+          bash supabase/prod-packages/tests/rehearsal.sh 2>&1 | tee "$RUNNER_TEMP/pm.txt" || true
+          grep -E '^(FAIL|SOME|REFUSED)|ERROR' "$RUNNER_TEMP/pm.txt" | head -20 | sed 's/^/::error::/' || true
+          grep -q '^ALL PASSED' "$RUNNER_TEMP/pm.txt"
