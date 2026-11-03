@@ -21,7 +21,7 @@ const MIG = "supabase/migrations/20261103170000_prompter_p0_2_payment_invoices.s
 const DOWN = "supabase/rollback/20261103170000_prompter_p0_2_payment_invoices.down.sql";
 const B2 = "supabase/migrations/20261030140000_prompter_b2_double_payment_safety.sql";
 
-const FN = /create or replace function public\.fn_apply_verified_payment\(.*?\n\$\$;/s;
+const FN = /create or replace function public\.fn_apply_verified_payment\([\s\S]*?\n\$\$;/;
 const fnOf = (sql: string) => {
   const m = FN.exec(sql);
   if (!m) throw new Error("fn_apply_verified_payment not found");

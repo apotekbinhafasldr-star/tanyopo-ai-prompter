@@ -151,12 +151,12 @@ drop trigger zz_skip on public.prompter_subscriptions; drop function public.zz_s
 
 -- ===== S16. one invoice per transaction is enforced by the database itself =====
 select pg_temp.chk('S16 a second invoice for the same transaction is refused even for the table owner',
-  (select pg_temp.dml_as(null, format($q$insert into public.prompter_invoices(tenant_id, transaction_id, provider, external_invoice_id, status, amount) values (%L::uuid, %L::uuid, 'midtrans', 'dup_x', 'PAID', 1)$q$, pg_temp.t('0001'), pg_temp.cid((select r from s1))), 'postgres')) like '23505:%');
+  (select pg_temp.dml_as(null, format($q$insert into public.prompter_invoices(tenant_id, transaction_id, provider, external_invoice_id, status, amount) values (%L::uuid, %L::uuid, 'midtrans', 'dup_x', 'PAID', 1)$q$, pg_temp.t('0001'), pg_temp.cid((select r from s1))), session_user::text)) like '23505:%');
 select pg_temp.chk('S16b the idempotency index exists, is unique and partial',
   (select indisunique and pg_get_expr(indpred, indrelid) is not null from pg_index where indexrelid = 'public.uq_prompter_invoices_transaction'::regclass));
 -- pre-existing style rows (no transaction) are still allowed several times (NULL transaction_id)
 select pg_temp.chk('S16c rows without a transaction (legacy shape) are unaffected by the unique index',
-  (select pg_temp.dml_as(null, $q$insert into public.prompter_invoices(tenant_id, status, amount) values ('00000000-0000-0000-0000-00000f020001', 'DRAFT', null), ('00000000-0000-0000-0000-00000f020001', 'DRAFT', null)$q$, 'postgres')) = 'ok:2');
+  (select pg_temp.dml_as(null, $q$insert into public.prompter_invoices(tenant_id, status, amount) values ('00000000-0000-0000-0000-00000f020001', 'DRAFT', null), ('00000000-0000-0000-0000-00000f020001', 'DRAFT', null)$q$, session_user::text)) = 'ok:2');
 delete from public.prompter_invoices where status = 'DRAFT' and tenant_id = pg_temp.t('0001')::uuid;
 
 -- ===== S17. tenant isolation and privileges =====

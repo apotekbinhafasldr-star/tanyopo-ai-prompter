@@ -25,6 +25,7 @@ MINV="$MIG/20260901130513_prompter_billing_invoices.sql"
 MP="$MIG/20261103170000_prompter_p0_2_payment_invoices.sql"
 DP="$root/supabase/rollback/20261103170000_prompter_p0_2_payment_invoices.down.sql"
 export PGOPTIONS="-c client_min_messages=warning"
+export PGHOST="$HOST" PGPORT="$PORT" PGUSER="$USER_"  # the embedded python helpers call psql and read the same connection settings
 PS() { psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q "$@"; }
 P() { PS -v ON_ERROR_STOP=1 "$@"; }
 PA() { PS -At "$@"; }
@@ -118,7 +119,7 @@ mk p02_crlf || bad "mk p02_crlf"
 python3 - "$W" "$MP" <<'PY'
 import re, sys, subprocess
 w, mp = sys.argv[1], sys.argv[2]
-src = subprocess.check_output(["psql","-h","/tmp","-p","5544","-U","postgres","-d","p02_crlf","-At","-c","select prosrc from pg_proc where proname='fn_apply_verified_payment'"]).decode()
+src = subprocess.check_output(["psql","-X","-d","p02_crlf","-At","-c","select prosrc from pg_proc where proname='fn_apply_verified_payment'"]).decode()
 crlf = src.replace("\n", "\r\n")
 sql = ("create or replace function public.fn_apply_verified_payment(p_transaction_id uuid, p_provider_payment_id text, p_provider_event_id text, p_verified_amount numeric, p_verified_currency text) returns table(allowed boolean, reason text) language plpgsql security definer set search_path = public as $zz$" + crlf + "$zz$;")
 open(f"{w}/crlf.sql","w",newline="").write(sql)
@@ -177,7 +178,7 @@ if P -d p02_rb -f "$DP" >/dev/null 2>&1; then pass "rollback applies when no lin
 python3 - "$W" "$MIG" <<'PY'
 import re, hashlib, subprocess, sys
 w, mig = sys.argv[1:3]
-src = subprocess.check_output(["psql","-h","/tmp","-p","5544","-U","postgres","-d","p02_rb","-At","-c","select prosrc from pg_proc where proname='fn_apply_verified_payment'"]).decode().rstrip("\n")
+src = subprocess.check_output(["psql","-X","-d","p02_rb","-At","-c","select prosrc from pg_proc where proname='fn_apply_verified_payment'"]).decode().rstrip("\n")
 b2 = open(f"{mig}/20261030140000_prompter_b2_double_payment_safety.sql").read()
 m = re.search(r"create or replace function public\.fn_apply_verified_payment\(.*?\n\$\$;", b2, re.S).group(0)
 body = m[m.index("as $$")+5: m.rindex("$$;")]
