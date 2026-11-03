@@ -647,12 +647,15 @@ export interface Database {
           issued_at: string | null;
           paid_at: string | null;
           billing_country: string | null;
+          /** P0-2: the verified payment transaction this invoice documents (unique when set). Written only by fn_apply_verified_payment. */
+          transaction_id: string | null;
           created_at: string;
           updated_at: string;
         };
         Insert: {
           id?: string;
           tenant_id: string;
+          transaction_id?: string | null;
           provider?: string | null;
           external_invoice_id?: string | null;
           status?: InvoiceStatus;
