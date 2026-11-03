@@ -174,8 +174,10 @@ export async function listInvoices(
  * Idempotent upsert for a real payment provider's invoice payload,
  * keyed on (provider, external_invoice_id) — a webhook redelivery
  * updates the same row (e.g. DRAFT -> PAID) rather than creating a
- * duplicate. Not called by anything yet (no provider is integrated),
- * ready for the payment webhook route a real adapter will add.
+ * duplicate. NOT the payment-receipt path: since P0-2 the invoice of a verified
+ * payment is written by the database function fn_apply_verified_payment in the same
+ * transaction as the activation (one PAID invoice per transaction_id). Nothing calls
+ * this helper; do not use it for payments.
  */
 export async function recordInvoiceFromProvider(
   admin: SupabaseClient<Database>,
