@@ -1,0 +1,80 @@
+{
+  "schema": 1,
+  "project_ref": "wjjyqovhmwenbcvbnkgx",
+  "migration_role": "linoe_migrator",
+  "approved_privileged_role": false,
+  "approval": {
+    "environment": "production-migration",
+    "approver": "repository_owner"
+  },
+  "packages": {
+    "p0-2": {
+      "title": "P0-2 invoice per verified payment (PR #81, main 1205572)",
+      "version": "20261103170000",
+      "name": "prompter_p0_2_payment_invoices",
+      "migration": {
+        "path": "supabase/migrations/20261103170000_prompter_p0_2_payment_invoices.sql",
+        "sha256": "21d860e5e2f9a20ecf35900cc2705be717f1fd4ee4c16855bd404ff705668bbd"
+      },
+      "rollback": {
+        "path": "supabase/rollback/20261103170000_prompter_p0_2_payment_invoices.down.sql",
+        "sha256": "57e7ba735c305fc25bdd18d5e8ea6f99e347fe7a5a806285a1928e3b47db3475"
+      },
+      "files": {
+        "A": {
+          "path": "supabase/prod-packages/p0-2/A_p02_preflight_readonly.sql",
+          "sha256": "57a1c55279230baf76bcb1d13377f0ee93da8b275f39bbaf14778d41cf2d8b0f"
+        },
+        "B": {
+          "path": "supabase/prod-packages/p0-2/B_p02_apply_sql_editor.sql",
+          "sha256": "b4ade18f38d39b4c20ef10d932fa757c401493bfd16975ba2e2b7cff859108f6"
+        },
+        "C": {
+          "path": "supabase/prod-packages/p0-2/C_p02_verify_readonly.sql",
+          "sha256": "c24d88f24eaa5c36da818fd3465931bcd3ce44e20827e1e5128c47971f437014"
+        },
+        "D": {
+          "path": "supabase/prod-packages/p0-2/D_p02_ledger_record.sql",
+          "sha256": "d43fa3df2af5bbce0997060719acc33e52005321f01a08d8826d73d7303c733c"
+        },
+        "E": {
+          "path": "supabase/prod-packages/p0-2/E_p02_rollback_emergency.sql",
+          "sha256": "ba7a87ecb6666a38dc5457e995fdc82c126e8e76848cf5d7d41c50617b5391be"
+        },
+        "F": {
+          "path": "supabase/prod-packages/p0-2/F_p02_final_verify.sql",
+          "sha256": "fe110206c86705f3159cfd5b08c3e8f84355997700dbe578bec180416e06fd39"
+        },
+        "S": {
+          "path": "supabase/prod-packages/p0-2/S_p02_state_readonly.sql",
+          "sha256": "91a4d4f236d9e2644adf231df00bb03232f21a9a415fd4bda572e9d77289ee49"
+        }
+      },
+      "pre_fn_hash": "dbd3a48a43c2959bbc02ad0575b23803",
+      "post_fn_hash": "fed9cc40c66292168cf7d26b53adaec0",
+      "ddl_targets": [
+        "function:fn_apply_verified_payment",
+        "index:uq_prompter_invoices_transaction",
+        "table:prompter_invoices"
+      ],
+      "allowed_public_refs": [
+        "fn_apply_verified_payment",
+        "prompter_audit_logs",
+        "prompter_invoices",
+        "prompter_payment_transactions",
+        "prompter_subscriptions"
+      ],
+      "expected_effects": [
+        "column:public.prompter_invoices.transaction_id",
+        "constraint:prompter_invoices.prompter_invoices_transaction_id_fkey",
+        "function:public.fn_apply_verified_payment(p_transaction_id uuid, p_provider_payment_id text, p_provider_event_id text, p_verified_amount numeric, p_verified_currency text)",
+        "index:public.uq_prompter_invoices_transaction",
+        "table_acl:prompter_invoices"
+      ],
+      "rollback_allowed_statements": [
+        "drop index if exists public.uq_prompter_invoices_transaction",
+        "alter table public.prompter_invoices drop column if exists transaction_id"
+      ]
+    }
+  }
+}

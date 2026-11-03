@@ -1,0 +1,104 @@
+name: Production Migration
+
+# Manual, approval-gated migration of the SHARED Supabase project (umkmpro-ai). Design and operating procedure: docs/PRODUCTION_MIGRATION.md
+#
+# Safety properties (each one is also asserted by tests/unit/lib/production-migration-static-guards.test.ts):
+#   * workflow_dispatch ONLY: nothing runs on push, merge, pull request or schedule.
+#   * Only from main: the job is skipped on any other ref; the Environment must also restrict deployment branches to main.
+#   * The Environment "production-migration" must have a Required reviewer. The workflow PROVES the approval happened by reading
+#     the run's approvals (GitHub API) and stops if there is none, before any database secret is used.
+#   * The input SHA must equal the workflow's own commit AND the current tip of main.
+#   * No third-party action, no Supabase CLI, no `db push`, no service_role key. Only psql runs the hash-pinned package files.
+#   * The single secret (MIGRATION_DB_PASSWORD) is attached to ONE step only. Host and user are Environment variables.
+#   * Repository is PUBLIC: logs are public. The runner prints check names, PASS/FAIL and counts only, never a credential or row.
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: "Paket (hanya yang ada di supabase/prod-packages/manifest.json)"
+        type: choice
+        required: true
+        options:
+          - p0-2
+      mode:
+        description: "owner-audit = laporan pemilik objek (read-only); verify-only = cek sesuai keadaan DB (read-only); apply = A-B-C-D-F; record-ledger = lanjutan bila sudah ter-apply; rollback = E"
+        type: choice
+        required: true
+        options:
+          - owner-audit
+          - verify-only
+          - apply
+          - record-ledger
+          - rollback
+      sha:
+        description: "SHA lengkap (40 karakter) ujung main saat ini"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: production-migration
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production-migration
+    steps:
+      - name: Fetch exactly the approved commit (no third-party action)
+        env:
+          REPO: ${{ github.repository }}
+          INPUT_SHA: ${{ inputs.sha }}
+          WORKFLOW_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$INPUT_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::STOP - sha harus 40 karakter heksadesimal huruf kecil"; exit 1; }
+          [ "$INPUT_SHA" = "$WORKFLOW_SHA" ] || { echo "::error::STOP - sha input tidak sama dengan commit workflow ini"; exit 1; }
+          TIP="$(git ls-remote "https://github.com/${REPO}.git" refs/heads/main | cut -f1)"
+          [ "$TIP" = "$INPUT_SHA" ] || { echo "::error::STOP - sha input bukan ujung main saat ini (main sudah berubah atau sha salah)"; exit 1; }
+          git init -q src
+          cd src
+          git remote add origin "https://github.com/${REPO}.git"
+          git fetch -q --depth 1 --no-tags origin "$INPUT_SHA"
+          git checkout -q FETCH_HEAD
+          [ "$(git rev-parse HEAD)" = "$INPUT_SHA" ] || { echo "::error::STOP - checkout tidak sama dengan sha"; exit 1; }
+          echo "PASS - commit $INPUT_SHA adalah ujung main"
+
+      - name: Verify the Environment approval really happened
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          gh api "repos/${REPO}/actions/runs/${RUN_ID}/approvals" > "$RUNNER_TEMP/approvals.json"
+          python3 src/supabase/prod-packages/tools/check_approval.py "$RUNNER_TEMP/approvals.json" "$OWNER" production-migration
+
+      - name: Ensure psql client
+        run: command -v psql || (sudo apt-get update && sudo apt-get install -y postgresql-client)
+
+      - name: Verify package (checksums, SQL lint, object allow-lists)
+        env:
+          PACKAGE: ${{ inputs.package }}
+        run: python3 src/supabase/prod-packages/tools/run_package.py --root src --package "$PACKAGE" --mode check-only
+
+      - name: Run package
+        env:
+          PACKAGE: ${{ inputs.package }}
+          MODE: ${{ inputs.mode }}
+          INPUT_SHA: ${{ inputs.sha }}
+          RUN_ID: ${{ github.run_id }}
+          PGHOST: ${{ vars.MIGRATION_DB_HOST }}
+          PGUSER: ${{ vars.MIGRATION_DB_USER }}
+          PGPASSWORD: ${{ secrets.MIGRATION_DB_PASSWORD }}
+          PGPORT: "5432"
+          PGSSLMODE: require
+          PGDATABASE: postgres
+        run: python3 src/supabase/prod-packages/tools/run_package.py --root src --package "$PACKAGE" --mode "$MODE" --target production --sha "$INPUT_SHA" --run-id "$RUN_ID"
