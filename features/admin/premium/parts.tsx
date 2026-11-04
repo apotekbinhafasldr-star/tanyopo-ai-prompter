@@ -23,11 +23,60 @@ export function Hero({ title, subtitle }: { title: string; subtitle: string }) {
   );
 }
 
+/**
+ * Headline of the finance page: the operating result as one large figure, with a bar that shows
+ * revenue against expenses. The bar lengths use the drawing-only `value` numbers; every label the
+ * reader sees is the exact text from the model.
+ */
+export function Headline({ result, revenue, expenses, label }: { result: KpiView; revenue: KpiView; expenses: KpiView; label: string }) {
+  const neg = result.amount.text.startsWith("-") || result.amount.value < 0;
+  const rev = Math.max(revenue.amount.value, 0);
+  const exp = Math.max(expenses.amount.value, 0);
+  const t = result.trend;
+  const tone = t.kind === "UP" || t.kind === "DOWN" ? trendTone(t, result.upIsGood) : "flat";
+  return (
+    <section className="fin-head" data-testid={`kpi-${result.id}`}>
+      <h1>{label}</h1>
+      <p className={`big${neg ? " neg" : ""}`}>{result.amount.text}</p>
+      <p className="sub">
+        {t.kind === "UP" || t.kind === "DOWN" ? (
+          <>
+            <b className={tone === "flat" ? "" : tone}>{t.text}</b> dibanding bulan lalu. {result.hint}.
+          </>
+        ) : t.kind === "NEW" ? (
+          <>Baru bulan ini. {result.hint}.</>
+        ) : (
+          <>{result.hint}.</>
+        )}
+      </p>
+      <div className="fin-bridge">
+        {rev + exp > 0 ? (
+          <div className="bar" role="img" aria-label={`Pendapatan ${revenue.amount.text} dibanding beban ${expenses.amount.text}`}>
+            <i className="in" style={{ flex: rev || 0.0001 }} />
+            <i className="out" style={{ flex: exp || 0.0001 }} />
+          </div>
+        ) : (
+          <div className="bar empty" aria-hidden />
+        )}
+        <div className="lg">
+          <div>
+            <small>Pendapatan</small>
+            <strong>{revenue.amount.text}</strong>
+          </div>
+          <div>
+            <small>Beban dan biaya gateway</small>
+            <strong>{expenses.amount.text}</strong>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 /** Must appear on every screen that shows demo data. */
 export function DemoNotice() {
   return (
     <div className="fin-demo" role="note" data-testid="demo-banner">
-      <b>DEMO</b>
       <span>
         {DEMO_LABEL}. Migrasi database belum diterapkan, jadi semua angka di sini contoh fiktif. Laporan masih draf.
       </span>
