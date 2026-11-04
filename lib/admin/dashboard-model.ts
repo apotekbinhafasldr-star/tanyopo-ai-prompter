@@ -1,4 +1,4 @@
-import { balanceSheet, cashFlowStatement, incomeStatement, type Ledger } from "@/lib/accounting";
+import { balanceSheet, cashFlowStatement, incomeStatement, type Ledger, type StatementLine } from "@/lib/accounting";
 import { analyzeRefunds, paymentKey, summarize, type FinanceSnapshot, type Money, type PeriodSummary } from "@/lib/finance";
 import { addDays, localDate, WIB_OFFSET_MINUTES } from "@/lib/finance/dates";
 import { formatRupiah, monthLabel, shortDate } from "@/lib/admin/format";
@@ -28,6 +28,20 @@ export interface KpiView {
   /** Whether an increase is good news (false for expenses). */
   readonly upIsGood: boolean;
   readonly hint: string;
+  /** Monthly series for the small chart (drawing only). Empty when there is no monthly series. */
+  readonly spark: readonly number[];
+}
+/** One slice of a breakdown. `pct` is exact text; `share` (0..1) is for drawing only. */
+export interface ShareView {
+  readonly key: string;
+  readonly name: string;
+  readonly amount: Amt;
+  readonly pct: string;
+  readonly share: number;
+}
+export interface BreakdownView {
+  readonly total: Amt;
+  readonly items: readonly ShareView[];
 }
 export interface MonthPoint {
   readonly key: string;
@@ -56,6 +70,9 @@ export interface DashboardModel {
   readonly kpis: readonly KpiView[];
   readonly months: readonly MonthPoint[];
   readonly transactions: readonly TxView[];
+  readonly expenseMix: BreakdownView;
+  readonly expenseInsight: string;
+  readonly assetMix: BreakdownView;
   readonly checks: ReadonlyArray<{ label: string; ok: boolean; detail: string }>;
   readonly anomalyCount: number;
   readonly warnings: readonly string[];
@@ -85,6 +102,30 @@ export function trendOf(cur: Money, prev: Money | null): TrendView {
   const frac = tenths % BigInt(10);
   const text = `${negative ? "-" : "+"}${whole.toString()},${frac.toString()}%`;
   return { kind: negative ? "DOWN" : "UP", text };
+}
+
+/** Largest-first slices with exact percentages (integer math); everything past `max` folds into "Lainnya". */
+function breakdown(lines: readonly StatementLine[], total: Money, max: number): BreakdownView {
+  const cur = total.currency;
+  const pos = lines.filter((l) => l.amount.minor > BigInt(0)).sort((a, b) => (a.amount.minor < b.amount.minor ? 1 : a.amount.minor > b.amount.minor ? -1 : 0));
+  const rows: Array<{ key: string; name: string; money: Money }> = pos.map((l) => ({ key: l.code, name: l.name, money: l.amount }));
+  let shown = rows;
+  if (rows.length > max) {
+    const rest = rows.slice(max - 1).reduce((acc, r) => acc + r.money.minor, BigInt(0));
+    shown = [...rows.slice(0, max - 1), { key: "other", name: "Lainnya", money: { minor: rest, currency: cur } }];
+  }
+  const denom = total.minor > BigInt(0) ? total.minor : BigInt(0);
+  const items = shown.map((r) => {
+    const tenths = denom > BigInt(0) ? (r.money.minor * BigInt(1000)) / denom : BigInt(0);
+    return {
+      key: r.key,
+      name: r.name,
+      amount: amt(r.money),
+      pct: `${(tenths / BigInt(10)).toString()},${(tenths % BigInt(10)).toString()}%`,
+      share: denom > BigInt(0) ? Number(r.money.minor) / Number(denom) : 0,
+    };
+  });
+  return { total: amt(total), items };
 }
 
 export function buildDashboardModel(input: {
@@ -121,13 +162,14 @@ export function buildDashboardModel(input: {
   const cashNow = balanceSheet(ledger, range.to).assets.find((a) => a.code === "1110")?.amount ?? { minor: BigInt(0), currency: cur };
   const cashPrev = prevKey ? balanceSheet(ledger, monthRange(prevKey).to).assets.find((a) => a.code === "1110")?.amount ?? { minor: BigInt(0), currency: cur } : null;
 
+  const series = (pick: (m: MonthPoint) => Amt): number[] => (months.length >= 2 ? months.map((m) => pick(m).value) : []);
   const kpis: KpiView[] = [
-    { id: "revenue", label: "Pendapatan diakui", amount: amt(is.totalRevenue), trend: trendOf(is.totalRevenue, pis?.totalRevenue ?? null), upIsGood: true, hint: "Dari jurnal, setelah refund" },
-    { id: "gross", label: "Pembayaran terverifikasi", amount: amt(s.grossVerified), trend: trendOf(s.grossVerified, p?.grossVerified ?? null), upIsGood: true, hint: `${s.paymentCount} pembayaran` },
-    { id: "expenses", label: "Beban + biaya gateway", amount: amt(is.totalExpenses), trend: trendOf(is.totalExpenses, pis?.totalExpenses ?? null), upIsGood: false, hint: "Operasional dan gateway" },
-    { id: "result", label: "Hasil operasi", amount: amt(is.netIncome), trend: trendOf(is.netIncome, pis?.netIncome ?? null), upIsGood: true, hint: "Pendapatan dikurangi beban" },
-    { id: "cash", label: "Kas dan bank", amount: amt(cashNow), trend: trendOf(cashNow, cashPrev), upIsGood: true, hint: ledger.entries().some((e) => e.type === "OPENING") ? (input.demo ? "Termasuk modal DEMO fiktif" : "Termasuk saldo awal terverifikasi") : "Saldo awal belum diinput" },
-    { id: "deferred", label: "Pendapatan diterima di muka", amount: amt(s.deferredAtEnd), trend: trendOf(s.deferredAtEnd, p?.deferredAtEnd ?? null), upIsGood: true, hint: "Belum menjadi pendapatan" },
+    { id: "revenue", label: "Pendapatan diakui", amount: amt(is.totalRevenue), trend: trendOf(is.totalRevenue, pis?.totalRevenue ?? null), upIsGood: true, hint: "Dari jurnal, setelah refund", spark: series((m) => m.revenue) },
+    { id: "gross", label: "Pembayaran terverifikasi", amount: amt(s.grossVerified), trend: trendOf(s.grossVerified, p?.grossVerified ?? null), upIsGood: true, hint: `${s.paymentCount} pembayaran`, spark: [] },
+    { id: "expenses", label: "Beban + biaya gateway", amount: amt(is.totalExpenses), trend: trendOf(is.totalExpenses, pis?.totalExpenses ?? null), upIsGood: false, hint: "Operasional dan gateway", spark: series((m) => m.expenses) },
+    { id: "result", label: "Hasil operasi", amount: amt(is.netIncome), trend: trendOf(is.netIncome, pis?.netIncome ?? null), upIsGood: true, hint: "Pendapatan dikurangi beban", spark: series((m) => m.net) },
+    { id: "cash", label: "Kas dan bank", amount: amt(cashNow), trend: trendOf(cashNow, cashPrev), upIsGood: true, hint: ledger.entries().some((e) => e.type === "OPENING") ? (input.demo ? "Termasuk modal DEMO fiktif" : "Termasuk saldo awal terverifikasi") : "Saldo awal belum diinput", spark: series((m) => m.cash) },
+    { id: "deferred", label: "Pendapatan diterima di muka", amount: amt(s.deferredAtEnd), trend: trendOf(s.deferredAtEnd, p?.deferredAtEnd ?? null), upIsGood: true, hint: "Belum menjadi pendapatan", spark: [] },
   ];
 
   // ---- transactions + status filter
@@ -167,6 +209,13 @@ export function buildDashboardModel(input: {
     { label: "Pendapatan di muka cocok dengan modul keuangan", ok: (bsEnd.liabilities.find((a) => a.code === "2120")?.amount.minor ?? BigInt(0)) === summarize(snapshot, { from: input.yearStart, to: range.to }, { lateAfterDays: input.lateAfterDays }).deferredAtEnd.minor, detail: "Akun 2120 vs pengakuan pendapatan" },
     { label: "Tanpa anomali pembayaran", ok: s.anomalies.length === 0, detail: `${s.anomalies.length} perlu dicek` },
   ];
+  const expenseMix = breakdown(is.expenses, is.totalExpenses, 5);
+  const assetMix = breakdown(bsEnd.assets, bsEnd.totalAssets, 6);
+  const expTrend = trendOf(is.totalExpenses, pis?.totalExpenses ?? null);
+  const top = expenseMix.items[0];
+  const expenseInsight = top
+    ? `${expTrend.kind === "UP" || expTrend.kind === "DOWN" ? `Beban ${expTrend.kind === "UP" ? "naik" : "turun"} ${expTrend.text.slice(1)} dibanding bulan lalu. ` : ""}${top.name} penyumbang terbesar: ${top.amount.text}, atau ${top.pct} dari seluruh beban.`
+    : "Belum ada beban tercatat pada periode ini.";
   const warnings = ["Draf: belum final sebelum rekonsiliasi bank dan verifikasi akuntan."];
   if (input.demo) warnings.push("Data contoh fiktif. Tidak ada saldo awal yang dikarang.");
 
@@ -179,6 +228,9 @@ export function buildDashboardModel(input: {
     kpis,
     months,
     transactions: filters.status === "ALL" ? all : all.filter((t) => t.status === filters.status),
+    expenseMix,
+    expenseInsight,
+    assetMix,
     checks,
     anomalyCount: s.anomalies.length,
     warnings,
