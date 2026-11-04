@@ -71,6 +71,30 @@ export function ResultHero({ result, revenue, expenses, cash, label }: { result:
   );
 }
 
+/** Dark summary band used at the top of every finance screen: one big figure and up to three supporting ones. */
+export function SummaryHero({ label, value, negative, note, noteTone = "flat", items }: { label: string; value: string; negative?: boolean; note?: string; noteTone?: "good" | "bad" | "flat"; items: ReadonlyArray<{ label: string; value: string }> }) {
+  const neg = negative ?? value.startsWith("-");
+  return (
+    <section className="fin-rh">
+      <h1>{label}</h1>
+      <p className={`big${neg ? " neg" : ""}`}>{value}</p>
+      {note ? <span className={`delta ${noteTone}`}>{note}</span> : null}
+      {items.length > 0 ? (
+        <div className="tri" style={{ gridTemplateColumns: `repeat(${items.length},minmax(0,1fr))`, paddingBottom: 16 }}>
+          {items.map((it) => (
+            <div key={it.label}>
+              <small>{it.label}</small>
+              <strong>{it.value}</strong>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div style={{ height: 16 }} />
+      )}
+    </section>
+  );
+}
+
 /** Must appear on every screen that shows demo data. */
 export function DemoNotice() {
   return (
