@@ -43,7 +43,7 @@ export function Chip({ href, current, children }: { href: string; current: boole
   );
 }
 
-export function Badge({ tone, children }: { tone: "good" | "bad" | "warn" | "info"; children: ReactNode }) {
+export function Badge({ tone, children }: { tone: "good" | "bad" | "warn" | "info" | "brand" | "mute"; children: ReactNode }) {
   return <span className={`fin-badge ${tone}`}>{children}</span>;
 }
 

@@ -35,8 +35,8 @@ export function AdminNav({ items }: { items: AdminNavLink[] }) {
                 href={item.href}
                 aria-current={isActive ? "page" : undefined}
                 className={cn(
-                  "flex min-h-14 flex-col items-center justify-center gap-1 px-3 text-xs font-medium md:min-h-12 md:flex-row md:gap-2 md:text-sm",
-                  isActive ? "text-brand" : "text-muted-foreground hover:text-foreground",
+                  "flex min-h-14 flex-col items-center justify-center gap-1 border-t-2 px-3 text-[11px] font-medium md:min-h-12 md:flex-row md:gap-2 md:border-t-0 md:border-b-2 md:text-sm",
+                  isActive ? "border-brand text-brand" : "border-transparent text-muted-foreground hover:text-foreground",
                 )}
               >
                 {Icon ? <Icon className="size-5 shrink-0 md:size-4" aria-hidden /> : null}
