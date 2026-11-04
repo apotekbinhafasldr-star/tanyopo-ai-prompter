@@ -44,5 +44,5 @@ export async function POST(request: NextRequest) {
   if (!permissions.every((p) => (GRANTABLE_PERMISSIONS as readonly string[]).includes(p))) return back(request, "permission");
 
   const result = await applyStaffChange(actor, { email, permissions, isActive: form.get("isActive") === "on" });
-  return back(request, result.ok ? "ok" : result.code);
+  return back(request, result.ok ? (result.outcomeLogged ? "ok" : "ok_unlogged") : result.code);
 }
