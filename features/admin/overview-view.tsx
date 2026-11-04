@@ -1,19 +1,10 @@
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
-import { Badge, Card, DemoNotice, Frame, Hero, Row } from "@/features/admin/premium/parts";
+import { Badge, Card, DemoNotice, Frame, Hero, Row, SummaryHero } from "@/features/admin/premium/parts";
 import { formatRupiah, monthLabel } from "@/lib/admin/format";
 import { visibleAdminNav } from "@/lib/admin/nav";
 import { can, type AdminPrincipal } from "@/lib/admin/permissions";
 import type { PeriodSummary } from "@/lib/finance";
-
-function Kpi({ label, value, tone }: { label: string; value: string; tone?: "neg" }) {
-  return (
-    <div className="fin-card fin-kpi">
-      <p className="k">{label}</p>
-      <p className={`v${tone === "neg" ? " neg" : ""}`}>{value}</p>
-    </div>
-  );
-}
 
 export function OverviewView({
   principal,
@@ -25,7 +16,6 @@ export function OverviewView({
   demo: boolean;
 }) {
   const modules = visibleAdminNav(principal).filter((item) => item.href !== "/admin");
-  const lateCount = summary ? summary.reconciliation.rows.filter((r) => r.status === "SETTLEMENT_LATE").length : 0;
 
   return (
     <Frame>
@@ -33,14 +23,17 @@ export function OverviewView({
       <Hero title="Ringkasan" subtitle="Pusat pengelolaan internal PT Tanyopo Future Technology" />
 
       {summary && can(principal, "finance.view") ? (
-        <Card title={`Keuangan · ${monthLabel(summary.range.from.slice(0, 7))}`} sub="Ringkas; buka Keuangan untuk rincian.">
-          <div className="fin-grid">
-            <Kpi label="Pendapatan diakui" value={formatRupiah(summary.recognizedNet)} />
-            <Kpi label="Dana sudah settle" value={formatRupiah(summary.settledNet)} />
-            <Kpi label="Belum settle" value={formatRupiah(summary.unsettled)} tone={lateCount > 0 ? "neg" : undefined} />
-            <Kpi label="Perlu diperiksa" value={`${summary.anomalies.length} temuan`} tone={summary.anomalies.length > 0 ? "neg" : undefined} />
-          </div>
-        </Card>
+        <SummaryHero
+          label={`Keuangan · ${monthLabel(summary.range.from.slice(0, 7))}`}
+          value={formatRupiah(summary.recognizedNet)}
+          negative={false}
+          note="Pendapatan diakui bulan ini"
+          items={[
+            { label: "Sudah settle", value: formatRupiah(summary.settledNet) },
+            { label: "Belum settle", value: formatRupiah(summary.unsettled) },
+            { label: "Perlu diperiksa", value: `${summary.anomalies.length} temuan` },
+          ]}
+        />
       ) : null}
 
       <Card title="Modul">

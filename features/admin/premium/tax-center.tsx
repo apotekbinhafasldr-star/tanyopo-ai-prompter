@@ -3,7 +3,7 @@ import type { BankReconciliation, FiscalReconciliation, TaxPaymentRecord } from 
 import { formatRupiah, monthLabel } from "@/lib/admin/format";
 import type { TurnoverRecap } from "@/lib/finance";
 import type { DashboardModel } from "@/lib/admin/dashboard-model";
-import { Badge, Card, Check, DemoNotice, Empty, Frame, Hero, Row } from "./parts";
+import { Badge, Card, Check, DemoNotice, Empty, Frame, Hero, Row, SummaryHero } from "./parts";
 import { TaxSubMenu } from "./tax-optimization";
 
 const fmt = formatRupiah;
@@ -22,11 +22,24 @@ export interface TaxCenterProps {
 export function TaxCenter({ recap, fiscal, taxPayments, checks, bank, canExport, canOptimize = false, demo }: TaxCenterProps) {
   const seg = fiscal.segment;
   const pkp = recap.configVerified;
+  const allReady = checks.every((c) => c.ok) && bank.final && pkp && fiscal.entity.status === "COMPLETE";
   return (
     <Frame>
       {demo ? <DemoNotice /> : null}
       <Hero title="Pajak dan paket Coretax" subtitle={`Tahun ${recap.year} · Data pendukung untuk akuntan · Segmen LINOE`} />
       <TaxSubMenu current="rekap" canOptimize={canOptimize} />
+
+      <SummaryHero
+        label={`Omzet bersih tahun ${recap.year}`}
+        value={fmt(recap.yearTurnover)}
+        negative={false}
+        note={pkp ? "Status PKP terverifikasi" : "Status PKP belum diverifikasi"}
+        noteTone={pkp ? "good" : "flat"}
+        items={[
+          { label: "Paket pendukung", value: allReady ? "Siap ke akuntan" : "Belum siap" },
+          { label: "Basis", value: "Kas, bukan SPT" },
+        ]}
+      />
 
       <Card title="Panduan lapor pajak" sub="Langkah demi langkah ke Coretax resmi: SPT Tahunan PPh Badan dan SPT Masa PPN (jika PKP).">
         <Link className="fin-btn" style={{ display: "flex", alignItems: "center", justifyContent: "center" }} href="/admin/finance/tax/guide" prefetch={false} data-testid="guide-link">

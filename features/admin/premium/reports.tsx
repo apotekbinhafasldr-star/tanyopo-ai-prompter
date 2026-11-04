@@ -13,7 +13,7 @@ import { reconcileControl } from "@/lib/accounting";
 import { formatRupiah } from "@/lib/admin/format";
 import { REPORT_TABS, REPORT_TAB_LABEL, type ReportTab } from "@/lib/admin/filters";
 import type { DateRange } from "@/lib/finance/dates";
-import { Badge, Card, Check, Chip, DemoNotice, Empty, Frame, Hero, Row } from "./parts";
+import { Badge, Card, Check, Chip, DemoNotice, Empty, Frame, Hero, Row, SummaryHero } from "./parts";
 
 const href = (tab: ReportTab, extra = "") => `/admin/finance/reports?r=${tab}${extra}`;
 
@@ -57,6 +57,15 @@ function Body({ tab, ledger, range, account, bank, openItems }: Parameters<typeo
   if (tab === "laba-rugi") {
     const is = incomeStatement(ledger, range);
     return (
+      <>
+      <SummaryHero
+        label="Laba (rugi) bersih, periode ini"
+        value={fmt(is.netIncome)}
+        items={[
+          { label: "Total pendapatan", value: fmt(is.totalRevenue) },
+          { label: "Total beban", value: fmt(is.totalExpenses) },
+        ]}
+      />
       <Card title="Laporan laba rugi" sub={`${range.from} s.d. ${range.to}`}>
         <p className="fin-label">Pendapatan</p>
         {is.revenue.map((l) => <Row key={l.code} label={`${l.code} ${l.name}`} value={fmt(l.amount)} />)}
@@ -66,12 +75,24 @@ function Body({ tab, ledger, range, account, bank, openItems }: Parameters<typeo
         <Row total label="Total beban" value={fmt(is.totalExpenses)} />
         <Row total label="Laba (rugi) bersih" value={fmt(is.netIncome)} />
       </Card>
+      </>
     );
   }
   if (tab === "neraca") {
     const bs = balanceSheet(ledger, range.to);
     return (
       <>
+        <SummaryHero
+          label={`Total aset per ${range.to}`}
+          value={fmt(bs.totalAssets)}
+          negative={false}
+          note={bs.balanced ? "Neraca seimbang" : "Neraca tidak seimbang, perlu dicek"}
+          noteTone={bs.balanced ? "good" : "bad"}
+          items={[
+            { label: "Liabilitas", value: fmt(bs.totalLiabilities) },
+            { label: "Ekuitas", value: fmt(bs.totalEquity) },
+          ]}
+        />
         <Card title="Laporan posisi keuangan" sub={`per ${range.to}`}>
           <p className="fin-label">Aset</p>
           {bs.assets.map((l) => <Row key={l.code} label={`${l.code} ${l.name}`} value={fmt(l.amount)} />)}

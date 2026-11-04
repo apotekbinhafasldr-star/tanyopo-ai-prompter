@@ -54,15 +54,15 @@ export function TrendChart({ points, initialKey }: { points: readonly ChartPoint
         <title id={`${uid}-t`}>{mode === "flow" ? "Pendapatan dan beban per bulan" : "Saldo kas akhir bulan"}</title>
         {points.map((p, i) => (
           <g key={p.key} onClick={() => setActive(p.key)} onMouseEnter={() => setActive(p.key)} style={{ cursor: "pointer" }}>
-            <rect x={PAD.l + slot * i} y={PAD.t - 6} width={slot} height={H - PAD.t - PAD.b + 6} fill={i === idx ? "#2563eb" : "transparent"} opacity={0.08} />
+            <rect x={PAD.l + slot * i} y={PAD.t - 6} width={slot} height={H - PAD.t - PAD.b + 6} fill={i === idx ? "#4338ca" : "transparent"} opacity={0.08} />
             {mode === "flow" ? (
               <>
-                <rect x={cx(i) - barW - 2} width={barW} y={Math.min(flowScale.y(p.revenue.value), flowScale.zero)} height={Math.abs(flowScale.zero - flowScale.y(p.revenue.value))} rx={3} fill="#2563eb" />
-                <rect x={cx(i) + 2} width={barW} y={Math.min(flowScale.y(p.expenses.value), flowScale.zero)} height={Math.abs(flowScale.zero - flowScale.y(p.expenses.value))} rx={3} fill="#0b1f3a" />
-                <circle cx={cx(i)} cy={flowScale.y(p.net.value)} r={4.5} fill="#06b6d4" stroke="#fff" strokeWidth={1.5} />
+                <rect x={cx(i) - barW - 2} width={barW} y={Math.min(flowScale.y(p.revenue.value), flowScale.zero)} height={Math.abs(flowScale.zero - flowScale.y(p.revenue.value))} rx={3} fill="#4338ca" />
+                <rect x={cx(i) + 2} width={barW} y={Math.min(flowScale.y(p.expenses.value), flowScale.zero)} height={Math.abs(flowScale.zero - flowScale.y(p.expenses.value))} rx={3} fill="#0f1330" />
+                <circle cx={cx(i)} cy={flowScale.y(p.net.value)} r={4.5} fill="#38bdf8" stroke="#fff" strokeWidth={1.5} />
               </>
             ) : (
-              <rect x={cx(i) - barW} width={barW * 2} y={Math.min(cashScale.y(p.cash.value), cashScale.zero)} height={Math.abs(cashScale.zero - cashScale.y(p.cash.value))} rx={4} fill="#06b6d4" />
+              <rect x={cx(i) - barW} width={barW * 2} y={Math.min(cashScale.y(p.cash.value), cashScale.zero)} height={Math.abs(cashScale.zero - cashScale.y(p.cash.value))} rx={4} fill="#38bdf8" />
             )}
             <text x={cx(i)} y={H - 8} textAnchor="middle" fontSize={11} fontWeight={i === idx ? 800 : 500} fill="#566780">{p.short}</text>
           </g>
@@ -72,12 +72,12 @@ export function TrendChart({ points, initialKey }: { points: readonly ChartPoint
       <div className="fin-legend" aria-hidden>
         {mode === "flow" ? (
           <>
-            <span><i style={{ background: "#2563eb" }} />Pendapatan</span>
-            <span><i style={{ background: "#0b1f3a" }} />Beban</span>
-            <span><i style={{ background: "#06b6d4", borderRadius: 99 }} />Hasil</span>
+            <span><i style={{ background: "#4338ca" }} />Pendapatan</span>
+            <span><i style={{ background: "#0f1330" }} />Beban</span>
+            <span><i style={{ background: "#38bdf8", borderRadius: 99 }} />Hasil</span>
           </>
         ) : (
-          <span><i style={{ background: "#06b6d4" }} />Kas akhir bulan</span>
+          <span><i style={{ background: "#38bdf8" }} />Kas akhir bulan</span>
         )}
       </div>
       <div className="fin-seg" role="group" aria-label="Pilih bulan">
