@@ -1,6 +1,8 @@
 import { Badge, Card, DemoNotice, Frame, Hero } from "@/features/admin/premium/parts";
 import { DEMO_STAFF, PERMISSION_LABELS, type DemoStaffMember } from "@/lib/admin/demo-data";
-import { PERMISSIONS, SENSITIVE_PERMISSIONS } from "@/lib/admin/permissions";
+import { GRANTABLE_PERMISSIONS, PERMISSIONS, SENSITIVE_PERMISSIONS } from "@/lib/admin/permissions";
+import type { StaffRow } from "@/services/staff-admin";
+import { StaffManager } from "./staff-manager";
 
 const RULES = [
   "Hanya Super Admin yang dapat mengatur akses staf.",
@@ -42,22 +44,32 @@ function StaffCard({ member }: { member: DemoStaffMember }) {
   );
 }
 
-/** Read-only in Phase B: the rules are enforced and tested, the write path is not enabled. */
-export function StaffView({ demo }: { demo: boolean }) {
+/** Live list and Founder-only form when the admin table is reachable; otherwise the read-only demo list. */
+export function StaffView({ demo, live = null, canManage = false, message = null }: { demo: boolean; live?: readonly StaffRow[] | null; canManage?: boolean; message?: { ok: boolean; text: string } | null }) {
+  const options = GRANTABLE_PERMISSIONS.map((p) => ({ value: p as string, label: PERMISSION_LABELS[p].label, sensitive: PERMISSION_LABELS[p].sensitive }));
   return (
     <Frame>
       {demo ? <DemoNotice /> : null}
       <Hero title="Akses Staf" subtitle="Siapa boleh membuka modul apa di Admin Center" />
 
-      <Card title="Daftar staf (contoh)">
-        {DEMO_STAFF.map((m) => (
-          <StaffCard key={m.name} member={m} />
-        ))}
-        <button type="button" disabled aria-disabled="true" className="fin-btn">
-          Ubah akses staf
-        </button>
-        <p className="fin-note">Belum aktif. Perubahan akses dibuka setelah migrasi disetujui Founder dan diterapkan.</p>
-      </Card>
+      {live ? (
+        <StaffManager
+          items={live.map((r) => ({ userId: r.userId, email: r.email, role: r.role, isActive: r.isActive, permissions: [...r.permissions] }))}
+          options={options}
+          canManage={canManage}
+          message={message}
+        />
+      ) : (
+        <Card title="Daftar staf (contoh)">
+          {DEMO_STAFF.map((m) => (
+            <StaffCard key={m.name} member={m} />
+          ))}
+          <button type="button" disabled aria-disabled="true" className="fin-btn">
+            Ubah akses staf
+          </button>
+          <p className="fin-note">Belum aktif. Perubahan akses dibuka setelah migrasi disetujui Founder dan diterapkan.</p>
+        </Card>
+      )}
 
       <Card title="Daftar izin">
         {PERMISSIONS.map((p) => (
