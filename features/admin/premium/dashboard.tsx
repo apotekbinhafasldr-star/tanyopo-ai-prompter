@@ -1,7 +1,8 @@
 import type { DashboardModel } from "@/lib/admin/dashboard-model";
 import { STATUS_FILTERS, STATUS_LABEL } from "@/lib/admin/filters";
 import { TrendChart } from "./charts";
-import { Badge, Card, Check, Chip, DemoNotice, Empty, Frame, Headline, KpiCard, Row } from "./parts";
+import { Badge, Card, Check, Chip, DemoNotice, Empty, Frame, KpiCard, ResultHero, Row } from "./parts";
+import { Donut, SLICE_COLORS } from "./visuals";
 
 const href = (period: string, status: string) => `/admin/finance?period=${period}&status=${status}`;
 
@@ -23,17 +24,16 @@ export function FinanceDashboard({ model }: { model: DashboardModel }) {
         ))}
       </nav>
 
-      {result && revenue && expenses ? (
-        <Headline result={result} revenue={revenue} expenses={expenses} label={`Hasil operasi, ${model.period.label}`} />
-      ) : null}
-
-      <Card title="Angka utama" sub={`${model.period.from} s.d. ${model.period.to}. Draf, belum final.`}>
-        <div className="fin-grid">
+      <div className="fin-top">
+        {result && revenue && expenses ? (
+          <ResultHero result={result} revenue={revenue} expenses={expenses} cash={kpi("cash")} label={`Hasil operasi, ${model.period.label}`} />
+        ) : null}
+        <div className="fin-grid" role="group" aria-label={`Angka utama, ${model.period.from} s.d. ${model.period.to}. Draf, belum final.`}>
           {model.kpis.filter((k) => k.id !== "result").map((k) => (
             <KpiCard key={k.id} kpi={k} />
           ))}
         </div>
-      </Card>
+      </div>
 
       <Card title="Tren bulanan" sub="Ketuk bulan untuk melihat angka pastinya. Data dari jurnal akuntansi.">
         {model.months.length === 0 ? (
@@ -42,6 +42,52 @@ export function FinanceDashboard({ model }: { model: DashboardModel }) {
           <TrendChart points={model.months} initialKey={model.period.key === "ytd" ? model.months[model.months.length - 1].key : model.period.key} />
         )}
       </Card>
+
+      <div className="fin-duo">
+        <Card title="Komposisi beban" sub={model.period.label}>
+          {model.expenseMix.items.length === 0 ? (
+            <Empty title="Belum ada beban">Rincian muncul setelah ada beban pada periode ini.</Empty>
+          ) : (
+            <>
+              <div className="fin-donut">
+                <Donut items={model.expenseMix.items} centerLabel="Total beban" centerValue={model.expenseMix.total.text} />
+                <ul>
+                  {model.expenseMix.items.map((it, i) => (
+                    <li key={it.key}>
+                      <i style={{ background: SLICE_COLORS[i % SLICE_COLORS.length] }} />
+                      {it.name}
+                      <b>{it.pct}</b>
+                      <span>{it.amount.text}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <p className="fin-insight">{model.expenseInsight}</p>
+            </>
+          )}
+        </Card>
+
+        <Card title="Posisi aset" sub={`Per ${model.period.to}`}>
+          {model.assetMix.items.length === 0 ? (
+            <Empty title="Belum ada saldo aset">Saldo muncul setelah ada jurnal atau saldo awal.</Empty>
+          ) : (
+            <>
+              <div className="fin-bars">
+                {model.assetMix.items.map((it, i) => (
+                  <div className="r" key={it.key}>
+                    <span className="n">{it.name}</span>
+                    <span className="b">
+                      <i className={i === 0 ? "top" : undefined} style={{ width: `${Math.max(it.share * 100, 4).toFixed(1)}%` }} />
+                      <b>{it.amount.text}</b>
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <Row label="Total aset" value={model.assetMix.total.text} total />
+            </>
+          )}
+        </Card>
+      </div>
 
       <div className="fin-split">
         <Card title="Transaksi" sub={`${model.period.label}`}>
