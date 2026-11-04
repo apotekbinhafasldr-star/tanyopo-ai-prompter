@@ -1,4 +1,4 @@
-import { DemoBanner, DisabledAction, Notice, PageTitle, Section, StatusBadge } from "@/features/admin/ui";
+import { Badge, Card, DemoNotice, Frame, Hero } from "@/features/admin/premium/parts";
 import { DEMO_STAFF, PERMISSION_LABELS, type DemoStaffMember } from "@/lib/admin/demo-data";
 import { PERMISSIONS, SENSITIVE_PERMISSIONS } from "@/lib/admin/permissions";
 
@@ -14,77 +14,69 @@ const RULES = [
 function StaffCard({ member }: { member: DemoStaffMember }) {
   const isSuper = member.role === "SUPER_ADMIN";
   return (
-    <li className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0">
-      <div className="flex items-center justify-between gap-2">
-        <div className="min-w-0">
-          <p className="truncate text-sm font-medium text-foreground">{member.name}</p>
-          <p className="truncate text-xs text-muted-foreground">{member.title}</p>
+    <div className="fin-person">
+      <div className="top">
+        <div style={{ minWidth: 0 }}>
+          <p className="nm">{member.name}</p>
+          <p className="ti">{member.title}</p>
         </div>
-        <div className="flex shrink-0 gap-1">
-          <StatusBadge variant={isSuper ? "brand" : "neutral"}>{isSuper ? "Super Admin" : "Staf"}</StatusBadge>
-          {!member.isActive ? <StatusBadge variant="danger">Nonaktif</StatusBadge> : null}
+        <div className="fin-tags" style={{ flexWrap: "nowrap" }}>
+          <Badge tone={isSuper ? "brand" : "mute"}>{isSuper ? "Super Admin" : "Staf"}</Badge>
+          {!member.isActive ? <Badge tone="bad">Nonaktif</Badge> : null}
         </div>
       </div>
-      <div className="flex flex-wrap gap-1">
+      <div className="fin-tags">
         {isSuper ? (
-          <StatusBadge variant="info">Semua izin</StatusBadge>
+          <Badge tone="info">Semua izin</Badge>
         ) : member.permissions.length === 0 ? (
-          <span className="text-xs text-muted-foreground">Tidak ada izin</span>
+          <span className="fin-note">Tidak ada izin</span>
         ) : (
           member.permissions.map((p) => (
-            <StatusBadge key={p} variant={SENSITIVE_PERMISSIONS.includes(p) ? "warning" : "neutral"}>
+            <Badge key={p} tone={SENSITIVE_PERMISSIONS.includes(p) ? "warn" : "mute"}>
               {PERMISSION_LABELS[p].label}
-            </StatusBadge>
+            </Badge>
           ))
         )}
       </div>
-    </li>
+    </div>
   );
 }
 
 /** Read-only in Phase B: the rules are enforced and tested, the write path is not enabled. */
 export function StaffView({ demo }: { demo: boolean }) {
   return (
-    <div className="flex flex-col gap-4">
-      {demo ? <DemoBanner /> : null}
-      <PageTitle title="Akses Staf" description="Siapa boleh membuka modul apa di Admin Center." />
+    <Frame>
+      {demo ? <DemoNotice /> : null}
+      <Hero title="Akses Staf" subtitle="Siapa boleh membuka modul apa di Admin Center" />
 
-      <Section title="Daftar staf (contoh)">
-        <ul className="flex flex-col divide-y divide-border">
-          {DEMO_STAFF.map((m) => (
-            <StaffCard key={m.name} member={m} />
-          ))}
-        </ul>
-        <div className="mt-4">
-          <DisabledAction
-            label="Ubah akses staf"
-            reason="Belum aktif. Perubahan akses dibuka setelah migrasi disetujui Founder dan diterapkan."
-          />
-        </div>
-      </Section>
+      <Card title="Daftar staf (contoh)">
+        {DEMO_STAFF.map((m) => (
+          <StaffCard key={m.name} member={m} />
+        ))}
+        <button type="button" disabled aria-disabled="true" className="fin-btn">
+          Ubah akses staf
+        </button>
+        <p className="fin-note">Belum aktif. Perubahan akses dibuka setelah migrasi disetujui Founder dan diterapkan.</p>
+      </Card>
 
-      <Section title="Daftar izin">
-        <ul className="flex flex-col divide-y divide-border">
-          {PERMISSIONS.map((p) => (
-            <li key={p} className="flex items-center justify-between gap-2 py-2 first:pt-0 last:pb-0">
-              <p className="text-sm text-foreground">{PERMISSION_LABELS[p].label}</p>
-              {PERMISSION_LABELS[p].sensitive ? <StatusBadge variant="warning">Sensitif</StatusBadge> : null}
-            </li>
-          ))}
-        </ul>
-      </Section>
+      <Card title="Daftar izin">
+        {PERMISSIONS.map((p) => (
+          <div key={p} className="fin-row">
+            <span>{PERMISSION_LABELS[p].label}</span>
+            {PERMISSION_LABELS[p].sensitive ? <Badge tone="warn">Sensitif</Badge> : <span />}
+          </div>
+        ))}
+      </Card>
 
-      <Section title="Aturan akses">
-        <ul className="list-disc pl-5 text-sm text-foreground">
+      <Card title="Aturan akses">
+        <ul className="fin-rules">
           {RULES.map((r) => (
-            <li key={r} className="py-0.5">
-              {r}
-            </li>
+            <li key={r}>{r}</li>
           ))}
         </ul>
-      </Section>
+      </Card>
 
-      <Notice tone="info">Tidak ada alamat email yang diberi hak khusus. Hak akses hanya berasal dari baris admin di database.</Notice>
-    </div>
+      <p className="fin-note">Tidak ada alamat email yang diberi hak khusus. Hak akses hanya berasal dari baris admin di database.</p>
+    </Frame>
   );
 }

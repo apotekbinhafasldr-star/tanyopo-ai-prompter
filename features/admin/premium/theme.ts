@@ -56,6 +56,27 @@ font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;c
 .fin-badge.bad{background:var(--bad-bg);color:var(--bad)}
 .fin-badge.warn{background:var(--warn-bg);color:var(--warn)}
 .fin-badge.info{background:var(--cyan-soft);color:var(--cyan)}
+.fin-badge.brand{background:#e8efff;color:var(--blue)}
+.fin-badge.mute{background:#eef2f7;color:var(--mute)}
+.fin-mod{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line);min-height:60px}
+.fin-mod:last-child{border-bottom:0;padding-bottom:2px}
+.fin-mod:first-child{padding-top:2px}
+.fin-ic{flex:0 0 42px;height:42px;border-radius:12px;background:linear-gradient(135deg,#e8efff,var(--cyan-soft));color:var(--blue);display:grid;place-items:center}
+.fin-mod .tx{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:1px}
+.fin-mod .t{font-weight:700;font-size:14.5px;color:var(--ink)}
+.fin-mod .d{font-size:12.5px;color:var(--mute);line-height:1.35}
+.fin-mod .chev{flex:0 0 auto;color:#9aa8bd}
+.fin-person{display:flex;flex-direction:column;gap:8px;padding:12px 0;border-bottom:1px solid var(--line)}
+.fin-person:first-child{padding-top:2px}
+.fin-person:last-child{border-bottom:0;padding-bottom:2px}
+.fin-person .top{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.fin-person .nm{font-weight:700;font-size:14.5px;overflow-wrap:anywhere}
+.fin-person .ti{font-size:12.5px;color:var(--mute)}
+.fin-tags{display:flex;flex-wrap:wrap;gap:6px}
+.fin-rules{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:10px}
+.fin-rules li{display:flex;gap:10px;font-size:13.5px;line-height:1.45;color:#26364d}
+.fin-rules li::before{content:"";flex:0 0 6px;height:6px;border-radius:99px;background:var(--cyan);margin-top:8px}
+.fin-btn.ghost{background:#eef2f7;color:#5d6b80;cursor:not-allowed}
 .fin-tx{display:flex;flex-direction:column;gap:6px;border:1px solid var(--line);border-radius:12px;padding:10px 12px}
 .fin-tx .top{display:flex;justify-content:space-between;gap:8px;align-items:center}
 .fin-tx .id{font-weight:700;font-size:13px;overflow-wrap:anywhere}
