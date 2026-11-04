@@ -1,18 +1,20 @@
 import type { DashboardModel } from "@/lib/admin/dashboard-model";
 import { STATUS_FILTERS, STATUS_LABEL } from "@/lib/admin/filters";
 import { TrendChart } from "./charts";
-import { Badge, Card, Check, Chip, DemoNotice, Empty, Frame, Hero, KpiCard, Row } from "./parts";
+import { Badge, Card, Check, Chip, DemoNotice, Empty, Frame, Headline, KpiCard, Row } from "./parts";
 
 const href = (period: string, status: string) => `/admin/finance?period=${period}&status=${status}`;
 
 const TONE = { SETTLED: "good", UNSETTLED: "warn", REFUNDED: "info", ANOMALY: "bad" } as const;
 
 export function FinanceDashboard({ model }: { model: DashboardModel }) {
+  const kpi = (id: string) => model.kpis.find((k) => k.id === id);
+  const result = kpi("result");
+  const revenue = kpi("revenue");
+  const expenses = kpi("expenses");
   return (
     <Frame>
       {model.demo ? <DemoNotice /> : null}
-      <Hero title="Keuangan LINOE" subtitle={`${model.period.label} · ${model.period.from} s.d. ${model.period.to} · Draf`} />
-
       <nav aria-label="Periode" className="fin-chips">
         {model.periods.map((p) => (
           <Chip key={p.key} href={href(p.key, model.status)} current={p.key === model.period.key}>
@@ -21,11 +23,17 @@ export function FinanceDashboard({ model }: { model: DashboardModel }) {
         ))}
       </nav>
 
-      <div className="fin-grid">
-        {model.kpis.map((k) => (
-          <KpiCard key={k.id} kpi={k} />
-        ))}
-      </div>
+      {result && revenue && expenses ? (
+        <Headline result={result} revenue={revenue} expenses={expenses} label={`Hasil operasi, ${model.period.label}`} />
+      ) : null}
+
+      <Card title="Angka utama" sub={`${model.period.from} s.d. ${model.period.to}. Draf, belum final.`}>
+        <div className="fin-grid">
+          {model.kpis.filter((k) => k.id !== "result").map((k) => (
+            <KpiCard key={k.id} kpi={k} />
+          ))}
+        </div>
+      </Card>
 
       <Card title="Tren bulanan" sub="Ketuk bulan untuk melihat angka pastinya. Data dari jurnal akuntansi.">
         {model.months.length === 0 ? (

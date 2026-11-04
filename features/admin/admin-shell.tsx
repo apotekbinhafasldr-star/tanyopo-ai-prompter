@@ -32,7 +32,7 @@ export function AdminShell({ principal, children }: { principal: AdminPrincipal;
             </span>
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold leading-tight text-foreground">Admin Perusahaan</p>
-              <p className="truncate text-xs leading-tight text-muted-foreground">PT Tanyopo Future Technology</p>
+              <p className="hidden truncate text-xs leading-tight text-muted-foreground sm:block">PT Tanyopo Future Technology</p>
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
