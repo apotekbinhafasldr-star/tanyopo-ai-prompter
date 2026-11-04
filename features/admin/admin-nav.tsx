@@ -2,14 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { LucideIcon } from "lucide-react";
-import { activeAdminHref } from "@/lib/admin/nav";
+import { ADMIN_NAV_ITEMS, activeAdminHref } from "@/lib/admin/nav";
 import { cn } from "@/lib/utils/cn";
 
 export interface AdminNavLink {
   label: string;
   href: string;
-  icon: LucideIcon;
 }
 
 /**
@@ -29,7 +27,7 @@ export function AdminNav({ items }: { items: AdminNavLink[] }) {
     >
       <ul className="mx-auto flex max-w-5xl items-stretch justify-around md:justify-start md:gap-1 md:px-4">
         {items.map((item) => {
-          const Icon = item.icon;
+          const Icon = ADMIN_NAV_ITEMS.find((n) => n.href === item.href)?.icon;
           const isActive = item.href === active;
           return (
             <li key={item.href} className="flex-1 md:flex-none">
@@ -41,7 +39,7 @@ export function AdminNav({ items }: { items: AdminNavLink[] }) {
                   isActive ? "text-brand" : "text-muted-foreground hover:text-foreground",
                 )}
               >
-                <Icon className="size-5 shrink-0 md:size-4" aria-hidden />
+                {Icon ? <Icon className="size-5 shrink-0 md:size-4" aria-hidden /> : null}
                 <span>{item.label}</span>
               </Link>
             </li>

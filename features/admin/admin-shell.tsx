@@ -18,7 +18,9 @@ const ROLE_LABEL: Record<PlatformRole, string> = {
  * already authorised, and shows just the sections that principal may open.
  */
 export function AdminShell({ principal, children }: { principal: AdminPrincipal; children: ReactNode }) {
-  const items = visibleAdminNav(principal).map(({ label, href, icon }) => ({ label, href, icon }));
+  // Only plain strings cross the server->client boundary: icon components are not serialisable
+  // (passing them made /admin fail at runtime). AdminNav looks the icon up by href.
+  const items = visibleAdminNav(principal).map(({ label, href }) => ({ label, href }));
 
   return (
     <div className="min-h-screen bg-background pb-20 md:pb-0">
