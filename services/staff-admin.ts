@@ -90,33 +90,34 @@ export async function listStaff(): Promise<StaffRow[] | null> {
   }
 }
 
-export type ApplyResult = { readonly ok: true } | { readonly ok: false; readonly reason: string };
+export type StaffFailCode = "config" | "format" | "permission" | "unregistered" | "rules" | "audit" | "failed";
+export type ApplyResult = { readonly ok: true } | { readonly ok: false; readonly code: StaffFailCode };
 
 export async function applyStaffChange(actor: AdminPrincipal, input: { email: string; permissions: readonly string[]; isActive: boolean }): Promise<ApplyResult> {
   const admin = createAdminClient();
-  if (!admin) return { ok: false, reason: "Admin Center belum dikonfigurasi" };
+  if (!admin) return { ok: false, code: "config" };
   const db = admin as unknown as Db;
 
   const email = input.email.trim().toLowerCase();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) return { ok: false, reason: "Format email tidak valid" };
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) return { ok: false, code: "format" };
   const permissions = [...new Set(input.permissions)].filter((p): p is Permission => isPermission(p));
-  if (permissions.length !== new Set(input.permissions).size) return { ok: false, reason: "Ada izin yang tidak dikenal" };
+  if (permissions.length !== new Set(input.permissions).size) return { ok: false, code: "permission" };
 
   const targetId = await findUserIdByEmail(email);
-  if (!targetId) return { ok: false, reason: "Akun dengan email itu belum terdaftar. Minta orangnya mendaftar dulu." };
+  if (!targetId) return { ok: false, code: "unregistered" };
 
   const { data: existing, error: e1 } = await db.from(TABLE).select("user_id, role, is_active").eq("user_id", targetId);
-  if (e1) return { ok: false, reason: "Tidak dapat membaca data admin" };
+  if (e1) return { ok: false, code: "failed" };
   const row = existing?.[0];
   const targetRole = row ? String(row.role) : "STAFF";
   const target = row && isPlatformRole(targetRole) ? { userId: targetId, role: targetRole, isActive: row.is_active === true } : null;
-  if (row && !target) return { ok: false, reason: "Peran akun ini tidak dikenal" };
+  if (row && !target) return { ok: false, code: "rules" };
 
   const { count, error: e2 } = await db.from(TABLE).select("user_id", { count: "exact", head: true }).eq("role", "SUPER_ADMIN").eq("is_active", true).is("revoked_at", null);
-  if (e2) return { ok: false, reason: "Tidak dapat memverifikasi Super Admin aktif" };
+  if (e2) return { ok: false, code: "failed" };
 
   const decision = evaluateStaffChange(actor, target, { role: "STAFF", permissions, isActive: input.isActive }, count ?? 0);
-  if (!decision.ok) return decision;
+  if (!decision.ok) return { ok: false, code: "rules" };
 
   const audited = await recordAdminAudit({
     actorId: actor.userId,
@@ -125,7 +126,7 @@ export async function applyStaffChange(actor: AdminPrincipal, input: { email: st
     entityId: targetId,
     details: { permissions, isActive: input.isActive, existed: Boolean(row) },
   });
-  if (!audited) return { ok: false, reason: "Log audit gagal ditulis, perubahan dibatalkan" };
+  if (!audited) return { ok: false, code: "audit" };
 
   const now = new Date().toISOString();
   const { error } = await db.from(TABLE).upsert(
@@ -140,6 +141,6 @@ export async function applyStaffChange(actor: AdminPrincipal, input: { email: st
     },
     { onConflict: "user_id" },
   );
-  if (error) return { ok: false, reason: "Perubahan gagal disimpan" };
+  if (error) return { ok: false, code: "failed" };
   return { ok: true };
 }

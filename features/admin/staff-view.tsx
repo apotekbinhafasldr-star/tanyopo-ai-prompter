@@ -45,7 +45,7 @@ function StaffCard({ member }: { member: DemoStaffMember }) {
 }
 
 /** Live list and Founder-only form when the admin table is reachable; otherwise the read-only demo list. */
-export function StaffView({ demo, live = null, canManage = false }: { demo: boolean; live?: readonly StaffRow[] | null; canManage?: boolean }) {
+export function StaffView({ demo, live = null, canManage = false, message = null }: { demo: boolean; live?: readonly StaffRow[] | null; canManage?: boolean; message?: { ok: boolean; text: string } | null }) {
   const options = GRANTABLE_PERMISSIONS.map((p) => ({ value: p as string, label: PERMISSION_LABELS[p].label, sensitive: PERMISSION_LABELS[p].sensitive }));
   return (
     <Frame>
@@ -57,6 +57,7 @@ export function StaffView({ demo, live = null, canManage = false }: { demo: bool
           items={live.map((r) => ({ userId: r.userId, email: r.email, role: r.role, isActive: r.isActive, permissions: [...r.permissions] }))}
           options={options}
           canManage={canManage}
+          message={message}
         />
       ) : (
         <Card title="Daftar staf (contoh)">

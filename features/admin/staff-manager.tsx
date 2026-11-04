@@ -1,8 +1,7 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useState } from "react";
 import { Badge, Card } from "@/features/admin/premium/parts";
-import { saveStaffAction, type StaffFormState } from "@/app/admin/staff/actions";
 
 export interface StaffItem {
   userId: string;
@@ -17,11 +16,8 @@ export interface PermOption {
   sensitive: boolean;
 }
 
-const initial: StaffFormState = { ok: null, message: null };
-
 /** Live staff list plus the Founder-only form. Only plain strings cross into this component. */
-export function StaffManager({ items, options, canManage }: { items: StaffItem[]; options: PermOption[]; canManage: boolean }) {
-  const [state, action, pending] = useActionState(saveStaffAction, initial);
+export function StaffManager({ items, options, canManage, message }: { items: StaffItem[]; options: PermOption[]; canManage: boolean; message: { ok: boolean; text: string } | null }) {
   const [email, setEmail] = useState("");
   const [picked, setPicked] = useState<string[]>([]);
   const [active, setActive] = useState(true);
@@ -75,12 +71,18 @@ export function StaffManager({ items, options, canManage }: { items: StaffItem[]
         })}
       </Card>
 
+      {message ? (
+        <p className={`fin-msg ${message.ok ? "ok" : "no"}`} role="status">
+          {message.text}
+        </p>
+      ) : null}
+
       {canManage ? (
         <Card title="Tambah atau ubah staf" sub="Orangnya harus sudah punya akun. Akses baru berlaku di permintaan berikutnya.">
-          <form action={action} className="fin-form">
+          <form method="post" action="/admin/staff/save" className="fin-form">
             <label className="fin-field">
               Email akun
-              <input type="email" name="email" required autoComplete="off" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="nama@email.com" />
+              <input type="email" name="email" required autoComplete="off" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Alamat email akun" />
             </label>
             <div className="fin-opts" role="group" aria-label="Izin">
               {options.map((o) => (
@@ -96,14 +98,9 @@ export function StaffManager({ items, options, canManage }: { items: StaffItem[]
               <input type="checkbox" name="isActive" checked={active} onChange={(e) => setActive(e.target.checked)} />
               <span>Akun staf aktif</span>
             </label>
-            <button type="submit" className="fin-btn" disabled={pending}>
-              {pending ? "Menyimpan..." : "SIMPAN AKSES STAF"}
+            <button type="submit" className="fin-btn">
+              SIMPAN AKSES STAF
             </button>
-            {state.message ? (
-              <p className={`fin-msg ${state.ok ? "ok" : "no"}`} role="status">
-                {state.message}
-              </p>
-            ) : null}
           </form>
         </Card>
       ) : null}
