@@ -6,7 +6,7 @@
  * account there.
  *
  * Two distinct signals, both checked:
- * - An explicit error (422 / "user_already_exists") — some project
+ * - An explicit error with code "user_already_exists" or "email_exists" — some project
  *   configurations return this directly.
  * - No error, but `data.user.identities` is an empty array — Supabase's
  *   documented, side-channel-safe way of signalling "already registered"
@@ -24,7 +24,11 @@ export function isExistingAccountSignUp(
   data: { user: { identities?: unknown[] | null } | null } | null,
 ): boolean {
   if (error) {
-    return error.status === 422 || error.code === "user_already_exists";
+    // Decided by the error CODE only, never by HTTP status: a 422 also carries unrelated failures such as
+    // weak_password or signup_disabled, and calling those "email already registered" is both wrong and a dead end.
+    // Both codes are in the official Supabase Auth error-code list (auth-js ErrorCode): `user_already_exists` and
+    // `email_exists`. An error without a code is never treated as an existing account.
+    return error.code === "user_already_exists" || error.code === "email_exists";
   }
 
   return data?.user?.identities?.length === 0;

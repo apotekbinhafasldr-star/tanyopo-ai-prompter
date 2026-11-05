@@ -96,13 +96,24 @@ describe("registerAction — PR #92 registration UX", () => {
     expect(limited.error).toMatch(/terlalu banyak/i);
     expect(limited.uncertain).toBeUndefined();
 
-    signUpMock.mockResolvedValue({ data: { user: null, session: null }, error: { status: 400, code: "weak_password" } });
+    signUpMock.mockResolvedValue({ data: { user: null, session: null }, error: { status: 422, code: "weak_password" } });
     const weak = await registerAction({ error: null }, registerFormData());
     expect(weak.error).toMatch(/kata sandi/i);
+    expect(weak.existingAccount).toBeUndefined();
+
+    signUpMock.mockResolvedValue({ data: { user: null, session: null }, error: { status: 422, code: "signup_disabled" } });
+    const disabled = await registerAction({ error: null }, registerFormData());
+    expect(disabled.existingAccount).toBeUndefined();
+    expect(disabled.error).toMatch(/tidak tersedia/i);
+
+    signUpMock.mockResolvedValue({ data: { user: null, session: null }, error: { status: 422 } });
+    const bare = await registerAction({ error: null }, registerFormData());
+    expect(bare.existingAccount).toBeUndefined();
+    expect(bare.error).toBeTruthy();
   });
 
-  it("regression: 422 user_already_exists still means existing account (checked before the uncertain rule)", async () => {
-    signUpMock.mockResolvedValue({ data: { user: null, session: null }, error: { status: 422, code: "user_already_exists" } });
+  it.each(["user_already_exists", "email_exists"])("regression: 422 %s still means existing account", async (code) => {
+    signUpMock.mockResolvedValue({ data: { user: null, session: null }, error: { status: 422, code } });
     const result = await registerAction({ error: null }, registerFormData());
     expect(result.existingAccount).toBe(true);
     expect(result.uncertain).toBeUndefined();
