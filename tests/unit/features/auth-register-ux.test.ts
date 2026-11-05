@@ -96,7 +96,7 @@ describe("registerAction — PR #92 registration UX", () => {
     expect(limited.error).toMatch(/terlalu banyak/i);
     expect(limited.uncertain).toBeUndefined();
 
-    signUpMock.mockResolvedValue({ data: { user: null, session: null }, error: { status: 422, code: "weak_password" } });
+    signUpMock.mockResolvedValue({ data: { user: null, session: null }, error: { status: 400, code: "weak_password" } });
     const weak = await registerAction({ error: null }, registerFormData());
     expect(weak.error).toMatch(/kata sandi/i);
   });

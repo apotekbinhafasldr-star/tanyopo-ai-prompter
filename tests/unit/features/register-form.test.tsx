@@ -106,7 +106,7 @@ describe("RegisterForm — sign-in hint", () => {
 });
 
 describe("RegisterForm — email already registered", () => {
-  const existing = { error: null, info: "x", existingAccount: true, values: VALUES };
+  const existing = { error: null, info: null, existingAccount: true, values: VALUES };
 
   it("offers the three choices: sign in, forgot password, use another email", async () => {
     registerActionMock.mockResolvedValue(existing);
