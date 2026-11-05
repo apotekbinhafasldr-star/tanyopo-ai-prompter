@@ -8,6 +8,7 @@ import { publicEnv } from "@/lib/env";
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
 import { isExistingAccountSignUp } from "@/lib/auth/existing-account";
 import { mapSignupError } from "@/lib/auth/signup-error";
+import { safeNextPath } from "@/lib/auth/safe-next";
 
 /**
  * Best-effort brake on trial-farming (repeated signups to get fresh
@@ -28,19 +29,6 @@ export interface AuthActionState {
    * register form show a distinct "already registered" card (Masuk /
    * Lupa kata sandi) instead of the generic "check your email" card. */
   existingAccount?: boolean;
-}
-
-/**
- * Only ever redirects to a same-origin app path. A `next` value coming
- * from a query string is untrusted input — without this check a login
- * link could be crafted to bounce a user off to an attacker's site
- * (`//evil.com`, `https://evil.com`) after they authenticate.
- */
-function safeNextPath(next: FormDataEntryValue | null): string {
-  if (typeof next !== "string" || !next.startsWith("/") || next.startsWith("//")) {
-    return "/dashboard";
-  }
-  return next;
 }
 
 export async function loginAction(
@@ -75,6 +63,22 @@ export async function registerAction(
   _prevState: AuthActionState,
   formData: FormData,
 ): Promise<AuthActionState> {
+  // An active session means the person is already signed in as someone. Registering from here would create a second
+  // identity next to a live one (and the old session would keep being used afterwards, which is exactly what looks
+  // like "the new account shows the old data"). Refuse before anything else: no validation, no rate-limit token, no
+  // signUp(). The register page itself shows the "already signed in" notice instead of this form; this guard covers a
+  // direct invocation of the action.
+  const sessionClient = await createClient();
+  const activeSession = await sessionClient.auth.getUser();
+  const activeUser = activeSession?.data?.user ?? null;
+  if (activeUser) {
+    return {
+      error: activeUser.email
+        ? `Anda sedang masuk sebagai ${activeUser.email}. Keluar terlebih dahulu untuk membuat akun baru.`
+        : "Anda sedang masuk. Keluar terlebih dahulu untuk membuat akun baru.",
+    };
+  }
+
   const parsed = registerSchema.safeParse({
     nama: formData.get("nama"),
     namaUsaha: formData.get("namaUsaha"),
@@ -99,7 +103,7 @@ export async function registerAction(
     };
   }
 
-  const supabase = await createClient();
+  const supabase = sessionClient;
   const { nama, namaUsaha, email, password } = parsed.data;
 
   const { data, error } = await supabase.auth.signUp({

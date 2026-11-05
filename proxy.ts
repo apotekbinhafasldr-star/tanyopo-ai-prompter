@@ -37,7 +37,6 @@ function readPreviewCredential(name: string): string | undefined {
 // account: they are linked from registration, and platform reviewers (Meta,
 // TikTok, X) fetch them anonymously.
 const PUBLIC_PATHS = ["/", "/login", "/register", "/forgot-password", "/privacy", "/terms", "/refund", "/data-deletion"];
-const AUTH_ONLY_PATHS = ["/login", "/register"];
 
 export function isPublicAsset(pathname: string) {
   return (
@@ -181,7 +180,6 @@ export async function proxy(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   const isPublicPath = PUBLIC_PATHS.includes(pathname);
-  const isAuthOnlyPath = AUTH_ONLY_PATHS.includes(pathname);
 
   if (!user && !isPublicPath) {
     const redirectUrl = new URL("/login", request.url);
@@ -192,9 +190,10 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   }
 
-  if (user && isAuthOnlyPath) {
-    return NextResponse.redirect(new URL("/dashboard", request.url));
-  }
+  // A signed-in visitor on /login or /register is deliberately NOT redirected here any more: the silent bounce to
+  // /dashboard made people believe a "new" registration had opened an old account. Those two pages now read the
+  // session themselves and show who is signed in, with "Lanjut ke Dashboard" and "Keluar"
+  // (features/auth/active-session-notice.tsx).
 
   return response;
 }
