@@ -106,7 +106,13 @@ describe("RegisterForm — sign-in hint", () => {
 });
 
 describe("RegisterForm — email already registered", () => {
-  const existing = { error: null, info: null, existingAccount: true, values: VALUES };
+  // Exactly what registerAction returns for an already-registered email (features/auth/actions.ts): `info` IS set.
+  const existing = {
+    error: null,
+    info: "Email ini sudah terdaftar. Silakan masuk menggunakan akun Anda.",
+    existingAccount: true,
+    values: VALUES,
+  };
 
   it("offers the three choices: sign in, forgot password, use another email", async () => {
     registerActionMock.mockResolvedValue(existing);
@@ -132,6 +138,46 @@ describe("RegisterForm — email already registered", () => {
     expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe("budi@example.com");
     expect((document.getElementById("password") as HTMLInputElement).value).toBe("");
     expect((document.getElementById("acceptLegal") as HTMLInputElement).checked).toBe(false);
+  });
+
+  it("regression PR-93: after 'Gunakan email lain' the form shows, never the 'Cek email Anda' success card", async () => {
+    registerActionMock.mockResolvedValue(existing);
+    render(<RegisterForm />);
+    await submit();
+    fireEvent.click(screen.getByRole("button", { name: "Gunakan email lain" }));
+
+    expect(screen.getByText("Buat akun LINOE")).toBeTruthy();
+    expect(screen.queryByText("Cek email Anda")).toBeNull();
+    expect(screen.queryByText("Kembali ke halaman masuk")).toBeNull();
+    expect(screen.queryByText("Email sudah terdaftar")).toBeNull();
+    expect(screen.getByRole("button", { name: "Daftar Gratis" })).toBeTruthy();
+  });
+
+  it("the email stays editable after 'Gunakan email lain'", async () => {
+    registerActionMock.mockResolvedValue(existing);
+    render(<RegisterForm />);
+    await submit();
+    fireEvent.click(screen.getByRole("button", { name: "Gunakan email lain" }));
+
+    const email = screen.getByLabelText("Email") as HTMLInputElement;
+    expect(email.readOnly).toBe(false);
+    expect(email.disabled).toBe(false);
+    fireEvent.change(email, { target: { value: "baru@example.com" } });
+    expect(email.value).toBe("baru@example.com");
+  });
+
+  it("a second submit of an email that is registered too shows the card again", async () => {
+    registerActionMock.mockResolvedValue(existing);
+    render(<RegisterForm />);
+    await submit();
+    fireEvent.click(screen.getByRole("button", { name: "Gunakan email lain" }));
+    expect(screen.queryByText("Email sudah terdaftar")).toBeNull();
+
+    registerActionMock.mockResolvedValue({ ...existing });
+    await submit();
+
+    expect(screen.getByText("Email sudah terdaftar")).toBeTruthy();
+    expect(screen.queryByText("Cek email Anda")).toBeNull();
   });
 
   it("the password is never rendered back: no password value anywhere in the DOM after the card", async () => {
@@ -167,5 +213,20 @@ describe("RegisterForm — unknown outcome", () => {
     render(<RegisterForm />);
     await submit();
     expect(screen.queryByRole("link", { name: "Lupa kata sandi?" })).toBeNull();
+  });
+});
+
+describe("RegisterForm — genuine signup success", () => {
+  it("still shows 'Cek email Anda' for a new account (info without existingAccount)", async () => {
+    registerActionMock.mockResolvedValue({
+      error: null,
+      info: "Akun berhasil dibuat. Silakan cek email Anda untuk konfirmasi sebelum masuk.",
+    });
+    render(<RegisterForm />);
+    await submit();
+
+    expect(screen.getByText("Cek email Anda")).toBeTruthy();
+    expect(screen.queryByText("Email sudah terdaftar")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Gunakan email lain" })).toBeNull();
   });
 });
