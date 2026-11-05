@@ -7,7 +7,7 @@ import { loginSchema, registerSchema, forgotPasswordSchema, resetPasswordSchema 
 import { publicEnv } from "@/lib/env";
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
 import { isExistingAccountSignUp } from "@/lib/auth/existing-account";
-import { mapSignupError } from "@/lib/auth/signup-error";
+import { isUncertainSignupOutcome, mapSignupError, UNCERTAIN_SIGNUP_MESSAGE } from "@/lib/auth/signup-error";
 import { safeNextPath } from "@/lib/auth/safe-next";
 
 /**
@@ -29,6 +29,28 @@ export interface AuthActionState {
    * register form show a distinct "already registered" card (Masuk /
    * Lupa kata sandi) instead of the generic "check your email" card. */
   existingAccount?: boolean;
+  /** Non-secret form values handed back so the person does not retype them after a message. NEVER the password. */
+  values?: RegisterKeptValues;
+  /** True when the signUp() request may or may not have been processed (transport failure / thrown error). */
+  uncertain?: boolean;
+}
+
+export interface RegisterKeptValues {
+  nama: string;
+  namaUsaha: string;
+  email: string;
+}
+
+const KEPT_VALUE_MAX = 200;
+
+function keptField(formData: FormData, name: string): string {
+  const value = formData.get(name);
+  return typeof value === "string" ? value.slice(0, KEPT_VALUE_MAX) : "";
+}
+
+/** Only these three fields are ever echoed back; the password is deliberately not read here. */
+function keptValues(formData: FormData): RegisterKeptValues {
+  return { nama: keptField(formData, "nama"), namaUsaha: keptField(formData, "namaUsaha"), email: keptField(formData, "email") };
 }
 
 export async function loginAction(
@@ -79,6 +101,8 @@ export async function registerAction(
     };
   }
 
+  const values = keptValues(formData);
+
   const parsed = registerSchema.safeParse({
     nama: formData.get("nama"),
     namaUsaha: formData.get("namaUsaha"),
@@ -89,7 +113,7 @@ export async function registerAction(
   });
 
   if (!parsed.success) {
-    return { error: parsed.error.issues[0]?.message ?? "Data tidak valid" };
+    return { error: parsed.error.issues[0]?.message ?? "Data tidak valid", values };
   }
 
   // Runs only after validation succeeds, so a typo retry never counts
@@ -100,41 +124,51 @@ export async function registerAction(
   if (!rateLimit.allowed) {
     return {
       error: "Terlalu banyak percobaan pendaftaran dari jaringan ini. Silakan coba lagi dalam beberapa saat.",
+      values,
     };
   }
 
   const supabase = sessionClient;
   const { nama, namaUsaha, email, password } = parsed.data;
 
-  const { data, error } = await supabase.auth.signUp({
-    email,
-    password,
-    options: {
-      data: {
-        nama,
-        nama_usaha: namaUsaha,
-        // Promoter-only signups don't map to a UMKMpro business type;
-        // the shared handle_new_user trigger records this as a custom
-        // business_template row. Real marketing context is collected in
-        // /onboarding and stored in prompter_brand_profiles.
-        jenis_usaha: "lainnya",
+  // No automatic retry anywhere: a signUp() whose outcome is unknown may already have created the account, and a
+  // second blind attempt could create a duplicate. A thrown error or a transport-level failure is reported as
+  // "uncertain" instead of "not created".
+  let signUpResult: Awaited<ReturnType<typeof supabase.auth.signUp>>;
+  try {
+    signUpResult = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          nama,
+          nama_usaha: namaUsaha,
+          // Promoter-only signups don't map to a UMKMpro business type;
+          // the shared handle_new_user trigger records this as a custom
+          // business_template row. Real marketing context is collected in
+          // /onboarding and stored in prompter_brand_profiles.
+          jenis_usaha: "lainnya",
+        },
+        // No emailRedirectTo here (see B12 P0-1): the production Supabase
+        // project has exactly one Redirect URLs entry, an exact-match bare
+        // `/auth/callback` with no wildcard, so any redirectTo carrying a
+        // query string (e.g. `?next=/onboarding`) would silently fail that
+        // check and fall back to the Site URL instead of taking effect.
+        // Signup confirmation instead relies on the "Confirm signup" email
+        // template being configured to link straight to
+        // `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=signup&next=/onboarding`
+        // (app/auth/confirm/route.ts) — a path that bypasses this allow-list
+        // check entirely, since it never goes through Supabase's own
+        // redirect step. Verified in the Supabase Dashboard (2026-09) that
+        // this template is configured exactly this way and Site URL already
+        // points at this app's own production domain — not a stale/unset
+        // fallback — so this flow is confirmed live end-to-end.
       },
-      // No emailRedirectTo here (see B12 P0-1): the production Supabase
-      // project has exactly one Redirect URLs entry, an exact-match bare
-      // `/auth/callback` with no wildcard, so any redirectTo carrying a
-      // query string (e.g. `?next=/onboarding`) would silently fail that
-      // check and fall back to the Site URL instead of taking effect.
-      // Signup confirmation instead relies on the "Confirm signup" email
-      // template being configured to link straight to
-      // `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=signup&next=/onboarding`
-      // (app/auth/confirm/route.ts) — a path that bypasses this allow-list
-      // check entirely, since it never goes through Supabase's own
-      // redirect step. Verified in the Supabase Dashboard (2026-09) that
-      // this template is configured exactly this way and Site URL already
-      // points at this app's own production domain — not a stale/unset
-      // fallback — so this flow is confirmed live end-to-end.
-    },
-  });
+    });
+  } catch {
+    return { error: UNCERTAIN_SIGNUP_MESSAGE, uncertain: true, values };
+  }
+  const { data, error } = signUpResult;
 
   // Covers both signals Supabase can return for "this email already has an
   // account" (this project is shared with UMKMpro AI, so that's a real,
@@ -148,11 +182,16 @@ export async function registerAction(
       error: null,
       info: "Email ini sudah terdaftar. Silakan masuk menggunakan akun Anda.",
       existingAccount: true,
+      values,
     };
   }
 
+  if (isUncertainSignupOutcome(error)) {
+    return { error: UNCERTAIN_SIGNUP_MESSAGE, uncertain: true, values };
+  }
+
   if (error) {
-    return { error: mapSignupError(error) };
+    return { error: mapSignupError(error), values };
   }
 
   // If the project requires email confirmation, signUp succeeds but no

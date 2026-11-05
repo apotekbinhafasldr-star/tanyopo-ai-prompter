@@ -39,3 +39,19 @@ export function mapSignupError(error: { status?: number; code?: string } | null)
 
   return GENERIC;
 }
+
+/**
+ * True when the request may or may not have been processed by Supabase Auth: the call threw, or the failure was a
+ * transport-level one (the response never arrived intact). In that case the account could already exist, so the caller
+ * must not claim it was not created and must not retry on its own (a retry could create a duplicate signup).
+ *
+ * Deliberately narrow: ordinary Supabase errors (422, 429, weak password, 5xx answered by Auth) keep going through
+ * mapSignupError exactly as before.
+ */
+export function isUncertainSignupOutcome(error: { status?: number; name?: string } | null | undefined): boolean {
+  if (!error) return false;
+  return error.name === "AuthRetryableFetchError" || error.name === "AuthUnknownError" || error.status === 0;
+}
+
+export const UNCERTAIN_SIGNUP_MESSAGE =
+  "Kami tidak menerima kepastian dari server, jadi permintaan Anda mungkin sudah diproses. Cek email Anda (termasuk folder spam) untuk konfirmasi. Jika tidak ada, tunggu beberapa menit, lalu coba masuk atau atur ulang kata sandi sebelum mendaftar lagi.";
