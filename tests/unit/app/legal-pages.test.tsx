@@ -237,9 +237,9 @@ describe("legal links", () => {
     const src = readFileSync("proxy.ts", "utf8");
     const line = src.split("\n").find((l) => l.startsWith("const PUBLIC_PATHS"))!;
     for (const p of ["/privacy", "/terms", "/refund", "/data-deletion"]) expect(line).toContain(`"${p}"`);
-    // Legal paths are not auth-only: a signed-in user may still read them.
-    const authOnly = src.split("\n").find((l) => l.startsWith("const AUTH_ONLY_PATHS"))!;
-    for (const p of ["/privacy", "/terms", "/refund", "/data-deletion"]) expect(authOnly).not.toContain(p);
+    // A signed-in user may still read the legal pages: proxy.ts no longer redirects signed-in visitors away from
+    // any public path (PR-1 removed the AUTH_ONLY_PATHS bounce), so there is no list that could contain them.
+    expect(src).not.toContain("AUTH_ONLY_PATHS");
   });
 });
 
