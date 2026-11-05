@@ -45,7 +45,9 @@ export function RegisterForm() {
     );
   }
 
-  if (state.info) {
+  // The existing-account result also carries `info`, so it must be excluded here: after "Gunakan email lain" hides
+  // its card, rendering must fall through to the form, never to this success card.
+  if (state.info && !state.existingAccount) {
     return (
       <Card>
         <CardHeader>
