@@ -67,3 +67,32 @@ describe("GET /auth/confirm — B12 signup confirmation (token_hash + type, bypa
     expect(res.headers.get("location")).toBe("https://tanyopo-ai-prompter.netlify.app/login");
   });
 });
+
+describe("GET /auth/confirm — Stage A hardening: only the type this app sends is verified", () => {
+  beforeEach(() => {
+    verifyOtpMock.mockReset();
+    verifyOtpMock.mockResolvedValue({ error: null });
+  });
+
+  it.each(["recovery", "invite", "magiclink", "email_change", "email", "bogus"])(
+    "type=%s is refused: /login, and Supabase is never asked to verify it",
+    async (type) => {
+      const res = await GET(requestFor(`https://tanyopo-ai-prompter.netlify.app/auth/confirm?token_hash=th&type=${type}&next=/onboarding`));
+      expect(verifyOtpMock).not.toHaveBeenCalled();
+      expect(res.headers.get("location")).toBe("https://tanyopo-ai-prompter.netlify.app/login");
+    },
+  );
+
+  it.each(["/\\evil.com", "https://evil.com", "//evil.com"])("next=%s never leaves the app (falls back to /dashboard)", async (next) => {
+    const res = await GET(
+      requestFor(`https://tanyopo-ai-prompter.netlify.app/auth/confirm?token_hash=th&type=signup&next=${encodeURIComponent(next)}`),
+    );
+    expect(res.headers.get("location")).toBe("https://tanyopo-ai-prompter.netlify.app/dashboard");
+  });
+
+  it("the existing signup link still verifies exactly as before", async () => {
+    const res = await GET(requestFor("https://tanyopo-ai-prompter.netlify.app/auth/confirm?token_hash=th_ok&type=signup&next=/onboarding"));
+    expect(verifyOtpMock).toHaveBeenCalledWith({ type: "signup", token_hash: "th_ok" });
+    expect(res.headers.get("location")).toBe("https://tanyopo-ai-prompter.netlify.app/onboarding");
+  });
+});
