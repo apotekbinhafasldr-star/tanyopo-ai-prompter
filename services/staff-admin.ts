@@ -155,6 +155,8 @@ export async function applyStaffChange(actor: AdminPrincipal, input: { email: st
   const targetRole = row ? String(row.role) : "STAFF";
   const target = row && isPlatformRole(targetRole) ? { userId: targetId, role: targetRole, isActive: row.is_active === true } : null;
   if (row && !target) return { ok: false, code: "rules" };
+  // Explicit, independent of evaluateStaffChange: a Super Admin row is never touched from the app.
+  if (row && targetRole === "SUPER_ADMIN") return { ok: false, code: "rules" };
 
   const { count, error: e2 } = await db.from(TABLE).select("user_id", { count: "exact", head: true }).eq("role", "SUPER_ADMIN").eq("is_active", true).is("revoked_at", null);
   if (e2) return { ok: false, code: "failed" };
@@ -169,13 +171,15 @@ export async function applyStaffChange(actor: AdminPrincipal, input: { email: st
     action: `${ACTION}.attempt`,
     entityType: "platform_admin",
     entityId: targetId,
-    details: { attemptId, permissions, isActive: input.isActive, existed: Boolean(row) },
+    details: { attemptId, permissions, isActive: input.isActive, existed: Boolean(row), previousRole: row ? targetRole : null },
   });
   if (!attempted) return { ok: false, code: "audit" };
 
   // 2. the change. A new row is an INSERT (a concurrent insert for the same user fails on the primary key). An
-  // existing row is UPDATED only while it is still a STAFF row, so a row that became SUPER_ADMIN meanwhile is never
-  // overwritten, and a row changed by someone else is reported as a conflict instead of silently replaced.
+  // existing row is UPDATED only while it still has exactly the role and active flag that were read. That lets a legacy
+  // FINANCE_ADMIN / FINANCE_VIEWER row be converted to STAFF (the attempt event records `previousRole`), while a row that
+  // was changed by someone else meanwhile (for example promoted to SUPER_ADMIN) is reported as a conflict, never
+  // overwritten. SUPER_ADMIN rows never reach this point (see the explicit check before the decision).
   const now = new Date().toISOString();
   const values = {
     role: "STAFF",
@@ -190,7 +194,7 @@ export async function applyStaffChange(actor: AdminPrincipal, input: { email: st
     const { error } = await db.from(TABLE).insert({ user_id: targetId, ...values });
     if (error) failure = "conflict";
   } else {
-    const { data, error } = await db.from(TABLE).update(values).eq("user_id", targetId).eq("role", "STAFF").eq("is_active", row.is_active === true).select("user_id");
+    const { data, error } = await db.from(TABLE).update(values).eq("user_id", targetId).eq("role", targetRole).eq("is_active", row.is_active === true).select("user_id");
     if (error) failure = "failed";
     else if (!data || data.length !== 1) failure = "conflict";
   }

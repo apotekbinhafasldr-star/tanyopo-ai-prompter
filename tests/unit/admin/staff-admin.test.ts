@@ -220,6 +220,62 @@ describe("applyStaffChange: concurrent changes", () => {
   });
 });
 
+describe("applyStaffChange: legacy roles (regression for the role guard)", () => {
+  const legacy = (role: string) => h.rows.push({ user_id: "u2", role, is_active: true, permissions: [] });
+  it.each(["FINANCE_ADMIN", "FINANCE_VIEWER"])("converts a legacy %s row to STAFF and records previousRole", async (role) => {
+    legacy(role);
+    const r = await grant("ana@x.id", ["finance.view"]);
+    expect(r).toEqual({ ok: true, outcomeLogged: true });
+    expect(writes()).toEqual(["write:update"]);
+    expect(h.rows.find((x) => x.user_id === "u2")).toMatchObject({ role: "STAFF", permissions: ["finance.view"], granted_by: "founder" });
+    expect(h.events[0].details).toMatchObject({ existed: true, previousRole: role });
+    expect(h.events[1].details?.outcome).toBe("SUCCEEDED");
+  });
+  it("a brand-new account records previousRole as null", async () => {
+    await grant();
+    expect(h.events[0].details?.previousRole).toBeNull();
+  });
+  it("a legacy row promoted to SUPER_ADMIN between read and write is never overwritten", async () => {
+    legacy("FINANCE_ADMIN");
+    h.beforeWrite = () => void Object.assign(h.rows.find((r) => r.user_id === "u2")!, { role: "SUPER_ADMIN" });
+    expect(await grant()).toEqual({ ok: false, code: "conflict" });
+    expect(h.rows.find((r) => r.user_id === "u2")?.role).toBe("SUPER_ADMIN");
+    expect(h.events[1].details).toMatchObject({ outcome: "FAILED", code: "conflict" });
+  });
+  it("a legacy row whose role changed to another role between read and write is a conflict, not an overwrite", async () => {
+    legacy("FINANCE_ADMIN");
+    h.beforeWrite = () => void Object.assign(h.rows.find((r) => r.user_id === "u2")!, { role: "FINANCE_VIEWER" });
+    expect(await grant()).toEqual({ ok: false, code: "conflict" });
+    expect(h.rows.find((r) => r.user_id === "u2")?.role).toBe("FINANCE_VIEWER");
+  });
+  it("a legacy row deactivated by someone else between read and write is a conflict", async () => {
+    legacy("FINANCE_VIEWER");
+    h.beforeWrite = () => void Object.assign(h.rows.find((r) => r.user_id === "u2")!, { is_active: false });
+    expect(await grant()).toEqual({ ok: false, code: "conflict" });
+  });
+  it("an existing SUPER_ADMIN row is refused before any audit or write (fail closed)", async () => {
+    h.rows.push({ user_id: "u2", role: "SUPER_ADMIN", is_active: true });
+    expect(await grant("ana@x.id", ["finance.view"])).toEqual({ ok: false, code: "rules" });
+    expect(h.log).toEqual([]);
+    expect(h.rows.find((r) => r.user_id === "u2")?.role).toBe("SUPER_ADMIN");
+  });
+  it("an unknown stored role is refused before any audit or write (fail closed)", async () => {
+    legacy("OWNER");
+    expect(await grant()).toEqual({ ok: false, code: "rules" });
+    expect(h.log).toEqual([]);
+  });
+  it("two simultaneous conversions of a legacy row: never more than one row, never SUPER_ADMIN overwritten, one terminal event per attempt", async () => {
+    legacy("FINANCE_ADMIN");
+    const results = await Promise.all([grant("ana@x.id", ["finance.view"]), grant("ana@x.id", ["tax.view"])]);
+    expect(results.some((r) => r.ok)).toBe(true);
+    expect(h.rows.filter((r) => r.user_id === "u2")).toHaveLength(1);
+    expect(h.rows.find((r) => r.user_id === "founder")?.role).toBe("SUPER_ADMIN");
+    for (const a of h.events.filter((e) => e.action.endsWith(".attempt"))) {
+      expect(h.events.filter((e) => e.details?.attemptId === a.details?.attemptId && !e.action.endsWith(".attempt"))).toHaveLength(1);
+    }
+  });
+});
+
 describe("applyStaffChange: existing protections are kept", () => {
   it("refuses everything for someone without staff.manage", async () => {
     expect((await applyStaffChange(staff, { email: "ana@x.id", permissions: ["finance.view"], isActive: true })).ok).toBe(false);
