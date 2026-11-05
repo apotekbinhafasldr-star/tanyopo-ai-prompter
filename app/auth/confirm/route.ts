@@ -1,6 +1,7 @@
 import { type EmailOtpType } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { safeNextPath } from "@/lib/auth/safe-next";
 
 /**
  * Handles Supabase's token_hash-based OTP verification link — used for
@@ -24,20 +25,20 @@ import { createClient } from "@/lib/supabase/server";
  * future audit finds signup confirmation broken, check the Dashboard
  * template content first rather than assuming this route is unreachable.
  */
-function safeNext(next: string | null): string {
-  if (!next || !next.startsWith("/") || next.startsWith("//")) {
-    return "/dashboard";
-  }
-  return next;
-}
+/**
+ * Only the types this app actually sends are accepted. The signup confirmation template uses `type=signup`;
+ * password recovery does NOT come through here (it uses /auth/callback), and nothing else links to this route, so
+ * `recovery`, `invite`, `magiclink`, `email_change` and `email` are refused instead of being verified on request.
+ */
+const SUPPORTED_TYPES: readonly EmailOtpType[] = ["signup"];
 
 export async function GET(request: NextRequest) {
   const { origin, searchParams } = new URL(request.url);
   const tokenHash = searchParams.get("token_hash");
   const type = searchParams.get("type") as EmailOtpType | null;
-  const next = safeNext(searchParams.get("next"));
+  const next = safeNextPath(searchParams.get("next"));
 
-  if (tokenHash && type) {
+  if (tokenHash && type && SUPPORTED_TYPES.includes(type)) {
     const supabase = await createClient();
     const { error } = await supabase.auth.verifyOtp({ type, token_hash: tokenHash });
     if (!error) {

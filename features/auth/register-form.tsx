@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
+import { VerifyOtpForm } from "@/features/auth/verify-otp-form";
 import { validateEmailFormat } from "@/schemas/auth";
 import { LegalLinks } from "@/features/legal/legal-links";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,6 +19,8 @@ export function RegisterForm() {
   // "Gunakan email lain" hides the existing-account card for THIS result only; a new submit produces a new state
   // object, so the card shows again if that email is also registered.
   const [dismissed, setDismissed] = useState<AuthActionState | null>(null);
+  // "Salah email? Ubah" on the code screen returns to the form (values kept) for THIS result only.
+  const [dismissedVerify, setDismissedVerify] = useState<AuthActionState | null>(null);
   // Format check on leaving the email field. Pure client-side: no request, no server action, no lookup of any kind.
   const [emailError, setEmailError] = useState<string | null>(null);
 
@@ -43,6 +46,10 @@ export function RegisterForm() {
         </CardContent>
       </Card>
     );
+  }
+
+  if (state.verifyEmail && dismissedVerify !== state) {
+    return <VerifyOtpForm email={state.verifyEmail} onChangeEmail={() => setDismissedVerify(state)} />;
   }
 
   // The existing-account result also carries `info`, so it must be excluded here: after "Gunakan email lain" hides

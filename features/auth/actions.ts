@@ -9,6 +9,7 @@ import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
 import { isExistingAccountSignUp } from "@/lib/auth/existing-account";
 import { isUncertainSignupOutcome, mapSignupError, UNCERTAIN_SIGNUP_MESSAGE } from "@/lib/auth/signup-error";
 import { safeNextPath } from "@/lib/auth/safe-next";
+import { isEmailOtpEnabled } from "@/lib/auth/email-otp";
 
 /**
  * Best-effort brake on trial-farming (repeated signups to get fresh
@@ -33,6 +34,9 @@ export interface AuthActionState {
   values?: RegisterKeptValues;
   /** True when the signUp() request may or may not have been processed (transport failure / thrown error). */
   uncertain?: boolean;
+  /** Set only when EMAIL_OTP_ENABLED is on and a NEW account was created without a session: the form then shows the
+   * code screen for this address. Never set for an existing account. */
+  verifyEmail?: string;
 }
 
 export interface RegisterKeptValues {
@@ -197,6 +201,10 @@ export async function registerAction(
   // If the project requires email confirmation, signUp succeeds but no
   // session is issued yet — there's nothing to redirect into.
   if (!data.session) {
+    if (isEmailOtpEnabled()) {
+      // Stage A (flag-gated): keep the person on a code screen; the link in the same email still works.
+      return { error: null, verifyEmail: email, values };
+    }
     return {
       error: null,
       info: "Akun berhasil dibuat. Silakan cek email Anda untuk konfirmasi sebelum masuk.",
