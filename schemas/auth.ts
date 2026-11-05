@@ -28,6 +28,20 @@ export const registerSchema = z.object({
 
 export type RegisterInput = z.infer<typeof registerSchema>;
 
+/**
+ * Client-side, no-network format check for the email field (runs when the person leaves the field, not on every
+ * keystroke). It only helps the person fix a typo early: the server (registerSchema above, then Supabase Auth) stays
+ * the final authority. An empty value returns null here on purpose — "required" is reported on submit, so merely
+ * tabbing past the field never shows an error.
+ */
+export const EMAIL_FORMAT_MESSAGE = "Format email belum benar. Contoh: nama@usaha.com";
+
+export function validateEmailFormat(value: string): string | null {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return null;
+  return registerSchema.shape.email.safeParse(trimmed).success ? null : EMAIL_FORMAT_MESSAGE;
+}
+
 export const forgotPasswordSchema = z.object({
   email: z.string().trim().min(1, "Email wajib diisi").email("Format email tidak valid"),
 });
