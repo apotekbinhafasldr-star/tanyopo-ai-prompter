@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { permissionsOf, type AdminPrincipal } from "@/lib/admin/permissions";
 
-const h = vi.hoisted(() => ({ principal: null as AdminPrincipal | null, flag: true, applied: [] as unknown[] }));
+const h = vi.hoisted(() => ({ principal: null as AdminPrincipal | null, flag: true, applied: [] as unknown[], outcome: { ok: true, outcomeLogged: true } as { ok: boolean; outcomeLogged?: boolean; code?: string } }));
 
 vi.mock("@/lib/admin/flag", () => ({ isAdminCenterEnabled: () => h.flag }));
 vi.mock("@/services/platform-admin", () => ({
@@ -14,7 +14,7 @@ vi.mock("@/services/platform-admin", () => ({
 vi.mock("@/services/staff-admin", () => ({
   applyStaffChange: vi.fn(async (_a: unknown, input: unknown) => {
     h.applied.push(input);
-    return { ok: true };
+    return h.outcome;
   }),
 }));
 
@@ -37,6 +37,7 @@ beforeEach(() => {
   h.principal = null;
   h.flag = true;
   h.applied = [];
+  h.outcome = { ok: true, outcomeLogged: true };
 });
 
 describe("staff save route", () => {
@@ -65,6 +66,15 @@ describe("staff save route", () => {
     const res = await POST(req([["email", "a@b.id"], ["permissions", "refund.approve"]]));
     expect(res.headers.get("location")).toBe("http://localhost/admin/staff?r=permission");
     expect(h.applied).toHaveLength(0);
+  });
+  it("maps outcomes to fixed codes: saved-but-unlogged and each new failure code", async () => {
+    as("SUPER_ADMIN");
+    h.outcome = { ok: true, outcomeLogged: false };
+    expect((await POST(req([["email", "a@b.id"]]))).headers.get("location")).toBe("http://localhost/admin/staff?r=ok_unlogged");
+    for (const code of ["unconfirmed", "search_limit", "conflict"]) {
+      h.outcome = { ok: false, code };
+      expect((await POST(req([["email", "a@b.id"]]))).headers.get("location")).toBe(`http://localhost/admin/staff?r=${code}`);
+    }
   });
   it("exports POST only", () => {
     for (const m of ["GET", "PUT", "PATCH", "DELETE"]) expect((route as Record<string, unknown>)[m]).toBeUndefined();

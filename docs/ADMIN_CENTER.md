@@ -23,3 +23,31 @@ All screens use fixed fictional DEMO data (`lib/admin/demo-data.ts`) through the
 4. Turn on `ADMIN_CENTER_ENABLED=true`.
 
 Screenshots (390px wide, rendered from the real component markup): `docs/admin-center/`.
+
+## Audit staf (SEC-1)
+
+Staff access changes (`POST /admin/staff/save`, Super Admin only) are audited in two layers. They do **not** form one atomic record.
+
+**Application events** (`finance_audit_logs`, immutable, written with the service role, `actor_id` = the acting Super Admin):
+
+| Event | When | Meaning |
+|---|---|---|
+| `staff.access.change.attempt` | before the change | intent; if it cannot be written, **nothing changes** |
+| `staff.access.change.succeeded` | after the change | the change was applied |
+| `staff.access.change.failed` | after a failed change | not applied; `details.code` says why (for example `conflict`) |
+
+Every event of one request carries the same `details.attemptId`; terminal events also carry `details.outcome` (`SUCCEEDED` or `FAILED`).
+
+**Database trigger** (`trg_finance_admins_audit`, unchanged): stores the full new row of `finance_platform_admins` in the same transaction as the row change. It is the authoritative record of what actually changed, but it cannot name the actor (`actor_id` is null under the service role).
+
+**Limits, stated plainly**
+
+- An `attempt` with no `succeeded`/`failed` event with the same `attemptId` means the outcome is **unknown**: the process stopped, or the outcome event could not be written. Resolve it by reading the trigger row for the same `entity_id` around the same time.
+- If the change succeeds but its outcome event cannot be written, the change is **not** rolled back. The screen then says "disimpan, tetapi catatan hasilnya gagal ditulis" (`r=ok_unlogged`) and the server logs `[staff-access] outcome event NOT recorded` with the `attemptId` only (no email).
+- Making the change and its audit one atomic unit needs a database function (RPC). That is a separate, explicitly approved migration and is not part of this change.
+
+**Other guards in the same path**
+
+- Access is granted only to an account whose Supabase Auth `email_confirmed_at` is set. An unconfirmed account is refused (`r=unconfirmed`).
+- The account search reads at most `USER_SEARCH_LIMIT.pages x perPage` users. If it ends on a full page without a match it refuses with `r=search_limit` instead of claiming "not registered".
+- A new row is an INSERT; an existing row is updated only while it is still `STAFF` and still has the `is_active` value that was read. Anything else is a `conflict`, never an overwrite (this also keeps a row promoted to `SUPER_ADMIN` meanwhile intact). The in-process rate limiter is best effort only; it is not a security control.

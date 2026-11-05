@@ -9,6 +9,6 @@ export default async function AdminStaffPage({ searchParams }: { searchParams?: 
   const live = await listStaff();
   const r = (await searchParams)?.r;
   const code = Array.isArray(r) ? r[0] : r;
-  const message = isStaffMessageCode(code) ? { ok: code === "ok", text: STAFF_MESSAGES[code] } : null;
+  const message = isStaffMessageCode(code) ? { ok: code === "ok" || code === "ok_unlogged", text: STAFF_MESSAGES[code] } : null;
   return <StaffView demo={live === null} live={live} canManage={can(principal, "staff.manage")} message={message} />;
 }
