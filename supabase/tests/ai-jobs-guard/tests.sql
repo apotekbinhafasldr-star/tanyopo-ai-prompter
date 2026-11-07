@@ -1,5 +1,8 @@
 -- Synthetic-data assertions for the AI Jobs quota guard. LOCAL THROW-AWAY DATABASE ONLY.
--- psql -v variant=main|pr31|pr31_rev|all   (main = no PR #31, so the DELETE guard is intentionally absent)
+-- psql -v variant=s1|pre_s1
+--   s1     = the REAL production shape: every migration of main incl. the three S1 migrations (authenticated has no
+--            INSERT/DELETE/TRUNCATE and only column-level UPDATE on prompter_ai_jobs) + guard part 1 + part 2.
+--   pre_s1 = S1 migrations NOT applied (what production looked like before S1): guard part 1 only; part 2 refuses.
 \set ON_ERROR_STOP off
 \pset format unaligned
 \pset tuples_only on
@@ -15,7 +18,7 @@
 \set mkb 'b4000000-0000-4000-8000-0000000000b4'
 \set oc 'c1000000-0000-4000-8000-0000000000c1'
 \set nobody 'd1000000-0000-4000-8000-0000000000d1'
-select (:'variant' <> 'main') as has_p2 \gset
+select (:'variant' <> 'pre_s1') as has_p2 \gset
 
 insert into auth.users(id,email) values
  (:'mb','member-b@example.invalid'),(:'kb','kasir-b@example.invalid'),(:'mkb','mkt-b@example.invalid'),(:'nobody','nobody@example.invalid');
@@ -97,7 +100,7 @@ select chk('T09a owner exhausts exactly the trial allowance (30)', :first_burn =
 select chk('T09b nothing more after exhaustion', burn(:'oc',3) = 0);
 
 select t_run('authenticated', :'oc', 'A1.delete', 'delete from prompter_ai_jobs');
-select chk('T10a DELETE does not reset quota' || case when :has_p2 then '' else ' (main-only: documented gap, closed by PR #31 + part 2)' end,
+select chk('T10a DELETE does not reset quota' || case when :has_p2 then '' else ' (pre_s1-only: documented gap, closed by S1 + part 2)' end,
   case when :has_p2 then burn(:'oc',1) = 0 else true end);
 select exhaust(:'oc') \gset
 select t_run('authenticated', :'oc', 'A2.backdate', $q$update prompter_ai_jobs set created_at = now() - interval '400 days'$q$);
@@ -113,7 +116,7 @@ select chk('T10e job_type/input_reference immutable for clients', (select result
 select t_run('authenticated', :'oc', 'A6.change_actor', $q$update prompter_ai_jobs set actor_user_id = null$q$);
 select chk('T10f actor_user_id immutable for clients', (select result like '42501%' from t_probe where name='A6.change_actor'));
 select t_run('authenticated', :'oc', 'A7.insert_direct', $q$insert into prompter_ai_jobs(tenant_id,job_type,status) values ('c0000000-0000-4000-8000-00000000000c','CONTENT_GENERATION','COMPLETED')$q$);
-select chk('T10g direct INSERT refused (PR #31) / by RLS role policy; never creates free capacity',
+select chk('T10g direct INSERT refused (S1 REVOKE) / by RLS role policy; never creates free capacity',
   case when :has_p2 then (select result like '42501%' from t_probe where name='A7.insert_direct') else true end);
 select t_run('authenticated', :'mb', 'A8.member_direct_insert', $q$insert into prompter_ai_jobs(tenant_id,job_type,status) values ('b0000000-0000-4000-8000-00000000000b','CONTENT_GENERATION','QUEUED')$q$);
 select chk('T10h member direct INSERT refused', (select result not like 'OK:%' from t_probe where name='A8.member_direct_insert'));
@@ -157,15 +160,42 @@ select chk('T13c triggers present (immutable, no_truncate' || case when :has_p2 
 select chk('T13d no sibling-product object touched: guard functions are the only new public functions',
   (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname like 'fn\_guard\_ai\_job%') = (case when :has_p2 then 3 else 2 end));
 
--- ===== 6b. PR #31's fail-closed entitlement block survives (no row => denied, never unlimited) =============
+-- ===== 6b. the fail-closed entitlement block (carried over from PR #31; NOT in S1 or live B10) (no row => denied, never unlimited) =============
 create table ent_bak as select * from prompter_plan_entitlements;
+-- prompter_plan_prices (B1) references the entitlement table, so a plain DELETE fails; a privileged emptying
+-- (owner TRUNCATE ... CASCADE / support error) is simulated with FK triggers off (superuser only, restored below).
+set session_replication_role = replica;
 delete from prompter_plan_entitlements;
+reset session_replication_role;
 select chk('T15a empty entitlement table -> ENTITLEMENT_NOT_CONFIGURED (not unlimited)',
   (select reason from rpc_as(:'oa','CONTENT_GENERATION')) = 'ENTITLEMENT_NOT_CONFIGURED');
+set session_replication_role = replica;
 insert into prompter_plan_entitlements select * from ent_bak;
+reset session_replication_role;
 select chk('T15b entitlements restored -> normal again', (select allowed from rpc_as(:'oa','CONTENT_GENERATION')));
 
--- ===== 7. defence in depth: a mass-restore rollback (what PR #46's down script does) cannot reopen the quota ===
+-- ===== 6c. compatibility with the S1 privilege model (variant s1 only; pre_s1 has the wide grants) =========
+select chk('T16a S1 model intact after the guard: no INSERT/UPDATE(table)/DELETE/TRUNCATE for anon/authenticated',
+  case when :has_p2 then not exists (select 1 from unnest(array['anon','authenticated']) r, unnest(array['INSERT','UPDATE','DELETE','TRUNCATE']) p
+        where has_table_privilege(r,'public.prompter_ai_jobs',p)) else true end);
+select chk('T16b S1 column UPDATE set (10 bookkeeping columns) is disjoint from the trigger-protected columns',
+  case when :has_p2 then
+    (select count(*) from pg_attribute a where a.attrelid='public.prompter_ai_jobs'::regclass and a.attnum>0 and not a.attisdropped
+       and has_column_privilege('authenticated','public.prompter_ai_jobs'::regclass,a.attnum,'UPDATE')) = 10
+    and not exists (select 1 from pg_attribute a where a.attrelid='public.prompter_ai_jobs'::regclass and a.attnum>0 and not a.attisdropped
+       and a.attname in ('id','tenant_id','actor_user_id','job_type','input_reference','created_at')
+       and has_column_privilege('authenticated','public.prompter_ai_jobs'::regclass,a.attnum,'UPDATE'))
+  else true end);
+select chk('T16c the guard added no privilege: RPC ACL unchanged (anon no, authenticated yes, service_role yes)',
+  not has_function_privilege('anon','public.fn_create_ai_job_if_entitled(text,jsonb)','execute')
+  and has_function_privilege('authenticated','public.fn_create_ai_job_if_entitled(text,jsonb)','execute')
+  and has_function_privilege('service_role','public.fn_create_ai_job_if_entitled(text,jsonb)','execute'));
+select t_run('authenticated', :'oa', 'S1.direct_delete', 'delete from prompter_ai_jobs');
+select chk('T16d client DELETE is refused (S1: no privilege; guard: trigger) -- 42501 either way',
+  case when :has_p2 then (select result like '42501%' from t_probe where name='S1.direct_delete') else true end,
+  (select result from t_probe where name='S1.direct_delete'));
+
+-- ===== 7. defence in depth: a mass-restore rollback (what a privilege rollback / default-privilege regression would do) cannot reopen the quota ===
 grant select, insert, update, delete, truncate on public.prompter_ai_jobs to anon, authenticated;
 select exhaust(:'ob') \gset
 select t_run('authenticated', :'ob', 'R2.backdate', $q$update prompter_ai_jobs set created_at = now() - interval '400 days'$q$);

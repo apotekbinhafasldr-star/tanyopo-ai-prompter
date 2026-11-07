@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 # LOCAL-ONLY tests for the AI Jobs quota guard on a THROW-AWAY PostgreSQL with SYNTHETIC data.
 # Refuses non-local hosts and any credential env var. Never touches Supabase / production.
-# Variants: main | pr31 | all (#31+#44+#45+#46); plus an apply-order hazard test (guard applied BEFORE #31).
-# Integration variants need PR dirs: PR31_DIR PR44_DIR PR45_DIR PR46_DIR (each = dir containing supabase/migrations).
+# Variants (rebased on main@f740e47, where the S1 migrations 20261019100000/100/200 are ALREADY part of supabase/migrations):
+#   s1      = production shape: every main migration incl. S1 (+ B1/B2/plan-tampering/P0-2), then guard part 1 + part 2
+#   pre_s1  = S1 migrations left out (production BEFORE S1): guard part 1 only; part 2 must refuse
+#   repo_order = the guard applied at its own file position (20261021...) inside the full chain, i.e. BEFORE the later
+#             migrations (20261027...-20261103...): proves no later migration overwrites or removes the guard
+# No other PR checkout is needed any more (#31/#44/#45/#46 were superseded; S1 is in the tree).
 set -uo pipefail
 HOST="${PGHOST:-/tmp}"; PORT="${PGPORT:-5544}"; USER_="${PGUSER:-postgres}"
 case "$HOST" in /*|localhost|127.0.0.1) ;; *) echo "REFUSED: non-local PGHOST=$HOST" >&2; exit 2;; esac
@@ -11,64 +15,51 @@ for k in SUPABASE_SECRET_KEY SUPABASE_SERVICE_ROLE_KEY DATABASE_URL POSTGRES_URL
 done
 here="$(cd "$(dirname "$0")" && pwd)"; root="$(cd "$here/../../.." && pwd)"
 G1=20261021120000_prompter_ai_jobs_quota_guard; G2=20261021120100_prompter_ai_jobs_delete_guard
+S1FILES="20261019100000_prompter_p0_ai_jobs_lockdown 20261019100100_prompter_p0_subscription_trial_insert_guard 20261019100200_prompter_p0_plan_entitlements_lockdown"
 P() { psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q -v ON_ERROR_STOP=1 "$@"; }
 PL() { psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q "$@"; }
 PA() { psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q -At "$@"; }
 fail=0; pass() { echo "PASS: $*"; }; bad() { echo "FAIL: $*"; fail=1; }
-L31="20261019100000_prompter_p0_ai_jobs_lockdown 20261019100100_prompter_p0_subscription_trial_insert_guard 20261019100200_prompter_p0_plan_entitlements_lockdown 20261019110000_prompter_trial_abuse_protection 20261019120000_prompter_shared_tables_truncate_delete_hardening"
-# S1_ONLY3=1: PR31_DIR holds PR #53 (exactly the three S1 migrations; the trial-abuse / shared-tables files do not exist there).
-if [ -n "${S1_ONLY3:-}" ]; then L31="20261019100000_prompter_p0_ai_jobs_lockdown 20261019100100_prompter_p0_subscription_trial_insert_guard 20261019100200_prompter_p0_plan_entitlements_lockdown"; fi
-M44=20261020160000_prompter_billing_financial_safety; M45=20261020180000_prompter_billing_security_hardening_p0
-M46=20261020190000_prompter_privilege_hardening_phase1
 
-P -d postgres -c "drop database if exists ajg_tpl" -c "create database ajg_tpl" >/dev/null
-P -d ajg_tpl -f "$here/support/base.sql" >/dev/null
-for f in "$root"/supabase/migrations/2026*.sql; do
-  case "$(basename "$f")" in $G1.sql|$G2.sql) continue;; esac
-  PL -d ajg_tpl -f "$f" >/dev/null 2>&1 || true
+# Build two templates from the REAL migration chain (guard files excluded): with S1 and without S1.
+# Stand-ins for objects owned by sibling products live in support/base.sql. Individual migration errors are
+# tolerated only for files unrelated to this test, but S1 and the tables under test must exist (checked below).
+build_tpl() { # <db> <with_s1:1|0>
+  P -d postgres -c "drop database if exists $1" -c "create database $1" >/dev/null
+  P -d "$1" -f "$here/support/base.sql" >/dev/null
+  for f in "$root"/supabase/migrations/2026*.sql; do
+    b="$(basename "$f" .sql)"
+    case "$b" in $G1|$G2) continue;; esac
+    if [ "$2" = 0 ]; then case " $S1FILES " in *" $b "*) continue;; esac; fi
+    PL -d "$1" -f "$f" >/dev/null 2>&1 || echo "NOTE: $b did not apply cleanly on the synthetic base (ignored)"
+  done
+}
+build_tpl ajg_tpl_s1 1; build_tpl ajg_tpl_pre 0
+for t in ajg_tpl_s1 ajg_tpl_pre; do
+  [ "$(PA -d $t -c "select to_regclass('public.prompter_ai_jobs') is not null and to_regprocedure('public.fn_create_ai_job_if_entitled(text,jsonb)') is not null and to_regclass('public.prompter_plan_prices') is not null")" = t ] \
+    || { echo "FAIL: template $t incomplete"; exit 1; }
 done
-mk() { P -d postgres -c "drop database if exists $1" -c "create database $1 template ajg_tpl" >/dev/null; }
+[ "$(PA -d ajg_tpl_s1 -c "select has_table_privilege('authenticated','public.prompter_ai_jobs','DELETE')")" = f ] && pass "template s1: S1 applied (authenticated has no DELETE)" || bad "template s1 lacks S1"
+[ "$(PA -d ajg_tpl_pre -c "select has_table_privilege('authenticated','public.prompter_ai_jobs','DELETE')")" = t ] && pass "template pre_s1: S1 absent (authenticated still has DELETE)" || bad "template pre_s1 unexpectedly has S1"
+[ "$(PA -d ajg_tpl_s1 -c "select position('ROLE_NOT_ALLOWED' in pg_get_functiondef('public.fn_create_ai_job_if_entitled(text,jsonb)'::regprocedure))")" = 0 ] && pass "S1 and later main migrations do not contain the guard (RPC is still the B10 body)" || bad "RPC already guarded before the guard migration"
+
+mk() { P -d postgres -c "drop database if exists $1" -c "create database $1 template $2" >/dev/null; }
 ap() { P -d "$1" -f "$2" >/dev/null; }
-apm() { ap "$1" "$2/supabase/migrations/$3.sql"; }
 g1() { ap "$1" "$root/supabase/migrations/$G1.sql"; }
 g2() { ap "$1" "$root/supabase/migrations/$G2.sql"; }
-prep() { # <db> <variant>: everything except fixtures
-  local db="$1"
-  case "$2" in
-    main) g1 "$db" ;;
-    pr31) for m in $L31; do apm "$db" "$PR31_DIR" "$m"; done; g1 "$db"; g2 "$db" ;;
-    pr31_rev) g1 "$db"; for m in $L31; do apm "$db" "$PR31_DIR" "$m"; done; g2 "$db" ;;
-    all) for m in $L31; do apm "$db" "$PR31_DIR" "$m"; done; apm "$db" "$PR44_DIR" "$M44"; apm "$db" "$PR45_DIR" "$M45"
-         apm "$db" "$PR46_DIR" "$M46"; g1 "$db"; g2 "$db" ;;
-  esac
-}
-need() { for v in "$@"; do [ -n "${!v:-}" ] && [ -d "${!v}/supabase/migrations" ] || return 1; done; }
+prep() { case "$2" in s1) g1 "$1"; g2 "$1";; pre_s1) g1 "$1";; esac; }
+tplof() { case "$1" in s1) echo ajg_tpl_s1;; pre_s1) echo ajg_tpl_pre;; esac; }
 
-# Does the S1 source (PR #31 or PR #53) redefine the quota RPC? #31's S1 files do (older body => apply-order hazard);
-# #53's do not (REVOKE/trigger only). The order-hazard and rollback assertions below depend on this, and are
-# STRICTER, not weaker, in the no-redefine case (the guard must survive S1 in either order).
-s1_redef=0
-if need PR31_DIR; then
-  for m in $L31; do
-    grep -qiE 'create or replace function[[:space:]]+public\.fn_create_ai_job_if_entitled' "$PR31_DIR/supabase/migrations/$m.sql" && s1_redef=1
-  done
-  echo "S1 source redefines fn_create_ai_job_if_entitled: $s1_redef"
-fi
-
-variants="main"
-need PR31_DIR && variants="$variants pr31" || echo "SKIP pr31: PR31_DIR not set"
-need PR31_DIR PR44_DIR PR45_DIR PR46_DIR && variants="$variants all" || echo "SKIP all: PR31_DIR/PR44_DIR/PR45_DIR/PR46_DIR not all set"
-
-for v in $variants; do
+for v in s1 pre_s1; do
   echo "== variant $v"
-  db="ajg_$v"; mk "$db"; prep "$db" "$v"; P -d "$db" -f "$here/support/fixtures.sql" >/dev/null
+  db="ajg_$v"; mk "$db" "$(tplof $v)"; prep "$db" "$v"; P -d "$db" -f "$here/support/fixtures.sql" >/dev/null
   out="$(PL -d "$db" -v variant="$v" -f "$here/tests.sql" 2>&1 | grep '^RESULT')"
   echo "$out" | sed 's/^RESULT //'
   n=$(echo "$out" | grep -c ' PASS '); f=$(echo "$out" | grep -c ' FAIL ')
   [ "$f" = 0 ] && [ "$n" -gt 0 ] && pass "$v: $n assertions" || bad "$v: $f failed / $n passed"
 
   # ---- parallel: 60 owner calls + 20 member calls against a fresh trial tenant (allowance 30) ----
-  pdb="ajg_par_$v"; mk "$pdb"; prep "$pdb" "$v"; P -d "$pdb" -f "$here/support/fixtures.sql" >/dev/null
+  pdb="ajg_par_$v"; mk "$pdb" "$(tplof $v)"; prep "$pdb" "$v"; P -d "$pdb" -f "$here/support/fixtures.sql" >/dev/null
   P -d "$pdb" -c "insert into auth.users(id,email) values ('c2000000-0000-4000-8000-0000000000c2','member-c@example.invalid'); insert into user_profiles(id,tenant_id,nama,role) values ('c2000000-0000-4000-8000-0000000000c2','c0000000-0000-4000-8000-00000000000c','Member C','member')" >/dev/null
   export HOST PORT USER_ pdb
   { for i in $(seq 60); do echo c1000000-0000-4000-8000-0000000000c1; done; for i in $(seq 20); do echo c2000000-0000-4000-8000-0000000000c2; done; } \
@@ -78,69 +69,61 @@ for v in $variants; do
   [ "$t" = 30 ] && [ "$rows" = 30 ] && pass "$v: 80 parallel calls (60 owner + 20 member) -> exactly 30 allowed, 30 rows" || bad "$v: parallel allowed=$t rows=$rows (want 30/30)"
 done
 
-# ---- part 2 refuses to apply while authenticated still has DELETE (prerequisite fail-closed) ----
-mk ajg_pre; g1 ajg_pre; P -d ajg_pre -f "$here/support/fixtures.sql" >/dev/null
+# ---- billing-behaviour parity: owner results identical before (live B10 body) and after the guard ----
+mk ajg_par_pre ajg_tpl_s1; P -d ajg_par_pre -f "$here/support/fixtures.sql" >/dev/null
+PL -d ajg_par_pre -f "$here/parity.sql" 2>&1 | grep '^PARITY' > "$here/.parity.before"
+g1 ajg_par_pre; g2 ajg_par_pre
+PL -d ajg_par_pre -f "$here/parity.sql" 2>&1 | grep '^PARITY' > "$here/.parity.after"
+nl=$(wc -l < "$here/.parity.before")
+if [ "$nl" -ge 9 ] && cmp -s "$here/.parity.before" "$here/.parity.after"; then pass "billing parity: $nl subscription scenarios (trial, limit, expired, PAST_DUE, CANCELED, plan!=trial, carryover) identical for owners before/after the guard"; else bad "billing parity differs"; diff "$here/.parity.before" "$here/.parity.after"; fi
+rm -f "$here/.parity.before" "$here/.parity.after"
+
+# ---- part 2 refuses to apply while authenticated still has DELETE (prerequisite fail-closed: S1 first) ----
+mk ajg_pre ajg_tpl_pre; g1 ajg_pre; P -d ajg_pre -f "$here/support/fixtures.sql" >/dev/null
 o="$(PL -d ajg_pre -v ON_ERROR_STOP=1 -f "$root/supabase/migrations/$G2.sql" 2>&1 || true)"
-if echo "$o" | grep -q "prerequisite missing: apply PR #31"; then pass "part 2 refuses without PR #31 (fail-closed prerequisite)"; else bad "part 2 applied without PR #31"; fi
+if echo "$o" | grep -q "prerequisite missing: apply PR #31"; then pass "part 2 refuses without S1 (authenticated still has DELETE): fail-closed prerequisite"; else bad "part 2 applied without S1"; fi
+# part 2 also refuses when part 1 is not live (S1 present, guard function missing)
+mk ajg_nog1 ajg_tpl_s1
+o="$(PL -d ajg_nog1 -v ON_ERROR_STOP=1 -f "$root/supabase/migrations/$G2.sql" 2>&1 || true)"
+if echo "$o" | grep -q "part 1 (quota guard) is not live"; then pass "part 2 refuses when part 1 is not live"; else bad "part 2 applied without part 1"; fi
 
-# ---- apply-order hazard: guard applied BEFORE #31 is overwritten by #31's older RPC body -> part 2 must refuse ----
-if need PR31_DIR; then
-  mk ajg_rev; g1 ajg_rev; for m in $L31; do apm ajg_rev "$PR31_DIR" "$m"; done; P -d ajg_rev -f "$here/support/fixtures.sql" >/dev/null
-  r1=$(PA -d ajg_rev -c "select position('ROLE_NOT_ALLOWED' in pg_get_functiondef('public.fn_create_ai_job_if_entitled(text,jsonb)'::regprocedure))")
-  o="$(PL -d ajg_rev -v ON_ERROR_STOP=1 -f "$root/supabase/migrations/$G2.sql" 2>&1 || true)"
-  if [ "$s1_redef" = 1 ]; then
-    if [ "$r1" = 0 ] && echo "$o" | grep -q "part 1 (quota guard) is not live"; then pass "wrong order (guard, then #31) is DETECTED: guard overwritten, part 2 refuses"; else bad "order hazard not detected (r1=$r1)"; fi
-    g1 ajg_rev; g2 ajg_rev && pass "re-applying part 1 repairs the order hazard; part 2 then applies" || bad "repair failed"
-  else
-    # S1 = PR #53: its migrations never redefine the RPC, so applying them AFTER the guard must leave the guard intact
-    # (no hazard), compared byte-for-byte with the function as it was right after part 1.
-    fb=$(PA -d ajg_rev -c "select md5(pg_get_functiondef('public.fn_create_ai_job_if_entitled(text,jsonb)'::regprocedure))")
-    mk ajg_rev2; g1 ajg_rev2; fa=$(PA -d ajg_rev2 -c "select md5(pg_get_functiondef('public.fn_create_ai_job_if_entitled(text,jsonb)'::regprocedure))")
-    if [ "$r1" -gt 0 ] && [ "$fb" = "$fa" ] && ! echo "$o" | grep -q "prerequisite missing"; then pass "wrong order (guard, then #53 S1) is HARMLESS: S1 leaves the guarded RPC byte-identical and part 2 applies"; else bad "S1 (#53) altered/removed the guard (r1=$r1 same_fn=$([ "$fb" = "$fa" ] && echo y || echo n))"; fi
-  fi
-fi
+# ---- repo order: guard at its own file position, followed by every later migration (B1, B2, plan-tampering, P0-2...) ----
+P -d postgres -c "drop database if exists ajg_order" -c "create database ajg_order" >/dev/null
+P -d ajg_order -f "$here/support/base.sql" >/dev/null
+for f in "$root"/supabase/migrations/2026*.sql; do PL -d ajg_order -f "$f" >/dev/null 2>&1 || true; done
+fnd=$(PA -d ajg_order -c "select pg_get_functiondef('public.fn_create_ai_job_if_entitled(text,jsonb)'::regprocedure)")
+mk ajg_alone ajg_tpl_s1; g1 ajg_alone; g2 ajg_alone
+a=$(PA -d ajg_order -c "select md5(pg_get_functiondef('public.fn_create_ai_job_if_entitled(text,jsonb)'::regprocedure))")
+b=$(PA -d ajg_alone -c "select md5(pg_get_functiondef('public.fn_create_ai_job_if_entitled(text,jsonb)'::regprocedure))")
+tr=$(PA -d ajg_order -c "select count(*) from pg_trigger where tgrelid='public.prompter_ai_jobs'::regclass and tgname in ('trg_prompter_ai_jobs_immutable','trg_prompter_ai_jobs_no_truncate','trg_prompter_ai_jobs_no_delete')")
+[ "$a" = "$b" ] && [ "$tr" = 3 ] && echo "$fnd" | grep -q ROLE_NOT_ALLOWED && pass "guard applied at its repo position survives every later migration (RPC md5 == standalone apply; 3 triggers present)" || bad "later migration altered the guard (md5 $a vs $b, triggers=$tr)"
 
-# ---- idempotency, rollback, re-apply, no privilege change (use the last integration variant available) ----
-INCLUDE_FN=true; rv=main; need PR31_DIR && rv=pr31; need PR31_DIR PR44_DIR PR45_DIR PR46_DIR && rv=all
-echo "== idempotent / rollback / reapply on variant $rv"
-[ "$rv" = main ] && INCLUDE_FN=false   # on main the rollback intentionally keeps #31's fail-closed block (see rollback header)
-# Same when S1 is #53: it never redefines the RPC, so the pre-state function is the older B10 body and the rollback
-# intentionally lands on the stricter fail-closed body (never removes a security fix). Triggers, ACLs and the whole
-# privilege matrix are still compared exactly, and the final check below still pins ENTITLEMENT_NOT_CONFIGURED present
-# and ROLE_NOT_ALLOWED absent after rollback.
-[ "$rv" != main ] && [ "$s1_redef" = 0 ] && INCLUDE_FN=false
+# ---- idempotency, rollback, re-apply, no privilege change (variant s1) ----
+echo "== idempotent / rollback / reapply on variant s1 (RPC compared byte-for-byte with the B10 body)"
 sigq="select md5(string_agg(x, '|' order by x)) from (
-  select 'f:'||md5(pg_get_functiondef(p.oid)) x from pg_proc p where p.proname='fn_create_ai_job_if_entitled' and p.pronamespace='public'::regnamespace and $INCLUDE_FN
+  select 'f:'||md5(pg_get_functiondef(p.oid)) x from pg_proc p where p.proname='fn_create_ai_job_if_entitled' and p.pronamespace='public'::regnamespace
   union all select 't:'||tgname from pg_trigger where tgrelid='public.prompter_ai_jobs'::regclass and not tgisinternal
   union all select 'g:'||tbl||role||priv||granted::text from t_matrix()
   union all select 'a:'||aclexplode.privilege_type||aclexplode.grantee::text||aclexplode.is_grantable::text from pg_class c, aclexplode(c.relacl) where c.oid='public.prompter_ai_jobs'::regclass
-  union all select 'x:'||p.proname||has_function_privilege('anon',p.oid,'execute')::text||has_function_privilege('authenticated',p.oid,'execute')::text from pg_proc p where p.proname='fn_create_ai_job_if_entitled'
+  union all select 'x:'||p.proname||has_function_privilege('anon',p.oid,'execute')::text||has_function_privilege('authenticated',p.oid,'execute')::text||has_function_privilege('service_role',p.oid,'execute')::text from pg_proc p where p.proname='fn_create_ai_job_if_entitled'
+  union all select 'o:'||pg_get_userbyid(p.proowner)||p.prosecdef::text from pg_proc p where p.proname='fn_create_ai_job_if_entitled'
 ) s"
-mk ajg_rb
-case "$rv" in
-  main) : ;;
-  pr31) for m in $L31; do apm ajg_rb "$PR31_DIR" "$m"; done ;;
-  all) for m in $L31; do apm ajg_rb "$PR31_DIR" "$m"; done; apm ajg_rb "$PR44_DIR" "$M44"; apm ajg_rb "$PR45_DIR" "$M45"; apm ajg_rb "$PR46_DIR" "$M46" ;;
-esac
+mk ajg_rb ajg_tpl_s1
 P -d ajg_rb -f "$here/support/fixtures.sql" >/dev/null
 pre=$(PA -d ajg_rb -c "$sigq")
-g1 ajg_rb; [ "$rv" != main ] && g2 ajg_rb
+g1 ajg_rb; g2 ajg_rb
 post=$(PA -d ajg_rb -c "$sigq")
-g1 ajg_rb; [ "$rv" != main ] && g2 ajg_rb; g1 ajg_rb
+g1 ajg_rb; g2 ajg_rb; g1 ajg_rb
 again=$(PA -d ajg_rb -c "$sigq")
 [ "$post" = "$again" ] && pass "migrations are idempotent (apply x2 -> identical function/trigger/ACL signature)" || bad "not idempotent"
 [ "$pre" != "$post" ] && pass "migrations change the function/trigger set (sanity)" || bad "migration had no effect"
-[ "$rv" != main ] && P -d ajg_rb -f "$root/supabase/rollback/$G2.down.sql"
+P -d ajg_rb -f "$root/supabase/rollback/$G2.down.sql"
 P -d ajg_rb -f "$root/supabase/rollback/$G1.down.sql"
 rolled=$(PA -d ajg_rb -c "$sigq")
-[ "$rolled" = "$pre" ] && pass "rollback restores the exact pre-migration function, triggers and ACL/privilege matrix (no privilege re-opened)" || bad "rollback state differs from pre-migration state"
+[ "$rolled" = "$pre" ] && pass "rollback restores the exact pre-migration (live B10) function, triggers and ACL/privilege matrix (no privilege re-opened)" || bad "rollback state differs from pre-migration state"
 P -d ajg_rb -f "$root/supabase/rollback/$G2.down.sql" 2>/dev/null; P -d ajg_rb -f "$root/supabase/rollback/$G1.down.sql"   # rollback twice is harmless
 [ "$(PA -d ajg_rb -c "$sigq")" = "$pre" ] && pass "rollback is itself idempotent" || bad "second rollback changed state"
-g1 ajg_rb; [ "$rv" != main ] && g2 ajg_rb
+g1 ajg_rb; g2 ajg_rb
 [ "$(PA -d ajg_rb -c "$sigq")" = "$post" ] && pass "re-apply after rollback == first apply" || bad "re-apply differs"
-# after rollback: no guard left, but the fail-closed entitlement block (a security fix) is still there
-P -d ajg_rb -f "$root/supabase/rollback/$G1.down.sql" >/dev/null 2>&1
-fnd=$(PA -d ajg_rb -c "select pg_get_functiondef('public.fn_create_ai_job_if_entitled(text,jsonb)'::regprocedure)")
-if echo "$fnd" | grep -q ENTITLEMENT_NOT_CONFIGURED && ! echo "$fnd" | grep -q ROLE_NOT_ALLOWED; then pass "rolled-back RPC keeps the fail-closed entitlement block and has no guard"; else bad "rolled-back RPC wrong"; fi
 
 [ "$fail" = 0 ] && echo "ALL PASSED" || { echo "SOME FAILED"; exit 1; }

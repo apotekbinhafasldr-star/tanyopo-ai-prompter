@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 
 /**
@@ -109,23 +109,94 @@ describe("AI jobs quota guard migrations", () => {
 });
 
 describe("AI jobs quota guard rollbacks", () => {
+  const fnOf = (sql: string) => {
+    const i = sql.indexOf("create or replace function public.fn_create_ai_job_if_entitled(");
+    return sql.slice(i, sql.indexOf("$$;", i) + 3);
+  };
   it("contain no GRANT (cannot re-open any privilege) and are not in the migrations dir", () => {
     for (const p of [D1, D2]) {
       expect(code(read(p))).not.toMatch(/\bgrant\b/i);
       expect(p).not.toContain("supabase/migrations");
     }
   });
-  it("rollback 1 restores a function that keeps the fail-closed entitlement block and has no role guard", () => {
+  it("rollback 1 restores the EXACT B10 body that is live (byte-for-byte copy from the B10 migration)", () => {
+    const b10 = fnOf(read("supabase/migrations/20260915051359_prompter_b10_payment_billing_core.sql"));
+    expect(b10.length).toBeGreaterThan(1500);
+    expect(fnOf(read(D1))).toBe(b10);
     const d = code(read(D1));
-    expect(d).toContain("ENTITLEMENT_NOT_CONFIGURED");
     expect(d).not.toContain("ROLE_NOT_ALLOWED");
+    expect(d).not.toContain("ENTITLEMENT_NOT_CONFIGURED");
     expect(d).toMatch(/drop trigger if exists trg_prompter_ai_jobs_immutable/);
+  });
+  it("rollback 2 only drops the delete trigger and its function", () => {
+    const d = code(read(D2));
+    expect(d).toMatch(/drop trigger if exists trg_prompter_ai_jobs_no_delete/);
+    expect(d).toMatch(/drop function if exists public\.fn_guard_ai_job_delete\(\)/);
+  });
+});
+
+describe("compatibility with S1 (already in the tree and on production)", () => {
+  const S1 = "supabase/migrations/20261019100000_prompter_p0_ai_jobs_lockdown.sql";
+  const g1 = code(read(G1));
+
+  it("S1 does not redefine the RPC, so the guard is the next definition after B10 (no hidden overwrite)", () => {
+    const definers = readdirSync(path.join(root, "supabase/migrations"))
+      .filter((f) => f.endsWith(".sql"))
+      .filter((f) => /create or replace function public\.fn_create_ai_job_if_entitled\(/i.test(code(read(`supabase/migrations/${f}`))))
+      .sort();
+    expect(definers).toEqual([
+      "20260915043800_prompter_b9_entitlement_enforcement.sql",
+      "20260915051359_prompter_b10_payment_billing_core.sql",
+      "20261021120000_prompter_ai_jobs_quota_guard.sql",
+    ]);
+  });
+
+  it("the columns the guard freezes are NOT among the 10 columns S1 grants UPDATE on (defence in depth, no overlap)", () => {
+    const s1 = code(read(S1));
+    const granted = (s1.match(/grant update \(([\s\S]*?)\) on public\.prompter_ai_jobs/i)?.[1] ?? "")
+      .split(",")
+      .map((c) => c.trim())
+      .filter(Boolean);
+    expect(granted).toHaveLength(10);
+    for (const col of ["id", "tenant_id", "actor_user_id", "job_type", "input_reference", "created_at"]) {
+      expect(granted).not.toContain(col);
+    }
+  });
+
+  it("part 2 prerequisite is the S1 DELETE revoke, which S1 performs", () => {
+    expect(code(read(S1))).toMatch(/revoke insert, delete, truncate on public\.prompter_ai_jobs from authenticated, anon/);
+    expect(code(read(G2))).toContain("has_table_privilege('authenticated', 'public.prompter_ai_jobs', 'DELETE')");
+  });
+
+  it("guard keeps the B10 behaviour lines (trial = FREE numbers, PAST_DUE/CANCELED denied, trial expiry)", () => {
+    expect(g1).toContain("case when v_sub.status = 'TRIALING' then 'FREE' else coalesce(v_sub.plan, 'FREE') end");
+    expect(g1).toContain("v_sub.status in ('PAST_DUE', 'CANCELED')");
+    expect(g1).toContain("now() > v_sub.current_period_end");
+    expect(g1).toContain("v_period_start := coalesce(v_sub.current_period_start, v_sub.created_at)");
   });
 });
 
 describe("app compatibility", () => {
+  const svc = read("services/ai-jobs.ts");
   it("services/ai-jobs.ts handles unknown denial reasons with its generic message", () => {
-    const svc = read("services/ai-jobs.ts");
     expect(svc).toMatch(/default:\s*\n\s*return "Akses AI tidak diizinkan/);
   });
+  it("services/ai-jobs.ts maps every reason the guard adds to a specific message", () => {
+    for (const reason of ["ROLE_NOT_ALLOWED", "INVALID_JOB_TYPE", "INVALID_INPUT", "ENTITLEMENT_NOT_CONFIGURED"]) {
+      expect(g1Reasons()).toContain(reason);
+      expect(svc).toContain(`case "${reason}"`);
+    }
+  });
+  it("job release for an unconfigured provider uses the service-role client (DELETE guard compatible)", () => {
+    const fn = svc.slice(svc.indexOf("async function releaseUnconfiguredJob"), svc.indexOf("describeEntitlementBlock"));
+    expect(fn).toContain("createAdminClient()");
+    expect(fn).toMatch(/admin\s*\.from\("prompter_ai_jobs"\)\s*\.delete\(\)/);
+    // the user-client fallback only writes S1-granted bookkeeping columns
+    expect(fn).toMatch(/\.update\(\{\s*status: "FAILED",\s*error:[^}]*error_category: "CONFIG",\s*completed_at:/);
+  });
 });
+
+function g1Reasons(): string[] {
+  const sql = code(read(G1));
+  return [...sql.matchAll(/'([A-Z_]+)'::text/g)].map((m) => m[1]);
+}

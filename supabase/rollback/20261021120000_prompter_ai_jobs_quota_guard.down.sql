@@ -1,9 +1,11 @@
 -- ROLLBACK for 20261021120000_prompter_ai_jobs_quota_guard.sql
 -- Removes the role check / job_type / input limits and the update+truncate guard triggers. Touches NO grant,
 -- table, column, policy or data, so it cannot re-open any privilege.
--- FAIL-CLOSED CHOICE: the function is restored to the PR #31 definition (B10 body + ENTITLEMENT_NOT_CONFIGURED),
--- never to the older B10 body: a rollback must not remove a security fix, whatever the apply order was.
--- (On a database where PR #31 was never applied this leaves the stricter, fail-closed behaviour.)
+-- RESTORES THE EXACT PRE-GUARD FUNCTION: the B10 body that is live on production (RPC md5 17bd1c2bee1069ca6460774e9021fa9d
+-- before this guard), copied byte-for-byte from 20260915051359_prompter_b10_payment_billing_core.sql. Rebased on main
+-- (S1 already in the tree): S1 never redefined the RPC, so there is no "#31 body" to fall back to any more. This means the
+-- ENTITLEMENT_NOT_CONFIGURED fail-closed block that part 1 adds is removed again by this rollback (it is not live today).
+-- CREATE OR REPLACE keeps owner and ACL (anon no / authenticated yes / service_role yes).
 -- Roll back part 2 (delete guard) first if it is applied. Not in supabase/migrations on purpose.
 
 drop trigger if exists trg_prompter_ai_jobs_immutable on public.prompter_ai_jobs;
@@ -52,22 +54,22 @@ begin
     return;
   end if;
 
+  -- Batch B10 Gap 2: a subscription that has fallen behind on payment or
+  -- been cancelled never gets paid-plan entitlement, regardless of what
+  -- `plan` still says.
   if v_sub.status in ('PAST_DUE', 'CANCELED') then
     return query select null::uuid, false, 'SUBSCRIPTION_' || v_sub.status, 0, 0;
     return;
   end if;
 
+  -- Batch B10 Gap 1: the trial is always the trial -- a `plan` value set
+  -- via changePlan() (governance preference only, no payment) never
+  -- grants paid-tier numbers while status is still TRIALING.
   v_entitlement_plan := case when v_sub.status = 'TRIALING' then 'FREE' else coalesce(v_sub.plan, 'FREE') end;
 
   select * into v_entitlement from public.prompter_plan_entitlements where plan = v_entitlement_plan;
   if not found then
     select * into v_entitlement from public.prompter_plan_entitlements where plan = 'FREE';
-  end if;
-
-  -- FAIL CLOSED: no entitlement row (or a NULL allowance) never means "unlimited".
-  if v_entitlement.plan is null or v_entitlement.ai_usage_allowance is null then
-    return query select null::uuid, false, 'ENTITLEMENT_NOT_CONFIGURED'::text, 0, 0;
-    return;
   end if;
 
   if v_sub.status = 'TRIALING' then
@@ -92,3 +94,6 @@ begin
   return query select v_new_job_id, true, null::text, v_used + 1, v_entitlement.ai_usage_allowance;
 end;
 $$;
+
+comment on function public.fn_create_ai_job_if_entitled(text, jsonb) is
+  'Batch B9 P0-1/P1-2/P2-1, extended by Batch B10 to deny PAST_DUE/CANCELED subscriptions and to always use FREE-tier numbers while TRIALING regardless of the plan column (see this migration''s header for why).';
