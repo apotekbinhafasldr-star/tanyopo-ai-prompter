@@ -70,7 +70,7 @@ export function VerifyOtpForm({ email, onChangeEmail }: { email: string; onChang
               autoFocus
               pattern="[0-9]*"
               placeholder="Masukkan kode"
-              className="h-14 text-center font-mono text-2xl tracking-[0.35em]"
+              className="h-14 text-center font-mono text-2xl tracking-[0.35em] placeholder:font-sans placeholder:text-base placeholder:tracking-normal"
               required
               aria-describedby={verifyState.error ? "otp-error" : undefined}
             />
