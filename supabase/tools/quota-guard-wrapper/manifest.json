@@ -33,7 +33,7 @@
     },
     "postflight": {
       "file": "postflight_readonly.sql",
-      "sha256": "aae7b6cee792be8c3c679475d2839b33ce076bda082039d40b3fae7d97f3259f"
+      "sha256": "39e6def0d69f3cd5bd4fce912c235cbc777f366a4dee3cdb07159fc16f41c92c"
     }
   }
 }

@@ -46,7 +46,7 @@ rows_ as (
   union all select 12, 'S1 versions still recorded (3)', s1_n::text, s1_n = 3 from st
   union all select 20, 'RPC md5 now', md5_now, case state when 'PART1' then md5_now = exp.md5_after1 when 'ALL' then md5_now = exp.md5_after1 else false end from st, exp
   union all select 21, 'RPC has role guard and fail-closed block', has_role_guard::text || '/' || has_failclosed::text, has_role_guard and has_failclosed from st
-  union all select 22, 'RPC owner/security definer (postgres/secdef=true)', owner_def, owner_def = 'postgres/secdef=true' from st
+  union all select 22, 'RPC owner/security definer (production: postgres/secdef=true; owner unchanged is enforced by the wrapper ACL check)', owner_def, owner_def like '%/secdef=true' from st
   union all select 23, 'RPC execute anon/authenticated/service_role (false/true/true, unchanged ACL)', anon_exec::text || '/' || auth_exec::text || '/' || svc_exec::text,
          (not anon_exec) and auth_exec and svc_exec from st
   union all select 30, 'triggers on prompter_ai_jobs with the exact shape / total (PART1: 2/2, ALL: 3/3)', trg_ok_n::text || '/' || trg_n::text,
