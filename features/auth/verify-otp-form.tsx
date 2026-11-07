@@ -3,7 +3,7 @@
 import { useActionState, useEffect, useState } from "react";
 import Link from "next/link";
 import { resendSignupOtpAction, verifyEmailOtpAction, type OtpActionState } from "@/features/auth/otp-actions";
-import { RESEND_COOLDOWN_SECONDS } from "@/lib/auth/email-otp";
+import { RESEND_COOLDOWN_SECONDS, sanitizeOtpInput } from "@/lib/auth/email-otp";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -26,7 +26,7 @@ function ResendButton({ pending }: { pending: boolean }) {
   const secondsLeft = RESEND_COOLDOWN_SECONDS - elapsed;
   return (
     <Button type="submit" variant="outline" className="w-full" disabled={secondsLeft > 0 || pending} loading={pending}>
-      {secondsLeft > 0 ? `Kirim ulang kode (${secondsLeft} dtk)` : "Kirim ulang kode"}
+      {secondsLeft > 0 ? `Kirim Ulang Kode (${secondsLeft} dtk)` : "Kirim Ulang Kode"}
     </Button>
   );
 }
@@ -39,6 +39,8 @@ function ResendButton({ pending }: { pending: boolean }) {
 export function VerifyOtpForm({ email, onChangeEmail }: { email: string; onChangeEmail: () => void }) {
   const [verifyState, verifyAction, verifying] = useActionState(verifyEmailOtpAction, initialState);
   const [resendState, resendAction, resending] = useActionState(resendSignupOtpAction, initialState);
+  // Controlled so typing, pasting and browser/keyboard autofill all end up as clean digits.
+  const [code, setCode] = useState("");
 
   return (
     <Card>
@@ -57,12 +59,18 @@ export function VerifyOtpForm({ email, onChangeEmail }: { email: string; onChang
             <Input
               id="otp-token"
               name="token"
+              value={code}
+              onChange={(event) => setCode(sanitizeOtpInput(event.target.value))}
               inputMode="numeric"
               autoComplete="one-time-code"
-              pattern="[0-9 ]*"
-              maxLength={16}
+              enterKeyHint="done"
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+              autoFocus
+              pattern="[0-9]*"
               placeholder="Masukkan kode"
-              className="text-center text-lg tracking-widest"
+              className="h-14 text-center font-mono text-2xl tracking-[0.35em] placeholder:font-sans placeholder:text-base placeholder:tracking-normal"
               required
               aria-describedby={verifyState.error ? "otp-error" : undefined}
             />
@@ -72,8 +80,8 @@ export function VerifyOtpForm({ email, onChangeEmail }: { email: string; onChang
               {verifyState.error}
             </p>
           ) : null}
-          <Button type="submit" loading={verifying} className="w-full">
-            Verifikasi
+          <Button type="submit" loading={verifying} className="h-12 w-full text-base">
+            Verifikasi Email
           </Button>
         </form>
 

@@ -6,6 +6,7 @@ import {
   normalizeOtpInput,
   OTP_MESSAGES,
   OTP_PATTERN,
+  sanitizeOtpInput,
   RESEND_COOLDOWN_SECONDS,
 } from "@/lib/auth/email-otp";
 
@@ -80,5 +81,19 @@ describe("error mapping is safe and never echoes raw text", () => {
 
   it("resend failures do not reveal whether an email exists", () => {
     expect(mapResendError({ status: 400, code: "user_not_found" }).message).toBe(mapResendError({ status: 400 }).message);
+  });
+});
+
+describe("sanitizeOtpInput (live field cleaning)", () => {
+  it("keeps digits only and caps at the longest possible code", () => {
+    expect(sanitizeOtpInput("12 34-56")).toBe("123456");
+    expect(sanitizeOtpInput("abc")).toBe("");
+    expect(sanitizeOtpInput("１２３")).toBe("");
+    expect(sanitizeOtpInput("123456789012")).toBe("1234567890");
+  });
+
+  it("does not assume 6 or 8 digits", () => {
+    expect(sanitizeOtpInput("123456")).toBe("123456");
+    expect(sanitizeOtpInput("12345678")).toBe("12345678");
   });
 });

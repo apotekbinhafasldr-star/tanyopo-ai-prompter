@@ -37,6 +37,9 @@ export interface AuthActionState {
   /** Set only when EMAIL_OTP_ENABLED is on and a NEW account was created without a session: the form then shows the
    * code screen for this address. Never set for an existing account. */
   verifyEmail?: string;
+  /** Set only with `existingAccount` while EMAIL_OTP_ENABLED is on: lets someone who never finished verifying open the
+   * code screen for the address they typed. It says nothing about whether that account is verified. */
+  otpAvailable?: boolean;
 }
 
 export interface RegisterKeptValues {
@@ -187,6 +190,7 @@ export async function registerAction(
       info: "Email ini sudah terdaftar. Silakan masuk menggunakan akun Anda.",
       existingAccount: true,
       values,
+      ...(isEmailOtpEnabled() ? { otpAvailable: true } : {}),
     };
   }
 

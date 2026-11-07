@@ -75,14 +75,40 @@ describe("VerifyOtpForm — mobile-first code screen", () => {
     const input = screen.getByLabelText("Kode dari email") as HTMLInputElement;
     expect(input.getAttribute("inputmode")).toBe("numeric");
     expect(input.getAttribute("autocomplete")).toBe("one-time-code");
-    expect(screen.getByRole("button", { name: "Verifikasi" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Verifikasi Email" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Kembali ke login" }).getAttribute("href")).toBe("/login");
   });
 
-  it("does not hard-code a length: no maxLength of 6 or 8 on the field", () => {
+  it("does not hard-code a length: no maxLength attribute, so 6 and 8 digit codes both fit", () => {
     render(<VerifyOtpForm email="baru@example.com" onChangeEmail={() => {}} />);
-    const max = Number((screen.getByLabelText("Kode dari email") as HTMLInputElement).getAttribute("maxlength"));
-    expect(max).toBeGreaterThan(10);
+    expect((screen.getByLabelText("Kode dari email") as HTMLInputElement).getAttribute("maxlength")).toBeNull();
+  });
+
+  it("one field only: typing keeps digits, paste with spaces/dashes/letters is cleaned, autofill (change event) works", () => {
+    render(<VerifyOtpForm email="baru@example.com" onChangeEmail={() => {}} />);
+    const input = screen.getByLabelText("Kode dari email") as HTMLInputElement;
+    expect(document.querySelectorAll('input[name="token"]').length).toBe(1);
+
+    fireEvent.change(input, { target: { value: "12ab34" } });
+    expect(input.value).toBe("1234");
+
+    fireEvent.change(input, { target: { value: " 123 456 " } });
+    expect(input.value).toBe("123456");
+
+    fireEvent.change(input, { target: { value: "1234-5678" } });
+    expect(input.value).toBe("12345678");
+
+    fireEvent.change(input, { target: { value: "123456789012345" } });
+    expect(input.value).toBe("1234567890");
+  });
+
+  it("is built for mobile: numeric keypad, one-time-code autofill, focused on open, large type", () => {
+    render(<VerifyOtpForm email="baru@example.com" onChangeEmail={() => {}} />);
+    const input = screen.getByLabelText("Kode dari email") as HTMLInputElement;
+    expect(input.getAttribute("inputmode")).toBe("numeric");
+    expect(input.getAttribute("autocomplete")).toBe("one-time-code");
+    expect(input.getAttribute("pattern")).toBe("[0-9]*");
+    expect(document.activeElement).toBe(input);
   });
 
   it("never says the account is verified before the server has confirmed", () => {
@@ -93,7 +119,7 @@ describe("VerifyOtpForm — mobile-first code screen", () => {
   it("resend is disabled during the 60 second cooldown, with a visible countdown, then enabled", () => {
     vi.useFakeTimers();
     render(<VerifyOtpForm email="baru@example.com" onChangeEmail={() => {}} />);
-    const button = () => screen.getByRole("button", { name: /Kirim ulang kode/ }) as HTMLButtonElement;
+    const button = () => screen.getByRole("button", { name: /Kirim Ulang Kode/ }) as HTMLButtonElement;
 
     expect(button().disabled).toBe(true);
     expect(button().textContent).toContain("60");
@@ -108,7 +134,7 @@ describe("VerifyOtpForm — mobile-first code screen", () => {
       vi.advanceTimersByTime(30_000);
     });
     expect(button().disabled).toBe(false);
-    expect(button().textContent).toBe("Kirim ulang kode");
+    expect(button().textContent).toBe("Kirim Ulang Kode");
   });
 
   it("'Salah email? Ubah' calls back so the person can return to the form", () => {
@@ -204,7 +230,7 @@ describe("RegisterForm + real actions — flag ON", () => {
     act(() => {
       vi.advanceTimersByTime(60_000);
     });
-    const button = screen.getByRole("button", { name: "Kirim ulang kode" }) as HTMLButtonElement;
+    const button = screen.getByRole("button", { name: "Kirim Ulang Kode" }) as HTMLButtonElement;
     expect(button.disabled).toBe(false);
 
     await act(async () => {
@@ -214,8 +240,68 @@ describe("RegisterForm + real actions — flag ON", () => {
     expect(resendMock).toHaveBeenCalledTimes(1);
     expect(resendMock).toHaveBeenCalledWith({ type: "signup", email: "baru@example.com" });
     expect(screen.getByRole("status").textContent).toBe(OTP_MESSAGES.resendSent);
-    const again = screen.getByRole("button", { name: /Kirim ulang kode/ }) as HTMLButtonElement;
+    const again = screen.getByRole("button", { name: /Kirim Ulang Kode/ }) as HTMLButtonElement;
     expect(again.disabled).toBe(true);
     expect(again.textContent).toContain("60");
+  });
+});
+
+describe("RegisterForm + real actions — existing / unfinished account while the flag is ON", () => {
+  beforeEach(() => vi.stubEnv("EMAIL_OTP_ENABLED", "true"));
+
+  it("the existing-account card offers 'Belum verifikasi? Masukkan kode' and it opens the code screen without any request", async () => {
+    signUpMock.mockResolvedValue({ data: { user: { identities: [] }, session: null }, error: null });
+    render(<RegisterForm />);
+    fillRegister();
+    await submitFirstForm();
+
+    expect(screen.getByText("Email sudah terdaftar")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Masuk ke akun Anda" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Gunakan email lain" })).toBeTruthy();
+    signUpMock.mockClear();
+
+    fireEvent.click(screen.getByRole("button", { name: "Belum verifikasi? Masukkan kode" }));
+
+    expect(screen.getByText("Masukkan kode verifikasi")).toBeTruthy();
+    expect(screen.getByTestId("otp-email").textContent).toBe("baru@example.com");
+    expect(signUpMock).not.toHaveBeenCalled();
+    expect(verifyOtpMock).not.toHaveBeenCalled();
+    expect(resendMock).not.toHaveBeenCalled();
+  });
+
+  it("from that code screen 'Salah email? Ubah' returns to the form with the typed values, never the success card", async () => {
+    signUpMock.mockResolvedValue({ data: { user: { identities: [] }, session: null }, error: null });
+    render(<RegisterForm />);
+    fillRegister();
+    await submitFirstForm();
+    fireEvent.click(screen.getByRole("button", { name: "Belum verifikasi? Masukkan kode" }));
+    fireEvent.click(screen.getByRole("button", { name: "Salah email? Ubah" }));
+
+    expect(screen.getByText("Buat akun LINOE")).toBeTruthy();
+    expect(screen.queryByText("Cek email Anda")).toBeNull();
+    expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe("baru@example.com");
+    expect((document.getElementById("password") as HTMLInputElement).value).toBe("");
+  });
+
+  it("re-registering an UNFINISHED account (Supabase returns the user with identities) goes straight to the code screen", async () => {
+    signUpMock.mockResolvedValue({ data: { user: { identities: [{ id: "i" }] }, session: null }, error: null });
+    render(<RegisterForm />);
+    fillRegister();
+    await submitFirstForm();
+    expect(screen.getByText("Masukkan kode verifikasi")).toBeTruthy();
+    expect(screen.queryByText("Cek email Anda")).toBeNull();
+  });
+});
+
+describe("RegisterForm + real actions — existing account while the flag is OFF", () => {
+  it("shows no code entry point (the three original choices only)", async () => {
+    vi.stubEnv("EMAIL_OTP_ENABLED", "");
+    signUpMock.mockResolvedValue({ data: { user: { identities: [] }, session: null }, error: null });
+    render(<RegisterForm />);
+    fillRegister();
+    await submitFirstForm();
+
+    expect(screen.getByText("Email sudah terdaftar")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Belum verifikasi? Masukkan kode" })).toBeNull();
   });
 });

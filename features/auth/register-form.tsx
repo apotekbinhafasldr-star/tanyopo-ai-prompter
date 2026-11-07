@@ -23,6 +23,21 @@ export function RegisterForm() {
   const [dismissedVerify, setDismissedVerify] = useState<AuthActionState | null>(null);
   // Format check on leaving the email field. Pure client-side: no request, no server action, no lookup of any kind.
   const [emailError, setEmailError] = useState<string | null>(null);
+  // Set when someone with an existing/unfinished account opens the code screen from the existing-account card
+  // (EMAIL_OTP_ENABLED only). No request is made by opening it.
+  const [otpEmail, setOtpEmail] = useState<string | null>(null);
+
+  if (otpEmail) {
+    return (
+      <VerifyOtpForm
+        email={otpEmail}
+        onChangeEmail={() => {
+          setOtpEmail(null);
+          setDismissed(state);
+        }}
+      />
+    );
+  }
 
   if (state.existingAccount && dismissed !== state) {
     return (
@@ -40,6 +55,11 @@ export function RegisterForm() {
           <Link href="/forgot-password" className="text-center text-sm font-medium text-brand hover:underline">
             Lupa kata sandi?
           </Link>
+          {state.otpAvailable && state.values?.email ? (
+            <Button type="button" variant="outline" className="w-full" onClick={() => setOtpEmail(state.values?.email ?? null)}>
+              Belum verifikasi? Masukkan kode
+            </Button>
+          ) : null}
           <Button type="button" variant="outline" className="w-full" onClick={() => setDismissed(state)}>
             Gunakan email lain
           </Button>
