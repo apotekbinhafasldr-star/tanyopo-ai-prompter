@@ -9,19 +9,19 @@ import type { JobType } from "@/types/database";
 
 /**
  * Claims and runs up to `batchSize` due jobs from the queue. Requires a
- * bearer secret (JOBS_PROCESSOR_SECRET) — unset (the state in every
- * environment this app has run in) means this always responds
- * NOT_CONFIGURED, regardless of caller. Even once set, nothing in this
- * app calls this endpoint on a schedule; an external scheduler (Vercel
- * Cron, pg_cron, ...) has to be configured separately to actually drive
- * production queue execution, which is why "the architecture exists" and
- * "jobs run autonomously in production" are two different, independently
- * NOT_CONFIGURED, things here.
+ * bearer secret (JOBS_PROCESSOR_SECRET) — while that variable is unset this
+ * always responds NOT_CONFIGURED (503), regardless of caller. Whether it is
+ * set in a given deployment is an environment fact this file cannot know.
+ * Even once set, nothing in this repository calls this endpoint on a
+ * schedule; an external scheduler (Vercel Cron, pg_cron, ...) has to be
+ * configured separately to drive queue execution, which is why "the
+ * architecture exists" and "jobs run autonomously" are two different,
+ * independently NOT_CONFIGURED, things here.
  *
- * JOB_HANDLERS starts empty on purpose — see the comment below. No
- * existing feature enqueues anything into this queue yet (services/jobs.ts),
- * so in every environment this app has actually run in, claimNextJob()
- * always returns null and this route is a no-op even if it were called.
+ * JOB_HANDLERS starts empty on purpose — see the comment below. As of this
+ * commit no code calls enqueueJob() (services/jobs.ts), so unless something
+ * outside this repository inserts rows, claimNextJob() returns null and this
+ * route is a no-op.
  */
 type JobHandler = (job: Job) => Promise<Record<string, unknown> | void>;
 
