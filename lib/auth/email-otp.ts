@@ -22,6 +22,15 @@ export function normalizeOtpInput(value: unknown): string {
   return typeof value === "string" ? value.replace(/[\s-]/g, "") : "";
 }
 
+/**
+ * Live sanitising for the code field: keeps digits only (so "1234 5678", "1234-5678" and pasted text with stray
+ * characters all work) and never more than the longest code Supabase can issue. It does not know, and must not guess,
+ * the configured length: Supabase is the only authority on whether the code is right.
+ */
+export function sanitizeOtpInput(value: string): string {
+  return value.replace(/\D/g, "").slice(0, OTP_MAX_DIGITS);
+}
+
 export const RESEND_COOLDOWN_SECONDS = 60;
 
 export const OTP_MESSAGES = {
