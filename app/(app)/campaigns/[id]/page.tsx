@@ -31,6 +31,7 @@ import {
   scheduleChannelCampaignAction,
 } from "@/features/campaigns/actions";
 import { LaunchChannelButton } from "@/features/campaigns/launch-button";
+import { isBudgetWritePlatformEnabled } from "@/lib/campaigns/external-budget-guard";
 import { ManualCheckPanel } from "@/features/campaigns/manual-check-panel";
 import {
   canOfferLaunch,
@@ -96,6 +97,18 @@ function resolveLaunchability(
   }
 
   return { launchable: true, reason: null };
+}
+
+const PAID_LAUNCH_PREPARING_NOTE = "Peluncuran iklan berbayar sedang dalam persiapan.";
+
+/**
+ * Display only. Mirrors the closed S1 budget gate so the launch button is not
+ * offered when the server would refuse it anyway. The gate itself (and
+ * launch-actions.ts) is unchanged and still decides on its own.
+ */
+function paidLaunchNoteFor(channel: Channel): string | undefined {
+  const platform = CHANNEL_TO_CONNECTOR[channel];
+  return platform && isBudgetWritePlatformEnabled(platform) ? undefined : PAID_LAUNCH_PREPARING_NOTE;
 }
 
 const STATUS_BANNER: Record<string, { tone: "info" | "warning" | "success"; text: string }> = {
@@ -472,7 +485,11 @@ export default async function CampaignDetailPage({
                       {cc.error && !manualCheck ? <p className="max-w-md text-xs text-danger">{cc.error}</p> : null}
                       {showLaunchControl ? (
                         launchable ? (
-                          <LaunchChannelButton channelCampaignId={cc.id} retry={cc.status === "FAILED"} />
+                          <LaunchChannelButton
+                            channelCampaignId={cc.id}
+                            retry={cc.status === "FAILED"}
+                            paidLaunchNote={paidLaunchNoteFor(cc.channel)}
+                          />
                         ) : reason ? (
                           <p className="max-w-xs text-right text-xs text-muted-foreground">{reason}</p>
                         ) : null

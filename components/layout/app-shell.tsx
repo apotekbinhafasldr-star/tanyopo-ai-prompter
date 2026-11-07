@@ -12,6 +12,8 @@ interface AppShellProps {
   userRole: string;
   /** Show the "Admin Perusahaan" entry. Decided on the server; defaults to hidden. */
   showAdminLink?: boolean;
+  /** Optional strip shown above the page content (e.g. trial status). Decided on the server. */
+  banner?: ReactNode;
   children: ReactNode;
 }
 
@@ -23,7 +25,7 @@ interface AppShellProps {
  * on small screens, opened from a slim top bar, and leaves the `lg:` docked
  * layout exactly as it was.
  */
-export function AppShell({ businessName, userName, userRole, showAdminLink = false, children }: AppShellProps) {
+export function AppShell({ businessName, userName, userRole, showAdminLink = false, banner = null, children }: AppShellProps) {
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -76,6 +78,7 @@ export function AppShell({ businessName, userName, userRole, showAdminLink = fal
       </div>
 
       <main className="flex min-h-screen flex-1 flex-col overflow-x-hidden pt-14 lg:pt-0">
+        {banner}
         {children}
       </main>
     </div>
