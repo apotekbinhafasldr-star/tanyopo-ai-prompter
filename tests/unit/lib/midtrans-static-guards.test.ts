@@ -31,11 +31,19 @@ describe("Billing B3 — static guards (sandbox only, secrets stay on the server
     expect(read("lib/billing/providers/midtrans-payment-provider.ts")).toMatch(/^import "server-only";/m);
   });
 
-  it("the adapter hard-codes SANDBOX hosts only — no production Midtrans host appears anywhere in the source", () => {
+  it("the adapter keeps sandbox as the default and gates the production hosts behind BOTH live switches (C1)", () => {
     const src = read("lib/billing/providers/midtrans-payment-provider.ts");
     expect(src).toContain("https://app.sandbox.midtrans.com/snap/v1/transactions");
     expect(src).toContain("https://api.sandbox.midtrans.com");
-    expect(src).not.toMatch(/https:\/\/(app|api)\.midtrans\.com/);
+    // each production host is written exactly once, as a constant, and only resolveMidtransMode() can select it
+    expect(src.match(/https:\/\/app\.midtrans\.com/g)).toHaveLength(1);
+    expect(src.match(/https:\/\/api\.midtrans\.com/g)).toHaveLength(1);
+    expect(src.match(/\bLIVE_MODE\b/g)?.length).toBeGreaterThan(0);
+    expect(src).toContain('flag === "true"');
+    expect(src).toContain('env === "production"');
+    // the live flag is read from the environment only inside the adapter, never in app / features / components
+    const offenders = [...walk("app"), ...walk("features"), ...walk("components")].filter((f) => /PAYMENT_LIVE_ENABLED/.test(read(f)));
+    expect(offenders).toEqual([]);
   });
 
   it("the payment secrets are read only by the provider layer, never from pages, actions, components or client code", () => {

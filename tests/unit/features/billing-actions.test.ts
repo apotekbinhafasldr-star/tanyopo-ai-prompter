@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
@@ -98,7 +98,27 @@ describe("startCheckoutAction — Batch B10 Bagian G/I", () => {
   });
 
   describe("Batch B11 hotfix — checkout redirect origin is context-aware, never a single fixed URL", () => {
-    it("builds successUrl/cancelUrl from the request's Origin header when present (Deploy Preview stays on Deploy Preview)", async () => {
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    it("falls back to publicEnv.appUrl for an https Origin that is NOT allowlisted (C3: the raw header is never trusted)", async () => {
+      headersMock.mockResolvedValue(mockHeaders({ origin: "https://evil.example.com" }));
+      startCheckoutMock.mockResolvedValue({ ok: true, checkoutUrl: "https://checkout.xendit.co/w" });
+      const fd = new FormData();
+      fd.set("plan", "GROWTH");
+
+      await expect(startCheckoutAction({ error: null }, fd)).rejects.toThrow("REDIRECT:https://checkout.xendit.co/w");
+
+      const callArgs = startCheckoutMock.mock.calls[0][0];
+      expect(callArgs.successUrl).toBe(`${publicEnv.appUrl}/billing?checkout=success`);
+      expect(callArgs.cancelUrl).toBe(`${publicEnv.appUrl}/billing?checkout=cancelled`);
+    });
+
+    it("builds successUrl/cancelUrl from the request's Origin header when it is the allowlisted deployment URL (Deploy Preview stays on Deploy Preview)", async () => {
+      // Netlify injects DEPLOY_PRIME_URL for the deployment actually serving the request; C3 only trusts the header
+      // when it equals that origin (or appUrl / CHECKOUT_ALLOWED_ORIGINS).
+      vi.stubEnv("DEPLOY_PRIME_URL", "https://deploy-preview-11--tanyopo-ai-prompter.netlify.app");
       headersMock.mockResolvedValue(
         mockHeaders({ origin: "https://deploy-preview-11--tanyopo-ai-prompter.netlify.app" }),
       );

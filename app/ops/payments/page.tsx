@@ -118,6 +118,24 @@ export default async function PaymentQueuePage({ searchParams }: { searchParams:
         </form>
       </section>
 
+      <section className="rounded-md border border-border bg-surface p-3 text-sm">
+        <h2 className="font-medium">Ekspor rekonsiliasi (CSV)</h2>
+        <p className="mt-1 text-muted-foreground">Transaksi LUNAS beserta invoice per rentang tanggal (WIB, maks. 92 hari). Hanya baca.</p>
+        <form action="/ops/payments/export" method="get" className="mt-2 grid grid-cols-2 gap-2">
+          <label className="text-xs" htmlFor="export-from">
+            Dari
+            <input id="export-from" name="from" type="date" required className="mt-1 h-11 w-full rounded-md border border-border-strong px-2 text-sm" />
+          </label>
+          <label className="text-xs" htmlFor="export-to">
+            Sampai
+            <input id="export-to" name="to" type="date" required className="mt-1 h-11 w-full rounded-md border border-border-strong px-2 text-sm" />
+          </label>
+          <button type="submit" className="col-span-2 h-11 rounded-md border border-border-strong px-4 text-sm font-medium">
+            Unduh CSV
+          </button>
+        </form>
+      </section>
+
       <nav className="flex gap-2 text-sm" aria-label="Filter">
         <a href="/ops/payments" className={`flex-1 rounded-md border px-3 py-2 text-center ${showDone ? "border-border" : "border-brand font-medium"}`}>
           Aktif

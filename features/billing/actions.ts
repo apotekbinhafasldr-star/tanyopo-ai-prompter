@@ -8,6 +8,7 @@ import { requireSessionContext } from "@/services/session";
 import { changePlan } from "@/services/billing";
 import { startCheckout } from "@/services/checkout";
 import { publicEnv } from "@/lib/env";
+import { resolveCheckoutOriginFromHeader } from "@/lib/billing/checkout-origin";
 import type { SubscriptionPlan } from "@/types/database";
 
 export interface BillingActionState {
@@ -65,28 +66,19 @@ export async function changePlanAction(
 }
 
 /**
- * Batch B11 hotfix — the checkout redirect origin must match whichever
- * deployment actually started the checkout (Deploy Preview vs.
- * Production), never a single fixed value. NEXT_PUBLIC_APP_URL is one
- * global env var (always Production's URL, across every Netlify
- * context) — using it unconditionally sent a Deploy Preview payer back
- * to the Production domain after paying, where the Deploy Preview's
- * session cookie doesn't exist (different origin), landing them on
- * /login instead of back in their own session.
- *
- * The `origin` header is safe to trust here without extra allowlisting:
- * this function only ever runs after Next.js's own Server Actions origin
- * check has already accepted the request (a mismatched Origin header
- * never reaches this far), so it always reflects the real deployment the
- * browser is actually on. Falls back to the fixed publicEnv.appUrl only
- * when the header is absent (e.g. a non-browser caller), which keeps
- * Production's behavior exactly as before and never makes Production
- * depend on any preview URL.
+ * Batch B11 hotfix + C3 — the checkout redirect origin must match the deployment that actually started the checkout
+ * (Deploy Preview vs. Production), but the raw `Origin` header is no longer trusted on its own: it is used only when it
+ * is exactly one of the allowlisted origins (publicEnv.appUrl, CHECKOUT_ALLOWED_ORIGINS, Netlify's DEPLOY_PRIME_URL /
+ * DEPLOY_URL — see lib/billing/checkout-origin.ts). Anything else falls back to publicEnv.appUrl, so a forged or
+ * unexpected Origin can never become the payer's return address.
  */
 async function resolveCheckoutOrigin(): Promise<string> {
   const headerList = await headers();
-  const origin = headerList.get("origin");
-  return origin && origin.startsWith("https://") ? origin : publicEnv.appUrl;
+  return resolveCheckoutOriginFromHeader(headerList.get("origin"), {
+    appUrl: publicEnv.appUrl,
+    extraOrigins: process.env.CHECKOUT_ALLOWED_ORIGINS,
+    deployUrls: [process.env.DEPLOY_PRIME_URL, process.env.DEPLOY_URL],
+  });
 }
 
 /**
