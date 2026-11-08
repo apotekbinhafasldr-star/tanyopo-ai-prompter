@@ -49,6 +49,10 @@ export function isPublicAsset(pathname: string) {
     // (unchanged) — same "signed service auth, not cookie auth" shape as
     // /api/v1/integrations above.
     pathname === "/api/webhooks/payment" ||
+    // C2 — called by the Netlify scheduled function payment-pending-sweep with a Bearer secret
+    // (PAYMENT_SWEEPER_SECRET), never with a session cookie. The route answers 503 while the secret is unset and 401 for
+    // a wrong token. Exact match only: no other /api/internal/* path is exempted by this line.
+    pathname === "/api/internal/payments/sweep" ||
     pathname === "/favicon.ico" ||
     // Liveness probe for uptime monitors (app/api/health/route.ts): returns a fixed {status:"ok"}, no data, no
     // session. Without this it is redirected to /login (or 401 on Basic-Auth previews). Exact match only.
