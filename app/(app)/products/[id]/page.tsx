@@ -334,7 +334,7 @@ export default async function ProductDetailPage({
   );
 
   return (
-    <div className="flex flex-1 flex-col gap-6 p-8">
+    <div className="flex flex-1 flex-col gap-6 p-4 sm:p-8">
       <div>
         <p className="text-xs text-muted-foreground">{productTypeLabel(product.product_type)}</p>
         <h1 className="text-xl font-semibold tracking-tight text-foreground">{product.name}</h1>

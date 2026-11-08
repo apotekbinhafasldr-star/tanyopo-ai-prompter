@@ -9,6 +9,7 @@ import {
   type StructuredGenerationRequest,
   type StructuredGenerationResult,
 } from "@/lib/ai/provider";
+import { AI_REQUEST_TIMEOUT_MS } from "@/lib/ai/resilience";
 
 const DEFAULT_MODEL = "claude-opus-5";
 const DEFAULT_MAX_TOKENS = 4000;
@@ -18,7 +19,9 @@ export class AnthropicProvider implements AIProvider {
   private client: Anthropic;
 
   constructor(apiKey: string) {
-    this.client = new Anthropic({ apiKey });
+    // Retries are owned by lib/ai/resilience.ts (one retry, transient errors only),
+    // so the SDK's own retry loop (default 2) is disabled to keep attempts predictable.
+    this.client = new Anthropic({ apiKey, maxRetries: 0, timeout: AI_REQUEST_TIMEOUT_MS });
   }
 
   async generateStructured<T>(
@@ -27,15 +30,18 @@ export class AnthropicProvider implements AIProvider {
   ): Promise<StructuredGenerationResult<T>> {
     let message;
     try {
-      message = await this.client.messages.parse({
-        model: request.model ?? DEFAULT_MODEL,
-        max_tokens: request.maxTokens ?? DEFAULT_MAX_TOKENS,
-        system: request.system,
-        messages: [{ role: "user", content: request.prompt }],
-        output_config: {
-          format: zodOutputFormat(schema),
+      message = await this.client.messages.parse(
+        {
+          model: request.model ?? DEFAULT_MODEL,
+          max_tokens: request.maxTokens ?? DEFAULT_MAX_TOKENS,
+          system: request.system,
+          messages: [{ role: "user", content: request.prompt }],
+          output_config: {
+            format: zodOutputFormat(schema),
+          },
         },
-      });
+        { signal: request.signal },
+      );
     } catch (err) {
       // Most-specific-first: distinguish retryable from non-retryable
       // failures rather than surfacing one generic message.
