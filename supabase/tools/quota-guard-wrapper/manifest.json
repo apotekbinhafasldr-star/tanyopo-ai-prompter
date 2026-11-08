@@ -1,0 +1,39 @@
+{
+  "_comment": "LOCKED checksums for the two AI-jobs quota-guard migrations (PR #48 content rebased onto main), their rollbacks and the read-only preflight/postflight checks. The generator refuses any other content. Editing a hash here is a deliberate, reviewable act; never do it to 'make a file pass'. lockedAtCommit = commit at which the two migration files (unchanged from PR #48) were verified. expect.* = md5(pg_get_functiondef) of fn_create_ai_job_if_entitled(text,jsonb): Before = live B10 body on production (read-only catalog check 2026-11-07); AfterPart1 = result of applying part 1 (measured on synthetic PostgreSQL; CI asserts it on PostgreSQL 17).",
+  "lockedAtCommit": "71f2a64c38782b19c5cd1512b02659a21217c6a1",
+  "s1Versions": [
+    "20261019100000",
+    "20261019100100",
+    "20261019100200"
+  ],
+  "expect": {
+    "rpcMd5Before": "17bd1c2bee1069ca6460774e9021fa9d",
+    "rpcMd5AfterPart1": "2042201955b6acbae5b10999413b0e49"
+  },
+  "files": {
+    "20261021120000": {
+      "file": "20261021120000_prompter_ai_jobs_quota_guard.sql",
+      "sha256": "4037f87f42e93c43472f5b321f9e257500d5d849c1036f257158b0594ae3f356",
+      "bytes": 9036,
+      "rollback": "20261021120000_prompter_ai_jobs_quota_guard.down.sql",
+      "rollbackSha256": "bc1a7be80fc1205830d28654f2313ad7799e94f9d44c13198a58882b4dcc3599"
+    },
+    "20261021120100": {
+      "file": "20261021120100_prompter_ai_jobs_delete_guard.sql",
+      "sha256": "903bde666f87c981c7ab00a449a538ecdf000823bb3fa79c108593d5ed099d91",
+      "bytes": 2417,
+      "rollback": "20261021120100_prompter_ai_jobs_delete_guard.down.sql",
+      "rollbackSha256": "a7d457df408e6a1f4e507bac42bddf9e0d49c767842a0939f91d3a18a5d4f31e"
+    }
+  },
+  "readonly": {
+    "preflight": {
+      "file": "preflight_readonly.sql",
+      "sha256": "837b131fde81c1197f399ff29986d3deb525f6a53ad9e62b17da5d9458bea504"
+    },
+    "postflight": {
+      "file": "postflight_readonly.sql",
+      "sha256": "39e6def0d69f3cd5bd4fce912c235cbc777f366a4dee3cdb07159fc16f41c92c"
+    }
+  }
+}
