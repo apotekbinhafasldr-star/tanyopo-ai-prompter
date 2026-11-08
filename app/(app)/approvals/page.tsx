@@ -62,7 +62,7 @@ export default async function ApprovalsPage() {
   const decided = (approvals ?? []).filter((a) => a.status !== "PENDING");
 
   return (
-    <div className="flex flex-1 flex-col gap-6 p-8">
+    <div className="flex flex-1 flex-col gap-6 p-4 sm:p-8">
       <div>
         <h1 className="text-xl font-semibold tracking-tight text-foreground">Approval Center</h1>
         <p className="mt-1 text-sm text-muted-foreground">

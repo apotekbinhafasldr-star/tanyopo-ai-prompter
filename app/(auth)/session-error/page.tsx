@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { logoutAction } from "@/features/auth/actions";
 import { Button } from "@/components/ui/button";
+import { LEGAL } from "@/features/legal/legal-meta";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 export const metadata: Metadata = {
@@ -36,6 +37,13 @@ export default function SessionErrorPage() {
           <Link href="/login" className="font-medium text-brand hover:underline">
             Kembali ke halaman masuk
           </Link>
+        </p>
+        <p className="text-center text-xs text-muted-foreground">
+          Butuh bantuan? Hubungi kami di{" "}
+          <a href={`mailto:${LEGAL.contactEmail}`} className="font-medium text-brand hover:underline">
+            {LEGAL.contactEmail}
+          </a>
+          .
         </p>
       </CardContent>
     </Card>

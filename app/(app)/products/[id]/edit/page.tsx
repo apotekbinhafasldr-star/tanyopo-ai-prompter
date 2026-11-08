@@ -27,7 +27,7 @@ export default async function EditProductPage({ params }: { params: Promise<{ id
   const boundAction = updateProductAction.bind(null, id);
 
   return (
-    <div className="flex flex-1 flex-col gap-6 p-8">
+    <div className="flex flex-1 flex-col gap-6 p-4 sm:p-8">
       <div>
         <h1 className="text-xl font-semibold tracking-tight text-foreground">Edit Produk</h1>
       </div>

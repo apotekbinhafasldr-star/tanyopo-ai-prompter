@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Share2, Music2, X as XIcon, Globe, Store } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { StatusPill, type ConnectionStatus } from "@/components/ui/status-pill";
 import { requireSessionContext } from "@/services/session";
 import { createClient } from "@/lib/supabase/server";
@@ -34,6 +35,14 @@ const CONNECTED_LABEL: Record<ConnectorPlatform, string> = {
   TIKTOK: "TikTok",
   X: "X",
 };
+
+/**
+ * Connectors whose connect flow is not offered from the UI yet. Display only:
+ * the connector code and the /api/connections/<platform>/authorize routes stay
+ * as they are, but no button or link on this page can trigger them for these
+ * platforms. Remove a platform from this set to offer its connect button again.
+ */
+const COMING_SOON_PLATFORMS: ReadonlySet<ConnectorPlatform> = new Set<ConnectorPlatform>(["TIKTOK", "X"]);
 
 const PLATFORM_INFO: Record<
   ConnectorPlatform,
@@ -143,7 +152,7 @@ export default async function ConnectionsPage({
     : new Map<ConnectorPlatform, CapabilityRow[]>();
 
   return (
-    <div className="flex flex-1 flex-col gap-6 p-8">
+    <div className="flex flex-1 flex-col gap-6 p-4 sm:p-8">
       <div>
         <h1 className="text-xl font-semibold tracking-tight text-foreground">Connections</h1>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -219,6 +228,37 @@ function ConnectorCard({
   const info = PLATFORM_INFO[platform];
   const Icon = info.icon;
   const status = computeStatus(platform, account);
+
+  if (COMING_SOON_PLATFORMS.has(platform)) {
+    return (
+      <Card>
+        <CardContent className="flex flex-col gap-4 p-5">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="flex size-10 items-center justify-center rounded-[var(--radius-md)] bg-surface-muted">
+                <Icon className="size-5 text-foreground" aria-hidden />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-foreground">{info.title}</p>
+                <p className="text-xs text-muted-foreground">{info.subtitle}</p>
+              </div>
+            </div>
+            <Badge variant="outline">Segera hadir</Badge>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Koneksi {info.title} belum tersedia dan sedang dalam persiapan. Tombol hubungkan baru aktif setelah
+            integrasinya siap.
+          </p>
+          <div className="flex gap-2">
+            <Button size="sm" disabled aria-disabled="true">
+              Hubungkan
+            </Button>
+            {isOwner && account ? <DisconnectButton platform={platform} /> : null}
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card>

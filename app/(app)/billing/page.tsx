@@ -124,7 +124,7 @@ export default async function BillingPage({
   const isOwner = session.role === "owner";
 
   return (
-    <div className="flex flex-1 flex-col gap-6 p-8">
+    <div className="flex flex-1 flex-col gap-6 p-4 sm:p-8">
       <div>
         <h1 className="text-xl font-semibold tracking-tight text-foreground">Paket & Langganan</h1>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -188,7 +188,7 @@ export default async function BillingPage({
           ) : null}
           <p className="text-xs text-muted-foreground">
             {subscription.billing_provider
-              ? `Pemroses pembayaran: ${subscription.billing_provider}.`
+              ? "Pembayaran online belum aktif untuk akun Anda saat ini."
               : "Pembayaran online belum tersedia. Untuk saat ini Anda tetap dapat menggunakan masa coba yang aktif. Pilihan berlangganan akan tersedia setelah pembayaran online diaktifkan."}
           </p>
           {subscription.status === "ACTIVE" ? (

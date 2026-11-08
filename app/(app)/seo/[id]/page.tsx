@@ -97,7 +97,7 @@ export default async function SeoProjectDetailPage({ params }: { params: Promise
   const discovery = recommendations?.discovery_recommendations as unknown as DiscoveryRecommendationsData | null;
 
   return (
-    <div className="flex flex-1 flex-col gap-6 p-8">
+    <div className="flex flex-1 flex-col gap-6 p-4 sm:p-8">
       <div>
         <p className="text-xs text-muted-foreground">Project SEO & Discovery</p>
         <h1 className="text-xl font-semibold tracking-tight text-foreground">
