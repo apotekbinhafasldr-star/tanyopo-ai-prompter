@@ -98,7 +98,7 @@ export function ProductForm({
             describedBy="category-hint"
           />
           <p id="category-hint" className="text-xs text-muted-foreground">
-            Pilih dari daftar atau pilih "Lainnya" untuk mengetik kategori sendiri.
+            Pilih dari daftar atau pilih opsi Lainnya untuk mengetik kategori sendiri.
           </p>
         </div>
 
@@ -156,7 +156,7 @@ export function ProductForm({
             />
           </div>
           <p id="stockUnit-hint" className="text-xs text-muted-foreground">
-            Contoh: 12 pcs, 5 box. Pilih satuan dari daftar atau pilih "Lainnya" untuk mengetik sendiri.
+            Contoh: 12 pcs, 5 box. Pilih satuan dari daftar atau pilih opsi Lainnya untuk mengetik sendiri.
           </p>
         </div>
 
