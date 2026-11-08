@@ -14,6 +14,11 @@ export interface StructuredGenerationRequest {
    * existed already relied on.
    */
   model?: string;
+  /**
+   * Aborts the in-flight vendor request. Set by the AI Router's resilience
+   * wrapper (lib/ai/resilience.ts) to enforce the per-attempt timeout.
+   */
+  signal?: AbortSignal;
 }
 
 export interface StructuredGenerationResult<T> {

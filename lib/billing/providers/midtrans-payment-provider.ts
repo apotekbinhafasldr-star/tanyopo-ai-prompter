@@ -14,12 +14,57 @@ import {
 } from "@/lib/billing/payment-provider";
 
 /**
- * Sandbox hosts are hard-coded ON PURPOSE (Billing B3, Founder mandate: Midtrans SANDBOX ONLY). There is no setting
- * that points this adapter at the production hosts; going live needs a new, separately approved change.
+ * Billing B3 / C1 — host and server-key prefix are chosen by resolveMidtransMode(), FAIL-CLOSED:
+ *  - Default (no PAYMENT_LIVE_ENABLED): SANDBOX only, exactly as before (Founder mandate). Only "SB-Mid-server-" keys.
+ *  - LIVE needs BOTH PAYMENT_LIVE_ENABLED === "true" AND PAYMENT_PROVIDER_ENV === "production" (two independent
+ *    switches that must agree). Then only "Mid-server-" keys are accepted; a sandbox key in live mode is a mismatch.
+ *  - Any other combination (flag without env, env=production without flag, unknown env value) => no mode => the adapter
+ *    reports itself unconfigured, so checkout, webhook and reconciliation all fail closed.
+ * Neither switch is a secret. Turning them on is a separately approved production change (docs/GO_LIVE_PAYMENTS.md).
  */
-const MIDTRANS_SNAP_URL = "https://app.sandbox.midtrans.com/snap/v1/transactions";
-const MIDTRANS_API_BASE = "https://api.sandbox.midtrans.com";
+const SANDBOX_SNAP_URL = "https://app.sandbox.midtrans.com/snap/v1/transactions";
+const SANDBOX_API_BASE = "https://api.sandbox.midtrans.com";
 const SANDBOX_SERVER_KEY_PREFIX = "SB-Mid-server-";
+const LIVE_SNAP_URL = "https://app.midtrans.com/snap/v1/transactions";
+const LIVE_API_BASE = "https://api.midtrans.com";
+const LIVE_SERVER_KEY_PREFIX = "Mid-server-";
+
+export interface MidtransModeConfig {
+  mode: "sandbox" | "live";
+  snapUrl: string;
+  apiBase: string;
+  keyPrefix: string;
+}
+
+const SANDBOX_MODE: MidtransModeConfig = {
+  mode: "sandbox",
+  snapUrl: SANDBOX_SNAP_URL,
+  apiBase: SANDBOX_API_BASE,
+  keyPrefix: SANDBOX_SERVER_KEY_PREFIX,
+};
+const LIVE_MODE: MidtransModeConfig = {
+  mode: "live",
+  snapUrl: LIVE_SNAP_URL,
+  apiBase: LIVE_API_BASE,
+  keyPrefix: LIVE_SERVER_KEY_PREFIX,
+};
+
+/** Reads the two switches (exact strings only) and returns the mode, or null when they are inconsistent. Exported for tests. */
+export function resolveMidtransMode(
+  liveFlag: string | undefined = process.env.PAYMENT_LIVE_ENABLED,
+  providerEnv: string | undefined = process.env.PAYMENT_PROVIDER_ENV,
+): MidtransModeConfig | null {
+  const flag = (liveFlag ?? "").trim();
+  const env = (providerEnv ?? "").trim();
+  if (flag === "true") return env === "production" ? LIVE_MODE : null;
+  if (flag !== "") return null; // any other non-empty flag value ("TRUE", "1", "yes", typo): refuse rather than guess
+  // No flag: behaviour is exactly the previous sandbox-only one. A production env without the flag is inconsistent.
+  return env === "" || env === "sandbox" ? SANDBOX_MODE : null;
+}
+
+/** Snap payment page lifetime (C4). Conservative: an unpaid invoice never stays payable for more than a day. */
+const SNAP_EXPIRY_UNIT = "hours";
+const SNAP_EXPIRY_DURATION = 24;
 
 /** Hard ceilings so a slow or hostile gateway answer can never hold a request open or exhaust memory. */
 const REQUEST_TIMEOUT_MS = 5_000;
@@ -147,10 +192,10 @@ export function mapMidtransStatus(
 }
 
 /**
- * Billing B3 — Midtrans adapter, SANDBOX ONLY by explicit Founder mandate. isConfigured() is the production-payment
- * guard: only a sandbox server key ("SB-Mid-server-…") is accepted; a production-shaped key makes the adapter report
- * itself unconfigured, so checkout, webhook and reconciliation all fail closed. Do not relax this without a separate,
- * explicit Founder approval for production activation.
+ * Billing B3 / C1 — Midtrans adapter, SANDBOX by default (explicit Founder mandate). isConfigured() is the
+ * production-payment guard: without PAYMENT_LIVE_ENABLED only a sandbox server key ("SB-Mid-server-…") is accepted and
+ * a production-shaped key makes the adapter report itself unconfigured, so checkout, webhook and reconciliation all
+ * fail closed. Live mode needs the two switches described at resolveMidtransMode() plus a matching "Mid-server-" key.
  *
  * Trust model (why there are two independent checks):
  *   1. verifyWebhookSignature(): SHA512(order_id + status_code + gross_amount + ServerKey), constant-time. This proves
@@ -166,16 +211,18 @@ export class MidtransPaymentProvider implements PaymentProvider {
   readonly name = "midtrans";
 
   isConfigured(): boolean {
+    const mode = resolveMidtransMode();
     const { apiKey } = serverEnv.payment;
-    return !!apiKey && apiKey.startsWith(SANDBOX_SERVER_KEY_PREFIX);
+    return !!mode && !!apiKey && apiKey.startsWith(mode.keyPrefix);
   }
 
-  private requireConfig(): { apiKey: string } {
+  private requireConfig(): { apiKey: string; mode: MidtransModeConfig } {
+    const mode = resolveMidtransMode();
     const { apiKey } = serverEnv.payment;
-    if (!this.isConfigured() || !apiKey) {
-      throw new PaymentProviderConfigError(this.name, "Midtrans belum dikonfigurasi dengan sandbox server key yang valid.");
+    if (!mode || !apiKey || !apiKey.startsWith(mode.keyPrefix)) {
+      throw new PaymentProviderConfigError(this.name, "Midtrans belum dikonfigurasi dengan server key yang sesuai mode.");
     }
-    return { apiKey };
+    return { apiKey, mode };
   }
 
   private authHeader(apiKey: string): string {
@@ -202,7 +249,7 @@ export class MidtransPaymentProvider implements PaymentProvider {
   }
 
   async createCheckoutSession(input: CheckoutSessionInput): Promise<CheckoutSessionResult> {
-    const { apiKey } = this.requireConfig();
+    const { apiKey, mode } = this.requireConfig();
 
     if (!ORDER_ID_PATTERN.test(input.internalTransactionId)) {
       throw new PaymentProviderConfigError(this.name, "ID transaksi internal tidak valid.");
@@ -213,7 +260,7 @@ export class MidtransPaymentProvider implements PaymentProvider {
 
     let response: Response;
     try {
-      response = await fetch(MIDTRANS_SNAP_URL, {
+      response = await fetch(mode.snapUrl, {
         method: "POST",
         headers: {
           Authorization: this.authHeader(apiKey),
@@ -227,6 +274,7 @@ export class MidtransPaymentProvider implements PaymentProvider {
             { id: input.plan, price: input.amountIDR, quantity: 1, name: `LINOE paket ${input.plan}`.slice(0, 50) },
           ],
           credit_card: { secure: true },
+          expiry: { unit: SNAP_EXPIRY_UNIT, duration: SNAP_EXPIRY_DURATION },
           callbacks: { finish: input.successUrl },
         }),
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
@@ -254,7 +302,7 @@ export class MidtransPaymentProvider implements PaymentProvider {
   }
 
   async getVerifiedPayment(orderId: string): Promise<VerifiedPayment> {
-    const { apiKey } = this.requireConfig();
+    const { apiKey, mode } = this.requireConfig();
 
     // order_id ends up inside a URL path: only our own UUID shape is ever allowed there (no path injection).
     if (!ORDER_ID_PATTERN.test(orderId)) {
@@ -263,7 +311,7 @@ export class MidtransPaymentProvider implements PaymentProvider {
 
     let response: Response;
     try {
-      response = await fetch(`${MIDTRANS_API_BASE}/v2/${encodeURIComponent(orderId)}/status`, {
+      response = await fetch(`${mode.apiBase}/v2/${encodeURIComponent(orderId)}/status`, {
         headers: { Authorization: this.authHeader(apiKey), Accept: "application/json" },
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         cache: "no-store",

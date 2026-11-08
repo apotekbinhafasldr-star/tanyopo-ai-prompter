@@ -98,7 +98,7 @@ export function OnboardingWizard() {
 
   return (
     <Card className="w-full max-w-lg">
-      <CardContent className="p-8">
+      <CardContent className="p-5 sm:p-8">
         <div className="mb-6 flex items-center gap-1.5" aria-hidden>
           {Array.from({ length: TOTAL_STEPS }).map((_, i) => (
             <div

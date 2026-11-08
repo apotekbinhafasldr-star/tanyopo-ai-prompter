@@ -54,6 +54,9 @@ export function isPublicAsset(pathname: string) {
     // a wrong token. Exact match only: no other /api/internal/* path is exempted by this line.
     pathname === "/api/internal/payments/sweep" ||
     pathname === "/favicon.ico" ||
+    // Liveness probe for uptime monitors (app/api/health/route.ts): returns a fixed {status:"ok"}, no data, no
+    // session. Without this it is redirected to /login (or 401 on Basic-Auth previews). Exact match only.
+    pathname === "/api/health" ||
     // Both handle their own auth (exchange a Supabase recovery/PKCE code,
     // or verify a token_hash) for a session — the request arrives with no
     // session cookie yet, so cookie gating below would otherwise bounce it
