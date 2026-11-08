@@ -90,7 +90,7 @@ describe("Quick Promote — budget is optional for creating an AI strategy", () 
 
   it("tells the user that budget is optional but required for a paid launch (accessible description)", () => {
     toStep2();
-    expect(screen.getByLabelText(/Berapa budget promosi ini \(opsional\)/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Berapa budget promosi ini\? \(opsional\)/)).toBeInTheDocument();
     const hint = screen.getByText(/Budget wajib diisi sebelum meluncurkan iklan berbayar/);
     expect(hint).toHaveAttribute("id", "budget-hint");
     expect(screen.getByLabelText(/Berapa budget promosi ini/)).toHaveAttribute("aria-describedby", "budget-hint");
