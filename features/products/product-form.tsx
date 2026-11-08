@@ -10,6 +10,7 @@ import { SUPPORTED_CURRENCIES } from "@/schemas/global-preferences";
 import { categorySuggestionsFor } from "@/lib/constants/product-categories";
 import { STOCK_UNIT_SUGGESTIONS } from "@/lib/constants/stock-units";
 import { CountryMultiSelect } from "@/features/products/country-multi-select";
+import { SuggestSelect } from "@/features/products/suggest-select";
 import type { ActionState } from "@/features/products/actions";
 import type { Database, Json } from "@/types/database";
 
@@ -84,22 +85,20 @@ export function ProductForm({
         </div>
 
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="category">Kategori</Label>
-          <Input
+          <SuggestSelect
             id="category"
             name="category"
-            list="categoryOptions"
-            defaultValue={product?.category ?? ""}
-            placeholder="Cari atau ketik kategori"
-            autoComplete="off"
+            label="Kategori"
+            options={categoryOptions}
+            defaultValue={product?.category}
+            emptyLabel="Pilih kategori (opsional)"
+            customLabel="Kategori (ketik sendiri)"
+            customPlaceholder="Ketik kategori Anda"
+            maxLength={100}
+            describedBy="category-hint"
           />
-          <datalist id="categoryOptions">
-            {categoryOptions.map((c) => (
-              <option key={c} value={c} />
-            ))}
-          </datalist>
-          <p className="text-xs text-muted-foreground">
-            Pilih dari daftar atau ketik kategori Anda sendiri.
+          <p id="category-hint" className="text-xs text-muted-foreground">
+            Pilih dari daftar atau pilih "Lainnya" untuk mengetik kategori sendiri.
           </p>
         </div>
 
@@ -129,7 +128,7 @@ export function ProductForm({
 
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="stock">{needsStock ? "Stok (opsional)" : "Stok (opsional, jika relevan)"}</Label>
-          <div className="flex gap-2">
+          <div className="flex items-start gap-2">
             <Input
               id="stock"
               name="stock"
@@ -141,23 +140,23 @@ export function ProductForm({
               className="flex-1"
               placeholder="0"
             />
-            <Input
+            <SuggestSelect
               id="stockUnit"
               name="stockUnit"
-              list="stockUnitOptions"
-              defaultValue={product?.stock_unit ?? ""}
-              placeholder="Satuan"
-              autoComplete="off"
-              className="w-28 shrink-0"
+              label="Satuan stok"
+              hideLabel
+              options={STOCK_UNIT_SUGGESTIONS}
+              defaultValue={product?.stock_unit}
+              emptyLabel="Satuan"
+              customLabel="Satuan stok (ketik sendiri)"
+              customPlaceholder="Satuan"
+              maxLength={40}
+              describedBy="stockUnit-hint"
+              className="w-36 shrink-0"
             />
-            <datalist id="stockUnitOptions">
-              {STOCK_UNIT_SUGGESTIONS.map((u) => (
-                <option key={u} value={u} />
-              ))}
-            </datalist>
           </div>
-          <p className="text-xs text-muted-foreground">
-            Contoh: 12 pcs, 5 box. Pilih dari daftar satuan atau ketik satuan sendiri.
+          <p id="stockUnit-hint" className="text-xs text-muted-foreground">
+            Contoh: 12 pcs, 5 box. Pilih satuan dari daftar atau pilih "Lainnya" untuk mengetik sendiri.
           </p>
         </div>
 
