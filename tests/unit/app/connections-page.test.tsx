@@ -199,8 +199,25 @@ describe("ConnectionsPage — schema without Track B columns and failed reads", 
     await renderPage();
 
     expect(screen.queryByRole("alert")).toBeNull();
-    expect(screen.getAllByText("Belum Terhubung")).toHaveLength(3);
-    expect(screen.getAllByText("Hubungkan")).toHaveLength(3);
+    // Only Meta can be connected; TikTok and X are "Segera hadir" (see below).
+    expect(screen.getAllByText("Belum Terhubung")).toHaveLength(1);
+    expect(screen.getAllByRole("link", { name: "Hubungkan" })).toHaveLength(1);
+  });
+
+  it("shows TikTok and X as 'Segera hadir' with a disabled button and no OAuth link", async () => {
+    hoisted.configured = true; // even with credentials present, nothing may start OAuth for these two
+    hoisted.list = { data: [], error: null };
+
+    await renderPage();
+
+    expect(screen.getAllByText("Segera hadir")).toHaveLength(2);
+    const disabled = screen.getAllByRole("button", { name: "Hubungkan" });
+    expect(disabled).toHaveLength(2);
+    for (const button of disabled) expect(button).toBeDisabled();
+    expect(document.querySelector('a[href*="/api/connections/tiktok/authorize"]')).toBeNull();
+    expect(document.querySelector('a[href*="/api/connections/x/authorize"]')).toBeNull();
+    // Meta keeps its working connect link.
+    expect(document.querySelector('a[href="/api/connections/meta/authorize"]')).not.toBeNull();
   });
 
   it("keeps 'Belum Dikonfigurasi' for unconfigured connectors on a successful read", async () => {
@@ -209,7 +226,8 @@ describe("ConnectionsPage — schema without Track B columns and failed reads", 
 
     await renderPage();
 
-    expect(screen.getAllByText("Belum Dikonfigurasi")).toHaveLength(3);
+    // Meta only: TikTok and X show "Segera hadir" instead of a configuration status.
+    expect(screen.getAllByText("Belum Dikonfigurasi")).toHaveLength(1);
     expect(screen.queryByText("Belum Terhubung")).toBeNull();
   });
 });
