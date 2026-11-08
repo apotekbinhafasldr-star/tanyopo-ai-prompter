@@ -56,12 +56,29 @@ describe("quickPromoteSchema", () => {
     expect(result.success).toBe(true);
   });
 
-  it("rejects when neither daily nor total budget is provided", () => {
+  // Contract change (Quick Promote): budget is OPTIONAL when creating the AI
+  // strategy. The old "rejects when neither budget is provided" case encoded the
+  // bug that disabled "Buat Strategi dengan AI" for organic/free strategies.
+  // A budget is still required before a PAID LAUNCH — see
+  // tests/unit/features/quick-promote-optional-budget.test.tsx
+  // (allocateDailyBudget rejects a missing/zero daily budget).
+  it("accepts product + objective with NO budget at all (organic/free strategy)", () => {
     const result = quickPromoteSchema.safeParse({
       productId: minimal.productId,
       objective: minimal.objective,
     });
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts empty-string and zero budgets (treated as not set)", () => {
+    expect(quickPromoteSchema.safeParse({ ...minimal, dailyBudget: "", totalBudget: "" }).success).toBe(true);
+    expect(quickPromoteSchema.safeParse({ ...minimal, dailyBudget: "0", totalBudget: "0" }).success).toBe(true);
+  });
+
+  it("still rejects a negative or non-numeric budget when one is given", () => {
+    expect(quickPromoteSchema.safeParse({ ...minimal, dailyBudget: "-1" }).success).toBe(false);
+    expect(quickPromoteSchema.safeParse({ ...minimal, totalBudget: "-5" }).success).toBe(false);
+    expect(quickPromoteSchema.safeParse({ ...minimal, dailyBudget: "abc" }).success).toBe(false);
   });
 
   it("rejects a missing objective", () => {

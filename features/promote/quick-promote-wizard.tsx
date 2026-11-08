@@ -67,8 +67,11 @@ export function QuickPromoteWizard({
   const destinationSummary = summarizeDestinationInput(destinationChoice.type, destinationChoice.value);
   const [state, formAction, pending] = useActionState(generateQuickCampaignDraftAction, initialState);
 
-  const hasBudget = Number(dailyBudget) > 0 || Number(totalBudget) > 0;
-  const canAdvance = step === 1 ? !!productId : objective.length > 0 && hasBudget && destinationValid;
+  // Budget is OPTIONAL for creating the AI strategy (organic/free strategies
+  // need none). Only a filled-in but invalid (negative / non-numeric) value
+  // blocks submit; the paid-launch step still requires a daily budget.
+  const budgetInvalid = [dailyBudget, totalBudget].some((v) => v !== "" && !(Number(v) >= 0));
+  const canAdvance = step === 1 ? !!productId : objective.length > 0 && !budgetInvalid && destinationValid;
 
   function toggleChannel(value: string) {
     setChannels((prev) => (prev.includes(value) ? prev.filter((c) => c !== value) : [...prev, value]));
@@ -169,11 +172,16 @@ export function QuickPromoteWizard({
               </div>
 
               <div className="flex flex-col gap-3">
-                <Label htmlFor="dailyBudget">Berapa budget promosi ini?</Label>
+                <Label htmlFor="dailyBudget">Berapa budget promosi ini? (opsional)</Label>
+                <p id="budget-hint" className="-mt-1 text-xs text-muted-foreground">
+                  Boleh dikosongkan untuk strategi organik/gratis. Budget wajib diisi sebelum meluncurkan iklan berbayar.
+                </p>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div className="flex flex-col gap-1.5">
                     <Input
                       id="dailyBudget"
+                      aria-describedby="budget-hint"
+                      aria-invalid={budgetInvalid || undefined}
                       type="number"
                       min={0}
                       inputMode="numeric"
@@ -185,6 +193,9 @@ export function QuickPromoteWizard({
                     <p className="text-xs text-muted-foreground">Contoh: 50000 untuk Rp50.000/hari</p>
                   </div>
                   <Input
+                    aria-label="Budget total (IDR)"
+                    aria-describedby="budget-hint"
+                    aria-invalid={budgetInvalid || undefined}
                     type="number"
                     min={0}
                     inputMode="numeric"

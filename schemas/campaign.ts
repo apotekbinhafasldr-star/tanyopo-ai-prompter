@@ -37,8 +37,12 @@ export type PromoteWizardInput = z.infer<typeof promoteWizardSchema>;
  * Quick Promote's own, smaller input contract — kept separate from
  * promoteWizardSchema (the full Advanced wizard) so loosening what's
  * required here can never change validation for that existing flow.
- * Only product + objective + a budget are required; channels and audience
- * targeting are optional "Advanced" fields — leaving them empty is the
+ * Only product + objective are required. Budget is OPTIONAL here: creating
+ * an AI strategy (organic/free or paid) must not demand it. A budget is
+ * enforced where it actually matters — before a paid ad launch
+ * (allocateDailyBudget in lib/campaigns/budget-allocation.ts rejects a
+ * missing/zero daily budget, called from launch-actions.ts). Channels and
+ * audience targeting are optional "Advanced" fields — leaving them empty is the
  * Quick Promote default ("biarkan LINOE AI memilih strategi terbaik"),
  * not an error.
  */
@@ -77,10 +81,6 @@ export const quickPromoteSchema = z
     startDate: z.string().trim().optional().or(z.literal("")),
     destinationType: z.string().trim().max(20).optional().or(z.literal("")),
     destinationValue: z.string().trim().max(2100).optional().or(z.literal("")),
-  })
-  .refine((data) => (data.dailyBudget ?? 0) > 0 || (data.totalBudget ?? 0) > 0, {
-    message: "Masukkan budget harian atau budget total",
-    path: ["dailyBudget"],
   });
 
 export type QuickPromoteInput = z.infer<typeof quickPromoteSchema>;
