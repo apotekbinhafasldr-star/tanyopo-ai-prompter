@@ -27,7 +27,7 @@ export default async function CampaignsPage() {
   const productNameById = new Map((products ?? []).map((p) => [p.id, p.name]));
 
   return (
-    <div className="flex flex-1 flex-col gap-6 p-8">
+    <div className="flex flex-1 flex-col gap-6 p-4 sm:p-8">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-xl font-semibold tracking-tight text-foreground">Campaigns</h1>

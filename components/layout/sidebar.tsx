@@ -78,7 +78,7 @@ export function Sidebar({ businessName, userName, userRole, showAdminLink = fals
         ) : null}
 
         <Link
-          href="/settings"
+          href="/settings#bantuan"
           onClick={onNavigate}
           className="flex items-center gap-2 rounded-[var(--radius-md)] px-3 py-2 text-sm text-muted-foreground hover:bg-surface-muted hover:text-foreground"
         >

@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { User, ShieldCheck, Bot, Globe, ShieldAlert, Power, ChevronRight, SlidersHorizontal } from "lucide-react";
+import { User, LifeBuoy, ShieldCheck, Bot, Globe, ShieldAlert, Power, ChevronRight, SlidersHorizontal } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { requireSessionContext } from "@/services/session";
@@ -17,6 +17,7 @@ import { getDictionary } from "@/lib/i18n/dictionary";
 import { DEFAULT_LOCALE } from "@/lib/i18n/config";
 import { getFeatureFlags } from "@/lib/feature-flags";
 import { listComplianceFlags } from "@/services/compliance";
+import { LEGAL } from "@/features/legal/legal-meta";
 
 export const metadata: Metadata = { title: "Pengaturan — LINOE" };
 
@@ -71,7 +72,7 @@ export default async function SettingsPage() {
   const isOwnerOrMarketing = session.role === "owner" || session.role === "marketing";
 
   return (
-    <div className="flex flex-1 flex-col gap-6 p-8">
+    <div className="flex flex-1 flex-col gap-6 p-4 sm:p-8">
       <div>
         <h1 className="text-xl font-semibold tracking-tight text-foreground">Pengaturan</h1>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -109,6 +110,29 @@ export default async function SettingsPage() {
           </dl>
           <p className="mt-4 text-xs text-muted-foreground">
             Pengaturan brand, tim, dan API akan tersedia pada fase pengembangan berikutnya.
+          </p>
+        </CardContent>
+      </Card>
+
+      {/* Bantuan — support contact from the shared legal constants (the
+          sidebar "Bantuan" item points here). */}
+      <Card id="bantuan">
+        <CardHeader className="flex flex-row items-center gap-2 space-y-0">
+          <LifeBuoy className="size-4 text-muted-foreground" aria-hidden />
+          <CardTitle>Bantuan</CardTitle>
+          <CardDescription className="sr-only">Kontak dukungan LINOE</CardDescription>
+        </CardHeader>
+        <CardContent className="pt-4">
+          <p className="text-sm text-foreground">
+            Ada pertanyaan atau kendala? Kirim email ke{" "}
+            <a href={`mailto:${LEGAL.contactEmail}`} className="break-all font-medium text-brand hover:underline">
+              {LEGAL.contactEmail}
+            </a>
+            .
+          </p>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Sertakan email akun dan penjelasan singkat masalahnya agar kami lebih mudah membantu. Pengajuan refund
+            juga lewat email ini; lihat Kebijakan Refund untuk caranya.
           </p>
         </CardContent>
       </Card>

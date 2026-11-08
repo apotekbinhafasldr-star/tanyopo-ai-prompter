@@ -9,9 +9,15 @@ vi.mock("@/components/brand/linoe-logo", () => ({ LinoeLogo: () => <span>LINOE</
 const hoisted = vi.hoisted(() => ({ canSee: false }));
 vi.mock("@/services/session", () => ({
   requireSessionContext: vi.fn(async () => ({
+    tenantId: "t1",
     businessName: "Toko Contoh",
     userName: "Pelanggan",
     role: "owner",
+  })),
+}));
+vi.mock("@/lib/supabase/server", () => ({
+  createClient: vi.fn(async () => ({
+    from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: null }) }) }) }),
   })),
 }));
 vi.mock("@/services/platform-admin", () => ({ canSeeAdminCenterLink: vi.fn(async () => hoisted.canSee) }));
