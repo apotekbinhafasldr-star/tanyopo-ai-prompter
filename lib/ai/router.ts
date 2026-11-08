@@ -7,6 +7,7 @@ import { OpenAIProvider } from "@/lib/ai/openai-provider";
 import { resolveRoute, type AIRoutingEnvConfig } from "@/lib/ai/routing-config";
 import { AIRoutingNotConfiguredError } from "@/lib/ai/routing-config";
 import type { AIProviderName, AITaskClass } from "@/lib/ai/task-classes";
+import { callWithResilience } from "@/lib/ai/resilience";
 import type { AIProvider, StructuredGenerationRequest, StructuredGenerationResult } from "@/lib/ai/provider";
 
 export { AIRoutingNotConfiguredError };
@@ -56,8 +57,9 @@ export function isAiRoutingConfigured(): boolean {
  * structured AI generation. Callers declare a task class
  * (lib/ai/task-classes.ts) — never a provider — and the router resolves
  * which configured provider/model actually serves it (lib/ai/routing-config.ts),
- * calling the real provider adapter and falling back once, only on a
- * live failure, only when a distinct fallback provider is configured.
+ * calling the real provider adapter (explicit per-attempt timeout and one
+ * retry for transient failures, see lib/ai/resilience.ts) and falling back
+ * once, only on a live failure, only when a distinct fallback provider is configured.
  *
  * Throws AIRoutingNotConfiguredError when nothing is configured at all —
  * callers (services/ai-jobs.ts#runAiJob) turn that into a plain
@@ -81,7 +83,9 @@ export async function routeStructuredGeneration<T>(
   }
 
   try {
-    const result = await primary.generateStructured(schema, { ...request, model: route.model });
+    const result = await callWithResilience((signal) =>
+      primary.generateStructured(schema, { ...request, model: route.model, signal }),
+    );
     return { ...result, fallbackUsed: false };
   } catch (primaryError) {
     if (!route.fallbackProvider) throw primaryError;
@@ -89,7 +93,9 @@ export async function routeStructuredGeneration<T>(
     const fallback = instantiateProvider(route.fallbackProvider);
     if (!fallback) throw primaryError;
 
-    const result = await fallback.generateStructured(schema, { ...request, model: route.fallbackModel });
+    const result = await callWithResilience((signal) =>
+      fallback.generateStructured(schema, { ...request, model: route.fallbackModel, signal }),
+    );
     return { ...result, fallbackUsed: true, fallbackFrom: route.provider };
   }
 }

@@ -5,6 +5,7 @@ import type { z } from "zod";
 import { routeStructuredGeneration, isAiRoutingConfigured, AIRoutingNotConfiguredError } from "@/lib/ai/router";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { AIProviderError } from "@/lib/ai/provider";
+import { estimateCostUsd } from "@/lib/ai/pricing";
 import { TASK_CLASS_BY_JOB_TYPE } from "@/lib/ai/task-classes";
 import { getOrCreateSubscription } from "@/services/billing";
 import type { AiJobType, Database, Json } from "@/types/database";
@@ -50,6 +51,38 @@ async function releaseUnconfiguredJob(
       completed_at: new Date().toISOString(),
     })
     .eq("id", jobId);
+}
+
+/**
+ * Best-effort write of prompter_ai_jobs.estimated_cost. Clients have no UPDATE
+ * grant on that column (it is immutable for them), so this goes through the
+ * server-only admin client, scoped to this tenant's own COMPLETED job
+ * (tenant_id + id + status), where the job id came from the entitlement RPC
+ * under the caller's own JWT. Never throws and never changes the job result:
+ * unknown model price, missing admin client or a DB error all just skip it.
+ */
+async function recordEstimatedCost(
+  tenantId: string,
+  jobId: string,
+  provider: string,
+  model: string,
+  tokensIn: number,
+  tokensOut: number,
+): Promise<void> {
+  try {
+    const cost = estimateCostUsd(provider, model, tokensIn, tokensOut);
+    if (cost === null) return;
+    const admin = createAdminClient();
+    if (!admin) return;
+    await admin
+      .from("prompter_ai_jobs")
+      .update({ estimated_cost: cost })
+      .eq("id", jobId)
+      .eq("tenant_id", tenantId)
+      .eq("status", "COMPLETED");
+  } catch {
+    // Observability only; must never affect the generation result.
+  }
 }
 
 /** User-facing Indonesian text for each `reason` code
@@ -184,6 +217,15 @@ export async function runAiJob<T>(params: RunAiJobParams<T>): Promise<RunAiJobRe
         completed_at: new Date().toISOString(),
       })
       .eq("id", jobId);
+
+    await recordEstimatedCost(
+      tenantId,
+      jobId,
+      result.provider,
+      result.model,
+      result.tokensInput,
+      result.tokensOutput,
+    );
 
     return {
       ok: true,
