@@ -9,6 +9,7 @@ import {
   type StructuredGenerationRequest,
   type StructuredGenerationResult,
 } from "@/lib/ai/provider";
+import { AI_REQUEST_TIMEOUT_MS } from "@/lib/ai/resilience";
 
 const DEFAULT_MAX_OUTPUT_TOKENS = 4000;
 
@@ -29,7 +30,9 @@ export class OpenAIProvider implements AIProvider {
   private client: OpenAI;
 
   constructor(apiKey: string) {
-    this.client = new OpenAI({ apiKey });
+    // Retries are owned by lib/ai/resilience.ts (one retry, transient errors only),
+    // so the SDK's own retry loop (default 2) is disabled to keep attempts predictable.
+    this.client = new OpenAI({ apiKey, maxRetries: 0, timeout: AI_REQUEST_TIMEOUT_MS });
   }
 
   async generateStructured<T>(
@@ -45,13 +48,16 @@ export class OpenAIProvider implements AIProvider {
 
     let response;
     try {
-      response = await this.client.responses.parse({
-        model: request.model,
-        instructions: request.system,
-        input: request.prompt,
-        max_output_tokens: request.maxTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
-        text: { format: zodTextFormat(schema, "result") },
-      });
+      response = await this.client.responses.parse(
+        {
+          model: request.model,
+          instructions: request.system,
+          input: request.prompt,
+          max_output_tokens: request.maxTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
+          text: { format: zodTextFormat(schema, "result") },
+        },
+        { signal: request.signal },
+      );
     } catch (err) {
       if (err instanceof OpenAI.AuthenticationError) {
         throw new AIProviderError("OpenAI menolak kredensial. Periksa OPENAI_API_KEY.", "AUTH");
