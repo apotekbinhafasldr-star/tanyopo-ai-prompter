@@ -32,7 +32,15 @@ Next.js 16 uses Turbopack for both `next dev` and `next build` by default — no
 
 ## Hosting
 
-No hosting provider is pinned yet. The app is a standard Next.js App Router project and deploys to Vercel or any Node.js 20.9+ host without modification, as long as the environment variables above are set.
+Production is hosted on **Netlify**. `netlify.toml` runs `npm run build` and uses `@netlify/plugin-nextjs` to run the Next.js app (pages and API routes as functions, `proxy.ts` as an Edge Function). Environment variables are set in the Netlify site settings, never committed.
+
+- **Scheduled function:** `netlify/functions/payment-alert-notify.ts` runs every 5 minutes on published production deploys only. It does nothing unless `ALERT_EMAIL_ENABLED` is exactly `true` — see [BILLING_B4_2_EMAIL_NOTIFICATIONS.md](BILLING_B4_2_EMAIL_NOTIFICATIONS.md).
+- **Health check:** `GET /api/health` returns `{"status":"ok"}` (no auth, no database). Point an uptime monitor at it.
+- **Rollback:** Netlify -> Deploys -> pick a healthy deploy -> Publish deploy. Full procedure in [RUNBOOK.md](RUNBOOK.md).
+- **Security headers:** set in `next.config.ts`; CSP is Report-Only for now.
+- **Smoke test after each production deploy:** [SMOKE_TEST_CHECKLIST.md](SMOKE_TEST_CHECKLIST.md).
+
+The app itself remains a standard Next.js App Router project (Node.js 20.9+).
 
 ## CI
 

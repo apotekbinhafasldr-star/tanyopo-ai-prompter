@@ -7,6 +7,12 @@ vi.mock("@/lib/env", () => ({
 import { isPublicAsset, hasValidBasicAuth } from "@/proxy";
 
 describe("isPublicAsset — B12 hotfix regression: auth routes that handle their own session-less auth", () => {
+  it("exempts /api/health (uptime probe) exactly, nothing under it", () => {
+    expect(isPublicAsset("/api/health")).toBe(true);
+    expect(isPublicAsset("/api/health/extra")).toBe(false);
+    expect(isPublicAsset("/api/healthz")).toBe(false);
+  });
+
   it("exempts /auth/confirm from cookie gating (signup confirmation arrives with no session yet)", () => {
     expect(isPublicAsset("/auth/confirm")).toBe(true);
   });
