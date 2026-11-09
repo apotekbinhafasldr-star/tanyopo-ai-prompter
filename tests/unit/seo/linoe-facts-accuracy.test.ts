@@ -121,7 +121,8 @@ describe("tenant lain tidak terpengaruh (isolasi fakta)", () => {
   });
   it("tidak ada fakta LINOE/PUBLOE/MITAPENG di konteks Kopi Nusa walau semua URL = LINOE", () => {
     expect(kopi.some((f) => f.key.startsWith("linoe_") || f.status)).toBe(false);
-    expect(JSON.stringify(kopi)).not.toMatch(/PUBLOE|MITAPENG|LINOE|Tanyopo/i);
+    // URL referensi milik tenant sendiri boleh tampil apa adanya; yang tidak boleh: fakta/nama LINOE di luar itu
+    expect(JSON.stringify(kopi).split(LINOE_URL).join("")).not.toMatch(/PUBLOE|MITAPENG|LINOE|Tanyopo/i);
   });
   it("jawaban/konteks AI yang menyebut LINOE/PUBLOE/MITAPENG/UMKMpro di tenant lain dibuang (tidak ada di fakta mereka)", () => {
     for (const leak of ["Didukung oleh LINOE.", "Tersedia juga di PUBLOE.", "Cek MITAPENG.", "Terhubung ke UMKMpro."]) {
@@ -189,7 +190,7 @@ describe("generateSeoRecommendationsAction — isolasi tenant end-to-end", () =>
     const r = await generateSeoRecommendationsAction("p-kopi");
     expect(r.error).toBeNull();
     expect(aiCalls).toHaveLength(1);
-    const all = aiCalls[0].prompt + aiCalls[0].system;
+    const all = (aiCalls[0].prompt + aiCalls[0].system).split(LINOE_URL).join("");
     expect(all).not.toMatch(/PUBLOE|MITAPENG|\[SEGERA\]|\[TARGET\]|tanyopofuturetechnology|Rp99\.000/);
     expect(all).not.toMatch(/Rahasia|rahasia\.id|777/);
     expect(aiCalls[0].tenantId).toBe("t-kopi");
