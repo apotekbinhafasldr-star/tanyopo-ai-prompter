@@ -16,7 +16,7 @@ with
     union all select 3, 'tabel_acct_finance_taxopt', '21', (select count(*)::text from pubt where relname ~ '^(acct|finance|tax_opt)_')
     union all select 4, 'tabel_public_total_(+tenants,user_profiles,2_penanda)', '72', (select count(*)::text from pubt)
     union all select 5, 'tabel_tanpa_RLS', '0', (select count(*)::text from pubt where not relrowsecurity)
-    union all select 6, 'policy_public_total', '70', (select count(*)::text from pg_policies where schemaname = 'public')
+    union all select 6, 'policy_public_total', '71', (select count(*)::text from pg_policies where schemaname = 'public')
     union all select 7, 'fungsi_public_total', '58', (select count(*)::text from fnc)
     union all select 8, 'fungsi_pembayaran_ada(3)', '3', (select count(*)::text from fnc where proname in ('fn_begin_checkout','fn_apply_verified_payment','fn_resolve_review_payment'))
     union all select 9, 'ACL_fungsi_pembayaran_hanya_service_role', 'true', (
@@ -39,6 +39,8 @@ with
     union all select 15, 'pg_cron_job', '3', (case when to_regclass('cron.job') is null then 'cron.job_tidak_ada'
       else (xpath('/row/c/text()', query_to_xml('select count(*) as c from cron.job where jobname like ''prompter-%''', false, true, '')))[1]::text end)
     union all select 16, 'marker_sandbox', '1', (select count(*)::text from public._linoe_sandbox_marker)
+    union all select 18, 'user_profiles_FK_cascade_ke_auth.users_dan_tenants', '2', (select count(*)::text from pg_constraint
+      where conrelid = to_regclass('public.user_profiles') and contype = 'f' and confdeltype = 'c')
     union all select 17, 'tak_ada_tabel_umkmpro', '0', (select count(*)::text from pubt where relname in (
       'products','product_batches','warehouses','warehouse_stock','inventory_movements','purchase_orders','transactions',
       'transaction_items','online_orders','pesanan_meja','receivables','employees','attendance','payroll_notes','kontrak_karyawan','leave_requests'))

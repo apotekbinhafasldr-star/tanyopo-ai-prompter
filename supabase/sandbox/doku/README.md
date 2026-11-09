@@ -35,11 +35,11 @@ Berkas disalin dari GitHub ("Copy raw file"), butuh Draft PR yang disetujui. Set
 | 3 | `20_seed_dummy.sql` | tulis | sukses (opsional) |
 | 4 | `30_verify_readonly.sql` | baca saja | `ALL_PASS`=PASS; FAIL = selisih yang harus dijelaskan |
 | 5 | `31_smoke_checkout_apply_rollback.sql` | selalu rollback | pesan error berisi `SMOKE_OVERALL=PASS` (itu BUKAN kegagalan) |
-| – | `02_optional_signup_and_profile_policy.sql` | tulis, **butuh persetujuan terpisah** | hanya bila E2E lewat UI/login |
+| – | `02_optional_signup_trigger.sql` | tulis, **butuh persetujuan terpisah** | hanya bila E2E lewat UI/login |
 
 ## Rollback
 - Paling bersih: hapus project sandbox, buat baru (ref baru → perbarui allow-list).
-- SQL: `99_rollback_sandbox.sql` (menolak jalan tanpa marker sandbox, bila ada tabel UMKMpro, atau bila ada tabel/fungsi tak dikenal di `public`; hanya menghapus objek yang dikenal). Teruji lokal: kembali ke keadaan kosong, aman diulang.
+- SQL: `99_rollback_sandbox.sql` (menolak jalan tanpa marker sandbox, bila ada tabel UMKMpro, atau bila ada tabel/fungsi tak dikenal di `public`; hanya menghapus objek yang dikenal). Teruji lokal: tabel/fungsi/trigger/seed kembali kosong, aman diulang; pengguna non-seed di `auth.users` tidak dihapus.
   Batasan: Supabase mungkin menolak DELETE langsung pada `storage.buckets` → 4 bucket bisa tertinggal (ada NOTICE).
 
 ## Hasil uji LOKAL (PostgreSQL 16 sekali pakai + stub Supabase; CI repo memakai PG17)

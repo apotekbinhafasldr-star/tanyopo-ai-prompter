@@ -45,6 +45,12 @@ begin
     end loop;
   end if;
 
+  -- 1b. pengguna dummy dari 20_seed (email @sandbox.invalid); cascade ke user_profiles
+  begin
+    delete from auth.users where email like 'seed-%@sandbox.invalid';
+  exception when others then raise notice 'auth.users seed tidak bisa dihapus: %', sqlerrm;
+  end;
+
   -- 2. trigger opsional pada auth.users (02), bila ada
   begin
     execute 'drop trigger if exists on_auth_user_created on auth.users';
@@ -79,4 +85,6 @@ begin
   end loop;
 end $rb$;
 commit;
--- Cek hasil (read-only): jalankan ulang 00_preflight_readonly.sql; baris 1..5 harus kembali PASS.
+-- Cek hasil (read-only): jalankan ulang 00_preflight_readonly.sql; baris 1,2,4,5 harus kembali PASS.
+-- Baris 3 (auth.users = 0) baru PASS bila TIDAK ada pengguna asli/signup: rollback hanya menghapus pengguna seed
+-- (seed-*@sandbox.invalid), BUKAN pengguna lain. Hapus sisanya lewat Dashboard -> Authentication -> Users, atau buat ulang project.

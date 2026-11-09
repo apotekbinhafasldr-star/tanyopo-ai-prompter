@@ -41,4 +41,4 @@ Harus terlihat di teks: `SMOKE_OVERALL=PASS` dan 10 baris `PASS`. Ini bukan kega
 Variabel env, situs Netlify, dan kredensial DOKU adalah tahap terpisah yang butuh persetujuan Anda. `02_optional...` juga butuh persetujuan.
 
 ## Rollback (hanya bila diperintahkan)
-Paling bersih: hapus project lalu buat ulang (ref baru). Atau `99_rollback_sandbox.sql` → Run (Supabase menampilkan peringatan operasi destruktif; konfirmasi hanya setelah T0 diulang). Lalu jalankan T2 lagi: baris 1–5 harus kembali PASS.
+Paling bersih: hapus project lalu buat ulang (ref baru). Atau `99_rollback_sandbox.sql` → Run (Supabase menampilkan peringatan operasi destruktif; konfirmasi hanya setelah T0 diulang). Lalu jalankan T2 lagi: baris 1,2,4,5 harus PASS. Baris 3 hanya PASS bila tidak ada pengguna signup; rollback tidak menghapus pengguna asli (hapus lewat Authentication → Users atau buat ulang project).

@@ -1,7 +1,7 @@
 -- ============================================================================
 -- PROJECT YANG BENAR: linoe-doku-sandbox, ref eskqngzhtndkfqjoxxou (cocokkan dengan URL dashboard). Bukan umkmpro-ai, bukan linoe-otp-test.
 -- 02 OPSIONAL (JANGAN dijalankan tanpa persetujuan Founder terpisah)
--- Hanya diperlukan bila E2E melewati UI aplikasi (login + sesi). Jalur webhook /
+-- Hanya diperlukan bila E2E melewati UI aplikasi (login + sesi). Policy baca profil kini ada di 01. Jalur webhook /
 -- checkout lewat server dapat diuji tanpa file ini memakai data dari 20_seed_dummy.sql.
 -- ============================================================================
 -- ASUMSI, BUKAN SALINAN PRODUCTION: handle_new_user asli (UMKMpro) tidak ada di repo.
@@ -34,7 +34,4 @@ end $$;
 create trigger on_auth_user_created after insert on auth.users
   for each row execute function public.handle_new_user();
 
--- Asumsi: pengguna membaca profil sendiri (diperlukan services/session.ts).
-create policy "sandbox: baca profil sendiri" on public.user_profiles for select to authenticated
-  using (id = auth.uid());
 commit;

@@ -11,9 +11,12 @@
 --   (c) 2 policy tenants + isi fungsi yang tercatat di
 --       supabase/tests/s1-trial-quota/support/prod_snapshot.sql (dibaca dari katalog
 --       production 2026-10-10/19 oleh sesi sebelumnya; tidak bisa diverifikasi ulang di sini).
--- Yang TIDAK diketahui (sengaja tidak dikarang): constraint/default lain, FK ke
--- auth.users, policy user_profiles, grant fungsi, trigger. Lihat README bagian
--- "Mendapatkan definisi asli secara aman" agar shim ini bisa diganti yang asli.
+-- Dibandingkan dengan metadata production tersaring (2026-11-09; berkasnya TIDAK disimpan di repo):
+-- FK user_profiles.id -> auth.users ON DELETE CASCADE, FK tenant_id ON DELETE CASCADE, policy UPDATE tenants
+-- untuk role authenticated, dan policy SELECT user_profiles per tenant sudah disesuaikan.
+-- Masih TIDAK sama/tidak diketahui: ~30 kolom tenants lain (tidak dipakai SQL repo), nilai default kolom
+-- (mis. role), isi CHECK role, policy khusus admin platform dan fungsi pendukungnya, trigger tambahan pada tenants, badan
+-- fungsi (sengaja dihilangkan dari metadata), grant dan ACL fungsi, badan handle_new_user.
 -- Tujuan sempit: cukup agar jalur pembayaran (checkout -> invoice -> webhook ->
 -- aktivasi) bisa diuji di DB terpisah. Jangan dipakai sebagai bukti kesetaraan.
 -- ============================================================================
@@ -55,8 +58,8 @@ create table public.tenants (
   created_at timestamptz not null default now()
 );
 create table public.user_profiles (
-  id uuid primary key,
-  tenant_id uuid not null references public.tenants (id),
+  id uuid primary key references auth.users (id) on delete cascade,
+  tenant_id uuid not null references public.tenants (id) on delete cascade,
   nama text not null,
   role text not null check (role in ('owner','apoteker','kasir','admin_gudang','hr','marketing')),
   created_at timestamptz not null default now()
@@ -74,12 +77,12 @@ create function public.fn_current_role() returns text
 
 create policy "Lihat tenant sendiri" on public.tenants for select to public
   using (id = public.fn_current_tenant_id());
-create policy "Owner bisa edit data usaha sendiri" on public.tenants for update to public
+create policy "Owner bisa edit data usaha sendiri" on public.tenants for update to authenticated
   using (id = public.fn_current_tenant_id() and public.fn_current_role() = 'owner')
   with check (id = public.fn_current_tenant_id());
--- user_profiles: SENGAJA tanpa policy (definisi asli tidak diketahui). Akibatnya
--- klien authenticated tidak bisa membaca user_profiles; jalur server (service_role)
--- dan fungsi SECURITY DEFINER tidak terpengaruh. Untuk login lewat aplikasi lihat
--- 02_optional_signup_and_profile_policy.sql (asumsi, perlu persetujuan terpisah).
+-- user_profiles: baca profil dalam satu tenant (struktur dicocokkan dengan perbandingan metadata 2026-11-09).
+-- Nama policy di sini milik sandbox; nama/isi produksi tidak disalin.
+create policy "sandbox: lihat profil satu tenant" on public.user_profiles for select to public
+  using (tenant_id = public.fn_current_tenant_id());
 
 commit;
