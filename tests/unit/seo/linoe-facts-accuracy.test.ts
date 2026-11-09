@@ -11,9 +11,19 @@ let tables: Record<string, Row[]>;
 let filtersSeen: { table: string; filters: Record<string, unknown> }[];
 let upserts: { table: string; payload: Row }[];
 
-function builder(table: string) {
+interface Builder {
+  select: () => Builder;
+  eq: (k: string, v: unknown) => Builder;
+  order: () => Builder;
+  limit: () => Builder;
+  single: () => Promise<{ data: Row | null; error: { message: string } | null }>;
+  maybeSingle: () => Promise<{ data: Row | null; error: null }>;
+  upsert: (payload: Row) => Promise<{ error: null }>;
+}
+
+function builder(table: string): Builder {
   const filters: Record<string, unknown> = {};
-  const api = {
+  const api: Builder = {
     select: () => api,
     eq: (k: string, v: unknown) => ((filters[k] = v), api),
     order: () => api,
