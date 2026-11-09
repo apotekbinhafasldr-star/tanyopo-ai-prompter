@@ -5,11 +5,15 @@ import { createClient } from "@/lib/supabase/server";
 import { requireSessionContext } from "@/services/session";
 import { budgetPolicySchema } from "@/schemas/budget";
 import { globalPreferencesSchema } from "@/schemas/global-preferences";
+import { brandProfileSchema, normalizeWebsiteUrl, normalizeWhatsapp } from "@/schemas/brand-profile";
 import { COMPLIANCE_FLAG_TYPES } from "@/services/compliance";
 import type { AutomationMode, AutopilotPolicyType, ComplianceFlagType, ComplianceStatus, FeatureFlagKey } from "@/types/database";
 
 export interface SettingsActionState {
   error: string | null;
+  /** Pesan non-fatal (mis. data tersimpan tetapi audit gagal dicatat). */
+  notice?: string | null;
+  saved?: boolean;
 }
 
 export async function updateBudgetPolicyAction(
@@ -364,4 +368,82 @@ export async function updateComplianceFlagAction(
 
   revalidatePath("/settings");
   return { error: null };
+}
+
+/**
+ * Edit Profil Brand (brand_name, what_do_you_sell, website_url, whatsapp_number). Owner/Marketing saja —
+ * sama dengan tingkat tata kelola profil brand & preferensi global. tenant_id SELALU dari sesi server
+ * (tidak pernah dari form); RLS tabel tetap berlaku. Field opsional yang dikirim kosong TIDAK mengubah
+ * nilai tersimpan; menghapus butuh centang "Hapus" eksplisit. Audit: bila pencatatan gagal, data tetap
+ * tersimpan tetapi hasilnya melaporkan notice (tidak mengklaim audit berhasil). Nilai tidak ditulis ke
+ * audit — hanya nama field yang berubah.
+ */
+export async function updateBrandProfileAction(
+  _prevState: SettingsActionState,
+  formData: FormData,
+): Promise<SettingsActionState> {
+  const session = await requireSessionContext({ allowIncompleteOnboarding: true });
+
+  if (session.role !== "owner" && session.role !== "marketing") {
+    return { error: "Anda tidak memiliki izin untuk mengubah profil brand." };
+  }
+
+  const parsed = brandProfileSchema.safeParse({
+    brandName: formData.get("brandName"),
+    whatDoYouSell: formData.get("whatDoYouSell"),
+    websiteUrl: formData.get("websiteUrl"),
+    whatsappNumber: formData.get("whatsappNumber"),
+    clearWhatDoYouSell: formData.get("clearWhatDoYouSell"),
+    clearWebsiteUrl: formData.get("clearWebsiteUrl"),
+    clearWhatsappNumber: formData.get("clearWhatsappNumber"),
+  });
+
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Data tidak valid." };
+  }
+
+  const d = parsed.data;
+  const patch: Record<string, string | null> = { brand_name: d.brandName };
+  const changed: string[] = ["brand_name"];
+
+  const setOptional = (column: string, value: string | null | undefined, clear: boolean) => {
+    if (value) {
+      patch[column] = value;
+      changed.push(column);
+    } else if (clear) {
+      patch[column] = null;
+      changed.push(`${column}:cleared`);
+    }
+    // kosong tanpa "Hapus" → kolom tidak disertakan sama sekali (nilai lama dipertahankan)
+  };
+  setOptional("what_do_you_sell", d.whatDoYouSell || null, d.clearWhatDoYouSell);
+  setOptional("website_url", d.websiteUrl ? normalizeWebsiteUrl(d.websiteUrl) : null, d.clearWebsiteUrl);
+  setOptional("whatsapp_number", d.whatsappNumber ? normalizeWhatsapp(d.whatsappNumber) : null, d.clearWhatsappNumber);
+
+  const supabase = await createClient();
+
+  const { error } = await supabase.from("prompter_brand_profiles").upsert({
+    tenant_id: session.tenantId,
+    ...patch,
+  });
+
+  if (error) {
+    return { error: "Gagal menyimpan profil brand. Silakan coba lagi." };
+  }
+
+  const { error: auditError } = await supabase.from("prompter_audit_logs").insert({
+    tenant_id: session.tenantId,
+    actor_user_id: session.userId,
+    action: "brand_profile.updated",
+    resource_type: "prompter_brand_profiles",
+    resource_id: null,
+    context: { changed_fields: changed },
+  });
+
+  revalidatePath("/settings");
+  return {
+    error: null,
+    saved: true,
+    notice: auditError ? "Perubahan tersimpan, tetapi pencatatan audit gagal." : null,
+  };
 }

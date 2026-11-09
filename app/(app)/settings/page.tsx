@@ -10,6 +10,7 @@ import { BudgetPolicyForm } from "@/features/settings/budget-policy-form";
 import { AutomationModeForm } from "@/features/settings/automation-mode-form";
 import { EmergencyStopButton } from "@/features/settings/emergency-stop-button";
 import { AutopilotPolicyToggles } from "@/features/settings/autopilot-policy-toggles";
+import { BrandProfileForm } from "@/features/settings/brand-profile-form";
 import { GlobalPreferencesForm } from "@/features/settings/global-preferences-form";
 import { FeatureFlagToggles } from "@/features/settings/feature-flag-toggles";
 import { ComplianceFlagsForm } from "@/features/settings/compliance-flags-form";
@@ -60,7 +61,7 @@ export default async function SettingsPage() {
       .eq("tenant_id", session.tenantId),
     supabase
       .from("prompter_brand_profiles")
-      .select("country_code, default_language, default_timezone, default_currency")
+      .select("brand_name, what_do_you_sell, website_url, whatsapp_number, country_code, default_language, default_timezone, default_currency")
       .eq("tenant_id", session.tenantId)
       .maybeSingle(),
     getFeatureFlags(supabase, session.tenantId),
@@ -109,13 +110,32 @@ export default async function SettingsPage() {
             </div>
           </dl>
           <p className="mt-4 text-xs text-muted-foreground">
-            Pengaturan brand, tim, dan API akan tersedia pada fase pengembangan berikutnya.
+            Pengaturan tim dan API akan tersedia pada fase pengembangan berikutnya.
           </p>
         </CardContent>
       </Card>
 
       {/* Bantuan — support contact from the shared legal constants (the
           sidebar "Bantuan" item points here). */}
+      <Card id="profil-brand">
+        <CardHeader className="flex flex-row items-center gap-2 space-y-0">
+          <User className="size-4 text-muted-foreground" aria-hidden />
+          <CardTitle>Profil Brand</CardTitle>
+          <CardDescription className="sr-only">Nama brand, website, kontak, dan apa yang dijual</CardDescription>
+        </CardHeader>
+        <CardContent className="pt-4">
+          <BrandProfileForm
+            readOnly={!isOwnerOrMarketing}
+            values={{
+              brandName: brandProfile?.brand_name ?? "",
+              whatDoYouSell: brandProfile?.what_do_you_sell ?? "",
+              websiteUrl: brandProfile?.website_url ?? "",
+              whatsappNumber: brandProfile?.whatsapp_number ?? "",
+            }}
+          />
+        </CardContent>
+      </Card>
+
       <Card id="bantuan">
         <CardHeader className="flex flex-row items-center gap-2 space-y-0">
           <LifeBuoy className="size-4 text-muted-foreground" aria-hidden />
