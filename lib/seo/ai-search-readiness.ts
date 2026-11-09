@@ -166,7 +166,8 @@ export function sanitizeAiSearchReadiness(
     if (!ok) removed++;
     return ok;
   });
-  const missing = Array.from(new Set([...findMissingFacts(facts), ...ai.missing_facts.map((m) => m.trim()).filter(Boolean)])).slice(0, MAX_MISSING_FACTS);
+  // Maks 3 dari hitungan server agar tersisa ruang untuk fakta spesifik dari AI (total tetap <= MAX_MISSING_FACTS).
+  const missing = Array.from(new Set([...findMissingFacts(facts).slice(0, 3), ...ai.missing_facts.map((m) => m.trim()).filter(Boolean)])).slice(0, MAX_MISSING_FACTS);
   return {
     version: 1,
     generated_at: now.toISOString(),
