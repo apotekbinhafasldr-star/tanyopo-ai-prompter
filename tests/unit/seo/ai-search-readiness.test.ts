@@ -6,7 +6,7 @@ import {
   parseStoredAiSearchReadiness,
   sanitizeAiSearchReadiness,
 } from "@/lib/seo/ai-search-readiness";
-import { AiSearchReadinessSchema } from "@/schemas/ai/ai-search-readiness";
+import { AiSearchReadinessSchema, type AiSearchReadinessAi } from "@/schemas/ai/ai-search-readiness";
 import { SeoWithReadinessSchema, DiscoveryWithReadinessSchema } from "@/schemas/ai/seo-with-readiness";
 import { SeoRecommendationsSchema } from "@/schemas/ai/seo-recommendations";
 import { DiscoveryRecommendationsSchema } from "@/schemas/ai/discovery-recommendations";
@@ -17,8 +17,8 @@ const facts = buildVerifiedFacts({
   product: { name: "Kopi Robusta 200gr", description: "Biji kopi robusta sangrai medium", category: "Makanan & Minuman", price: 55000, currency: "IDR" },
 });
 
-const ai = (over: Partial<ReturnType<typeof base>> = {}) => ({ ...base(), ...over });
-function base() {
+const ai = (over: Partial<AiSearchReadinessAi> = {}): AiSearchReadinessAi => ({ ...base(), ...over });
+function base(): AiSearchReadinessAi {
   return {
     customer_questions: [
       { question: "Berapa harga Kopi Robusta 200gr?", short_answer: "Harganya IDR 55000.", owner_input_needed: null },
@@ -26,7 +26,7 @@ function base() {
       { question: "Bagaimana cara pesan?", short_answer: "Pesan lewat WhatsApp 08123456789.", owner_input_needed: null },
     ],
     entity_context: "Kopi Nusa adalah bisnis kopi di Bandung.",
-    content_recommendations: [{ title: "FAQ cara pesan", format: "FAQ" as const, reason: "Menjawab pertanyaan umum" }],
+    content_recommendations: [{ title: "FAQ cara pesan", format: "FAQ", reason: "Menjawab pertanyaan umum" }],
     missing_facts: [],
   };
 }
@@ -81,7 +81,7 @@ describe("sanitizeAiSearchReadiness", () => {
   });
   it("membuang rekomendasi konten yang berisi klaim visibilitas AI", () => {
     const out = sanitizeAiSearchReadiness(
-      ai({ content_recommendations: [{ title: "Agar muncul di ChatGPT", format: "ARTICLE" as const, reason: "x" }, ...base().content_recommendations] }),
+      ai({ content_recommendations: [{ title: "Agar muncul di ChatGPT", format: "ARTICLE", reason: "x" }, ...base().content_recommendations] }),
       facts,
     );
     expect(out.content_recommendations).toHaveLength(1);
