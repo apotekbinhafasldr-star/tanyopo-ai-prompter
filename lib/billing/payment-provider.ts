@@ -107,6 +107,18 @@ export interface ParsedWebhookEvent {
   internalTransactionId: string | null;
 }
 
+/**
+ * DOKU PR (additive, backward compatible): what a provider may need beyond the raw body to authenticate a webhook.
+ * DOKU signs over request HEADERS (Client-Id, Request-Id, Request-Timestamp) and the request PATH, so a body-only
+ * check cannot verify it. Midtrans / Xendit never read this; they keep using verifyWebhookSignature().
+ */
+export interface WebhookRequestContext {
+  /** Case-insensitive header lookup (a `Headers` instance satisfies this). */
+  headers: { get(name: string): string | null };
+  /** The request pathname as received (no host, no query), e.g. "/api/webhooks/payment". */
+  path: string;
+}
+
 export interface PaymentProvider {
   /** e.g. "midtrans"/"xendit" — also the `provider` value stored on
    * prompter_subscriptions/prompter_invoices/prompter_payment_transactions
@@ -139,8 +151,14 @@ export interface PaymentProvider {
    * to move a subscription. Must fail closed: any timeout, non-2xx, malformed or inconsistent answer THROWS. */
   getVerifiedPayment?(orderId: string): Promise<VerifiedPayment>;
 
+  /** Optional, header/path-aware webhook authentication. When an adapter implements it, the webhook core calls THIS
+   * instead of verifyWebhookSignature() and fails closed (401) if no request context is available. Same rules:
+   * constant-time comparison, never throws, must return true before parseWebhookEvent() is called. */
+  verifyWebhookRequest?(rawBody: string, request: WebhookRequestContext): boolean;
+
   /** Normalizes a verified webhook's raw body into ParsedWebhookEvent.
-   * Only ever called after verifyWebhookSignature() has returned true —
-   * an adapter may assume the body it receives here is authentic. */
-  parseWebhookEvent(rawBody: string): ParsedWebhookEvent;
+   * Only ever called after signature verification has returned true —
+   * an adapter may assume the body it receives here is authentic. `request` is passed only to adapters that need
+   * headers (e.g. a per-delivery id); adapters that ignore it are unaffected. */
+  parseWebhookEvent(rawBody: string, request?: WebhookRequestContext): ParsedWebhookEvent;
 }

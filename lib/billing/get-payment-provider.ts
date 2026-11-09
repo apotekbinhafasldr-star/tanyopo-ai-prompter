@@ -4,11 +4,13 @@ import { serverEnv } from "@/lib/env";
 import type { PaymentProvider } from "@/lib/billing/payment-provider";
 import { NullPaymentProvider } from "@/lib/billing/providers/null-payment-provider";
 import { MidtransPaymentProvider } from "@/lib/billing/providers/midtrans-payment-provider";
+import { DokuPaymentProvider } from "@/lib/billing/providers/doku-payment-provider";
 import { XenditPaymentProvider } from "@/lib/billing/providers/xendit-payment-provider";
 
 const nullPaymentProvider = new NullPaymentProvider();
 const xenditPaymentProvider = new XenditPaymentProvider();
 const midtransPaymentProvider = new MidtransPaymentProvider();
+const dokuPaymentProvider = new DokuPaymentProvider();
 
 /**
  * Resolves the payment provider the same way lib/connectors/get-connector.ts
@@ -29,6 +31,10 @@ export function getPaymentProvider(): PaymentProvider {
   // report itself unconfigured, so every caller fails closed exactly as with no provider at all).
   if (serverEnv.payment.providerName === "midtrans") {
     return midtransPaymentProvider;
+  }
+  // DOKU: SANDBOX ONLY in this codebase version (see DokuPaymentProvider.isConfigured()). Midtrans stays as the fallback.
+  if (serverEnv.payment.providerName === "doku") {
+    return dokuPaymentProvider;
   }
   if (serverEnv.payment.providerName === "xendit") {
     return xenditPaymentProvider;

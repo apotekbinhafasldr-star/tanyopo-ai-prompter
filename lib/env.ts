@@ -110,6 +110,11 @@ export const serverEnv = {
   payment: {
     providerName: readOptional("PAYMENT_PROVIDER_NAME"),
     apiKey: readOptional("PAYMENT_PROVIDER_API_KEY"),
+    // DOKU only (Client-Id header); not a secret by itself, but still server-side. The DOKU Secret Key goes in apiKey.
+    clientId: readOptional("PAYMENT_PROVIDER_CLIENT_ID"),
+    // DOKU sandbox only: comma-separated Supabase project refs (20 chars each) that are explicitly allowed to run sandbox
+    // payments. Opt-in; empty/unset means the DOKU adapter stays off. See lib/billing/providers/doku-sandbox-db-guard.ts.
+    sandboxDbRefs: readOptional("PAYMENT_SANDBOX_DB_PROJECT_REFS"),
     webhookSecret: readOptional("PAYMENT_PROVIDER_WEBHOOK_SECRET"),
   },
   jobs: {
