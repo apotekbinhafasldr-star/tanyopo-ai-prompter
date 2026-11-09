@@ -5,8 +5,10 @@ import {
   formatFactsForPrompt,
   parseStoredAiSearchReadiness,
   sanitizeAiSearchReadiness,
+  limitToTwoSentences,
+  isGroundedText,
 } from "@/lib/seo/ai-search-readiness";
-import { AiSearchReadinessSchema, type AiSearchReadinessAi } from "@/schemas/ai/ai-search-readiness";
+import { AiSearchReadinessSchema, MAX_AEO_QUESTIONS, MAX_CONTENT_RECOMMENDATIONS, MAX_MISSING_FACTS, type AiSearchReadinessAi } from "@/schemas/ai/ai-search-readiness";
 import { SeoWithReadinessSchema, DiscoveryWithReadinessSchema } from "@/schemas/ai/seo-with-readiness";
 import { SeoRecommendationsSchema } from "@/schemas/ai/seo-recommendations";
 import { DiscoveryRecommendationsSchema } from "@/schemas/ai/discovery-recommendations";
@@ -64,7 +66,7 @@ describe("sanitizeAiSearchReadiness", () => {
     expect(out.customer_questions[0].owner_input_needed).toBeTruthy();
     expect(out.removed_count).toBe(1);
   });
-  it.each(["Sudah bersertifikat halal.", "Garansi uang kembali.", "Muncul di ChatGPT.", "Rating bintang 5 dari pelanggan.", "Produk terbaik."])(
+  it.each(["Sudah bersertifikat halal.", "Garansi uang kembali.", "Muncul di ChatGPT.", "Rating bintang 5 dari pelanggan.", "Produk terbaik.", "Hasil 100% pasti.", "Dijamin 100 % asli."])(
     "membuang klaim terlarang: %s",
     (claim) => {
       const out = sanitizeAiSearchReadiness(
@@ -132,5 +134,53 @@ describe("prompt", () => {
     expect(buildDiscoveryRecommendationsPrompt({})).not.toContain("ai_search_readiness");
     expect(buildSeoRecommendationsPrompt({ websiteUrl: "https://a.id", targetKeywords: [], verifiedFactsText: "-" })).toContain("ai_search_readiness");
     expect(buildSeoRecommendationsPrompt({ websiteUrl: "https://a.id", targetKeywords: [] })).not.toContain("ai_search_readiness");
+  });
+});
+
+describe("batas output (token cap 4000 tidak dinaikkan)", () => {
+  const q = (n: number) => Array.from({ length: n }, (_, i) => ({ question: `Q${i}?`, short_answer: null, owner_input_needed: "x" }));
+  const r = (n: number) => Array.from({ length: n }, (_, i) => ({ title: `T${i}`, format: "FAQ" as const, reason: "r" }));
+  it("konstanta batas: 5 / 3 / 5", () => {
+    expect([MAX_AEO_QUESTIONS, MAX_CONTENT_RECOMMENDATIONS, MAX_MISSING_FACTS]).toEqual([5, 3, 5]);
+  });
+  it("skema menolak lebih dari batas dan menerima tepat batas", () => {
+    expect(AiSearchReadinessSchema.safeParse({ ...base(), customer_questions: q(5) }).success).toBe(true);
+    expect(AiSearchReadinessSchema.safeParse({ ...base(), customer_questions: q(6) }).success).toBe(false);
+    expect(AiSearchReadinessSchema.safeParse({ ...base(), content_recommendations: r(3) }).success).toBe(true);
+    expect(AiSearchReadinessSchema.safeParse({ ...base(), content_recommendations: r(4) }).success).toBe(false);
+    expect(AiSearchReadinessSchema.safeParse({ ...base(), missing_facts: ["a", "b", "c", "d", "e"] }).success).toBe(true);
+    expect(AiSearchReadinessSchema.safeParse({ ...base(), missing_facts: ["a", "b", "c", "d", "e", "f"] }).success).toBe(false);
+  });
+  it("sanitizer memotong ke batas walau input melebihi, termasuk gabungan fakta kurang dari server", () => {
+    const f = buildVerifiedFacts({ product: { name: "X" } }); // banyak fakta kurang
+    const out = sanitizeAiSearchReadiness({ ...base(), customer_questions: q(8), content_recommendations: r(5), missing_facts: ["a", "b", "c", "d", "e", "f", "g"] }, f);
+    expect(out.customer_questions).toHaveLength(5);
+    expect(out.content_recommendations).toHaveLength(3);
+    expect(out.missing_facts.length).toBeLessThanOrEqual(5);
+  });
+  it("jawaban dibatasi maksimal 2 kalimat pendek", () => {
+    expect(limitToTwoSentences("Satu. Dua. Tiga. Empat.")).toBe("Satu. Dua.");
+    expect(limitToTwoSentences("A".repeat(500)).length).toBeLessThanOrEqual(300);
+    const f = buildVerifiedFacts({ product: { name: "Kopi" } });
+    const out = sanitizeAiSearchReadiness(
+      { ...base(), customer_questions: [{ question: "Apa?", short_answer: "Kopi itu produk. Kopi enak diminum. Kopi dijual online.", owner_input_needed: null }, ...q(2)] },
+      f,
+    );
+    expect(out.customer_questions[0].short_answer).toBe("Kopi itu produk. Kopi enak diminum.");
+  });
+  it("prompt menyebut batas yang sama dengan skema", () => {
+    const p = buildDiscoveryRecommendationsPrompt({ verifiedFactsText: "-" });
+    expect(p).toContain("maksimal 5");
+    expect(p).toContain("maksimal 3");
+    expect(p).toMatch(/maksimal 2 kalimat pendek/);
+    expect(p).not.toMatch(/3-8 pertanyaan|1-5 rekomendasi/);
+  });
+});
+
+describe("regex klaim 100%", () => {
+  it("memblokir '100%' walau angka 100 ada di fakta; mengizinkan bila '100%' memang ada di fakta tenant", () => {
+    expect(isGroundedText("Dijamin asli 100%.", "Diskon 100 ribu")).toBe(false);
+    expect(isGroundedText("Bahan 100% arabika", "Bahan 100% arabika")).toBe(true);
+    expect(isGroundedText("Produk original", "Kopi")).toBe(true);
   });
 });

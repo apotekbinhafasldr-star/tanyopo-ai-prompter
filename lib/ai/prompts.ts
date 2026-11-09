@@ -251,12 +251,12 @@ export function buildCampaignProposalPrompt(
  */
 export function buildAiSearchReadinessPrompt(factsText: string): string {
   return [
-    "BAGIAN TAMBAHAN — ai_search_readiness (kesiapan konten agar mudah dipahami mesin pencari berbasis AI). Isi field ai_search_readiness dengan aturan KETAT berikut:",
+    "BAGIAN TAMBAHAN — ai_search_readiness (kesiapan konten agar mudah dipahami mesin pencari berbasis AI). Isi field ai_search_readiness dengan aturan KETAT berikut (tulis ringkas — total output terbatas):",
     "FAKTA TERVERIFIKASI (satu-satunya sumber fakta yang boleh dipakai):\n" + factsText,
-    "1) customer_questions: 3-8 pertanyaan yang wajar ditanyakan calon pelanggan (apa itu, untuk siapa, harga, cara pesan, kandungan/bahan, area layanan, dll.). short_answer = 1-2 kalimat HANYA dari fakta terverifikasi; jika fakta tidak cukup, isi short_answer = null dan jelaskan data yang perlu dilengkapi di owner_input_needed. Jangan menebak.",
-    "2) entity_context: 1-3 kalimat yang menjelaskan siapa/apa bisnis dan produk ini, hanya dari fakta terverifikasi.",
-    "3) content_recommendations: 1-5 rekomendasi konten (FAQ, artikel, halaman produk, postingan, bio) yang membantu pertanyaan di atas terjawab jelas.",
-    "4) missing_facts: fakta yang sebaiknya dilengkapi pemilik (kosongkan bila sudah lengkap).",
+    "1) customer_questions: 3-5 pertanyaan (maksimal 5) yang wajar ditanyakan calon pelanggan (apa itu, untuk siapa, harga, cara pesan, kandungan/bahan, area layanan, dll.). short_answer = maksimal 2 kalimat pendek HANYA dari fakta terverifikasi; jika fakta tidak cukup, isi short_answer = null dan jelaskan data yang perlu dilengkapi di owner_input_needed. Jangan menebak.",
+    "2) entity_context: maksimal 2 kalimat pendek yang menjelaskan siapa/apa bisnis dan produk ini, hanya dari fakta terverifikasi.",
+    "3) content_recommendations: 1-3 rekomendasi (maksimal 3) konten (FAQ, artikel, halaman produk, postingan, bio) yang membantu pertanyaan di atas terjawab jelas.",
+    "4) missing_facts: maksimal 5 fakta yang sebaiknya dilengkapi pemilik (kosongkan bila sudah lengkap).",
     "DILARANG: mengarang fakta, angka, harga, bahan, sertifikasi, lokasi, atau jam operasional yang tidak ada di fakta terverifikasi; membuat testimoni, rating, atau ulasan pelanggan; menjanjikan atau mengklaim bisnis ini akan/sudah muncul, dikutip, atau direkomendasikan oleh ChatGPT, Gemini, Perplexity, Google AI Overviews, atau mesin AI lain; menjanjikan ranking, penjualan, atau hasil tertentu.",
   ].join("\n\n");
 }

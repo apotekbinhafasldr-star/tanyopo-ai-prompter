@@ -1,4 +1,4 @@
-import type { AiSearchReadinessAi } from "@/schemas/ai/ai-search-readiness";
+import { MAX_AEO_QUESTIONS, MAX_CONTENT_RECOMMENDATIONS, MAX_MISSING_FACTS, type AiSearchReadinessAi } from "@/schemas/ai/ai-search-readiness";
 
 /**
  * Fakta terverifikasi = data yang diisi tenant sendiri di LINOE (profil brand,
@@ -90,7 +90,14 @@ export function formatFactsForPrompt(facts: VerifiedFact[]): string {
 // Klaim yang tidak boleh muncul di jawaban/konteks: jaminan, ranking/visibilitas AI,
 // testimoni/rating, superlatif tak terbukti.
 const FORBIDDEN_CLAIMS =
-  /\b(garansi|dijamin|menjamin|pasti laku|terlaris|nomor\s*1|no\.?\s*1|terbaik|ranking|peringkat|muncul di (chatgpt|gemini|perplexity|google)|chatgpt|gemini|perplexity|ai overview|testimoni|ulasan pelanggan|rating|bintang\s*\d|review pelanggan|terbukti|100%|bersertifikat|bpom|halal)\b/i;
+  /(?:100\s*%|\b(garansi|dijamin|menjamin|pasti laku|terlaris|nomor\s*1|no\.?\s*1|terbaik|ranking|peringkat|muncul di (chatgpt|gemini|perplexity|google)|chatgpt|gemini|perplexity|ai overview|testimoni|ulasan pelanggan|rating|bintang\s*\d|review pelanggan|terbukti|bersertifikat|bpom|halal)\b)/i;
+
+/** Batasi ke 2 kalimat pendek (potongan dari jawaban berdasar fakta tetap berdasar fakta). */
+export function limitToTwoSentences(text: string, maxChars = 300): string {
+  const sentences = text.match(/[^.!?]+[.!?]+(?:\s|$)|[^.!?]+$/g) ?? [text];
+  const two = sentences.slice(0, 2).join("").trim();
+  return two.length > maxChars ? two.slice(0, maxChars).trimEnd() : two;
+}
 
 const NUMBER_RE = /\d[\d.,]*/g;
 const norm = (s: string) => s.replace(/[.,\s]/g, "");
@@ -135,7 +142,7 @@ export function sanitizeAiSearchReadiness(
 ): StoredAiSearchReadiness {
   const factsText = facts.map((f) => f.value).join(" \n ");
   let removed = 0;
-  const questions = ai.customer_questions.map((q) => {
+  const questions = ai.customer_questions.slice(0, MAX_AEO_QUESTIONS).map((q) => {
     let answer = clean(q.short_answer, 600);
     if (answer && (facts.length === 0 || !isGroundedText(answer, factsText))) {
       answer = null;
@@ -143,7 +150,7 @@ export function sanitizeAiSearchReadiness(
     }
     return {
       question: q.question.trim(),
-      short_answer: answer,
+      short_answer: answer ? limitToTwoSentences(answer) : null,
       owner_input_needed: answer
         ? null
         : clean(q.owner_input_needed, 300) ?? "Lengkapi data produk/bisnis agar pertanyaan ini bisa dijawab akurat.",
@@ -154,12 +161,12 @@ export function sanitizeAiSearchReadiness(
     entity = null;
     removed++;
   }
-  const recs = ai.content_recommendations.filter((r) => {
+  const recs = ai.content_recommendations.slice(0, MAX_CONTENT_RECOMMENDATIONS).filter((r) => {
     const ok = claimsAllowed(`${r.title} ${r.reason}`, factsText);
     if (!ok) removed++;
     return ok;
   });
-  const missing = Array.from(new Set([...findMissingFacts(facts), ...ai.missing_facts.map((m) => m.trim()).filter(Boolean)])).slice(0, 10);
+  const missing = Array.from(new Set([...findMissingFacts(facts), ...ai.missing_facts.map((m) => m.trim()).filter(Boolean)])).slice(0, MAX_MISSING_FACTS);
   return {
     version: 1,
     generated_at: now.toISOString(),

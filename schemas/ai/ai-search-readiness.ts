@@ -15,6 +15,11 @@ import { z } from "zod";
  * Strict structured outputs: setiap properti wajib ada; nilai opsional memakai
  * .nullable(), bukan .optional() (lihat tests/unit/schemas/ai-discovery-recommendations.test.ts).
  */
+/** Batas output sengaja ketat: output AI dibatasi 4000 token per panggilan (jangan dinaikkan di sini). */
+export const MAX_AEO_QUESTIONS = 5;
+export const MAX_CONTENT_RECOMMENDATIONS = 3;
+export const MAX_MISSING_FACTS = 5;
+
 export const AiSearchReadinessSchema = z.object({
   customer_questions: z
     .array(
@@ -23,7 +28,7 @@ export const AiSearchReadinessSchema = z.object({
         short_answer: z
           .string()
           .nullable()
-          .describe("Jawaban 1-2 kalimat HANYA dari fakta terverifikasi; null jika fakta belum cukup"),
+          .describe("Jawaban maksimal 2 kalimat pendek HANYA dari fakta terverifikasi; null jika fakta belum cukup"),
         owner_input_needed: z
           .string()
           .nullable()
@@ -31,7 +36,7 @@ export const AiSearchReadinessSchema = z.object({
       }),
     )
     .min(3)
-    .max(8),
+    .max(MAX_AEO_QUESTIONS),
   entity_context: z
     .string()
     .describe("1-3 kalimat: siapa/apa bisnis & produk ini, hanya dari fakta terverifikasi"),
@@ -44,10 +49,10 @@ export const AiSearchReadinessSchema = z.object({
       }),
     )
     .min(1)
-    .max(5),
+    .max(MAX_CONTENT_RECOMMENDATIONS),
   missing_facts: z
     .array(z.string())
-    .max(8)
+    .max(MAX_MISSING_FACTS)
     .describe("Fakta yang sebaiknya dilengkapi pemilik agar jawaban akurat; array kosong bila lengkap"),
 });
 
