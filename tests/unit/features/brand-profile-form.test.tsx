@@ -112,7 +112,8 @@ describe("updateBrandProfileAction — tidak menimpa dengan kosong", () => {
     expect(calls).toHaveLength(0);
   });
   it("validasi: URL/WhatsApp/panjang tidak valid → error, tanpa penulisan", async () => {
-    for (const bad of [{ websiteUrl: "javascript:alert(1)" }, { websiteUrl: "ftp://a.id" }, { whatsappNumber: "abc" }, { brandName: "x".repeat(121) }, { whatDoYouSell: "y".repeat(501) }]) {
+    const badInputs: Record<string, string>[] = [{ websiteUrl: "javascript:alert(1)" }, { websiteUrl: "ftp://a.id" }, { whatsappNumber: "abc" }, { brandName: "x".repeat(121) }, { whatDoYouSell: "y".repeat(501) }];
+    for (const bad of badInputs) {
       calls = [];
       const r = await updateBrandProfileAction(prev, fd({ brandName: "Kopi Nusa", ...bad }));
       expect(r.error, JSON.stringify(bad)).toBeTruthy();
