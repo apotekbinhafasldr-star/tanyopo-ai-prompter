@@ -67,8 +67,9 @@ export function buildVerifiedFacts(src: FactSources): VerifiedFact[] {
   add("target_countries", "Target negara", countries.length ? countries.join(", ") : null);
   add("website", "Website", clean(p?.website_url ?? src.projectWebsiteUrl ?? b?.website_url, 300));
   add("whatsapp", "Kontak WhatsApp", clean(b?.whatsapp_number, 40));
-  // Fakta publik LINOE hanya untuk bisnis yang website-nya = situs resmi LINOE (tidak pernah untuk tenant lain).
-  if (isLinoeSelfEntity([b?.website_url, p?.website_url, src.projectWebsiteUrl])) {
+  // Fakta publik LINOE hanya bila IDENTITAS BRAND tenant = LINOE (nama + website brand resmi).
+  // URL produk/project hanyalah referensi dan tidak pernah memicu ini.
+  if (isLinoeSelfEntity(b)) {
     for (const f of buildLinoePublicFacts()) facts.push(f);
   }
   return facts;

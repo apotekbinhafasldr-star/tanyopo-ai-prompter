@@ -50,14 +50,37 @@ describe("buildLinoePublicFacts — hanya dari sumber resmi", () => {
   });
 });
 
-describe("isLinoeSelfEntity — gerbang isolasi", () => {
-  it("true hanya bila website tenant = host resmi LINOE", () => {
-    expect(isLinoeSelfEntity([LINOE_URL])).toBe(true);
-    expect(isLinoeSelfEntity([null, "tanyopo-ai-prompter.netlify.app/harga"])).toBe(true);
-    expect(isLinoeSelfEntity(["https://tokokopi.id"])).toBe(false);
-    expect(isLinoeSelfEntity(["https://tanyopo-ai-prompter.netlify.app.evil.com"])).toBe(false);
-    expect(isLinoeSelfEntity([null, undefined, "bukan url ::"])).toBe(false);
-    expect(isLinoeSelfEntity([])).toBe(false);
+const LINOE_BRAND = { brand_name: "LINOE by Tanyopo", website_url: LINOE_URL };
+const hasLinoe = (f: { key: string }[]) => f.some((x) => x.key.startsWith("linoe_"));
+
+describe("isLinoeSelfEntity — gerbang dua syarat (nama brand + website brand resmi)", () => {
+  it("true hanya bila KEDUANYA terpenuhi", () => {
+    expect(isLinoeSelfEntity(LINOE_BRAND)).toBe(true);
+    expect(isLinoeSelfEntity({ brand_name: "Tanyopo Labs", website_url: "tanyopo-ai-prompter.netlify.app/harga" })).toBe(true);
+    expect(isLinoeSelfEntity({ brand_name: "linoe", website_url: "https://www.tanyopo-ai-prompter.netlify.app" })).toBe(true);
+  });
+  it("nama LINOE tanpa website / website salah → false", () => {
+    expect(isLinoeSelfEntity({ brand_name: "LINOE", website_url: null })).toBe(false);
+    expect(isLinoeSelfEntity({ brand_name: "LINOE", website_url: "" })).toBe(false);
+    expect(isLinoeSelfEntity({ brand_name: "LINOE", website_url: "https://linoe-fans.id" })).toBe(false);
+  });
+  it("website LINOE tetapi nama brand lain → false", () => {
+    expect(isLinoeSelfEntity({ brand_name: "Kopi Nusa", website_url: LINOE_URL })).toBe(false);
+    expect(isLinoeSelfEntity({ brand_name: null, website_url: LINOE_URL })).toBe(false);
+    expect(isLinoeSelfEntity({ website_url: LINOE_URL })).toBe(false);
+  });
+  it("host tiruan/subdomain/URL rusak ditolak (cocok host persis)", () => {
+    for (const u of [
+      "https://tanyopo-ai-prompter.netlify.app.evil.com",
+      "https://evil.com/tanyopo-ai-prompter.netlify.app",
+      "https://x.tanyopo-ai-prompter.netlify.app",
+      "https://tanyopo-ai-prompter.netlify.app@evil.com",
+      "bukan url ::",
+    ]) {
+      expect(isLinoeSelfEntity({ brand_name: "LINOE", website_url: u }), u).toBe(false);
+    }
+    expect(isLinoeSelfEntity(null)).toBe(false);
+    expect(isLinoeSelfEntity(undefined)).toBe(false);
   });
 });
 
@@ -67,25 +90,45 @@ describe("buildVerifiedFacts — fakta LINOE tidak bocor ke tenant lain", () => 
       brand: { brand_name: "Kopi Nusa", website_url: "https://kopinusa.id" },
       product: { name: "Kopi", website_url: "https://kopinusa.id/kopi", price: 1000, currency: "IDR" },
     });
-    expect(f.some((x) => x.key.startsWith("linoe_") || x.status)).toBe(false);
+    expect(f.some((x) => x.status)).toBe(false);
+    expect(hasLinoe(f)).toBe(false);
     expect(formatFactsForPrompt(f)).not.toMatch(/LINOE|Tanyopo|99\.000/i);
+  });
+  it("REGRESI: brand Kopi Nusa memakai URL LINOE sebagai referensi (brand/produk/project) → tanpa fakta LINOE", () => {
+    const variants = [
+      { brand: { brand_name: "Kopi Nusa", website_url: LINOE_URL }, product: { name: "Kopi" } },
+      { brand: { brand_name: "Kopi Nusa" }, product: { name: "Kopi", website_url: LINOE_URL } },
+      { brand: { brand_name: "Kopi Nusa" }, product: { name: "Kopi" }, projectWebsiteUrl: LINOE_URL },
+      { brand: { brand_name: "Kopi Nusa", website_url: LINOE_URL }, product: { name: "Kopi", website_url: LINOE_URL }, projectWebsiteUrl: LINOE_URL },
+    ];
+    for (const v of variants) {
+      const f = buildVerifiedFacts(v);
+      expect(hasLinoe(f)).toBe(false);
+      expect(f.some((x) => x.status)).toBe(false);
+      expect(formatFactsForPrompt(f)).not.toMatch(/Tanyopo|tanyopofuturetechnology|Rp99\.000|\[SEGERA\]/);
+    }
+  });
+  it("produk/project berURL LINOE tidak memicu walau brand bernama LINOE tanpa website brand", () => {
+    expect(hasLinoe(buildVerifiedFacts({ brand: { brand_name: "LINOE" }, product: { name: "LINOE", website_url: LINOE_URL } }))).toBe(false);
+    expect(hasLinoe(buildVerifiedFacts({ brand: { brand_name: "LINOE" }, projectWebsiteUrl: LINOE_URL }))).toBe(false);
+  });
+  it("brand LINOE tanpa website → tanpa fakta LINOE", () => {
+    expect(hasLinoe(buildVerifiedFacts({ brand: { brand_name: "LINOE by Tanyopo" }, product: { name: "LINOE" } }))).toBe(false);
+  });
+  it("brand LINOE dengan website resmi → fakta publik ikut, semuanya berlabel status", () => {
+    const f = buildVerifiedFacts({ brand: LINOE_BRAND, product: { name: "LINOE" } });
+    expect(f.filter((x) => x.key.startsWith("linoe_")).length).toBeGreaterThan(5);
+    expect(f.every((x) => !x.key.startsWith("linoe_") || x.status)).toBe(true);
+    expect(f.find((x) => x.key === "linoe_plan_starter")?.status).toBe("SEGERA");
+    expect(f.find((x) => x.key === "linoe_plan_agency")?.status).toBe("TARGET");
   });
   it("tenant tanpa website: tidak ada fakta LINOE", () => {
     expect(buildVerifiedFacts({ brand: { brand_name: "X" }, product: { name: "Y" } }).some((x) => x.status)).toBe(false);
   });
-  it("bisnis LINOE sendiri (website = situs LINOE): fakta publik ikut, berlabel status", () => {
-    const f = buildVerifiedFacts({ brand: { brand_name: "LINOE" }, product: { name: "LINOE", website_url: LINOE_URL } });
-    expect(f.filter((x) => x.key.startsWith("linoe_")).length).toBeGreaterThan(5);
-    expect(f.every((x) => !x.key.startsWith("linoe_") || x.status)).toBe(true);
-  });
-  it("via website project SEO juga dikenali", () => {
-    const f = buildVerifiedFacts({ projectWebsiteUrl: LINOE_URL });
-    expect(f.some((x) => x.key === "linoe_contact")).toBe(true);
-  });
 });
 
 describe("sanitizer — status ketersediaan", () => {
-  const selfFacts = buildVerifiedFacts({ product: { name: "LINOE", website_url: LINOE_URL } });
+  const selfFacts = buildVerifiedFacts({ brand: LINOE_BRAND, product: { name: "LINOE" } });
   const ai = (answer: string): AiSearchReadinessAi => ({
     customer_questions: [
       { question: "Berapa harga Starter?", short_answer: answer, owner_input_needed: null },

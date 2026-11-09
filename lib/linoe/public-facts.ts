@@ -97,15 +97,24 @@ function hostOf(raw: string | null | undefined): string | null {
   }
 }
 
+const LINOE_NAME = /linoe|tanyopo/i;
+
 /**
- * Fakta LINOE hanya boleh masuk konteks AI bila bisnis/produk/project ITU SENDIRI adalah LINOE,
- * dibuktikan dari website yang diisi tenant = host resmi LINOE. Tenant lain tidak pernah menerimanya.
- * (Fakta ini publik, bukan rahasia; gerbang ini mencegah tercampurnya konteks bisnis pelanggan.)
+ * Fakta LINOE hanya boleh masuk konteks AI bila DUA syarat terpenuhi sekaligus:
+ *  1. brand.website_url berhost resmi LINOE (cocok persis; subdomain/host tiruan ditolak), dan
+ *  2. brand_name mengandung "LINOE" atau "Tanyopo".
+ * product.website_url dan project.website_url SENGAJA bukan pemicu: itu sekadar referensi dan tidak
+ * boleh membuat identitas bisnis tenant lain tercampur dengan LINOE.
+ * (Fakta ini publik, bukan rahasia. Gerbang yang tidak bisa dipalsukan butuh ID tenant resmi di
+ * konfigurasi — keputusan Founder, di luar PR ini.)
  */
-export function isLinoeSelfEntity(websiteUrls: (string | null | undefined)[], env?: Record<string, string | undefined>): boolean {
+export function isLinoeSelfEntity(
+  brand: { brand_name?: string | null; website_url?: string | null } | null | undefined,
+  env?: Record<string, string | undefined>,
+): boolean {
+  if (!brand || typeof brand.brand_name !== "string" || !LINOE_NAME.test(brand.brand_name)) return false;
+  const host = hostOf(brand.website_url);
+  if (!host) return false;
   const own = new Set([hostOf(PRODUCTION_ORIGIN), hostOf(env ? getSiteOrigin(env) : getSiteOrigin())].filter(Boolean) as string[]);
-  return websiteUrls.some((u) => {
-    const h = hostOf(u);
-    return !!h && own.has(h);
-  });
+  return own.has(host);
 }
