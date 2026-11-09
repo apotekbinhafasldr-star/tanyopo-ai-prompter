@@ -101,8 +101,9 @@ const FORBIDDEN_CLAIMS =
 
 /** Batasi ke 2 kalimat pendek (potongan dari jawaban berdasar fakta tetap berdasar fakta). */
 export function limitToTwoSentences(text: string, maxChars = 300): string {
-  const sentences = text.match(/[^.!?]+[.!?]+(?:\s|$)|[^.!?]+$/g) ?? [text];
-  const two = sentences.slice(0, 2).join("").trim();
+  // Pisah hanya di tanda akhir kalimat + spasi, sehingga "Rp99.000" tidak terpotong.
+  const sentences = text.trim().split(/(?<=[.!?])\s+/);
+  const two = sentences.slice(0, 2).join(" ").trim();
   return two.length > maxChars ? two.slice(0, maxChars).trimEnd() : two;
 }
 

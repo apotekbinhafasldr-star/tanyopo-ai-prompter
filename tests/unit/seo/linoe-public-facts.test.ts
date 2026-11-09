@@ -108,6 +108,10 @@ describe("sanitizer — status ketersediaan", () => {
   it("tidak berlaku untuk tenant tanpa fakta SEGERA/TARGET", () => {
     expect(overstatesAvailability("Bisa dibeli sekarang.", buildVerifiedFacts({ product: { name: "Kopi" } }))).toBe(false);
   });
+  it("batas 2 kalimat tidak memotong angka berpemisah titik (Rp99.000)", async () => {
+    const { limitToTwoSentences } = await import("@/lib/seo/ai-search-readiness");
+    expect(limitToTwoSentences("Starter Rp99.000/bulan, rencana. Pembayaran belum aktif. Tiga.")).toBe("Starter Rp99.000/bulan, rencana. Pembayaran belum aktif.");
+  });
   it("produk belum dipilih → catatan 'Pilih produk' tampil lebih dulu, tanpa produk fallback", () => {
     const out = sanitizeAiSearchReadiness(ai("x"), [], new Date(), ["Pilih produk pada project SEO ini agar jawaban akurat"]);
     expect(out.missing_facts[0]).toMatch(/Pilih produk/);
