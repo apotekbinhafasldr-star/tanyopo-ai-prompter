@@ -220,7 +220,7 @@ describe("DOKU createCheckoutSession", () => {
     );
   });
   it("uses a fresh Request-Id on every call", async () => {
-    fetchMock.mockResolvedValue(json(ok));
+    fetchMock.mockImplementation(async () => json(ok)); // a fresh Response per call (a body can be read once)
     await provider.createCheckoutSession(input);
     await provider.createCheckoutSession(input);
     const ids = fetchMock.mock.calls.map((c) => ((c[1] as RequestInit).headers as Record<string, string>)["Request-Id"]);

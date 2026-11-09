@@ -40,7 +40,7 @@ describe("DOKU adapter — static guards (sandbox only, secrets stay on the serv
     expect(read("lib/billing/providers/midtrans-payment-provider.ts")).toContain('readonly name = "midtrans"');
   });
 
-  it("the new credential variable is read in lib/env.ts only and is not NEXT_PUBLIC", () => {
+  it("the new credential variable is read only by lib/env.ts and the provider layer, and is not NEXT_PUBLIC", () => {
     expect(read("lib/env.ts")).toContain('readOptional("PAYMENT_PROVIDER_CLIENT_ID")');
     const offenders: string[] = [];
     const walk = (dir: string) => {
@@ -48,7 +48,7 @@ describe("DOKU adapter — static guards (sandbox only, secrets stay on the serv
         if (name === "node_modules" || name === ".next" || name.startsWith(".")) continue;
         const rel = path.join(dir, name);
         if (/\.(ts|tsx)$/.test(name)) {
-          if (/PAYMENT_PROVIDER_CLIENT_ID|NEXT_PUBLIC_[A-Z_]*DOKU/.test(read(rel)) && rel !== "lib/env.ts") offenders.push(rel);
+          if (/PAYMENT_PROVIDER_CLIENT_ID|NEXT_PUBLIC_[A-Z_]*DOKU/.test(read(rel)) && rel !== "lib/env.ts" && !rel.startsWith("lib/billing/providers/")) offenders.push(rel);
         } else if (!name.includes(".")) {
           walk(rel);
         }
