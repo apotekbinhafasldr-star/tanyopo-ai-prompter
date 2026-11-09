@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { requireSessionContext } from "@/services/session";
 import { seoProjectSchema } from "@/schemas/seo";
 import { SeoWithReadinessSchema, DiscoveryWithReadinessSchema } from "@/schemas/ai/seo-with-readiness";
-import { buildVerifiedFacts, formatFactsForPrompt, productSelectionNote, sanitizeAiSearchReadiness } from "@/lib/seo/ai-search-readiness";
+import { buildVerifiedFacts, formatFactsForPrompt, productSelectionNote, sanitizeAiSearchReadiness, scrubStatusClaims } from "@/lib/seo/ai-search-readiness";
 import { buildSystemPreamble, buildSeoRecommendationsPrompt, buildDiscoveryRecommendationsPrompt } from "@/lib/ai/prompts";
 import { runAiJob } from "@/services/ai-jobs";
 import type { Json } from "@/types/database";
@@ -172,7 +172,8 @@ export async function generateSeoRecommendationsAction(projectId: string): Promi
         project_id: projectId,
         // Additive, no migration: AI Search Readiness lives inside the existing jsonb.
         discovery_recommendations: {
-          ...discoveryBase,
+          // Field AI lain: klaim status produk yang berlebihan dibuang (hanya aktif untuk fakta LINOE SEGERA/TARGET).
+          ...scrubStatusClaims(discoveryBase, facts),
           ai_search_readiness: sanitizeAiSearchReadiness(result.data.ai_search_readiness, facts, new Date(), productSelectionNote(product, facts)),
         } as unknown as Json,
         ai_job_id: result.jobId,
@@ -228,10 +229,10 @@ export async function generateSeoRecommendationsAction(projectId: string): Promi
     {
       tenant_id: session.tenantId,
       project_id: projectId,
-      summary: result.data.summary,
-      target_keywords: result.data.target_keywords,
-      on_page_recommendations: result.data.on_page_recommendations,
-      content_plan: result.data.content_plan,
+      summary: scrubStatusClaims(result.data.summary, websiteFacts),
+      target_keywords: scrubStatusClaims(result.data.target_keywords, websiteFacts),
+      on_page_recommendations: scrubStatusClaims(result.data.on_page_recommendations, websiteFacts),
+      content_plan: scrubStatusClaims(result.data.content_plan, websiteFacts),
       // WEBSITE rows previously had NULL here; the page reads this column only in
       // NO_WEBSITE mode for the legacy discovery fields, so the key is purely additive.
       discovery_recommendations: {

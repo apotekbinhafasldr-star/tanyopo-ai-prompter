@@ -139,21 +139,159 @@ function claimsAllowed(text: string, factsText: string): boolean {
 }
 
 /**
- * Fakta berstatus SEGERA/TARGET (belum aktif): jawaban tidak boleh menyebutnya siap dibeli/aktif
- * kecuali jelas berlabel belum/rencana/segera/target.
+ * Fakta berstatus SEGERA/TARGET (belum aktif): klaim "tersedia/aktif/bisa dibeli/bisa dicoba/launching"
+ * tidak boleh muncul untuk subjek yang belum aktif. Pemeriksaan dilakukan PER KLAUSA (bukan kualifikator
+ * global), sehingga kata "belum"/"rencana" di klausa lain tidak menutupi klaim yang berlebihan, dan klaim
+ * benar tentang hal yang memang TERSEDIA (mis. trial gratis 14 hari) tidak ikut ditolak.
  */
-const READY_CLAIM = /(siap dibeli|bisa dibeli|dapat dibeli|sudah aktif|sudah tersedia|beli sekarang|bayar sekarang|langganan sekarang|checkout)/i;
-const PLANNED_QUALIFIER = /(belum|rencana|segera|target|direncanakan)/i;
+const PURCHASE_CLAIM = /(siap dibeli|beli sekarang|bayar sekarang|langganan sekarang|checkout)/i;
+const QUALIFIER = /(belum|tidak|bukan|segera|rencana|direncanakan|target|akan|pengembangan|dikembangkan|coming soon|not yet|soon)/i;
+const AVAILABLE_CLAIM =
+  /\b(tersedia|available|aktif|active|sudah|bisa|dapat|siap|ready|live|launch(?:ing|ed)?|diluncurkan|dirilis|rilis|released?|dibuka|beroperasi|hadir|resmi|go[- ]live|(?:di)?(?:akses|coba|pakai|gunakan|beli|bayar|order|pesan|daftar))\b/i;
+/** "sudah dalam pengembangan" adalah pernyataan status yang benar, bukan klaim tersedia. */
+const BENIGN_DEV_PHRASE = /sudah\s+(?:dalam|masuk|di)\s+(?:tahap\s+|proses\s+)?pengembangan/gi;
 
-/** Produk yang masih dalam pengembangan tidak boleh disebut tersedia/aktif/bisa dipakai. */
-const IN_DEVELOPMENT_NAMES = /(publoe|mitapeng)/i;
-const AVAILABLE_WORDS = /(tersedia|sudah|dapat (digunakan|dipakai)|bisa (digunakan|dipakai)|aktif|rilis|diluncurkan|siap)/i;
-const DEV_QUALIFIER = /(belum|pengembangan|segera|rencana|direncanakan)/i;
+/** Produk yang masih dalam pengembangan (PUBLOE, MITAPENG, "produk Tanyopo lain"). */
+const DEV_SUBJECT = /(publoe|mitapeng|ekosistem|produk\s+(?:tanyopo\s+)?lain(?:nya)?)/i;
+const PAYMENT_SUBJECT = /\b(pembayaran|membayar|bayar|checkout|(?:mem|di)?beli|(?:ber)?langganan|penagihan|upgrade)\b/i;
+const OTHER_ENTITY = /\b(linoe|trial|gratis)\b/i;
+const CROSS_SENTENCE_PRONOUN = /^\s*(keduanya|ketiganya|mereka|produk\s+(?:tersebut|lainnya))/i;
+const CONTRAST_OR_BOUNDARY = /\s*[;:()—–]\s*|\s+(?:tetapi|tapi|namun|sedangkan|sementara|padahal|meskipun|meski|walaupun|but|while|however)\s+/i;
+const CLAUSE_SPLIT = /(\s*,\s*|\s+(?:dan|serta|lalu|kemudian|juga|and)\s+)/i;
+const COORDINATING = /^\s+(?:dan|serta|lalu|kemudian|juga|and)\s+$/i;
+
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Subjek yang BELUM aktif, diturunkan dari fakta SEGERA/TARGET milik tenant ini saja. */
+function unavailableSubject(facts: VerifiedFact[]): RegExp | null {
+  const parts: string[] = [];
+  for (const f of facts) {
+    if (f.status !== "SEGERA" && f.status !== "TARGET") continue;
+    if (f.key.startsWith("linoe_plan_")) {
+      const name = f.label.replace(/^Paket\s+/i, "").trim();
+      if (name) parts.push(`(?:paket\\s+)?${escapeRe(name)}`);
+    } else if (f.key === "linoe_platform_status") parts.push("platform\\s+iklan");
+  }
+  return parts.length ? new RegExp(`\\b(?:${parts.join("|")})\\b`) : null; // sensitif huruf: "Growth" paket vs "growth" umum
+}
+
+function qualifiedBeforeClaim(clause: string): boolean {
+  const t = clause.replace(BENIGN_DEV_PHRASE, " ");
+  const m = AVAILABLE_CLAIM.exec(t);
+  if (!m) return true; // tidak ada klaim ketersediaan
+  return QUALIFIER.test(t.slice(0, m.index)) || QUALIFIER.test(m[0]);
+}
+
+interface Clause { text: string; coordinated: boolean }
+
+function clausesOf(sentence: string): Clause[] {
+  const out: Clause[] = [];
+  for (const seg of sentence.split(CONTRAST_OR_BOUNDARY)) {
+    if (!seg?.trim()) continue;
+    const parts = seg.split(CLAUSE_SPLIT);
+    let coordinated = false;
+    for (let i = 0; i < parts.length; i++) {
+      if (i % 2 === 1) { coordinated = COORDINATING.test(parts[i]); continue; }
+      if (parts[i].trim()) out.push({ text: parts[i].trim(), coordinated: i > 0 && coordinated });
+    }
+  }
+  return out;
+}
+
+function isSubjectOnly(text: string, subj: RegExp[]): boolean {
+  let rest = text;
+  let hit = false;
+  for (const re of subj) {
+    const g = new RegExp(re.source, re.flags.includes("g") ? re.flags : `${re.flags}g`);
+    if (g.test(rest)) { hit = true; rest = rest.replace(g, " "); }
+  }
+  rest = rest.replace(/\b(dan|serta|atau|and|yang|di|ke|dari|produk|paket|tanyopo)\b/gi, " ");
+  return hit && !/[a-z0-9]/i.test(rest);
+}
+
+/** Apakah kalimat ini membuat klaim ketersediaan berlebihan untuk subjek yang belum aktif? */
+function sentenceOverstates(sentence: string, facts: VerifiedFact[], carryDev: boolean): { flagged: boolean; dev: boolean } {
+  const unavail = unavailableSubject(facts);
+  const hasPaymentFact = facts.some((f) => f.key === "linoe_payment_status" && f.status === "SEGERA");
+  const subj: RegExp[] = [DEV_SUBJECT, ...(unavail ? [unavail] : []), ...(hasPaymentFact ? [PAYMENT_SUBJECT] : [])];
+  // Fragmen yang hanya berisi nama ("PUBLOE, MITAPENG ...") digabung ke klausa berikutnya.
+  const merged: Clause[] = [];
+  let pending = "";
+  for (const c of clausesOf(sentence)) {
+    if (isSubjectOnly(c.text, subj)) { pending = `${pending} ${c.text}`.trim(); continue; }
+    merged.push({ text: `${pending} ${c.text}`.trim(), coordinated: pending ? false : c.coordinated });
+    pending = "";
+  }
+  if (pending) merged.push({ text: pending, coordinated: false });
+
+  let prevDev = carryDev && CROSS_SENTENCE_PRONOUN.test(sentence);
+  let prevUnavail = false;
+  let flagged = false;
+  let lastDev = false;
+  merged.forEach((c, i) => {
+    const own = DEV_SUBJECT.test(c.text);
+    const ownUnavail = (unavail?.test(c.text) ?? false) || (hasPaymentFact && PAYMENT_SUBJECT.test(c.text));
+    const inherit = (c.coordinated || (i === 0 && prevDev)) && !own && !ownUnavail && !OTHER_ENTITY.test(c.text);
+    const dev = own || (inherit && prevDev);
+    const unv = ownUnavail || (inherit && prevUnavail);
+    if (dev && AVAILABLE_CLAIM.test(c.text.replace(BENIGN_DEV_PHRASE, " ")) && !qualifiedBeforeClaim(c.text)) flagged = true;
+    if (unv && !qualifiedBeforeClaim(c.text)) flagged = true;
+    if (PURCHASE_CLAIM.test(c.text) && !qualifiedBeforeClaim(c.text.replace(PURCHASE_CLAIM, "tersedia"))) flagged = true;
+    prevDev = dev;
+    prevUnavail = unv;
+    lastDev = dev;
+  });
+  return { flagged, dev: lastDev };
+}
+
+const hasPlannedFacts = (facts: VerifiedFact[]) => facts.some((f) => f.status === "SEGERA" || f.status === "TARGET");
+
+const splitSentences = (text: string) => text.trim().split(/(?<=[.!?])\s+/).filter(Boolean);
+
+/** Hapus HANYA kalimat yang melebih-lebihkan; kalimat benar tetap dipertahankan. */
+export function removeOverstatedSentences(text: string, facts: VerifiedFact[]): { text: string; removed: number } {
+  if (!hasPlannedFacts(facts)) return { text, removed: 0 };
+  let carry = false;
+  const kept: string[] = [];
+  let removed = 0;
+  for (const s of splitSentences(text)) {
+    const r = sentenceOverstates(s, facts, carry);
+    carry = r.dev;
+    if (r.flagged) removed++;
+    else kept.push(s);
+  }
+  return { text: kept.join(" "), removed };
+}
 
 export function overstatesAvailability(text: string, facts: VerifiedFact[]): boolean {
-  if (!facts.some((f) => f.status === "SEGERA" || f.status === "TARGET")) return false;
-  if (IN_DEVELOPMENT_NAMES.test(text) && AVAILABLE_WORDS.test(text) && !DEV_QUALIFIER.test(text)) return true;
-  return READY_CLAIM.test(text) && !PLANNED_QUALIFIER.test(text);
+  return removeOverstatedSentences(text, facts).removed > 0;
+}
+
+export const STATUS_CLAIM_REMOVED_NOTE = "Teks dihapus karena memuat klaim status produk yang belum terverifikasi.";
+
+/**
+ * Field AI lain (mis. keywords, bio, ide konten, CTA, rekomendasi on-page): kalimat yang melebih-lebihkan
+ * status produk dibuang. Hanya aktif bila tenant memiliki fakta SEGERA/TARGET (yaitu LINOE sendiri);
+ * tenant lain tidak terpengaruh. Elemen larik string yang habis dibuang; field skalar diberi catatan netral.
+ */
+export function scrubStatusClaims<T>(value: T, facts: VerifiedFact[]): T {
+  if (!hasPlannedFacts(facts)) return value;
+  const walk = (v: unknown, inArray: boolean): unknown => {
+    if (typeof v === "string") {
+      if (!v.trim()) return v;
+      const r = removeOverstatedSentences(v, facts);
+      if (r.removed === 0) return v;
+      return r.text || (inArray ? null : STATUS_CLAIM_REMOVED_NOTE);
+    }
+    if (Array.isArray(v)) return v.map((x) => walk(x, true)).filter((x) => x !== null);
+    if (v && typeof v === "object") {
+      return Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([k, x]) => [k, walk(x, false)]));
+    }
+    return v;
+  };
+  return walk(value, false) as T;
 }
 
 export function isGroundedText(text: string, factsText: string): boolean {
@@ -186,32 +324,38 @@ export function sanitizeAiSearchReadiness(
 ): StoredAiSearchReadiness {
   const factsText = facts.map((f) => f.value).join(" \n ");
   let removed = 0;
-  const questions = ai.customer_questions.slice(0, MAX_AEO_QUESTIONS).map((q) => {
-    let answer = clean(q.short_answer, 600);
-    if (answer && (facts.length === 0 || !isGroundedText(answer, factsText) || overstatesAvailability(answer, facts))) {
-      answer = null;
-      removed++;
+  /** Buang kalimat yang melebih-lebihkan status; sisanya tetap diperiksa terhadap fakta. */
+  const guard = (raw: string | null): string | null => {
+    if (!raw) return null;
+    const r = removeOverstatedSentences(raw, facts);
+    if (r.removed > 0) removed++;
+    const t = r.text.trim();
+    if (!t || facts.length === 0 || !isGroundedText(t, factsText)) {
+      if (r.removed === 0) removed++;
+      return null;
     }
+    return t;
+  };
+  const questions = ai.customer_questions.slice(0, MAX_AEO_QUESTIONS).map((q) => {
+    const answer = guard(clean(q.short_answer, 600));
+    const needed = clean(q.owner_input_needed, 300);
     return {
       question: q.question.trim(),
       short_answer: answer ? limitToTwoSentences(answer) : null,
       owner_input_needed: answer
         ? null
-        : clean(q.owner_input_needed, 300) ?? "Lengkapi data produk/bisnis agar pertanyaan ini bisa dijawab akurat.",
+        : (needed && !overstatesAvailability(needed, facts) ? needed : null) ??
+          "Lengkapi data produk/bisnis agar pertanyaan ini bisa dijawab akurat.",
     };
   });
-  let entity = clean(ai.entity_context, 600);
-  if (entity && (facts.length === 0 || !isGroundedText(entity, factsText) || overstatesAvailability(entity, facts))) {
-    entity = null;
-    removed++;
-  }
+  const entity = guard(clean(ai.entity_context, 600));
   const recs = ai.content_recommendations.slice(0, MAX_CONTENT_RECOMMENDATIONS).filter((r) => {
-    const ok = claimsAllowed(`${r.title} ${r.reason}`, factsText);
+    const ok = claimsAllowed(`${r.title} ${r.reason}`, factsText) && !overstatesAvailability(`${r.title}. ${r.reason}`, facts);
     if (!ok) removed++;
     return ok;
   });
   // Maks 3 dari hitungan server agar tersisa ruang untuk fakta spesifik dari AI (total tetap <= MAX_MISSING_FACTS).
-  const missing = Array.from(new Set([...extraMissing, ...findMissingFacts(facts).slice(0, 3), ...ai.missing_facts.map((m) => m.trim()).filter(Boolean)])).slice(0, MAX_MISSING_FACTS);
+  const missing = Array.from(new Set([...extraMissing, ...findMissingFacts(facts).slice(0, 3), ...ai.missing_facts.map((m) => m.trim()).filter((m) => m && !overstatesAvailability(m, facts))])).slice(0, MAX_MISSING_FACTS);
   return {
     version: 1,
     generated_at: now.toISOString(),
