@@ -82,6 +82,23 @@ export function buildSystemPreamble(brandProfile: BrandProfile): string {
   if (brandProfile?.target_market) {
     lines.push(isEn ? `Target market: ${brandProfile.target_market}.` : `Target pasar: ${brandProfile.target_market}.`);
   }
+  // Konteks bisnis milik tenant sendiri (dikirim hanya bila diisi; tidak ada nilai bawaan/karangan).
+  if (brandProfile?.what_do_you_sell) {
+    lines.push(isEn ? `What the business sells: ${brandProfile.what_do_you_sell}` : `Yang dijual bisnis: ${brandProfile.what_do_you_sell}`);
+  }
+  if (brandProfile?.default_location) {
+    lines.push(isEn ? `Business location: ${brandProfile.default_location}.` : `Lokasi bisnis: ${brandProfile.default_location}.`);
+  }
+  if (brandProfile?.website_url) {
+    lines.push(isEn ? `Business website: ${brandProfile.website_url}.` : `Website bisnis: ${brandProfile.website_url}.`);
+  }
+  if (brandProfile?.whatsapp_number) {
+    lines.push(
+      isEn
+        ? `Business contact (WhatsApp): ${brandProfile.whatsapp_number}. Use only as the contact/CTA destination; never invent other contacts.`
+        : `Kontak bisnis (WhatsApp): ${brandProfile.whatsapp_number}. Gunakan hanya sebagai tujuan kontak/CTA; jangan mengarang kontak lain.`,
+    );
+  }
   if (brandProfile?.prohibited_claims) {
     lines.push(
       isEn
@@ -101,6 +118,7 @@ function describeProduct(product: Product): string {
     product.category ? `Kategori: ${product.category}` : null,
     product.description ? `Deskripsi: ${product.description}` : null,
     product.price ? `Harga: ${product.price} ${product.currency}` : null,
+    product.website_url ? `Website produk: ${product.website_url}` : null,
     Array.isArray(product.target_countries) && product.target_countries.length > 0
       ? `Target negara produk: ${product.target_countries.join(", ")}`
       : null,
@@ -257,6 +275,7 @@ export function buildAiSearchReadinessPrompt(factsText: string): string {
     "2) entity_context: maksimal 2 kalimat pendek yang menjelaskan siapa/apa bisnis dan produk ini, hanya dari fakta terverifikasi.",
     "3) content_recommendations: 1-3 rekomendasi (maksimal 3) konten (FAQ, artikel, halaman produk, postingan, bio) yang membantu pertanyaan di atas terjawab jelas.",
     "4) missing_facts: maksimal 5 fakta yang sebaiknya dilengkapi pemilik (kosongkan bila sudah lengkap).",
+    "Fakta berlabel [SEGERA] atau [TARGET] BELUM tersedia: sebut sebagai rencana/segera hadir, jangan sebagai siap dibeli atau sudah aktif. Harga berlabel rencana wajib disebut sebagai rencana.",
     "DILARANG: mengarang fakta, angka, harga, bahan, sertifikasi, lokasi, atau jam operasional yang tidak ada di fakta terverifikasi; membuat testimoni, rating, atau ulasan pelanggan; menjanjikan atau mengklaim bisnis ini akan/sudah muncul, dikutip, atau direkomendasikan oleh ChatGPT, Gemini, Perplexity, Google AI Overviews, atau mesin AI lain; menjanjikan ranking, penjualan, atau hasil tertentu.",
   ].join("\n\n");
 }

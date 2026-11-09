@@ -53,6 +53,11 @@ export function AiSearchReadinessSection({ stored }: { stored: unknown }) {
                 <ul className="flex flex-col gap-1 text-sm">
                   {data.verified_facts.map((f) => (
                     <li key={f.key}>
+                      {f.status ? (
+                        <Badge variant={f.status === "TERSEDIA" ? "success" : "warning"} className="mr-1.5">
+                          {f.status === "TERSEDIA" ? "Tersedia" : f.status === "SEGERA" ? "Segera / rencana" : "Target"}
+                        </Badge>
+                      ) : null}
                       <span className="text-muted-foreground">{f.label}:</span>{" "}
                       <span className="text-foreground">{f.value}</span>
                     </li>
