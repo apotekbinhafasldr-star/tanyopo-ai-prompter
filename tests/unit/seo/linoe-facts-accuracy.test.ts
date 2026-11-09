@@ -191,7 +191,9 @@ describe("generateSeoRecommendationsAction — isolasi tenant end-to-end", () =>
     expect(r.error).toBeNull();
     expect(aiCalls).toHaveLength(1);
     const all = (aiCalls[0].prompt + aiCalls[0].system).split(LINOE_URL).join("");
-    expect(all).not.toMatch(/PUBLOE|MITAPENG|\[SEGERA\]|\[TARGET\]|tanyopofuturetechnology|Rp99\.000/);
+    // aturan umum di prompt menyebut label [SEGERA]/[TARGET]; yang tidak boleh ada adalah BARIS FAKTA berlabel
+    expect(all).not.toMatch(/^- \[(TERSEDIA|SEGERA|TARGET)\] /m);
+    expect(all).not.toMatch(/PUBLOE|MITAPENG|tanyopofuturetechnology|Rp99\.000/);
     expect(all).not.toMatch(/Rahasia|rahasia\.id|777/);
     expect(aiCalls[0].tenantId).toBe("t-kopi");
     for (const q of filtersSeen) expect(q.filters.tenant_id, q.table).toBe("t-kopi");
