@@ -7,6 +7,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { requireSessionContext } from "@/services/session";
 import { createClient } from "@/lib/supabase/server";
 import { GenerateRecommendationsButton } from "@/features/seo/generate-recommendations-button";
+import { AiSearchReadinessSection } from "@/features/seo/ai-search-readiness-section";
 import { countryLabel } from "@/lib/i18n/countries";
 
 export const metadata: Metadata = { title: "Detail Project SEO & Discovery — LINOE" };
@@ -324,6 +325,8 @@ export default async function SeoProjectDetailPage({ params }: { params: Promise
           </Card>
         </div>
       )}
+
+      {recommendations ? <AiSearchReadinessSection stored={recommendations.discovery_recommendations} /> : null}
     </div>
   );
 }
