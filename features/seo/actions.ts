@@ -6,18 +6,13 @@ import { createClient } from "@/lib/supabase/server";
 import { requireSessionContext } from "@/services/session";
 import { seoProjectSchema } from "@/schemas/seo";
 import { SeoWithReadinessSchema, DiscoveryWithReadinessSchema } from "@/schemas/ai/seo-with-readiness";
-import { buildVerifiedFacts, formatFactsForPrompt, sanitizeAiSearchReadiness } from "@/lib/seo/ai-search-readiness";
+import { buildVerifiedFacts, formatFactsForPrompt, productSelectionNote, sanitizeAiSearchReadiness } from "@/lib/seo/ai-search-readiness";
 import { buildSystemPreamble, buildSeoRecommendationsPrompt, buildDiscoveryRecommendationsPrompt } from "@/lib/ai/prompts";
 import { runAiJob } from "@/services/ai-jobs";
 import type { Json } from "@/types/database";
 
 export interface SeoActionState {
   error: string | null;
-}
-
-/** Tidak ada produk fallback otomatis (risiko salah konteks): minta pemilik memilih produk sendiri. */
-function noProductNote(product: unknown): string[] {
-  return product ? [] : ["Pilih produk pada project SEO ini agar jawaban akurat"];
 }
 
 function requireWriteAccess(role: string): string | null {
@@ -178,7 +173,7 @@ export async function generateSeoRecommendationsAction(projectId: string): Promi
         // Additive, no migration: AI Search Readiness lives inside the existing jsonb.
         discovery_recommendations: {
           ...discoveryBase,
-          ai_search_readiness: sanitizeAiSearchReadiness(result.data.ai_search_readiness, facts, new Date(), noProductNote(product)),
+          ai_search_readiness: sanitizeAiSearchReadiness(result.data.ai_search_readiness, facts, new Date(), productSelectionNote(product, facts)),
         } as unknown as Json,
         ai_job_id: result.jobId,
         model: result.model,
@@ -240,7 +235,7 @@ export async function generateSeoRecommendationsAction(projectId: string): Promi
       // WEBSITE rows previously had NULL here; the page reads this column only in
       // NO_WEBSITE mode for the legacy discovery fields, so the key is purely additive.
       discovery_recommendations: {
-        ai_search_readiness: sanitizeAiSearchReadiness(result.data.ai_search_readiness, websiteFacts, new Date(), noProductNote(websiteProduct)),
+        ai_search_readiness: sanitizeAiSearchReadiness(result.data.ai_search_readiness, websiteFacts, new Date(), productSelectionNote(websiteProduct, websiteFacts)),
       } as unknown as Json,
       ai_job_id: result.jobId,
       model: result.model,

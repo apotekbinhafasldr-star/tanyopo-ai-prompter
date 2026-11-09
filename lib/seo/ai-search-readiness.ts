@@ -75,18 +75,33 @@ export function buildVerifiedFacts(src: FactSources): VerifiedFact[] {
   return facts;
 }
 
-const RECOMMENDED: { key: string; label: string }[] = [
-  { key: "product_description", label: "Deskripsi produk" },
-  { key: "product_category", label: "Kategori produk" },
-  { key: "product_price", label: "Harga produk" },
-  { key: "location", label: "Lokasi bisnis" },
-  { key: "whatsapp", label: "Kontak WhatsApp/pemesanan" },
+/** `anyOf`: fakta apa pun dari daftar ini sudah memenuhi kebutuhan (mis. kontak resmi LINOE = email, bukan WhatsApp). */
+const RECOMMENDED: { label: string; anyOf: string[]; needsProduct?: boolean }[] = [
+  { label: "Deskripsi produk", anyOf: ["product_description", "linoe_what"], needsProduct: true },
+  { label: "Kategori produk", anyOf: ["product_category", "linoe_what"], needsProduct: true },
+  { label: "Harga produk", anyOf: ["product_price", "linoe_plan_free"], needsProduct: true },
+  { label: "Lokasi bisnis", anyOf: ["location", "linoe_operator"] },
+  { label: "Kontak WhatsApp/pemesanan", anyOf: ["whatsapp", "linoe_contact"] },
 ];
 
-/** Fakta penting yang belum ada — dihitung server, bukan ditebak AI. */
+/**
+ * Fakta penting yang belum ada — dihitung server, bukan ditebak AI. Tidak menyesatkan:
+ *  - butir yang sudah dicakup fakta resmi LINOE (lokasi/kontak/harga paket) tidak dilaporkan kurang;
+ *  - bila produk memang belum dipilih, butir per-produk tidak didaftar satu-satu (cukup catatan "Pilih produk").
+ */
 export function findMissingFacts(facts: VerifiedFact[]): string[] {
   const have = new Set(facts.map((f) => f.key));
-  return RECOMMENDED.filter((r) => !have.has(r.key)).map((r) => r.label);
+  const hasProduct = have.has("product_name") || [...have].some((k) => k.startsWith("linoe_"));
+  return RECOMMENDED.filter((r) => (r.needsProduct ? hasProduct : true) && !r.anyOf.some((k) => have.has(k))).map((r) => r.label);
+}
+
+/**
+ * Tidak ada produk fallback otomatis (risiko salah konteks): bila project tidak punya produk, minta pemilik memilih
+ * sendiri. Bisnis LINOE sendiri sudah dicakup fakta publik resmi, jadi catatan ini akan menyesatkan dan dilewati.
+ */
+export function productSelectionNote(product: unknown, facts: { key: string }[]): string[] {
+  if (product || facts.some((f) => f.key.startsWith("linoe_"))) return [];
+  return ["Pilih produk pada project SEO ini agar jawaban akurat"];
 }
 
 export function formatFactsForPrompt(facts: VerifiedFact[]): string {
@@ -98,7 +113,7 @@ export function formatFactsForPrompt(facts: VerifiedFact[]): string {
 // Klaim yang tidak boleh muncul di jawaban/konteks: jaminan, ranking/visibilitas AI,
 // testimoni/rating, superlatif tak terbukti.
 const FORBIDDEN_CLAIMS =
-  /(?:100\s*%|\b(garansi|dijamin|menjamin|pasti laku|terlaris|nomor\s*1|no\.?\s*1|terbaik|ranking|peringkat|muncul di (chatgpt|gemini|perplexity|google)|chatgpt|gemini|perplexity|ai overview|testimoni|ulasan pelanggan|rating|bintang\s*\d|review pelanggan|terbukti|bersertifikat|bpom|halal)\b)/i;
+  /(?:100\s*%|\b(garansi|dijamin|menjamin|pasti laku|terlaris|nomor\s*1|no\.?\s*1|terbaik|ranking|peringkat|muncul di (chatgpt|gemini|perplexity|google)|chatgpt|gemini|perplexity|ai overview|testimoni|ulasan pelanggan|rating|bintang\s*\d|review pelanggan|terbukti|bersertifikat|bpom|halal|publoe|mitapeng|umkmpro|linoe|tanyopo)\b)/i;
 
 /** Batasi ke 2 kalimat pendek (potongan dari jawaban berdasar fakta tetap berdasar fakta). */
 export function limitToTwoSentences(text: string, maxChars = 300): string {
@@ -130,8 +145,14 @@ function claimsAllowed(text: string, factsText: string): boolean {
 const READY_CLAIM = /(siap dibeli|bisa dibeli|dapat dibeli|sudah aktif|sudah tersedia|beli sekarang|bayar sekarang|langganan sekarang|checkout)/i;
 const PLANNED_QUALIFIER = /(belum|rencana|segera|target|direncanakan)/i;
 
+/** Produk yang masih dalam pengembangan tidak boleh disebut tersedia/aktif/bisa dipakai. */
+const IN_DEVELOPMENT_NAMES = /(publoe|mitapeng)/i;
+const AVAILABLE_WORDS = /(tersedia|sudah|dapat (digunakan|dipakai)|bisa (digunakan|dipakai)|aktif|rilis|diluncurkan|siap)/i;
+const DEV_QUALIFIER = /(belum|pengembangan|segera|rencana|direncanakan)/i;
+
 export function overstatesAvailability(text: string, facts: VerifiedFact[]): boolean {
   if (!facts.some((f) => f.status === "SEGERA" || f.status === "TARGET")) return false;
+  if (IN_DEVELOPMENT_NAMES.test(text) && AVAILABLE_WORDS.test(text) && !DEV_QUALIFIER.test(text)) return true;
   return READY_CLAIM.test(text) && !PLANNED_QUALIFIER.test(text);
 }
 

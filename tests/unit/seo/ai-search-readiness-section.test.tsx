@@ -35,3 +35,28 @@ describe("AiSearchReadinessSection", () => {
     expect(screen.getAllByText(/Belum bisa dijawab dari data Anda/)).toHaveLength(2);
   });
 });
+
+describe("AiSearchReadinessSection — status produk LINOE", () => {
+  it("menampilkan lencana status untuk fakta LINOE dan tidak memuat 'Pilih produk' bila tidak ada", () => {
+    const facts = buildVerifiedFacts({ brand: { brand_name: "LINOE", website_url: "https://tanyopo-ai-prompter.netlify.app" } });
+    const stored = sanitizeAiSearchReadiness(
+      {
+        customer_questions: [
+          { question: "Siapa target?", short_answer: "UMKM.", owner_input_needed: null },
+          { question: "A?", short_answer: null, owner_input_needed: "x" },
+          { question: "B?", short_answer: null, owner_input_needed: "x" },
+        ],
+        entity_context: "LINOE membantu promosi.",
+        content_recommendations: [{ title: "FAQ", format: "FAQ", reason: "r" }],
+        missing_facts: [],
+      },
+      facts,
+    );
+    render(<AiSearchReadinessSection stored={{ ai_search_readiness: stored }} />);
+    expect(screen.getAllByText("Tersedia").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Segera / rencana").length).toBeGreaterThan(0);
+    expect(screen.getByText(/Produk Tanyopo lain:/)).toBeInTheDocument();
+    expect(screen.queryByText(/Pilih produk/)).toBeNull();
+    expect(screen.queryByText("Perlu dilengkapi:")).toBeNull();
+  });
+});
