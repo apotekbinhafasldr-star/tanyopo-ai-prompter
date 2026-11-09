@@ -2,17 +2,20 @@
 import { createHash, createHmac, randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { serverEnvMock } = vi.hoisted(() => ({
+const { serverEnvMock, publicEnvMock } = vi.hoisted(() => ({
   serverEnvMock: {
+    supabaseSecretKey: undefined as string | undefined,
     payment: {
       providerName: "doku" as string | undefined,
       apiKey: "dokusecretkey-123456" as string | undefined,
       clientId: "MCH-0001-1234567890" as string | undefined,
       webhookSecret: undefined as string | undefined,
+      sandboxDbRefs: "abcdefghij0123456789" as string | undefined,
     },
   },
+  publicEnvMock: { supabaseUrl: "https://abcdefghij0123456789.supabase.co" },
 }));
-vi.mock("@/lib/env", () => ({ serverEnv: serverEnvMock }));
+vi.mock("@/lib/env", () => ({ serverEnv: serverEnvMock, publicEnv: publicEnvMock }));
 
 import {
   DOKU_INVOICE_NUMBER_LENGTH,
@@ -42,6 +45,9 @@ let provider: DokuPaymentProvider;
 beforeEach(() => {
   serverEnvMock.payment.apiKey = SECRET;
   serverEnvMock.payment.clientId = CLIENT;
+  serverEnvMock.payment.sandboxDbRefs = "abcdefghij0123456789";
+  serverEnvMock.supabaseSecretKey = undefined;
+  publicEnvMock.supabaseUrl = "https://abcdefghij0123456789.supabase.co";
   vi.stubEnv("PAYMENT_PROVIDER_ENV", "sandbox");
   vi.stubEnv("PAYMENT_LIVE_ENABLED", "");
   vi.stubGlobal("fetch", fetchMock);
@@ -83,6 +89,43 @@ describe("DOKU adapter — fail-closed configuration (sandbox only)", () => {
     expect(provider.isConfigured()).toBe(false);
     serverEnvMock.payment.clientId = "bad id\nwith newline";
     expect(provider.isConfigured()).toBe(false);
+  });
+  it.each([
+    ["the shared PRODUCTION project", "https://wjjyqovhmwenbcvbnkgx.supabase.co", "wjjyqovhmwenbcvbnkgx"],
+    ["production even if (mis)listed in the allow-list", "https://wjjyqovhmwenbcvbnkgx.supabase.co", "abcdefghij0123456789,wjjyqovhmwenbcvbnkgx"],
+    ["a project that is not in the allow-list", "https://zzzzzzzzzz9999999999.supabase.co", "abcdefghij0123456789"],
+    ["an empty allow-list", "https://abcdefghij0123456789.supabase.co", ""],
+    ["a malformed allow-list entry", "https://abcdefghij0123456789.supabase.co", "abcdefghij0123456789,not-a-ref"],
+    ["a custom domain (identity unprovable)", "https://db.example.com", "abcdefghij0123456789"],
+    ["localhost (identity unprovable)", "http://127.0.0.1:54321", "abcdefghij0123456789"],
+    ["the CI placeholder host", "https://placeholder.supabase.co", "abcdefghij0123456789"],
+    ["http instead of https", "http://abcdefghij0123456789.supabase.co", "abcdefghij0123456789"],
+    ["credentials / port in the URL", "https://user:pw@abcdefghij0123456789.supabase.co", "abcdefghij0123456789"],
+    ["no URL at all", "", "abcdefghij0123456789"],
+  ])("P1-C: is NOT configured against %s", (_name, url, refs) => {
+    publicEnvMock.supabaseUrl = url;
+    serverEnvMock.payment.sandboxDbRefs = refs;
+    expect(provider.isConfigured()).toBe(false);
+    expect(resolveDokuConfig()).toBeNull();
+  });
+  it("P1-C: a legacy JWT service key must belong to the same project as the URL; sb_secret keys carry no ref and are not blocked by that check", () => {
+    const jwt = (claims: object) => `h.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.s`;
+    serverEnvMock.supabaseSecretKey = jwt({ role: "service_role", ref: "abcdefghij0123456789" });
+    expect(provider.isConfigured()).toBe(true);
+    serverEnvMock.supabaseSecretKey = jwt({ role: "service_role", ref: "wjjyqovhmwenbcvbnkgx" }); // a production key on a sandbox URL
+    expect(provider.isConfigured()).toBe(false);
+    serverEnvMock.supabaseSecretKey = jwt({ role: "service_role" }); // JWT without a ref claim: cannot be tied to the URL
+    expect(provider.isConfigured()).toBe(false);
+    serverEnvMock.supabaseSecretKey = "sb_secret_abcdefghijklmnop";
+    expect(provider.isConfigured()).toBe(true);
+  });
+  it("P1-C: with the database identity unprovable, no checkout is created and no payment is verified (no network call)", async () => {
+    publicEnvMock.supabaseUrl = "https://wjjyqovhmwenbcvbnkgx.supabase.co";
+    await expect(
+      provider.createCheckoutSession({ tenantId: "t", plan: "PRO", amountIDR: 99000, internalTransactionId: TXN, successUrl: "https://a.test/s", cancelUrl: "https://a.test/c" }),
+    ).rejects.toBeInstanceOf(PaymentProviderConfigError);
+    await expect(provider.getVerifiedPayment(TXN)).rejects.toBeInstanceOf(PaymentProviderConfigError);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
   it("every call throws when unconfigured and never reaches the network", async () => {
     vi.stubEnv("PAYMENT_PROVIDER_ENV", "production");
@@ -180,6 +223,31 @@ describe("DOKU status mapping", () => {
     expect(mapDokuStatus("SUCCESS", "SALE", "ORDER_EXPIRED")).toBe("UNKNOWN");
     expect(mapDokuStatus("SUCCESS", "SALE", "ORDER_GENERATED")).toBe("PAID");
   });
+  it("P1-A: SUCCESS is PAID only for an absent type or a documented settled type (SALE / CAPTURE)", () => {
+    expect(mapDokuStatus("SUCCESS", undefined)).toBe("PAID"); // VA / QRIS / e-wallet carry no type
+    for (const t of ["SALE", "CAPTURE", "sale", "capture"]) expect(mapDokuStatus("SUCCESS", t), t).toBe("PAID");
+    // AUTHORIZE = held, NOT captured; the rest are not proven to be final settlements -> never PAID
+    for (const t of ["AUTHORIZE", "authorize", "MOTO", "RECURRING", "INSTALLMENT", "SOMETHING_NEW", "ADJUSTMENT"]) {
+      expect(mapDokuStatus("SUCCESS", t), t).toBe("UNKNOWN");
+    }
+  });
+  it("P1-A: SUCCESS together with a refund object is a refund alarm, never PAID; a malformed answer is UNKNOWN", () => {
+    expect(mapDokuStatus("SUCCESS", "SALE", undefined, { refundPresent: true })).toBe("REFUNDED");
+    expect(mapDokuStatus("SUCCESS", undefined, undefined, { refundPresent: true })).toBe("REFUNDED");
+    expect(mapDokuStatus("SUCCESS", "SALE", undefined, { malformed: true })).toBe("UNKNOWN");
+    expect(mapDokuStatus("PENDING", undefined, undefined, { malformed: true })).toBe("PENDING"); // only SUCCESS is gated
+  });
+  it("order.status may be an array (DOKU's table) or a string: any ORDER_EXPIRED blocks PAID", () => {
+    expect(mapDokuStatus("SUCCESS", "SALE", ["ORDER_GENERATED"])).toBe("PAID");
+    expect(mapDokuStatus("SUCCESS", "SALE", ["ORDER_GENERATED", "ORDER_EXPIRED"])).toBe("UNKNOWN");
+    expect(mapDokuStatus("SUCCESS", "SALE", ["order_expired"])).toBe("UNKNOWN");
+  });
+  it("a card block whose own type / status is not a settled SUCCESS blocks PAID", () => {
+    expect(mapDokuStatus("SUCCESS", "SALE", undefined, { cardPaymentType: "SALE", cardPaymentStatus: "SUCCESS" })).toBe("PAID");
+    expect(mapDokuStatus("SUCCESS", "SALE", undefined, { cardPaymentType: "AUTHORIZE" })).toBe("UNKNOWN");
+    expect(mapDokuStatus("SUCCESS", "SALE", undefined, { cardPaymentStatus: "PENDING" })).toBe("UNKNOWN");
+    expect(mapDokuStatus("SUCCESS", "SALE", undefined, { cardPaymentType: "REFUND" })).toBe("REFUNDED");
+  });
 });
 
 describe("DOKU createCheckoutSession", () => {
@@ -201,6 +269,7 @@ describe("DOKU createCheckoutSession", () => {
     const rawBody = init.body as string;
     const body = JSON.parse(rawBody);
     expect(body.order.amount).toBe(99000);
+    expect(body.order.currency).toBe("IDR"); // sent explicitly (DOKU Checkout supports order.currency; default is IDR)
     expect(body.order.invoice_number).toBe(INVOICE);
     expect(body.order.invoice_number.length).toBeLessThanOrEqual(30);
     expect(body.order.callback_url).toBe(input.successUrl);
@@ -263,7 +332,7 @@ describe("DOKU createCheckoutSession", () => {
 
 describe("DOKU getVerifiedPayment (Check Status)", () => {
   const answer = (over: { order?: Record<string, unknown>; transaction?: Record<string, unknown>; extra?: Record<string, unknown> } = {}) => ({
-    order: { invoice_number: INVOICE, amount: 99000, ...over.order },
+    order: { invoice_number: INVOICE, amount: 99000, currency: "IDR", ...over.order },
     transaction: { status: "SUCCESS", date: "2026-11-09T10:01:00Z", original_request_id: "orig-req-1", ...over.transaction },
     ...over.extra,
   });
@@ -362,6 +431,112 @@ describe("DOKU getVerifiedPayment (Check Status)", () => {
     await expect(provider.getVerifiedPayment("../../x")).rejects.toBeInstanceOf(PaymentProviderConfigError);
     expect(fetchMock.mock.calls.length).toBe(calls);
   });
+  describe("P1-A: only a documented settlement may be PAID", () => {
+    it.each(["AUTHORIZE", "MOTO", "RECURRING", "INSTALLMENT", "SOMETHING_NEW"])("SUCCESS + transaction.type %s is UNKNOWN, never PAID", async (type) => {
+      fetchMock.mockResolvedValueOnce(json(answer({ transaction: { type } })));
+      expect((await provider.getVerifiedPayment(TXN)).status).toBe("UNKNOWN");
+    });
+    it.each(["SALE", "CAPTURE"])("SUCCESS + transaction.type %s is PAID", async (type) => {
+      fetchMock.mockResolvedValueOnce(json(answer({ transaction: { type } })));
+      expect((await provider.getVerifiedPayment(TXN)).status).toBe("PAID");
+    });
+    it.each([
+      ["a number", 5],
+      ["an array", ["SALE"]],
+      ["an object", { a: 1 }],
+      ["null", null],
+      ["an empty string", ""],
+    ])("SUCCESS with transaction.type as %s (malformed) is UNKNOWN", async (_name, type) => {
+      fetchMock.mockResolvedValueOnce(json(answer({ transaction: { type } })));
+      expect((await provider.getVerifiedPayment(TXN)).status).toBe("UNKNOWN");
+    });
+    it.each([
+      ["a refund object", { refund: { amount: "500" } }],
+      ["an empty refund object", { refund: {} }],
+      ["a refund amount value", { refund: 500 }],
+    ])("SUCCESS together with %s is a REFUND alarm state, never PAID", async (_name, extra) => {
+      fetchMock.mockResolvedValueOnce(json(answer({ extra })));
+      const v = await provider.getVerifiedPayment(TXN);
+      expect(v.status).toBe("REFUNDED");
+      expect(v.eventRefBasis).toBe("detailed");
+    });
+    it("order.status as an array: ORDER_EXPIRED anywhere blocks PAID, a clean array does not; other shapes are UNKNOWN", async () => {
+      fetchMock.mockResolvedValueOnce(json(answer({ order: { status: ["ORDER_GENERATED"] } })));
+      expect((await provider.getVerifiedPayment(TXN)).status).toBe("PAID");
+      fetchMock.mockResolvedValueOnce(json(answer({ order: { status: ["ORDER_GENERATED", "ORDER_EXPIRED"] } })));
+      expect((await provider.getVerifiedPayment(TXN)).status).toBe("UNKNOWN");
+      for (const status of [{ a: 1 }, 7, [1, 2], [], ""]) {
+        fetchMock.mockResolvedValueOnce(json(answer({ order: { status } })));
+        expect((await provider.getVerifiedPayment(TXN)).status, JSON.stringify(status)).toBe("UNKNOWN");
+      }
+    });
+    it("a card block that is not a settled SUCCESS blocks PAID; a settled one does not", async () => {
+      fetchMock.mockResolvedValueOnce(json(answer({ transaction: { type: "SALE" }, extra: { card_payment: { type: "SALE", transaction_status: "SUCCESS" } } })));
+      expect((await provider.getVerifiedPayment(TXN)).status).toBe("PAID");
+      fetchMock.mockResolvedValueOnce(json(answer({ extra: { card_payment: { type: "AUTHORIZE", transaction_status: "SUCCESS" } } })));
+      expect((await provider.getVerifiedPayment(TXN)).status).toBe("UNKNOWN");
+      fetchMock.mockResolvedValueOnce(json(answer({ extra: { card_payment: { type: "SALE", transaction_status: "PENDING" } } })));
+      expect((await provider.getVerifiedPayment(TXN)).status).toBe("UNKNOWN");
+      fetchMock.mockResolvedValueOnce(json(answer({ extra: { card_payment: "oops" } })));
+      expect((await provider.getVerifiedPayment(TXN)).status).toBe("UNKNOWN");
+    });
+  });
+
+  describe("P1-B: currency is never assumed", () => {
+    it("a PAID answer WITHOUT currency throws (fail closed, safe retry) - it is not defaulted to IDR", async () => {
+      for (const currency of [undefined, null, ""]) {
+        fetchMock.mockResolvedValueOnce(json(clean(answer({ order: { currency } }))));
+        await expect(provider.getVerifiedPayment(TXN), String(currency)).rejects.toThrow(/Mata uang/);
+      }
+    });
+    it("a PAID answer needs exactly the string IDR; any other currency or type throws", async () => {
+      for (const currency of ["USD", "idr", " IDR", ["IDR"], { code: "IDR" }, 360]) {
+        fetchMock.mockResolvedValueOnce(json(answer({ order: { currency } })));
+        await expect(provider.getVerifiedPayment(TXN), JSON.stringify(currency)).rejects.toBeInstanceOf(PaymentProviderConfigError);
+      }
+      fetchMock.mockResolvedValueOnce(json(answer({ order: { currency: "IDR" } })));
+      await expect(provider.getVerifiedPayment(TXN)).resolves.toMatchObject({ status: "PAID", currency: "IDR" });
+    });
+    it("non-PAID answers need no currency (a pending VA must not look broken) but a present foreign one still throws", async () => {
+      for (const status of ["PENDING", "EXPIRED", "FAILED"]) {
+        fetchMock.mockResolvedValueOnce(json(clean(answer({ order: { currency: undefined }, transaction: { status, original_request_id: undefined } }))));
+        await expect(provider.getVerifiedPayment(TXN), status).resolves.toMatchObject({ status: status === "EXPIRED" ? "EXPIRED" : "PENDING" });
+      }
+      fetchMock.mockResolvedValueOnce(json(answer({ order: { currency: "USD" }, transaction: { status: "PENDING" } })));
+      await expect(provider.getVerifiedPayment(TXN)).rejects.toBeInstanceOf(PaymentProviderConfigError);
+    });
+  });
+
+  describe("network and stream failures (P2)", () => {
+    const failingStream = () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('{"order":'));
+          },
+          pull() {
+            throw new DOMException("The operation timed out.", "TimeoutError");
+          },
+        }),
+        { status: 200 },
+      );
+    it("a body that stalls / is aborted mid-stream is a PaymentProviderConfigError, not a half-read answer", async () => {
+      fetchMock.mockResolvedValueOnce(failingStream());
+      await expect(provider.getVerifiedPayment(TXN)).rejects.toBeInstanceOf(PaymentProviderConfigError);
+      fetchMock.mockResolvedValueOnce(failingStream());
+      await expect(
+        provider.createCheckoutSession({ tenantId: "t1", plan: "PRO", amountIDR: 99000, internalTransactionId: TXN, successUrl: "https://a.test/s", cancelUrl: "https://a.test/c" }),
+      ).rejects.toBeInstanceOf(PaymentProviderConfigError);
+    });
+    it("a connection failure (DNS / reset / TLS) is a PaymentProviderConfigError for both calls", async () => {
+      fetchMock.mockRejectedValue(new TypeError("fetch failed"));
+      await expect(provider.getVerifiedPayment(TXN)).rejects.toBeInstanceOf(PaymentProviderConfigError);
+      await expect(
+        provider.createCheckoutSession({ tenantId: "t1", plan: "PRO", amountIDR: 99000, internalTransactionId: TXN, successUrl: "https://a.test/s", cancelUrl: "https://a.test/c" }),
+      ).rejects.toBeInstanceOf(PaymentProviderConfigError);
+    });
+  });
+
   it("getPaymentStatus is a coarse display view only", async () => {
     fetchMock.mockResolvedValueOnce(json(answer()));
     await expect(provider.getPaymentStatus(TXN)).resolves.toBe("PAID");
@@ -412,6 +587,37 @@ describe("DOKU webhook authentication and parsing", () => {
   ])("rejects: %s", (_name, over) => {
     const r = request(over as Parameters<typeof request>[0]);
     expect(provider.verifyWebhookRequest(r.rawBody, r.ctx)).toBe(false);
+  });
+  it("rejects duplicate headers (a real Headers object folds them into 'a, a')", () => {
+    const r = request();
+    for (const name of ["Client-Id", "Request-Id", "Request-Timestamp", "Signature"]) {
+      const headers = new Headers({
+        "client-id": CLIENT,
+        "request-id": "notif-1",
+        "request-timestamp": "2026-11-09T10:00:00Z",
+        signature: (r.ctx.headers.get("signature") as string),
+      });
+      expect(provider.verifyWebhookRequest(r.rawBody, { headers, path: PATH }), "control").toBe(true);
+      headers.append(name, headers.get(name) as string); // the very same value twice
+      expect(headers.get(name)).toContain(", ");
+      expect(provider.verifyWebhookRequest(r.rawBody, { headers, path: PATH }), name).toBe(false);
+    }
+  });
+  it("rejects a trailing slash, a query string or a fragment: the Request-Target is the exact bare path", () => {
+    // signature computed over the canonical path, delivered on a different path
+    for (const path of [`${PATH}/`, `${PATH}?a=1`, `${PATH}#x`, `${PATH}?`, "//api/webhooks/payment", "/api/webhooks/payment/../payment"]) {
+      const r = request({ path });
+      expect(provider.verifyWebhookRequest(r.rawBody, r.ctx), path).toBe(false);
+    }
+    // even a signature that was (wrongly) computed over a path WITH a query is refused outright
+    const withQuery = `${PATH}?a=1`;
+    const headers: Record<string, string> = { "client-id": CLIENT, "request-id": "notif-1", "request-timestamp": "2026-11-09T10:00:00Z" };
+    headers.signature = computeDokuSignature({ clientId: CLIENT, requestId: "notif-1", timestamp: headers["request-timestamp"], requestTarget: withQuery, rawBody: body, secretKey: SECRET });
+    expect(provider.verifyWebhookRequest(body, { headers: { get: (n: string) => headers[n.toLowerCase()] ?? null }, path: withQuery })).toBe(false);
+    // a notification URL that really ends with a slash is verified exactly as given
+    const slash = `${PATH}/`;
+    headers.signature = computeDokuSignature({ clientId: CLIENT, requestId: "notif-1", timestamp: headers["request-timestamp"], requestTarget: slash, rawBody: body, secretKey: SECRET });
+    expect(provider.verifyWebhookRequest(body, { headers: { get: (n: string) => headers[n.toLowerCase()] ?? null }, path: slash })).toBe(true);
   });
   it("rejects everything when not configured (sandbox switch off)", () => {
     vi.stubEnv("PAYMENT_PROVIDER_ENV", "production");

@@ -1,9 +1,12 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { serverEnvMock, createAdminClientMock } = vi.hoisted(() => ({
+const { serverEnvMock, publicEnvMock, createAdminClientMock } = vi.hoisted(() => ({
+  publicEnvMock: { supabaseUrl: "https://abcdefghij0123456789.supabase.co" },
   serverEnvMock: {
+    supabaseSecretKey: undefined as string | undefined,
     payment: {
+      sandboxDbRefs: "abcdefghij0123456789" as string | undefined,
       providerName: "doku" as string | undefined,
       apiKey: "dokusecretkey-123456" as string | undefined,
       clientId: "MCH-0001-1234567890" as string | undefined,
@@ -12,7 +15,7 @@ const { serverEnvMock, createAdminClientMock } = vi.hoisted(() => ({
   },
   createAdminClientMock: vi.fn(() => null as unknown),
 }));
-vi.mock("@/lib/env", () => ({ serverEnv: serverEnvMock }));
+vi.mock("@/lib/env", () => ({ serverEnv: serverEnvMock, publicEnv: publicEnvMock }));
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: createAdminClientMock }));
 
 import { startCheckout } from "@/services/checkout";
@@ -52,6 +55,8 @@ const fetchMock = vi.fn();
 beforeEach(() => {
   createAdminClientMock.mockReset();
   fetchMock.mockReset();
+  publicEnvMock.supabaseUrl = "https://abcdefghij0123456789.supabase.co";
+  serverEnvMock.payment.sandboxDbRefs = "abcdefghij0123456789";
   vi.stubEnv("PAYMENT_PROVIDER_ENV", "sandbox");
   vi.stubEnv("PAYMENT_LIVE_ENABLED", "");
   vi.stubGlobal("fetch", fetchMock);
@@ -77,6 +82,7 @@ describe("startCheckout with the DOKU provider", () => {
     expect(url).toBe("https://api-sandbox.doku.com/checkout/v1/payment");
     const body = JSON.parse(init.body as string);
     expect(body.order.amount).toBe(99_000);
+    expect(body.order.currency).toBe("IDR");
     expect(body.order.invoice_number).toBe(encodeDokuInvoiceNumber(TXN));
     expect(body.order.invoice_number.length).toBeLessThanOrEqual(30);
     expect(body.order.callback_url).toContain(`txn=${TXN}`);
@@ -115,6 +121,24 @@ describe("startCheckout with the DOKU provider", () => {
     expect(result.ok).toBe(false);
     expect(fetchMock).not.toHaveBeenCalled();
     expect(admin.updates).toContainEqual({ status: "FAILED", failure_reason: "PRICE_CATALOG_MISMATCH" });
+  });
+
+  it("P1-C: pointed at the shared PRODUCTION database (or an unprovable one) → no transaction is created and DOKU is never contacted", async () => {
+    const admin = mockAdmin(outcome("CREATED"));
+    createAdminClientMock.mockReturnValue(admin);
+    for (const [url, refs] of [
+      ["https://wjjyqovhmwenbcvbnkgx.supabase.co", "abcdefghij0123456789"],
+      ["https://wjjyqovhmwenbcvbnkgx.supabase.co", "wjjyqovhmwenbcvbnkgx"],
+      ["https://db.example.com", "abcdefghij0123456789"],
+      ["https://abcdefghij0123456789.supabase.co", ""],
+    ] as const) {
+      publicEnvMock.supabaseUrl = url;
+      serverEnvMock.payment.sandboxDbRefs = refs;
+      expect((await startCheckout(input)).ok).toBe(false);
+    }
+    expect(admin.rpc).not.toHaveBeenCalled();
+    expect(admin.updates).toEqual([]);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("not configured for sandbox (production env / live flag) → no transaction is created and DOKU is never contacted", async () => {

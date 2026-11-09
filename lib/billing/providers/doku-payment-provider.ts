@@ -1,7 +1,8 @@
 import "server-only";
 
 import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
-import { serverEnv } from "@/lib/env";
+import { publicEnv, serverEnv } from "@/lib/env";
+import { evaluateSandboxDbGuard } from "@/lib/billing/providers/doku-sandbox-db-guard";
 import {
   PaymentProviderConfigError,
   type CheckoutSessionInput,
@@ -150,6 +151,15 @@ export function resolveDokuConfig(
   if ((providerEnv ?? "").trim() !== "sandbox") return null;
   const { apiKey, clientId } = serverEnv.payment;
   if (!apiKey || apiKey.length < 8 || !clientId || !CLIENT_ID_PATTERN.test(clientId)) return null;
+  // P1-C: a sandbox payment must never be able to touch the shared PRODUCTION database. The identity of the database this
+  // server is connected to is derived from the URL the admin client really uses (not NODE_ENV / a deploy name) and must be
+  // a known-safe, explicitly allow-listed project. Unprovable identity => adapter OFF (no checkout, no verification, 503).
+  const dbGuard = evaluateSandboxDbGuard({
+    supabaseUrl: publicEnv.supabaseUrl,
+    allowedRefs: serverEnv.payment.sandboxDbRefs,
+    serviceKey: serverEnv.supabaseSecretKey,
+  });
+  if (!dbGuard.ok) return null;
   return { clientId, secretKey: apiKey, apiBase: SANDBOX_API_BASE };
 }
 
@@ -184,27 +194,57 @@ function unwrap(data: Record<string, unknown>): Record<string, unknown> {
 const REFUND_TRANSACTION_TYPES = new Set(["REFUND", "FULL_REFUND", "PARTIAL_REFUND", "VOID"]);
 
 /**
- * The ONLY place DOKU's status words are interpreted. PAID means exactly `SUCCESS`, and nothing that looks like money
- * moving back or an inconsistent order ever counts as paid:
- *   SUCCESS (and order not expired)        -> PAID
- *   refund / void type, REFUNDED,
- *   PARTIAL_REFUNDED, VOIDED               -> REFUNDED   (alarm only; the subscription is never changed by it)
+ * Transaction types for which `SUCCESS` means money was captured/settled. DOKU documents more types (AUTHORIZE = held but
+ * NOT captured, MOTO, RECURRING, INSTALLMENT, ...); until a sandbox transaction proves one of them is a final settlement
+ * it is NOT in this list and a SUCCESS on it is UNKNOWN (never PAID). VA / QRIS / e-wallet answers carry no `type` at all,
+ * which is allowed. Anything not listed here fails closed.
+ */
+const SETTLED_TRANSACTION_TYPES = new Set(["SALE", "CAPTURE"]);
+
+/** Extra facts from a Check Status answer that can veto a PAID. Every field is optional; absence never grants anything. */
+export interface DokuStatusExtras {
+  /** A top-level `refund` object/value is present: money may have moved back, so SUCCESS is not a clean payment. */
+  refundPresent?: boolean;
+  /** A field had a shape this code does not understand (e.g. `transaction.type` not a string): SUCCESS becomes UNKNOWN. */
+  malformed?: boolean;
+  /** `card_payment.type` / `card_payment.transaction_status` when a card block is present. */
+  cardPaymentType?: string;
+  cardPaymentStatus?: string;
+}
+
+/**
+ * The ONLY place DOKU's status words are interpreted. PAID means `SUCCESS` AND nothing contradicts a clean settlement:
+ *   SUCCESS, no refund object, well-formed answer, order not expired, type absent or SALE/CAPTURE  -> PAID
+ *   refund / void type, REFUNDED, PARTIAL_REFUNDED, VOIDED, or SUCCESS together with a refund object -> REFUNDED
+ *                                                         (alarm only; the subscription is never changed by it)
+ *   SUCCESS with type AUTHORIZE / MOTO / RECURRING / INSTALLMENT / unknown type, ORDER_EXPIRED
+ *     (also when order.status is an array containing it), a malformed field, or a card block whose own
+ *     type/transaction_status is not a settled SUCCESS                                           -> UNKNOWN
  *   EXPIRED                                -> EXPIRED    (closes a still-PENDING invoice)
  *   PENDING, TIMEOUT, REDIRECT             -> PENDING
  *   FAILED                                 -> PENDING    (DOKU Checkout: a customer may retry with another method, so
  *                                                         FAILED is not final and must not close the invoice)
- *   SUCCESS but order.status ORDER_EXPIRED,
  *   anything unrecognised                  -> UNKNOWN    (never paid, never closes; the caller retries safely)
  */
 export function mapDokuStatus(
   transactionStatus: string | undefined,
   transactionType?: string,
-  orderStatus?: string,
+  orderStatus?: string | readonly string[],
+  extras: DokuStatusExtras = {},
 ): VerifiedPaymentStatus {
   if (transactionType && REFUND_TRANSACTION_TYPES.has(transactionType.toUpperCase())) return "REFUNDED";
+  if (extras.cardPaymentType && REFUND_TRANSACTION_TYPES.has(extras.cardPaymentType.toUpperCase())) return "REFUNDED";
   switch (transactionStatus?.toUpperCase()) {
-    case "SUCCESS":
-      return orderStatus?.toUpperCase() === "ORDER_EXPIRED" ? "UNKNOWN" : "PAID";
+    case "SUCCESS": {
+      if (extras.refundPresent) return "REFUNDED";
+      if (extras.malformed) return "UNKNOWN";
+      const orderWords = typeof orderStatus === "string" ? [orderStatus] : (orderStatus ?? []);
+      if (orderWords.some((word) => word.toUpperCase() === "ORDER_EXPIRED")) return "UNKNOWN";
+      if (transactionType !== undefined && !SETTLED_TRANSACTION_TYPES.has(transactionType.toUpperCase())) return "UNKNOWN";
+      if (extras.cardPaymentType !== undefined && !SETTLED_TRANSACTION_TYPES.has(extras.cardPaymentType.toUpperCase())) return "UNKNOWN";
+      if (extras.cardPaymentStatus !== undefined && extras.cardPaymentStatus.toUpperCase() !== "SUCCESS") return "UNKNOWN";
+      return "PAID";
+    }
     case "REFUNDED":
     case "PARTIAL_REFUNDED":
     case "VOIDED":
@@ -219,6 +259,46 @@ export function mapDokuStatus(
     default:
       return "UNKNOWN";
   }
+}
+
+/** Reads the veto facts out of a Check Status root without trusting their shape. */
+function readStatusFacts(root: Record<string, unknown>, order: Record<string, unknown>, transaction: Record<string, unknown>) {
+  let malformed = false;
+
+  let transactionType: string | undefined;
+  if (transaction.type !== undefined) {
+    if (typeof transaction.type === "string" && transaction.type.length > 0 && transaction.type.length <= 40) transactionType = transaction.type;
+    else malformed = true;
+  }
+
+  // DOKU's table types order.status as an array while its examples show a string: accept both, nothing else.
+  let orderStatuses: string[] = [];
+  if (order.status !== undefined) {
+    if (typeof order.status === "string" && order.status.length > 0) orderStatuses = [order.status];
+    else if (Array.isArray(order.status) && order.status.length > 0 && order.status.every((v) => typeof v === "string" && v.length > 0)) orderStatuses = order.status as string[];
+    else malformed = true;
+  }
+
+  const refundPresent = root.refund !== undefined && root.refund !== null;
+
+  const extras: DokuStatusExtras = { refundPresent };
+  if (root.card_payment !== undefined) {
+    if (isRecord(root.card_payment)) {
+      const card = root.card_payment;
+      if (card.type !== undefined) {
+        if (typeof card.type === "string" && card.type.length > 0) extras.cardPaymentType = card.type;
+        else malformed = true;
+      }
+      if (card.transaction_status !== undefined) {
+        if (typeof card.transaction_status === "string" && card.transaction_status.length > 0) extras.cardPaymentStatus = card.transaction_status;
+        else malformed = true;
+      }
+    } else {
+      malformed = true;
+    }
+  }
+  extras.malformed = malformed;
+  return { transactionType, orderStatuses, extras };
 }
 
 /** Coarse claim carried by a notification (an UNTRUSTED claim: the webhook core re-asks DOKU). */
@@ -258,7 +338,7 @@ function buildDokuEventRef(
   ];
   const detailed =
     (typeof transaction.type === "string" && REFUND_TRANSACTION_TYPES.has(transaction.type.toUpperCase())) ||
-    Object.keys(refund).length > 0;
+    (root.refund !== undefined && root.refund !== null);
   return { ref: `gw:${createHash("sha256").update(parts.join("|")).digest("hex").slice(0, 40)}`, basis: detailed ? "detailed" : "status_only" };
 }
 
@@ -290,19 +370,26 @@ export class DokuPaymentProvider implements PaymentProvider {
     let text = "";
     if (response.body) {
       const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let total = 0;
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        total += value.byteLength;
-        if (total > MAX_RESPONSE_BYTES) {
-          await reader.cancel();
-          throw new PaymentProviderConfigError(this.name, "Respons DOKU terlalu besar.");
+      try {
+        const decoder = new TextDecoder();
+        let total = 0;
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          total += value.byteLength;
+          if (total > MAX_RESPONSE_BYTES) {
+            throw new PaymentProviderConfigError(this.name, "Respons DOKU terlalu besar.");
+          }
+          text += decoder.decode(value, { stream: true });
         }
-        text += decoder.decode(value, { stream: true });
+        text += decoder.decode();
+      } catch (error) {
+        // A body that stalls past the request deadline (AbortSignal.timeout also covers the body), is cut off by the
+        // network, or is too large is always a verification failure, never a half-read answer.
+        reader.cancel().catch(() => undefined);
+        if (error instanceof PaymentProviderConfigError) throw error;
+        throw new PaymentProviderConfigError(this.name, "Respons DOKU terputus atau melewati batas waktu.");
       }
-      text += decoder.decode();
     }
     let parsed: unknown;
     try {
@@ -371,6 +458,9 @@ export class DokuPaymentProvider implements PaymentProvider {
     const data = await this.call(config, "POST", CHECKOUT_PATH, {
       order: {
         amount: input.amountIDR,
+        // DOKU Checkout supports `order.currency` (ISO 4217, default IDR). Sent explicitly so the order's currency is not
+        // an implicit default; the Check Status answer must confirm it before any activation (see getVerifiedPayment).
+        currency: "IDR",
         invoice_number: invoiceNumber,
         callback_url: input.successUrl,
       },
@@ -410,16 +500,22 @@ export class DokuPaymentProvider implements PaymentProvider {
       throw new PaymentProviderConfigError(this.name, "Respons status DOKU untuk order yang berbeda.");
     }
 
-    const currency = asString(order.currency);
-    if (currency !== undefined && currency.toUpperCase() !== "IDR") {
+    // Currency is checked strictly and is NEVER assumed: a present value must be exactly "IDR"; for a PAID answer it must be
+    // present (DOKU's VA / e-wallet examples omit it - that case stays fail-closed until sandbox proves what DOKU returns).
+    const currency: unknown = order.currency;
+    if (currency !== undefined && currency !== null && currency !== "IDR") {
       throw new PaymentProviderConfigError(this.name, "Mata uang respons DOKU bukan IDR.");
     }
 
-    const status = mapDokuStatus(transactionStatus, asString(transaction.type), asString(order.status));
+    const facts = readStatusFacts(root, order, transaction);
+    const status = mapDokuStatus(transactionStatus, facts.transactionType, facts.orderStatuses, facts.extras);
     const amount = parseIdrAmount(order.amount);
     const reference = asString(transaction.original_request_id);
 
     if (status === "PAID") {
+      if (currency !== "IDR") {
+        throw new PaymentProviderConfigError(this.name, "Mata uang pada respons DOKU tidak ada; aktivasi ditolak sampai terbukti IDR (blocker A6).");
+      }
       // A "paid" answer is only usable with everything needed to reconcile it later. Missing => throw => safe retry,
       // never an activation (and never a guess such as "assume the amount is right").
       if (amount === null || amount <= 0) {
@@ -439,7 +535,7 @@ export class DokuPaymentProvider implements PaymentProvider {
       status,
       amount: amount ?? 0,
       currency: "IDR",
-      rawStatus: `${transactionStatus}/${asString(transaction.type) ?? "-"}/${asString(order.status) ?? "-"}`.slice(0, 120),
+      rawStatus: `${transactionStatus}/${facts.transactionType ?? "-"}/${facts.orderStatuses.join("+") || "-"}`.slice(0, 120),
     };
   }
 
@@ -483,6 +579,8 @@ export class DokuPaymentProvider implements PaymentProvider {
     if (!REQUEST_ID_PATTERN.test(requestId) || !TIMESTAMP_PATTERN.test(timestamp)) return false;
     if (!SIGNATURE_HEADER_PATTERN.test(signature)) return false;
     if (typeof request.path !== "string" || !request.path.startsWith("/") || request.path.length > 200) return false;
+    // Request-Target is the bare path of our Notification URL: a query/fragment can never be part of a verified path.
+    if (request.path.includes("?") || request.path.includes("#")) return false;
     // Must be OUR merchant's notification. (Freshness of Request-Timestamp is deliberately not enforced: DOKU's retry /
     // "Resend Notification" behaviour is undocumented, and a replay cannot activate anything — see class comment.)
     if (!safeEqual(clientId, config.clientId)) return false;

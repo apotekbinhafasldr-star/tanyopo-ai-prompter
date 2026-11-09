@@ -117,11 +117,24 @@ export async function processPaymentWebhook(
     // first delivery attempt left behind.
     const { data: existingRow } = await admin
       .from("prompter_webhook_events")
-      .select("id")
+      .select("id, status, error")
       .eq("source_system", provider.name)
       .eq("external_event_id", event.externalEventId)
       .maybeSingle();
     eventRowId = existingRow?.id ?? null;
+
+    // Replay guard (header-signed providers only, i.e. DOKU - whose per-delivery Request-Id is the event id): a delivery whose
+    // outcome is already final must not make us call the gateway again. Only PROCESSED (activation applied) and a recorded
+    // refund/chargeback alarm are final. Anything else (RECEIVED, PENDING-not-yet-paid FAILED rows, ...) keeps going, so the
+    // gateway's retry of a not-yet-confirmed payment still completes it. Midtrans / Xendit keep their previous behaviour.
+    if (
+      provider.verifyWebhookRequest &&
+      existingRow &&
+      (existingRow.status === "PROCESSED" ||
+        (existingRow.status === "FAILED" && typeof existingRow.error === "string" && existingRow.error.startsWith("ALARM_")))
+    ) {
+      return { ok: true, status: 200, message: "Already processed." };
+    }
   }
 
   const markEvent = async (status: "PROCESSED" | "FAILED" | "IGNORED", error: string | null) => {
@@ -196,7 +209,9 @@ export async function processPaymentWebhook(
         if (event.status === "PAID" && (outcome.status === "PENDING" || outcome.status === "UNKNOWN")) {
           // The notification claims PAID but the gateway does not (yet) agree: could be gateway lag — ask for a retry,
           // activate nothing.
-          await markVerifiedEvent("FAILED", "VERIFIED_STATUS_NOT_PAID");
+          // UNKNOWN (an answer we could not classify safely) gets its own marker so repeated occurrences are queryable in
+          // prompter_webhook_events without a schema change; a plain "gateway still pending" keeps the old marker.
+          await markVerifiedEvent("FAILED", outcome.status === "UNKNOWN" ? "VERIFIED_STATUS_UNKNOWN" : "VERIFIED_STATUS_NOT_PAID");
           return { ok: false, status: 503, message: "Payment not confirmed by gateway yet." };
         }
         if (event.status === "PAID") {

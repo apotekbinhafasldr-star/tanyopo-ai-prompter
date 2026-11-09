@@ -20,8 +20,27 @@ Adapter dianggap terkonfigurasi hanya jika SEMUA benar:
 - `PAYMENT_LIVE_ENABLED` kosong (nilai apa pun, termasuk typo, mematikan DOKU)
 - `PAYMENT_PROVIDER_CLIENT_ID` = Client ID sandbox (header `Client-Id`; bukan rahasia, tetap server-side)
 - `PAYMENT_PROVIDER_API_KEY` = Secret Key sandbox (rahasia; tidak pernah di git/chat/`NEXT_PUBLIC_*`)
+- **Guard database (P1-C)**: `PAYMENT_SANDBOX_DB_PROJECT_REFS` = daftar izin (dipisah koma) berisi *project ref* Supabase (20 karakter)
+  yang BOLEH menjalankan pembayaran sandbox; DAN project yang dituju server bukan project production.
 Hanya host `https://api-sandbox.doku.com` yang ada di kode. Host production sengaja tidak ditulis.
 Menyalakan semua ini di Netlify adalah perubahan env production tersendiri yang butuh persetujuan; PR ini tidak melakukannya.
+
+### Guard "sandbox tidak boleh menyentuh DB production" (P1-C)
+Pembayaran sandbox memakai uang uji. Jika adapter hidup pada deploy yang terhubung ke DB production bersama (umkmpro-ai, dipakai
+PUBLOE/UMKMpro), pembayaran uji bisa mengaktifkan langganan sungguhan. `NODE_ENV`/nama deploy tidak membuktikan apa pun, jadi
+`lib/billing/providers/doku-sandbox-db-guard.ts` (fungsi murni, tanpa I/O, tanpa log) memeriksa identitas database itu sendiri,
+dan berjalan di `resolveDokuConfig()` sehingga mencakup **create checkout, verifikasi pembayaran, dan autentikasi webhook**:
+1. Project ref diturunkan di server dari `NEXT_PUBLIC_SUPABASE_URL` — URL yang sama persis dengan yang dipakai `createAdminClient()`
+   untuk menulis. Hanya bentuk `https://<20-char-ref>.supabase.co` yang diterima. Domain kustom, localhost, placeholder, http,
+   port, atau kredensial di URL = identitas **tak terbukti** → adapter MATI.
+2. Ref tidak boleh ada di daftar tolak (hard-coded: `wjjyqovhmwenbcvbnkgx` = umkmpro-ai production). Daftar izin yang memuat
+   ref production = kesalahan konfigurasi → semuanya ditolak.
+3. Ref harus tercantum eksplisit di `PAYMENT_SANDBOX_DB_PROJECT_REFS` (kosong/rusak/tidak cocok → MATI).
+4. Bila `SUPABASE_SECRET_KEY` berupa JWT lama, klaim `ref`-nya harus sama dengan URL (kunci production di URL sandbox → MATI).
+   Kunci baru `sb_secret_…` tidak membawa ref; pemeriksaan ini dilewati dan tidak pernah melonggarkan aturan lain.
+Efek: tanpa env baru ini (kondisi production sekarang) adapter tetap MATI. **Batas yang jujur:** guard ini membuktikan *project mana*
+yang dituju server, bukan bahwa isi database adalah salinan buangan. Atestasi sisi-database (baris/fungsi penanda) lebih kuat tetapi
+butuh migrasi → **BLOCKED**, butuh keputusan Founder (lihat blocker B-DB).
 
 ## Model kepercayaan
 Signature webhook hanya membuktikan notifikasi dibuat dengan Secret Key kita. Status/nominal di body adalah KLAIM.
@@ -29,15 +48,41 @@ Aktivasi hanya dari Check Status server-ke-server (`getVerifiedPayment` → `ver
 Jawaban Check Status yang tidak lengkap/ambigu **melempar error** (webhook 503 → retry aman) atau dipetakan ke status yang tidak
 pernah mengaktifkan. Nominal beda/kedaluwarsa/transaksi sudah tertutup → REVIEW (B2, tidak berubah).
 
-Pemetaan status (`mapDokuStatus`):
+Pemetaan status (`mapDokuStatus`; satu-satunya tempat kata status DOKU ditafsirkan):
 | DOKU | Hasil | Catatan |
 |---|---|---|
-| `SUCCESS` | PAID | hanya jika nominal > 0 dan referensi gateway ada; `order.status=ORDER_EXPIRED` → UNKNOWN |
+| `SUCCESS` **dan** semua syarat berikut: tanpa objek `refund`, bentuk jawaban wajar, `order.status` (string atau array) tidak memuat `ORDER_EXPIRED`, `transaction.type` kosong/`SALE`/`CAPTURE`, blok `card_payment` (jika ada) bertipe `SALE`/`CAPTURE` dan `transaction_status=SUCCESS`, nominal > 0, referensi gateway ada, **`order.currency` = `"IDR"` persis** | PAID | Selain itu SUCCESS **tidak pernah** PAID |
+| `SUCCESS` + tipe `AUTHORIZE`/`MOTO`/`RECURRING`/`INSTALLMENT`/tipe tak dikenal, atau `ORDER_EXPIRED`, atau field berbentuk aneh | UNKNOWN | `AUTHORIZE` = dana ditahan, belum ditangkap. Tipe lain belum terbukti sebagai settlement final → tidak aktif sampai ada bukti sandbox |
+| `SUCCESS` + objek `refund` (nilai apa pun, termasuk `{}`) | REFUNDED | alarm saja; langganan tidak berubah |
 | `PENDING`, `TIMEOUT`, `REDIRECT` | PENDING | |
 | `FAILED` | PENDING | di Checkout, pelanggan bisa ganti metode; JANGAN menutup invoice |
 | `EXPIRED` | EXPIRED | menutup invoice PENDING |
 | `REFUNDED`, `PARTIAL_REFUNDED`, `VOIDED`, atau `transaction.type` ∈ {REFUND, FULL_REFUND, PARTIAL_REFUND, VOID} | REFUNDED | hanya alarm; langganan tidak dicabut |
 | lainnya | UNKNOWN | tidak pernah PAID, tidak menutup invoice |
+
+**Mata uang (P1-B).** Checkout mengirim `order.currency: "IDR"` secara eksplisit (DOKU Checkout mendukung `order.currency`, kode ISO 4217,
+default IDR). Pada Check Status: nilai yang ada harus persis `"IDR"` (selain itu error); untuk jawaban **PAID** nilainya wajib ada.
+Jawaban PAID tanpa `currency` melempar error → webhook 503 → retry; **tidak ada aktivasi dan tidak ada asumsi IDR**.
+Dokumentasi DOKU menampilkan `currency` hanya pada contoh kartu, bukan VA/e-wallet. Artinya **pembayaran VA bisa terus 503 jika DOKU
+memang tidak mengembalikan `currency`**. Ini diketahui dan didokumentasikan sebagai blocker B-CUR, bukan disembunyikan: tandanya di
+`prompter_webhook_events` adalah `status=FAILED, error=GATEWAY_VERIFICATION_FAILED` berulang pada notifikasi SUCCESS. Cara membuka blokir:
+bukti respons Check Status VA nyata dari sandbox, lalu keputusan terpisah (mis. menerima `currency` kosong hanya untuk channel VA
+yang terbukti) — tidak diubah tanpa bukti tersebut.
+
+**Replay (P2).** Event DOKU memakai `Request-Id` per-pengiriman sebagai ID event. Pengiriman ulang notifikasi yang sudah **PROCESSED**
+(aktivasi selesai) atau yang alarm refund/chargeback-nya sudah tercatat dijawab `200 Already processed.` **tanpa** memanggil Check Status.
+Pengiriman yang belum final (RECEIVED, PENDING, gateway belum bisa diverifikasi, UNKNOWN) tetap diproses ulang → retry aman. Short-circuit
+ini hanya untuk provider yang menandatangani header (DOKU); Midtrans/Xendit berperilaku persis seperti sebelumnya. Konsekuensi: replay
+notifikasi *lama* tidak lagi menemukan refund baru — refund baru harus datang sebagai notifikasi/Request-Id sendiri (A11 belum terbukti) atau
+lewat halaman kembali/sweeper (sweeper tetap MATI).
+`Request-Timestamp` tetap tidak dicek kesegarannya (A10: kebijakan retry DOKU tidak terdokumentasi); dengan short-circuit di atas,
+replay tidak lagi menimbulkan panggilan Check Status berulang. Jendela timestamp ditambahkan setelah perilaku resend DOKU terukur di sandbox.
+
+**UNKNOWN berulang (P2).** Jawaban yang tidak bisa diklasifikasi dengan aman (tipe/status baru, `ORDER_EXPIRED`, bentuk field aneh) tidak
+mengaktifkan dan tidak menutup invoice; webhook menjawab 503 dan baris event ditandai `error=VERIFIED_STATUS_UNKNOWN`
+(berbeda dari `VERIFIED_STATUS_NOT_PAID` = gateway masih PENDING). Pantau lewat query baca-saja pada `prompter_webhook_events`
+(`source_system='doku' and error='VERIFIED_STATUS_UNKNOWN'`). Alarm antrean khusus untuk UNKNOWN **BLOCKED**: tabel/fungsi alert (B4)
+hanya mengenal REFUND/CHARGEBACK/REVERSAL — menambah jenis alarm butuh migrasi (lihat blocker B-ALERT).
 
 ## Nomor invoice (≤ 30 karakter)
 `order.invoice_number = "LN" + 25 digit base-36 huruf besar` dari UUID transaksi (27 karakter). Deterministik, unik (injektif),
@@ -50,36 +95,44 @@ reversible, hanya alfanumerik (aman untuk metode yang melarang simbol), dan diba
 berbeda per metode (VA: PENDING/SUCCESS/EXPIRED/FAILED; minimarket/e-wallet: TIMEOUT; kartu: REFUNDED/VOIDED/PARTIAL_REFUNDED)
 semuanya ditangani oleh pemetaan di atas.
 
-## Asumsi API yang BELUM terverifikasi (wajib dibuktikan di sandbox)
-Terverifikasi dari dokumentasi resmi: host sandbox, path `POST /checkout/v1/payment` dan `GET /orders/v1/status/{invoice}`,
-header `Client-Id`/`Request-Id`/`Request-Timestamp`/`Signature`, komponen signature (Digest hanya untuk POST), format
-`HMACSHA256=`, batas `invoice_number` 64/30, `payment_due_date` dalam menit, bidang notifikasi `order.invoice_number`,
-`order.amount`, `transaction.status`, `transaction.original_request_id`.
+## Asumsi API vs dokumentasi resmi DOKU (hasil review keamanan)
+Status: VERIFIED = tertulis di dokumentasi resmi; PARTIAL = sebagian; UNVERIFIED = dokumentasi diam; CONTRADICTED = dokumentasi berbeda.
+Terverifikasi: host sandbox, path `POST /checkout/v1/payment` dan `GET /orders/v1/status/{invoice}`, header
+`Client-Id`/`Request-Id`/`Request-Timestamp`/`Signature`, komponen signature (Digest hanya POST), `HMACSHA256=`, batas `invoice_number`
+64/30, `order.amount` bilangan bulat ≤12 digit, `payment_due_date` menit, `order.currency` di Checkout (ISO 4217, default IDR).
 
-| # | Asumsi | Jika salah |
-|---|---|---|
-| A1 | Pemisah komponen signature adalah karakter newline asli (dokumentasi menulis "`\n` escape") | semua request ditolak 401 |
-| A2 | `Request-Target` webhook = path URL notifikasi kita (`/api/webhooks/payment`) apa adanya | semua webhook 401 |
-| A3 | Respons create/status dibungkus `response` atau polos (keduanya ditoleransi) | create/status gagal tertutup |
-| A4 | Check Status untuk invoice **Checkout** mengembalikan `order.amount` dan `transaction.status` | aktivasi mustahil (aman), perlu perbaikan adapter |
-| A5 | `transaction.original_request_id` ada di Check Status dan layak jadi referensi pembayaran unik | PAID ditolak (503); perlu referensi lain |
-| A6 | `order.currency` bila ada bernilai `IDR`; bila tidak ada dianggap IDR (API DOKU hanya IDR) | — |
-| A7 | Check Status bisa dipanggil tepat setelah webhook; dokumentasi menyarankan ≥ 60 detik setelah bayar | webhook dijawab 503 sampai DOKU mengembalikan SUCCESS; bergantung retry DOKU atau sweeper |
-| A8 | Notifikasi SUCCESS dikirim per pembayaran dengan `Request-Id` unik; kirim ulang bisa memakai Request-Id sama atau baru | keduanya aman (idempoten di `fn_apply_verified_payment`) |
-| A9 | URL halaman bayar berada di domain `*.doku.com` | create checkout ditolak (fail-closed) |
-| A10 | `Request-Timestamp` tidak dicek kesegarannya (kebijakan retry/resend DOKU tidak terdokumentasi) | replay tidak berbahaya karena aktivasi hanya dari Check Status |
-| A11 | Kebijakan retry notifikasi DOKU, IP allowlist, dan payload notifikasi expired tidak diketahui | tidak dipakai kode |
-| A12 | Metode yang butuh data `customer` (mis. e-wallet/PayLater tertentu) | checkout metode itu bisa ditolak DOKU; kita tidak mengirim PII |
+| # | Asumsi | Status | Catatan / jika salah |
+|---|---|---|---|
+| A1 | Pemisah komponen signature = newline asli, tanpa newline akhir | VERIFIED | dokumentasi: tiap komponen satu baris |
+| A2 | `Request-Target` webhook = path URL notifikasi kita apa adanya | PARTIAL | path benar; query string tidak disebut. Kode menolak path ber-`?`/`#` (fail-closed) |
+| A3 | Respons dibungkus `response` atau polos | PARTIAL | create checkout memakai `response`; Check Status tanpa pembungkus. Dua bentuk ditoleransi |
+| A4 | Check Status untuk invoice Checkout memberi `order.amount` dan `transaction.status` | VERIFIED | syarat: status level-order untuk Checkout hanya untuk merchant terdaftar sejak Des 2024; merchant lama harus minta aktivasi. Tipe `amount` tidak konsisten (number/string), ditangani |
+| A5 | `transaction.original_request_id` layak jadi referensi pembayaran unik | PARTIAL | ada; artinya "Request-Id saat pembayaran diinisiasi". Unik per pembayaran belum terbukti; muncul juga saat PENDING (dipakai hanya setelah SUCCESS) |
+| A6 | ~~API DOKU hanya IDR; `currency` kosong dianggap IDR~~ **DIKOREKSI** | **CONTRADICTED** | Checkout mendukung `order.currency` (default IDR). Kode kini: kirim `IDR` eksplisit, `currency` wajib ada dan `"IDR"` untuk PAID, tanpa default. Contoh Check Status VA/e-wallet tidak memuat `currency` → blocker B-CUR |
+| A7 | Check Status dipanggil ≥ 60 dtk setelah bayar | VERIFIED (panduan) | sebelum itu bisa PENDING → webhook 503 → retry |
+| A8 | Perilaku `Request-Id` saat kirim ulang | UNVERIFIED | dokumentasi hanya menyebut duplikat mungkin terjadi; keduanya aman (idempoten) |
+| A9 | URL halaman bayar berada di `*.doku.com` | UNVERIFIED | domain tidak disebut; jika berbeda checkout ditolak (aman, tapi memblokir E2E) |
+| A10 | `Request-Timestamp` tidak dicek kesegarannya | UNVERIFIED | dokumentasi diam; lihat bagian Replay |
+| A11 | Kebijakan retry notifikasi, IP allowlist, notifikasi refund | UNVERIFIED | dokumentasi diam; tidak dipakai kode |
+| A12 | Metode yang butuh data `customer` | PARTIAL | `customer` tidak wajib; sebagian field bersyarat per metode |
+| A13 | Tipe `SALE`/`CAPTURE` adalah settlement final; tipe lain tidak | PARTIAL | dokumentasi menyebut tipe kartu SALE, INSTALLMENT, MOTO, AUTHORIZE, CAPTURE, RECURRING, REFUND. Hanya SALE/CAPTURE dibuka; sisanya UNKNOWN sampai terbukti. Tipe DANA tidak terdokumentasi lengkap |
+| A14 | `order.status` bertipe array atau string | PARTIAL | tabel DOKU menulis array, contoh string. Keduanya diterima; bentuk lain = UNKNOWN |
 
 ## Blocker untuk sandbox E2E (belum ada yang selesai)
 1. Akun sandbox DOKU + Client ID/Secret Key sandbox (Founder).
-2. Env sandbox terpasang di lingkungan UJI yang TIDAK menunjuk DB production (Netlify Deploy Preview ke DB production dilarang).
-3. Notification URL sandbox di Back Office diarahkan ke endpoint uji.
-4. Bukti A1–A5 dari satu transaksi sandbox nyata (bayar, expired, kirim ulang, refund).
-5. Keputusan sweeper (default MATI; perlu pengecualian `proxy.ts` dan secret → persetujuan terpisah) karena A7.
-6. `fn_sync_payment_alerts` masih memfilter `source_system = 'midtrans'`: alarm DOKU tercatat lewat jalur verifikasi langsung,
-   tetapi jaring pengaman sinkronisasi belum mencakup DOKU (butuh migrasi; persetujuan terpisah).
-7. Runbook refund & go-live khusus DOKU (belum ditulis; refund diasumsikan manual lewat Back Office).
+2. **Project Supabase terpisah (non-production)** untuk uji, mis. project gratis baru, dengan ref-nya diisi di `PAYMENT_SANDBOX_DB_PROJECT_REFS`.
+   Tanpa itu adapter sengaja MATI. Deploy Preview yang menunjuk DB production dilarang dan kini juga ditolak oleh kode.
+3. Notification URL sandbox di Back Office diarahkan ke endpoint uji (path persis, tanpa query).
+4. Bukti dari transaksi sandbox nyata: A1, A2, A4, A5, A9, A13 (bayar, expired, kirim ulang, refund); VA, QRIS, e-wallet, kartu masing-masing.
+5. Keputusan sweeper (default MATI; perlu pengecualian `proxy.ts` dan secret → persetujuan terpisah) karena A7/A11.
+6. Runbook refund & go-live khusus DOKU (belum ditulis; refund diasumsikan manual lewat Back Office).
+7. **B-CUR** — apakah Check Status VA/e-wallet mengembalikan `order.currency`. Jika tidak, pembayaran channel itu tetap 503 (aman) sampai ada bukti dan keputusan terpisah.
+8. **B-DB** (BLOCKED, butuh migrasi + persetujuan): atestasi sisi-database bahwa DB adalah lingkungan uji (mis. baris penanda yang
+   diperiksa server). Guard kode di atas membuktikan project yang dituju, bukan isinya.
+9. **B-ALERT** (BLOCKED, butuh migrasi + persetujuan): `fn_sync_payment_alerts` masih memfilter `source_system='midtrans'` dan tidak ada jenis
+   alarm untuk UNKNOWN/unverifiable berulang. Alarm refund DOKU tercatat lewat jalur verifikasi langsung; jaring pengaman sinkronisasi belum mencakup DOKU.
+10. Rate limit per-IP/endpoint untuk webhook publik butuh infrastruktur (edge/WAF) — belum ada; short-circuit replay hanya menutup
+    pengiriman ulang yang sudah final.
 
 ## Syarat sebelum pembayaran production (di luar PR ini)
 KYB DOKU disetujui; kode live ditambahkan dan ditinjau terpisah (saat ini TIDAK ada); semua asumsi di atas terbukti di sandbox;

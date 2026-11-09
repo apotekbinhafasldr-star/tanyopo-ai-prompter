@@ -3,9 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
 
-const { serverEnvMock, holder } = vi.hoisted(() => ({
+const { serverEnvMock, publicEnvMock, holder } = vi.hoisted(() => ({
+  publicEnvMock: { supabaseUrl: "https://abcdefghij0123456789.supabase.co", supabasePublishableKey: "k", appUrl: "http://localhost:3000" },
   serverEnvMock: {
+    supabaseSecretKey: undefined as string | undefined,
     payment: {
+      sandboxDbRefs: "abcdefghij0123456789" as string | undefined,
       providerName: "doku" as string | undefined,
       apiKey: "dokusecretkey-123456" as string | undefined,
       clientId: "MCH-0001-1234567890" as string | undefined,
@@ -16,7 +19,7 @@ const { serverEnvMock, holder } = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/env", () => ({
   serverEnv: serverEnvMock,
-  publicEnv: { supabaseUrl: "https://x.supabase.co", supabasePublishableKey: "k", appUrl: "http://localhost:3000" },
+  publicEnv: publicEnvMock,
 }));
 vi.mock("@/lib/billing/get-payment-provider", () => ({ getPaymentProvider: () => holder.provider }));
 
@@ -48,9 +51,10 @@ function installDoku() {
     if (a === "GARBAGE") return new Response("<html>", { status: 200 });
     if (a === "HUGE") return new Response(JSON.stringify({ pad: "x".repeat(70_000) }), { status: 200 });
     if (a === undefined) return new Response("{}", { status: 404 });
-    const order: Row = { invoice_number: invoice, amount: 99000, ...(a.order as Row | undefined) };
+    const order: Row = { invoice_number: invoice, amount: 99000, currency: "IDR", ...(a.order as Row | undefined) };
     const transaction: Row = { status: "SUCCESS", original_request_id: "orig-req-1", date: "2026-11-09T10:01:00Z", ...(a.transaction as Row | undefined) };
-    return new Response(JSON.stringify({ order, transaction }), { status: 200 });
+    const extraRoot = Object.fromEntries(Object.entries(a).filter(([key]) => key !== "order" && key !== "transaction")); // e.g. a top-level `refund` or `card_payment` block
+    return new Response(JSON.stringify({ order, transaction, ...extraRoot }), { status: 200 });
   });
   vi.stubGlobal("fetch", fetchMock);
   return { fetchMock, answer: (txn: string, a: Answer) => void answers.set(txn, a) };
@@ -81,6 +85,8 @@ const dokuTxn = (over: Row = {}) => addTxn(db, { provider: "doku", ...over });
 beforeEach(() => {
   serverEnvMock.payment.apiKey = SECRET;
   serverEnvMock.payment.clientId = CLIENT;
+  serverEnvMock.payment.sandboxDbRefs = "abcdefghij0123456789";
+  publicEnvMock.supabaseUrl = "https://abcdefghij0123456789.supabase.co";
   vi.stubEnv("PAYMENT_PROVIDER_ENV", "sandbox");
   vi.stubEnv("PAYMENT_LIVE_ENABLED", "");
   holder.provider = new DokuPaymentProvider();
@@ -289,6 +295,133 @@ describe("DOKU webhook — amount / currency mismatch and missing verification d
     expect(r.status).toBe(503);
     expect(db.rpcCalls).toEqual([]);
     expect(db.txns[0].status).toBe("PENDING");
+    expect(db.periods).toEqual({});
+  });
+});
+
+describe("DOKU webhook — replay: a final delivery never asks DOKU again, an unfinished one still retries", () => {
+  it("20 deliveries of the same PROCESSED notification cause exactly ONE Check Status call and one period", async () => {
+    dokuTxn();
+    gateway.answer(TXN_A, {});
+    const n = notification();
+    const results = [];
+    for (let i = 0; i < 20; i++) results.push(await deliver(n));
+    expect(results.every((r) => r.status === 200)).toBe(true);
+    expect(results[0].message).toBe("Payment applied.");
+    expect(results[19].message).toBe("Already processed.");
+    expect(gateway.fetchMock).toHaveBeenCalledTimes(1);
+    expect(db.rpcCalls).toHaveLength(1);
+    expect(db.periods).toEqual({ [TENANT_A]: 1 });
+    expect(db.events).toHaveLength(1);
+    expect(db.events[0].status).toBe("PROCESSED");
+  });
+  it("20 parallel deliveries of a brand-new notification still grant exactly one period", async () => {
+    dokuTxn();
+    gateway.answer(TXN_A, {});
+    const n = notification();
+    const results = await Promise.all(Array.from({ length: 20 }, () => deliver(n)));
+    expect(results.every((r) => r.status === 200)).toBe(true);
+    expect(db.periods).toEqual({ [TENANT_A]: 1 });
+    expect(db.events).toHaveLength(1);
+  });
+  it("a PENDING answer keeps the retry path open: the SAME delivery, re-sent after DOKU says SUCCESS, completes the activation", async () => {
+    dokuTxn();
+    const n = notification();
+    gateway.answer(TXN_A, { transaction: { status: "PENDING" } });
+    expect((await deliver(n)).status).toBe(503);
+    expect(db.events[0]).toMatchObject({ status: "FAILED", error: "VERIFIED_STATUS_NOT_PAID" });
+    expect((await deliver(n)).status).toBe(503); // still pending: asked again (not a final event)
+    expect(gateway.fetchMock).toHaveBeenCalledTimes(2);
+    gateway.answer(TXN_A, {});
+    const done = await deliver(n);
+    expect(done).toMatchObject({ status: 200, message: "Payment applied." });
+    expect(gateway.fetchMock).toHaveBeenCalledTimes(3);
+    expect(db.periods).toEqual({ [TENANT_A]: 1 });
+    expect(db.events).toHaveLength(1);
+    expect(db.events[0].status).toBe("PROCESSED");
+    await deliver(n); // now final
+    expect(gateway.fetchMock).toHaveBeenCalledTimes(3);
+  });
+  it("an unreachable DOKU (503) is retried on the same delivery, not short-circuited", async () => {
+    dokuTxn();
+    const n = notification();
+    gateway.answer(TXN_A, "TIMEOUT");
+    expect((await deliver(n)).status).toBe(503);
+    expect((await deliver(n)).status).toBe(503);
+    gateway.answer(TXN_A, {});
+    expect((await deliver(n)).status).toBe(200);
+    expect(db.periods).toEqual({ [TENANT_A]: 1 });
+  });
+  it("a recorded refund alarm is final for that delivery: 20 replays, one Check Status, one alarm", async () => {
+    dokuTxn({ status: "PAID" });
+    gateway.answer(TXN_A, { transaction: { status: "REFUNDED", type: "FULL_REFUND" } });
+    const n = notification({ status: "REFUNDED", type: "FULL_REFUND" });
+    for (let i = 0; i < 20; i++) expect((await deliver(n)).status).toBe(200);
+    expect(gateway.fetchMock).toHaveBeenCalledTimes(1);
+    expect(db.alerts).toHaveLength(1);
+  });
+  it("a replay with an invalid signature is rejected BEFORE any lookup, even for a PROCESSED event id", async () => {
+    dokuTxn();
+    gateway.answer(TXN_A, {});
+    await deliver(notification());
+    const calls = gateway.fetchMock.mock.calls.length;
+    expect((await deliver(notification({ secret: "attacker-secret-key" }))).status).toBe(401);
+    expect(gateway.fetchMock.mock.calls.length).toBe(calls);
+  });
+});
+
+describe("DOKU webhook — P1-A / P1-B / P1-C through the full flow", () => {
+  it.each(["AUTHORIZE", "MOTO", "RECURRING", "INSTALLMENT", "SOMETHING_NEW"])("SUCCESS + type %s never activates (retry 503, marker VERIFIED_STATUS_UNKNOWN)", async (type) => {
+    dokuTxn();
+    gateway.answer(TXN_A, { transaction: { type } });
+    const r = await deliver(notification());
+    expect(r.status).toBe(503);
+    expect(db.rpcCalls).toEqual([]);
+    expect(db.txns[0].status).toBe("PENDING");
+    expect(db.periods).toEqual({});
+    expect(db.events[0]).toMatchObject({ status: "FAILED", error: "VERIFIED_STATUS_UNKNOWN" });
+  });
+  it("SUCCESS + a refund object is a refund alarm, not a payment", async () => {
+    dokuTxn();
+    gateway.answer(TXN_A, { refund: { amount: "500" } });
+    await deliver(notification());
+    expect(db.periods).toEqual({});
+    expect(db.txns[0].status).not.toBe("PAID");
+    expect(db.alerts.map((a) => a.kind)).toEqual(["REFUND"]);
+  });
+  it("a PAID answer without currency never activates (503), is recorded as a failed delivery and retried", async () => {
+    dokuTxn();
+    gateway.answer(TXN_A, { order: { currency: undefined } });
+    const r = await deliver(notification());
+    expect(r.status).toBe(503);
+    expect(db.rpcCalls).toEqual([]);
+    expect(db.txns[0].status).toBe("PENDING");
+    expect(db.periods).toEqual({});
+    expect(db.events[0]).toMatchObject({ status: "FAILED", error: "GATEWAY_VERIFICATION_FAILED" });
+  });
+  it("repeated unclassifiable answers stay queryable (VERIFIED_STATUS_UNKNOWN) and never close or activate", async () => {
+    dokuTxn();
+    gateway.answer(TXN_A, { order: { status: ["ORDER_EXPIRED"] } });
+    for (let i = 0; i < 3; i++) expect((await deliver(notification({ requestId: `notif-${i}` }))).status).toBe(503);
+    expect(db.events.map((e) => e.error)).toEqual(Array(3).fill("VERIFIED_STATUS_UNKNOWN"));
+    expect(db.txns[0].status).toBe("PENDING");
+    expect(db.periods).toEqual({});
+  });
+  it("pointed at the shared PRODUCTION database (or an unprovable one): 503 before anything is read, written or sent", async () => {
+    dokuTxn();
+    gateway.answer(TXN_A, {});
+    for (const [url, refs] of [
+      ["https://wjjyqovhmwenbcvbnkgx.supabase.co", "abcdefghij0123456789"],
+      ["https://wjjyqovhmwenbcvbnkgx.supabase.co", "wjjyqovhmwenbcvbnkgx"],
+      ["https://db.example.com", "abcdefghij0123456789"],
+    ] as const) {
+      publicEnvMock.supabaseUrl = url;
+      serverEnvMock.payment.sandboxDbRefs = refs;
+      expect((await deliver(notification())).status).toBe(503);
+    }
+    expect(gateway.fetchMock).not.toHaveBeenCalled();
+    expect(db.events).toEqual([]);
+    expect(db.rpcCalls).toEqual([]);
     expect(db.periods).toEqual({});
   });
 });
