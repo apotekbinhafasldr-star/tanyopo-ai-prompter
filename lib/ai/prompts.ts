@@ -244,7 +244,26 @@ export function buildCampaignProposalPrompt(
     .join("\n\n");
 }
 
+/**
+ * AI Search Readiness (AEO + GEO) instruction block, appended to the SEO and
+ * Discovery prompts so it stays ONE AI call / one quota unit. The model may
+ * only use the verified facts below (built server-side from tenant data).
+ */
+export function buildAiSearchReadinessPrompt(factsText: string): string {
+  return [
+    "BAGIAN TAMBAHAN — ai_search_readiness (kesiapan konten agar mudah dipahami mesin pencari berbasis AI). Isi field ai_search_readiness dengan aturan KETAT berikut (tulis ringkas — total output terbatas):",
+    "FAKTA TERVERIFIKASI (satu-satunya sumber fakta yang boleh dipakai):\n" + factsText,
+    "1) customer_questions: 3-5 pertanyaan (maksimal 5) yang wajar ditanyakan calon pelanggan (apa itu, untuk siapa, harga, cara pesan, kandungan/bahan, area layanan, dll.). short_answer = maksimal 2 kalimat pendek HANYA dari fakta terverifikasi; jika fakta tidak cukup, isi short_answer = null dan jelaskan data yang perlu dilengkapi di owner_input_needed. Jangan menebak.",
+    "2) entity_context: maksimal 2 kalimat pendek yang menjelaskan siapa/apa bisnis dan produk ini, hanya dari fakta terverifikasi.",
+    "3) content_recommendations: 1-3 rekomendasi (maksimal 3) konten (FAQ, artikel, halaman produk, postingan, bio) yang membantu pertanyaan di atas terjawab jelas.",
+    "4) missing_facts: maksimal 5 fakta yang sebaiknya dilengkapi pemilik (kosongkan bila sudah lengkap).",
+    "DILARANG: mengarang fakta, angka, harga, bahan, sertifikasi, lokasi, atau jam operasional yang tidak ada di fakta terverifikasi; membuat testimoni, rating, atau ulasan pelanggan; menjanjikan atau mengklaim bisnis ini akan/sudah muncul, dikutip, atau direkomendasikan oleh ChatGPT, Gemini, Perplexity, Google AI Overviews, atau mesin AI lain; menjanjikan ranking, penjualan, atau hasil tertentu.",
+  ].join("\n\n");
+}
+
 export interface SeoRecommendationsInputs {
+  /** Verified-facts text for the AI Search Readiness section (see buildAiSearchReadinessPrompt). */
+  verifiedFactsText?: string;
   websiteUrl: string;
   targetKeywords: string[];
   /** Target market for this SEO project — never assumed to be Indonesia (product spec §18). */
@@ -263,6 +282,7 @@ export function buildSeoRecommendationsPrompt(inputs: SeoRecommendationsInputs):
       : "Pengguna belum menentukan kata kunci target — usulkan kata kunci yang relevan berdasarkan URL dan konteks bisnis.",
     "Anda tidak memiliki akses untuk benar-benar mengunjungi atau meng-crawl website ini — dasarkan rekomendasi pada URL, nama domain, dan konteks bisnis yang diberikan, bukan seolah-olah Anda sudah memeriksa isi halaman sebenarnya.",
     "Hasilkan ringkasan peluang SEO, daftar kata kunci target (dengan intent dan alasan), rekomendasi on-page (isu, rekomendasi, prioritas HIGH/MEDIUM/LOW), dan content plan (judul artikel, kata kunci target, jenis konten, angle singkat).",
+    inputs.verifiedFactsText !== undefined ? buildAiSearchReadinessPrompt(inputs.verifiedFactsText) : null,
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -277,6 +297,8 @@ export function buildSeoRecommendationsPrompt(inputs: SeoRecommendationsInputs):
  * through — nothing is asked twice.
  */
 export interface DiscoveryRecommendationsInputs {
+  /** Verified-facts text for the AI Search Readiness section (see buildAiSearchReadinessPrompt). */
+  verifiedFactsText?: string;
   businessName?: string | null;
   productName?: string | null;
   productDescription?: string | null;
@@ -311,6 +333,7 @@ export function buildDiscoveryRecommendationsPrompt(inputs: DiscoveryRecommendat
       : "Belum ada kontak WhatsApp yang diketahui — buat CTA generik ke \"kontak/pesan langsung\" tanpa mengarang nomor.",
     "Hasilkan: kata kunci utama, kata kunci pendukung, saran optimasi nama/username profil, saran bio/deskripsi singkat, ide konten/caption (dengan alasan singkat kenapa relevan dicari target pelanggan), hashtag relevan bila sesuai (array kosong jika memang tidak relevan — jangan dilewatkan), CTA menuju WhatsApp/kontak/link produk (bukan janji hasil), dan rekomendasi platform discovery (Instagram/Facebook/TikTok/marketplace — jangan sertakan WhatsApp di sini, WhatsApp adalah tujuan CTA bukan platform untuk ditemukan) beserta alasan sederhana berdasarkan jenis bisnis dan target audiens.",
     "PENTING — jangan pernah menjanjikan ranking pencarian tertentu, jumlah follower tertentu, jumlah views tertentu, atau penjualan tertentu. Gunakan bahasa sederhana yang mudah dipahami pemilik UMKM, hindari istilah teknis SEO berlebihan.",
+    inputs.verifiedFactsText !== undefined ? buildAiSearchReadinessPrompt(inputs.verifiedFactsText) : null,
   ]
     .filter(Boolean)
     .join("\n\n");

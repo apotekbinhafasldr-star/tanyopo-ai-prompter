@@ -79,7 +79,11 @@ function resolveLaunchability(
 ): LaunchabilityResult {
   const platform = CHANNEL_TO_CONNECTOR[channel];
   if (!platform) {
-    return { launchable: false, reason: null }; // e.g. SEO — not an ad platform, nothing to explain
+    // SEO is not an ad platform: say so honestly instead of showing nothing or implying a launch.
+    return {
+      launchable: false,
+      reason: "Channel SEO adalah rencana konten organik, bukan iklan yang diluncurkan. Susun di menu SEO & Discovery.",
+    };
   }
 
   const connector = getConnector(platform);

@@ -5,10 +5,11 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { requireSessionContext } from "@/services/session";
 import { seoProjectSchema } from "@/schemas/seo";
-import { SeoRecommendationsSchema } from "@/schemas/ai/seo-recommendations";
-import { DiscoveryRecommendationsSchema } from "@/schemas/ai/discovery-recommendations";
+import { SeoWithReadinessSchema, DiscoveryWithReadinessSchema } from "@/schemas/ai/seo-with-readiness";
+import { buildVerifiedFacts, formatFactsForPrompt, sanitizeAiSearchReadiness } from "@/lib/seo/ai-search-readiness";
 import { buildSystemPreamble, buildSeoRecommendationsPrompt, buildDiscoveryRecommendationsPrompt } from "@/lib/ai/prompts";
 import { runAiJob } from "@/services/ai-jobs";
+import type { Json } from "@/types/database";
 
 export interface SeoActionState {
   error: string | null;
@@ -115,7 +116,7 @@ export async function generateSeoRecommendationsAction(projectId: string): Promi
     const { data: product } = project.product_id
       ? await supabase
           .from("prompter_products")
-          .select("name, description, category, target_countries, language")
+          .select("name, description, category, price, currency, website_url, target_countries, language")
           .eq("id", project.product_id)
           .eq("tenant_id", session.tenantId)
           .maybeSingle()
@@ -135,12 +136,14 @@ export async function generateSeoRecommendationsAction(projectId: string): Promi
           .maybeSingle()
       : { data: null };
 
+    const facts = buildVerifiedFacts({ brand: brandProfile, product });
+
     const result = await runAiJob({
       supabase,
       tenantId: session.tenantId,
       actorUserId: session.userId,
       jobType: "SEO_RECOMMENDATIONS",
-      schema: DiscoveryRecommendationsSchema,
+      schema: DiscoveryWithReadinessSchema,
       system: buildSystemPreamble(brandProfile),
       prompt: buildDiscoveryRecommendationsPrompt({
         businessName: brandProfile?.brand_name,
@@ -152,6 +155,7 @@ export async function generateSeoRecommendationsAction(projectId: string): Promi
         campaignObjective: recentCampaign?.objective ?? null,
         existingChannels: recentCampaign?.channels ?? [],
         whatsappNumber: brandProfile?.whatsapp_number,
+        verifiedFactsText: formatFactsForPrompt(facts),
       }),
       inputReference: { seo_project_id: projectId },
     });
@@ -160,11 +164,17 @@ export async function generateSeoRecommendationsAction(projectId: string): Promi
       return { error: result.error };
     }
 
+    const { ai_search_readiness: _readiness, ...discoveryBase } = result.data;
+    void _readiness;
     const { error: upsertError } = await supabase.from("prompter_seo_recommendations").upsert(
       {
         tenant_id: session.tenantId,
         project_id: projectId,
-        discovery_recommendations: result.data,
+        // Additive, no migration: AI Search Readiness lives inside the existing jsonb.
+        discovery_recommendations: {
+          ...discoveryBase,
+          ai_search_readiness: sanitizeAiSearchReadiness(result.data.ai_search_readiness, facts),
+        } as unknown as Json,
         ai_job_id: result.jobId,
         model: result.model,
       },
@@ -179,18 +189,33 @@ export async function generateSeoRecommendationsAction(projectId: string): Promi
     return { error: null };
   }
 
+  const { data: websiteProduct } = project.product_id
+    ? await supabase
+        .from("prompter_products")
+        .select("name, description, category, price, currency, website_url, target_countries, language")
+        .eq("id", project.product_id)
+        .eq("tenant_id", session.tenantId)
+        .maybeSingle()
+    : { data: null };
+  const websiteFacts = buildVerifiedFacts({
+    brand: brandProfile,
+    product: websiteProduct,
+    projectWebsiteUrl: project.website_url,
+  });
+
   const result = await runAiJob({
     supabase,
     tenantId: session.tenantId,
     actorUserId: session.userId,
     jobType: "SEO_RECOMMENDATIONS",
-    schema: SeoRecommendationsSchema,
+    schema: SeoWithReadinessSchema,
     system: buildSystemPreamble(brandProfile),
     prompt: buildSeoRecommendationsPrompt({
       websiteUrl: project.website_url ?? "",
       targetKeywords: (project.target_keywords as string[]) ?? [],
       countryCode: project.country_code,
       language: project.language,
+      verifiedFactsText: formatFactsForPrompt(websiteFacts),
     }),
     inputReference: { seo_project_id: projectId },
   });
@@ -207,6 +232,11 @@ export async function generateSeoRecommendationsAction(projectId: string): Promi
       target_keywords: result.data.target_keywords,
       on_page_recommendations: result.data.on_page_recommendations,
       content_plan: result.data.content_plan,
+      // WEBSITE rows previously had NULL here; the page reads this column only in
+      // NO_WEBSITE mode for the legacy discovery fields, so the key is purely additive.
+      discovery_recommendations: {
+        ai_search_readiness: sanitizeAiSearchReadiness(result.data.ai_search_readiness, websiteFacts),
+      } as unknown as Json,
       ai_job_id: result.jobId,
       model: result.model,
     },
