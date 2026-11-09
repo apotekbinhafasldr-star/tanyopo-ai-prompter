@@ -39,7 +39,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ message: "Server not configured." }, { status: 503 });
   }
 
-  const result = await processPaymentWebhook(admin, rawBody, signatureHeader);
+  // Headers + path are passed for providers that sign over them (DOKU); Midtrans / Xendit ignore them.
+  const result = await processPaymentWebhook(admin, rawBody, signatureHeader, {
+    headers: request.headers,
+    path: request.nextUrl.pathname,
+  });
 
   return NextResponse.json({ message: result.message }, { status: result.status });
 }

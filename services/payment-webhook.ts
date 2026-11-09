@@ -2,6 +2,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getPaymentProvider } from "@/lib/billing/get-payment-provider";
+import type { WebhookRequestContext } from "@/lib/billing/payment-provider";
 import { canVerifyServerSide, verifyAndSettle } from "@/services/payment-verification";
 import type { Database, Json } from "@/types/database";
 
@@ -49,6 +50,9 @@ export async function processPaymentWebhook(
   admin: SupabaseClient<Database>,
   rawBody: string,
   signatureHeader: string | null,
+  /** Headers + path of the incoming request. Only header-signing providers (DOKU) use it; optional so every existing
+   * caller and provider keeps working unchanged. */
+  request?: WebhookRequestContext,
 ): Promise<ProcessPaymentWebhookResult> {
   const provider = getPaymentProvider();
 
@@ -58,13 +62,17 @@ export async function processPaymentWebhook(
     return { ok: false, status: 503, message: "Payment provider not configured." };
   }
 
-  if (!provider.verifyWebhookSignature(rawBody, signatureHeader)) {
+  // A provider that signs over headers/path must be given them; without a request context it can never verify (401).
+  const authentic = provider.verifyWebhookRequest
+    ? request !== undefined && provider.verifyWebhookRequest(rawBody, request)
+    : provider.verifyWebhookSignature(rawBody, signatureHeader);
+  if (!authentic) {
     return { ok: false, status: 401, message: "Invalid webhook signature." };
   }
 
   let event;
   try {
-    event = provider.parseWebhookEvent(rawBody);
+    event = provider.parseWebhookEvent(rawBody, request);
   } catch {
     return { ok: false, status: 400, message: "Could not parse webhook event." };
   }
