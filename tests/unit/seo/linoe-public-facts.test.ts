@@ -28,7 +28,7 @@ describe("buildLinoePublicFacts — hanya dari sumber resmi", () => {
       expect(f.value).toMatch(/belum bisa dibeli/);
     }
     expect(byKey("linoe_plan_agency").status).toBe("TARGET");
-    expect(byKey("linoe_plan_agency").value).toMatch(/target/);
+    expect(byKey("linoe_plan_agency").value).toMatch(/belum dibuka; harga target/);
     expect(byKey("linoe_payment_status").status).toBe("SEGERA");
   });
   it("harga sama persis dengan PLAN_TIERS (tidak ada angka karangan)", () => {

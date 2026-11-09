@@ -47,7 +47,6 @@ export function buildLinoePublicFacts(): LinoePublicFact[] {
   });
 
   for (const tier of PLAN_TIERS) {
-    if (tier.availability !== "ACTIVE") continue;
     if (tier.priceIDR === 0) {
       facts.push({
         key: `linoe_plan_${tier.id.toLowerCase()}`,
@@ -58,13 +57,14 @@ export function buildLinoePublicFacts(): LinoePublicFact[] {
       continue;
     }
     const price = `${rupiah(tier.priceIDR)}${tier.pricePeriodLabel}`;
-    const status: LinoeFactStatus = tier.isPriceTarget ? "TARGET" : ONLINE_PAYMENT_LIVE ? "TERSEDIA" : "SEGERA";
-    const note = tier.isPriceTarget
-      ? "harga target, belum final"
+    const notOpen = tier.availability !== "ACTIVE";
+    const status: LinoeFactStatus = tier.isPriceTarget || notOpen ? "TARGET" : ONLINE_PAYMENT_LIVE ? "TERSEDIA" : "SEGERA";
+    const note = tier.isPriceTarget || notOpen
+      ? "paket belum dibuka; harga target, belum final"
       : ONLINE_PAYMENT_LIVE
         ? "harga paket"
         : "harga rencana; pembayaran online belum aktif, belum bisa dibeli";
-    const feats = tier.coreFeatures.length ? ` Fitur: ${tier.coreFeatures.join("; ")}.` : "";
+    const feats = !notOpen && tier.coreFeatures.length ? ` Fitur: ${tier.coreFeatures.join("; ")}.` : "";
     const soon = tier.comingSoonFeatures.length ? ` Segera hadir (belum tersedia): ${tier.comingSoonFeatures.join("; ")}.` : "";
     facts.push({
       key: `linoe_plan_${tier.id.toLowerCase()}`,
