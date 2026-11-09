@@ -28,6 +28,13 @@ export interface LinoePublicFact {
   status: LinoeFactStatus;
 }
 
+/**
+ * Produk Tanyopo lain yang BELUM tersedia. Sumber: instruksi Founder (2026-11-09) — tidak ada halaman/kode resmi
+ * yang mendeskripsikannya, jadi hanya status "dalam pengembangan" yang dinyatakan; tidak ada fitur, tanggal, atau
+ * harga untuk keduanya. Ubah daftar ini hanya atas persetujuan Founder ketika statusnya berubah.
+ */
+export const ECOSYSTEM_IN_DEVELOPMENT = ["PUBLOE", "MITAPENG"] as const;
+
 const rupiah = (n: number) => `Rp${n.toLocaleString("id-ID")}`;
 
 function faqAnswer(question: string): string | null {
@@ -37,6 +44,23 @@ function faqAnswer(question: string): string | null {
 export function buildLinoePublicFacts(): LinoePublicFact[] {
   const facts: LinoePublicFact[] = [];
 
+  const what = faqAnswer("Apa itu LINOE?");
+  if (what) facts.push({ key: "linoe_what", label: "Apa itu LINOE", value: what, status: "TERSEDIA" });
+  // Target pengguna HANYA dari jawaban FAQ resmi di landing (bukan karangan, bukan klaim baru).
+  const audience = faqAnswer("Siapa yang cocok menggunakan LINOE?");
+  if (audience) facts.push({ key: "linoe_target_users", label: "Target pengguna LINOE", value: audience, status: "TERSEDIA" });
+  facts.push({
+    key: "linoe_standalone",
+    label: "Kemandirian LINOE",
+    value: "LINOE dapat dipakai sebagai bisnis mandiri; integrasi dengan UMKMpro AI bersifat opsional.",
+    status: "TERSEDIA",
+  });
+  facts.push({
+    key: "linoe_ecosystem_status",
+    label: "Produk Tanyopo lain",
+    value: `${ECOSYSTEM_IN_DEVELOPMENT.join(" dan ")} masih dalam pengembangan dan belum tersedia untuk publik; keduanya bukan bagian dari LINOE.`,
+    status: "SEGERA",
+  });
   facts.push({ key: "linoe_operator", label: "Pengembang LINOE", value: `${LEGAL.operator}, ${LEGAL.location}`, status: "TERSEDIA" });
   facts.push({ key: "linoe_contact", label: "Kontak resmi LINOE", value: `Email ${LEGAL.contactEmail}`, status: "TERSEDIA" });
   facts.push({
