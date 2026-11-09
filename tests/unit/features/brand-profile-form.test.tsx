@@ -88,7 +88,7 @@ describe("updateBrandProfileAction — isolasi tenant", () => {
     expect(audit()?.payload.actor_user_id).toBe("u1");
   });
   it("hanya kolom brand yang ditulis (tidak menyentuh billing/preferensi)", async () => {
-    await updateBrandProfileAction(prev, fd({ brandName: "K", websiteUrl: "tokoanda.id", whatsappNumber: "08123456789", whatDoYouSell: "Kopi" }));
+    await updateBrandProfileAction(prev, fd({ brandName: "Ko", websiteUrl: "tokoanda.id", whatsappNumber: "08123456789", whatDoYouSell: "Kopi" }));
     expect(Object.keys(upsert()!.payload).sort()).toEqual(["brand_name", "tenant_id", "website_url", "what_do_you_sell", "whatsapp_number"].sort());
   });
 });
