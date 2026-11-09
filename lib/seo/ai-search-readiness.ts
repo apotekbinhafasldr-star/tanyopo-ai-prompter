@@ -1,3 +1,4 @@
+import { buildLinoePublicFacts, isLinoeSelfEntity } from "@/lib/linoe/public-facts";
 import { MAX_AEO_QUESTIONS, MAX_CONTENT_RECOMMENDATIONS, MAX_MISSING_FACTS, type AiSearchReadinessAi } from "@/schemas/ai/ai-search-readiness";
 
 /**
@@ -10,6 +11,8 @@ export interface VerifiedFact {
   key: string;
   label: string;
   value: string;
+  /** Hanya untuk fakta publik LINOE (bisnis ini = LINOE): TERSEDIA | SEGERA | TARGET. */
+  status?: "TERSEDIA" | "SEGERA" | "TARGET";
 }
 
 export interface FactSources {
@@ -64,6 +67,10 @@ export function buildVerifiedFacts(src: FactSources): VerifiedFact[] {
   add("target_countries", "Target negara", countries.length ? countries.join(", ") : null);
   add("website", "Website", clean(p?.website_url ?? src.projectWebsiteUrl ?? b?.website_url, 300));
   add("whatsapp", "Kontak WhatsApp", clean(b?.whatsapp_number, 40));
+  // Fakta publik LINOE hanya untuk bisnis yang website-nya = situs resmi LINOE (tidak pernah untuk tenant lain).
+  if (isLinoeSelfEntity([b?.website_url, p?.website_url, src.projectWebsiteUrl])) {
+    for (const f of buildLinoePublicFacts()) facts.push(f);
+  }
   return facts;
 }
 
@@ -83,7 +90,7 @@ export function findMissingFacts(facts: VerifiedFact[]): string[] {
 
 export function formatFactsForPrompt(facts: VerifiedFact[]): string {
   return facts.length
-    ? facts.map((f) => `- ${f.label}: ${f.value}`).join("\n")
+    ? facts.map((f) => `- ${f.status ? `[${f.status}] ` : ""}${f.label}: ${f.value}`).join("\n")
     : "(belum ada fakta terverifikasi)";
 }
 
@@ -114,6 +121,18 @@ function claimsAllowed(text: string, factsText: string): boolean {
   return m.every((w) => lowerFacts.includes(w.toLowerCase()));
 }
 
+/**
+ * Fakta berstatus SEGERA/TARGET (belum aktif): jawaban tidak boleh menyebutnya siap dibeli/aktif
+ * kecuali jelas berlabel belum/rencana/segera/target.
+ */
+const READY_CLAIM = /(siap dibeli|bisa dibeli|dapat dibeli|sudah aktif|sudah tersedia|beli sekarang|bayar sekarang|langganan sekarang|checkout)/i;
+const PLANNED_QUALIFIER = /(belum|rencana|segera|target|direncanakan)/i;
+
+export function overstatesAvailability(text: string, facts: VerifiedFact[]): boolean {
+  if (!facts.some((f) => f.status === "SEGERA" || f.status === "TARGET")) return false;
+  return READY_CLAIM.test(text) && !PLANNED_QUALIFIER.test(text);
+}
+
 export function isGroundedText(text: string, factsText: string): boolean {
   return numbersAllowed(text, factsText) && claimsAllowed(text, factsText);
 }
@@ -139,12 +158,14 @@ export function sanitizeAiSearchReadiness(
   ai: AiSearchReadinessAi,
   facts: VerifiedFact[],
   now: Date = new Date(),
+  /** Catatan konteks yang kurang dari server (mis. produk belum dipilih) — ditampilkan lebih dulu. */
+  extraMissing: string[] = [],
 ): StoredAiSearchReadiness {
   const factsText = facts.map((f) => f.value).join(" \n ");
   let removed = 0;
   const questions = ai.customer_questions.slice(0, MAX_AEO_QUESTIONS).map((q) => {
     let answer = clean(q.short_answer, 600);
-    if (answer && (facts.length === 0 || !isGroundedText(answer, factsText))) {
+    if (answer && (facts.length === 0 || !isGroundedText(answer, factsText) || overstatesAvailability(answer, facts))) {
       answer = null;
       removed++;
     }
@@ -157,7 +178,7 @@ export function sanitizeAiSearchReadiness(
     };
   });
   let entity = clean(ai.entity_context, 600);
-  if (entity && (facts.length === 0 || !isGroundedText(entity, factsText))) {
+  if (entity && (facts.length === 0 || !isGroundedText(entity, factsText) || overstatesAvailability(entity, facts))) {
     entity = null;
     removed++;
   }
@@ -167,7 +188,7 @@ export function sanitizeAiSearchReadiness(
     return ok;
   });
   // Maks 3 dari hitungan server agar tersisa ruang untuk fakta spesifik dari AI (total tetap <= MAX_MISSING_FACTS).
-  const missing = Array.from(new Set([...findMissingFacts(facts).slice(0, 3), ...ai.missing_facts.map((m) => m.trim()).filter(Boolean)])).slice(0, MAX_MISSING_FACTS);
+  const missing = Array.from(new Set([...extraMissing, ...findMissingFacts(facts).slice(0, 3), ...ai.missing_facts.map((m) => m.trim()).filter(Boolean)])).slice(0, MAX_MISSING_FACTS);
   return {
     version: 1,
     generated_at: now.toISOString(),

@@ -15,6 +15,11 @@ export interface SeoActionState {
   error: string | null;
 }
 
+/** Tidak ada produk fallback otomatis (risiko salah konteks): minta pemilik memilih produk sendiri. */
+function noProductNote(product: unknown): string[] {
+  return product ? [] : ["Pilih produk pada project SEO ini agar jawaban akurat"];
+}
+
 function requireWriteAccess(role: string): string | null {
   if (role !== "owner" && role !== "marketing") {
     return "Hanya Owner/Marketing yang dapat mengelola project SEO & Discovery.";
@@ -173,7 +178,7 @@ export async function generateSeoRecommendationsAction(projectId: string): Promi
         // Additive, no migration: AI Search Readiness lives inside the existing jsonb.
         discovery_recommendations: {
           ...discoveryBase,
-          ai_search_readiness: sanitizeAiSearchReadiness(result.data.ai_search_readiness, facts),
+          ai_search_readiness: sanitizeAiSearchReadiness(result.data.ai_search_readiness, facts, new Date(), noProductNote(product)),
         } as unknown as Json,
         ai_job_id: result.jobId,
         model: result.model,
@@ -235,7 +240,7 @@ export async function generateSeoRecommendationsAction(projectId: string): Promi
       // WEBSITE rows previously had NULL here; the page reads this column only in
       // NO_WEBSITE mode for the legacy discovery fields, so the key is purely additive.
       discovery_recommendations: {
-        ai_search_readiness: sanitizeAiSearchReadiness(result.data.ai_search_readiness, websiteFacts),
+        ai_search_readiness: sanitizeAiSearchReadiness(result.data.ai_search_readiness, websiteFacts, new Date(), noProductNote(websiteProduct)),
       } as unknown as Json,
       ai_job_id: result.jobId,
       model: result.model,
