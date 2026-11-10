@@ -157,6 +157,29 @@ export default async function SettingsPage() {
         </CardContent>
       </Card>
 
+      {/* Bantuan — support contact from the shared legal constants (the
+          sidebar "Bantuan" item points here). */}
+      <Card id="bantuan">
+        <CardHeader className="flex flex-row items-center gap-2 space-y-0">
+          <LifeBuoy className="size-4 text-muted-foreground" aria-hidden />
+          <CardTitle>Bantuan</CardTitle>
+          <CardDescription className="sr-only">Kontak dukungan LINOE</CardDescription>
+        </CardHeader>
+        <CardContent className="pt-4">
+          <p className="text-sm text-foreground">
+            Ada pertanyaan atau kendala? Kirim email ke{" "}
+            <a href={`mailto:${LEGAL.contactEmail}`} className="break-all font-medium text-brand hover:underline">
+              {LEGAL.contactEmail}
+            </a>
+            .
+          </p>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Sertakan email akun dan penjelasan singkat masalahnya agar kami lebih mudah membantu. Pengajuan refund
+            juga lewat email ini; lihat Kebijakan Refund untuk caranya.
+          </p>
+        </CardContent>
+      </Card>
+
       {/* 2. Pasar & Lokasi — existing GlobalPreferencesForm/action, untouched. */}
       <Card>
         <CardHeader className="flex flex-row items-center gap-2 space-y-0">
