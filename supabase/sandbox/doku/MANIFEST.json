@@ -1,0 +1,388 @@
+{
+  "baseline_main_sha": "a07942ed27d72e041f91e9c50c504869218fa6c3",
+  "migration_count": 49,
+  "parts": [
+    {
+      "bundle": "10_migrations_part_1.sql",
+      "from": "20260829080127_prompter_foundation_schema.sql",
+      "to": "20260829102947_prompter_channel_campaigns_add_error.sql",
+      "count": 6,
+      "expected_before": 0,
+      "migrations": [
+        {
+          "version": "20260829080127",
+          "file": "20260829080127_prompter_foundation_schema.sql",
+          "bytes": 7804,
+          "sha256": "68deade554b45b338699f96634bb82c45d9d540f0c4cea6973d9b7468438e63a"
+        },
+        {
+          "version": "20260829080155",
+          "file": "20260829080155_prompter_fix_function_search_path.sql",
+          "bytes": 307,
+          "sha256": "1b170e599e2181908beb38aa4baa5b062e09e44fb4fb59fe703c77f28cc779f9"
+        },
+        {
+          "version": "20260829092303",
+          "file": "20260829092303_prompter_phase1_schema.sql",
+          "bytes": 15462,
+          "sha256": "f8f02b0511ad58fd1dfa18774eed12226fa9b256c27a170bd9147970f1648012"
+        },
+        {
+          "version": "20260829095447",
+          "file": "20260829095447_prompter_phase2_schema.sql",
+          "bytes": 17304,
+          "sha256": "b801b07a0cfb6a314306b4a4877da02fc8e8e9c05c57564b41dfbbd2adfff206"
+        },
+        {
+          "version": "20260829102304",
+          "file": "20260829102304_prompter_phase3_schema.sql",
+          "bytes": 11555,
+          "sha256": "b2038586a8e061478a896cc280e6e0566ecc65e5a52ae691170e9b9424997a10"
+        },
+        {
+          "version": "20260829102947",
+          "file": "20260829102947_prompter_channel_campaigns_add_error.sql",
+          "bytes": 1511,
+          "sha256": "98de4568c1284adbb3058fcc1fc14fc11699e0b188e55508c24315f8da1e0720"
+        }
+      ],
+      "bundle_bytes": 57330,
+      "bundle_sha256": "eee135b4eba6d6b4a636b98af5a9cb8c32ab426dd8cfa03e54963e61c7ce4232"
+    },
+    {
+      "bundle": "10_migrations_part_2.sql",
+      "from": "20260829104743_prompter_phase4_schema.sql",
+      "to": "20260901131336_prompter_job_queue.sql",
+      "count": 8,
+      "expected_before": 6,
+      "migrations": [
+        {
+          "version": "20260829104743",
+          "file": "20260829104743_prompter_phase4_schema.sql",
+          "bytes": 9787,
+          "sha256": "31b506080762c409fbed9e852ada219c8e14bd3dd401682ebe787fe1a42fe231"
+        },
+        {
+          "version": "20260829110644",
+          "file": "20260829110644_prompter_phase5_schema.sql",
+          "bytes": 12382,
+          "sha256": "9bc07e9c766f0019d0abce8b5a08d8ea31d0a2814bd1e38661fa1bdfce64aa81"
+        },
+        {
+          "version": "20260829112835",
+          "file": "20260829112835_prompter_phase6_capabilities.sql",
+          "bytes": 5700,
+          "sha256": "e2d5b2501ffdcd26407fe22f2e89d1de223d2a0fd68d4774f044c3667fad0f7a"
+        },
+        {
+          "version": "20260829114414",
+          "file": "20260829114414_prompter_phase7_schema.sql",
+          "bytes": 10781,
+          "sha256": "7aa7f152c27bd8015b08e43ce1db350710223407bab5cacf9e6f98f36234529c"
+        },
+        {
+          "version": "20260829155306",
+          "file": "20260829155306_prompter_ai_router_usage_columns.sql",
+          "bytes": 2824,
+          "sha256": "55ad80cefe2b17096217f6b27ca36483e2b75160a9c56c1e6710ad242e7a33a0"
+        },
+        {
+          "version": "20260901120847",
+          "file": "20260901120847_prompter_billing_foundation.sql",
+          "bytes": 4224,
+          "sha256": "8f2fea245a46636a7bd33f59a2971c9ab4a32770641a133f8b3feb79fcb44881"
+        },
+        {
+          "version": "20260901130513",
+          "file": "20260901130513_prompter_billing_invoices.sql",
+          "bytes": 2703,
+          "sha256": "f94e7cab392e9fadfa983513e771c1c6fe142506b61dc463f1ae0feb0aae1e6a"
+        },
+        {
+          "version": "20260901131336",
+          "file": "20260901131336_prompter_job_queue.sql",
+          "bytes": 5831,
+          "sha256": "067436ff2c64b5023ffca6b8915d00dfda351339d2704ba11ad8033607ea85ff"
+        }
+      ],
+      "bundle_bytes": 58145,
+      "bundle_sha256": "69e7d2cf3cb0459fbc9027e4cdec05b9408eed62a55070ed426bfdf0d14ee8a5"
+    },
+    {
+      "bundle": "10_migrations_part_3.sql",
+      "from": "20260901135021_prompter_global_edition_foundation.sql",
+      "to": "20260915043800_prompter_b9_entitlement_enforcement.sql",
+      "count": 13,
+      "expected_before": 14,
+      "migrations": [
+        {
+          "version": "20260901135021",
+          "file": "20260901135021_prompter_global_edition_foundation.sql",
+          "bytes": 11192,
+          "sha256": "5ba01dedd79145b0c1c60ab58ae150398e302cab95e86f2330ef452346208946"
+        },
+        {
+          "version": "20260901141241",
+          "file": "20260901141241_prompter_global_marketing_blueprint.sql",
+          "bytes": 1369,
+          "sha256": "211d38fd5e71478f5f97baf17d9e622a2d4b8367898e42dfb0d1dfcb4a06b9ff"
+        },
+        {
+          "version": "20260901142211",
+          "file": "20260901142211_prompter_compliance_flags_global_unique.sql",
+          "bytes": 848,
+          "sha256": "083d82ee984e276ad595263466ec6612baed0ea9ba20d1e8e40fca600b351c6c"
+        },
+        {
+          "version": "20260901142236",
+          "file": "20260901142236_prompter_compliance_flags_market_sentinel.sql",
+          "bytes": 1289,
+          "sha256": "9e1ba45a5a65a9a5190020ddbff4126d5554c3de76dffc32330c6227598e0082"
+        },
+        {
+          "version": "20260906061202",
+          "file": "20260906061202_prompter_product_stock_unit.sql",
+          "bytes": 794,
+          "sha256": "b76bbd5b9f61a5824091e2e4ed5592600f91341e47699faf6c9000695269a6ec"
+        },
+        {
+          "version": "20260909073321",
+          "file": "20260909073321_prompter_channel_campaigns_add_scheduled_at.sql",
+          "bytes": 1122,
+          "sha256": "d862671cd713f692e4cfe1380143be265b968a90020287d34ba55da9e1444621"
+        },
+        {
+          "version": "20260909100910",
+          "file": "20260909100910_prompter_master_campaigns_add_selected_media.sql",
+          "bytes": 1284,
+          "sha256": "fccca85c0eb052df334f12623fc1581cd9898c7612b02ceb22f599cd23d7e2ea"
+        },
+        {
+          "version": "20260909141526",
+          "file": "20260909141526_prompter_seo_discovery_no_website.sql",
+          "bytes": 2310,
+          "sha256": "2904e9759a293b2920d8a0666658f0b6af160bdc4603ada537f0097ecc18559e"
+        },
+        {
+          "version": "20260909164100",
+          "file": "20260909164100_prompter_growth_recommendation_job_type.sql",
+          "bytes": 385,
+          "sha256": "ecdc6a2c89cf124d0a4c936215e5ba357dfaa4bb99d15f5f72d6d7f49a34e48d"
+        },
+        {
+          "version": "20260910060428",
+          "file": "20260910060428_revert_unused_growth_recommendation_job_type.sql",
+          "bytes": 356,
+          "sha256": "9944ffdb9210b491f6b645a3f62a868085d8e61059ee98f223427fc04fbc0c2f"
+        },
+        {
+          "version": "20260910072819",
+          "file": "20260910072819_prompter_subscriptions_add_starter_plan.sql",
+          "bytes": 579,
+          "sha256": "e33bdccda42a6b15aca26e5f14fbe2546a5acc0b111f55dff1bb991a4db1dd45"
+        },
+        {
+          "version": "20260913163600",
+          "file": "20260913163600_prompter_track_b_meta_page_picker.sql",
+          "bytes": 1970,
+          "sha256": "902016257bcbf91dee456eb0a91035cbe7caa8b6a16599845fce60435811bf6a"
+        },
+        {
+          "version": "20260915043800",
+          "file": "20260915043800_prompter_b9_entitlement_enforcement.sql",
+          "bytes": 20039,
+          "sha256": "7aa9e03e0a2576afd317ad12130eeacd03d22d46ae1097953afb1728191cefb0"
+        }
+      ],
+      "bundle_bytes": 49053,
+      "bundle_sha256": "c42828e88bdc423fc9c7c2aafddfd46c896033976910dd7d26fb411e625b7e30"
+    },
+    {
+      "bundle": "10_migrations_part_4.sql",
+      "from": "20260915051359_prompter_b10_payment_billing_core.sql",
+      "to": "20260928161604_prompter_demo_ai_usage.sql",
+      "count": 5,
+      "expected_before": 27,
+      "migrations": [
+        {
+          "version": "20260915051359",
+          "file": "20260915051359_prompter_b10_payment_billing_core.sql",
+          "bytes": 28502,
+          "sha256": "3057a88da773ccfe4ec672891d4c94ccd737d569f3114d11b099f8e271925bec"
+        },
+        {
+          "version": "20260924173424",
+          "file": "20260924173424_prompter_trial_expiry_gate_fix.sql",
+          "bytes": 6412,
+          "sha256": "bced3f768e99f7145b2ffe1626a588a561e1ec560247fea961801c30c4d3daac"
+        },
+        {
+          "version": "20260926062741",
+          "file": "20260926062741_prompter_scheduled_cancellations_cron.sql",
+          "bytes": 1505,
+          "sha256": "923631930bb3ad9032780e9868eb820502d683b0091a4560f115aaa0d65b6a42"
+        },
+        {
+          "version": "20260926113000",
+          "file": "20260926113000_prompter_payment_lifecycle_remediation.sql",
+          "bytes": 5087,
+          "sha256": "44c25a3e6281265614a5b8d78f5582b2ecdfd6ac75dfbb54a014ba5df5bdffae"
+        },
+        {
+          "version": "20260928161604",
+          "file": "20260928161604_prompter_demo_ai_usage.sql",
+          "bytes": 5555,
+          "sha256": "8624ca5d75415877cb039e86481adb56d78174913acf7824b9254adc156128cd"
+        }
+      ],
+      "bundle_bytes": 50189,
+      "bundle_sha256": "73883da3098dd090eabad167cad0b10ff48594539bc380dc9dae76190e88c3cd"
+    },
+    {
+      "bundle": "10_migrations_part_5.sql",
+      "from": "20261018160000_prompter_manual_ad_metrics.sql",
+      "to": "20261027110000_linoe_admin_center_access.sql",
+      "count": 8,
+      "expected_before": 32,
+      "migrations": [
+        {
+          "version": "20261018160000",
+          "file": "20261018160000_prompter_manual_ad_metrics.sql",
+          "bytes": 13109,
+          "sha256": "ffbf01cbf3f8e800796558451b8ab2ebabec39de8da8eec17106116a89b78709"
+        },
+        {
+          "version": "20261019100000",
+          "file": "20261019100000_prompter_p0_ai_jobs_lockdown.sql",
+          "bytes": 2049,
+          "sha256": "0da43286f1e8a60123bd0272ab1e668146bb5bd37a90059c725d33f369d8ba66"
+        },
+        {
+          "version": "20261019100100",
+          "file": "20261019100100_prompter_p0_subscription_trial_insert_guard.sql",
+          "bytes": 5146,
+          "sha256": "72389edca8260661b8b6905ff5adbc59929e450ee6ea943bd6975c47059de741"
+        },
+        {
+          "version": "20261019100200",
+          "file": "20261019100200_prompter_p0_plan_entitlements_lockdown.sql",
+          "bytes": 1650,
+          "sha256": "e483750a4af17982e0d9ad2b2d874871d33e558e76cba9631bf30522647bdd12"
+        },
+        {
+          "version": "20261021120000",
+          "file": "20261021120000_prompter_ai_jobs_quota_guard.sql",
+          "bytes": 9036,
+          "sha256": "4037f87f42e93c43472f5b321f9e257500d5d849c1036f257158b0594ae3f356"
+        },
+        {
+          "version": "20261021120100",
+          "file": "20261021120100_prompter_ai_jobs_delete_guard.sql",
+          "bytes": 2417,
+          "sha256": "903bde666f87c981c7ab00a449a538ecdf000823bb3fa79c108593d5ed099d91"
+        },
+        {
+          "version": "20261027100000",
+          "file": "20261027100000_linoe_finance_foundation.sql",
+          "bytes": 15677,
+          "sha256": "6265938bb4c16757d3a4e7cac99eda69b537ea0d8a8709bc8c727ac754db1776"
+        },
+        {
+          "version": "20261027110000",
+          "file": "20261027110000_linoe_admin_center_access.sql",
+          "bytes": 3153,
+          "sha256": "871d14bc69f995bd0b3e61ff40c262c8fbe7bf9cc7b209df385cc809c8121e29"
+        }
+      ],
+      "bundle_bytes": 56210,
+      "bundle_sha256": "0e14a4a17694ccddeedac74de42c31ec6d08b9f1a2f7de6b69874aa02143e334"
+    },
+    {
+      "bundle": "10_migrations_part_6.sql",
+      "from": "20261027120000_linoe_accounting_ledger.sql",
+      "to": "20261030100100_prompter_b1_trial_remainder_carryover.sql",
+      "count": 5,
+      "expected_before": 40,
+      "migrations": [
+        {
+          "version": "20261027120000",
+          "file": "20261027120000_linoe_accounting_ledger.sql",
+          "bytes": 19580,
+          "sha256": "2436fd006c77d33dd33330fde66858eb024c47da61615f398b5ef898ab28088f"
+        },
+        {
+          "version": "20261027130000",
+          "file": "20261027130000_linoe_tax_optimization_approvals.sql",
+          "bytes": 17257,
+          "sha256": "550e635fbe40e73c794eb9d7cb345104fa5c9dea80d038cb4ff0f8ad3f55d8f0"
+        },
+        {
+          "version": "20261029220000",
+          "file": "20261029220000_prompter_p0_subscription_plan_tampering_lockdown.sql",
+          "bytes": 6931,
+          "sha256": "af580f85cf55eabc9310fd98902cc04209aa5d098e30eb31b0ee8ce1d99db7f9"
+        },
+        {
+          "version": "20261030100000",
+          "file": "20261030100000_prompter_b1_server_only_checkout.sql",
+          "bytes": 10543,
+          "sha256": "67ae6601d1c8a73179e4964a7010d97325fadde53b3835385fc073243559c88d"
+        },
+        {
+          "version": "20261030100100",
+          "file": "20261030100100_prompter_b1_trial_remainder_carryover.sql",
+          "bytes": 2052,
+          "sha256": "66a9737737b1ccf0ca1649be780f6186335675e60e0dffb254e15be5aecc1e92"
+        }
+      ],
+      "bundle_bytes": 59508,
+      "bundle_sha256": "ceabc0edb2d7c514045663dbba08993f0e193486d00fd1e7ad598f7acdfad27a"
+    },
+    {
+      "bundle": "10_migrations_part_7.sql",
+      "from": "20261030140000_prompter_b2_double_payment_safety.sql",
+      "to": "20261031100000_prompter_b4_payment_alerts.sql",
+      "count": 2,
+      "expected_before": 45,
+      "migrations": [
+        {
+          "version": "20261030140000",
+          "file": "20261030140000_prompter_b2_double_payment_safety.sql",
+          "bytes": 18501,
+          "sha256": "d4592d2adcd76ab990fa68544e58807be39b70a283b928d95bd709ceb9558c07"
+        },
+        {
+          "version": "20261031100000",
+          "file": "20261031100000_prompter_b4_payment_alerts.sql",
+          "bytes": 26009,
+          "sha256": "5629249a858cbc19720f29d959a03ba802f0ddf7318ef27c57fb94d21c336827"
+        }
+      ],
+      "bundle_bytes": 46773,
+      "bundle_sha256": "c430a87cfd500436d7ee2b3d8fd2287796ae12ed5df5596dc851bff3be429548"
+    },
+    {
+      "bundle": "10_migrations_part_8.sql",
+      "from": "20261101100000_prompter_b4_2_alert_notifications.sql",
+      "to": "20261103170000_prompter_p0_2_payment_invoices.sql",
+      "count": 2,
+      "expected_before": 47,
+      "migrations": [
+        {
+          "version": "20261101100000",
+          "file": "20261101100000_prompter_b4_2_alert_notifications.sql",
+          "bytes": 35337,
+          "sha256": "a71c68c4b398fa765d586ff3199bcfebd770d74ffffef5bf599734f3b2d93253"
+        },
+        {
+          "version": "20261103170000",
+          "file": "20261103170000_prompter_p0_2_payment_invoices.sql",
+          "bytes": 11273,
+          "sha256": "21d860e5e2f9a20ecf35900cc2705be717f1fd4ee4c16855bd404ff705668bbd"
+        }
+      ],
+      "bundle_bytes": 48881,
+      "bundle_sha256": "83ee90cb4ece45bf386c0e833f5503f24dc6a2fe3c4303b3a932c172102a6fd9"
+    }
+  ]
+}
