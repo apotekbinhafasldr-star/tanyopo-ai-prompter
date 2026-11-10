@@ -1,0 +1,122 @@
+name: DOKU Sandbox Runner
+
+# Manual, approval-gated runner for the DISPOSABLE Supabase project "linoe-doku-sandbox" (ref eskqngzhtndkfqjoxxou) ONLY.
+# It can NOT reach production: the runner refuses any host/user that is not that project's pooler/direct endpoint, and the
+# production refs (umkmpro-ai, linoe-otp-test) are rejected explicitly. Procedure: supabase/sandbox/doku/RUNNER.md
+#
+# Safety properties (asserted by supabase/sandbox/doku/tools/check_workflow_static.py):
+#   * workflow_dispatch ONLY: nothing runs on push, merge, pull request or schedule.
+#   * Only from main; the Environment "doku-sandbox" must have a Required reviewer (the workflow PROVES the approval happened).
+#   * The input sha must equal the workflow's own commit AND the current tip of main; the SQL tree hash must equal the audited one.
+#   * No third-party action. Only psql runs the SHA256-pinned sandbox files. No Supabase CLI, no `db push`, no service_role key.
+#   * Its own secret (DOKU_DB_PASSWORD) is attached to ONE step only. Host and user are Environment variables. It never uses
+#     any production secret (MIGRATION_DB_PASSWORD etc.).
+#   * Repository is PUBLIC: logs are public. The runner prints stage names, PASS/FAIL and counts only, never a credential or row.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "preflight = hanya baca (cek target + keadaan awal); execute = jalankan tahap"
+        type: choice
+        required: true
+        default: preflight
+        options:
+          - preflight
+          - execute
+      from_stage:
+        description: "Mulai dari tahap"
+        type: choice
+        required: true
+        default: T6
+        options: [T6, T7, T8, T9, T10, T11, T12, T13, T14]
+      to_stage:
+        description: "Berhenti setelah tahap"
+        type: choice
+        required: true
+        default: T14
+        options: [T6, T7, T8, T9, T10, T11, T12, T13, T14]
+      sha:
+        description: "SHA lengkap (40 karakter) ujung main saat ini"
+        type: string
+        required: true
+      tree:
+        description: "12+ karakter pertama hash pohon supabase/sandbox/doku dari laporan audit"
+        type: string
+        required: true
+      confirm:
+        description: "Untuk mode execute ketik persis: EKSEKUSI-SANDBOX-DOKU"
+        type: string
+        required: false
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: doku-sandbox-runner
+  cancel-in-progress: false
+
+jobs:
+  run:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: doku-sandbox
+    steps:
+      - name: Fetch exactly the approved commit (no third-party action)
+        env:
+          REPO: ${{ github.repository }}
+          INPUT_SHA: ${{ inputs.sha }}
+          WORKFLOW_SHA: ${{ github.sha }}
+          INPUT_TREE: ${{ inputs.tree }}
+          MODE: ${{ inputs.mode }}
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          set -euo pipefail
+          [[ "$INPUT_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::STOP - sha harus 40 karakter heksadesimal huruf kecil"; exit 1; }
+          [[ "$INPUT_TREE" =~ ^[0-9a-f]{12,40}$ ]] || { echo "::error::STOP - tree harus 12-40 karakter heksadesimal huruf kecil"; exit 1; }
+          if [ "$MODE" = execute ]; then [ "$CONFIRM" = "EKSEKUSI-SANDBOX-DOKU" ] || { echo "::error::STOP - konfirmasi eksekusi salah"; exit 1; }; fi
+          [ "$INPUT_SHA" = "$WORKFLOW_SHA" ] || { echo "::error::STOP - sha input tidak sama dengan commit workflow ini"; exit 1; }
+          TIP="$(git ls-remote "https://github.com/${REPO}.git" refs/heads/main | cut -f1)"
+          [ "$TIP" = "$INPUT_SHA" ] || { echo "::error::STOP - sha input bukan ujung main saat ini"; exit 1; }
+          git init -q src
+          cd src
+          git remote add origin "https://github.com/${REPO}.git"
+          git fetch -q --depth 1 --no-tags origin "$INPUT_SHA"
+          git checkout -q FETCH_HEAD
+          [ "$(git rev-parse HEAD)" = "$INPUT_SHA" ] || { echo "::error::STOP - checkout tidak sama dengan sha"; exit 1; }
+          TREE="$(git rev-parse HEAD:supabase/sandbox/doku)"
+          case "$TREE" in "$INPUT_TREE"*) ;; *) echo "::error::STOP - isi supabase/sandbox/doku tidak sama dengan yang diaudit"; exit 1;; esac
+          echo "PASS - commit $INPUT_SHA adalah ujung main; pohon SQL sandbox sesuai audit"
+
+      - name: Verify the Environment approval really happened
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          gh api "repos/${REPO}/actions/runs/${RUN_ID}/approvals" > "$RUNNER_TEMP/approvals.json"
+          python3 src/supabase/prod-packages/tools/check_approval.py "$RUNNER_TEMP/approvals.json" "$OWNER" doku-sandbox
+
+      - name: Ensure psql client
+        run: command -v psql || (sudo apt-get update && sudo apt-get install -y postgresql-client)
+
+      - name: Static self-check of runner and workflow
+        run: python3 src/supabase/sandbox/doku/tools/check_workflow_static.py
+
+      - name: Run sandbox runner
+        env:
+          MODE: ${{ inputs.mode }}
+          FROM_STAGE: ${{ inputs.from_stage }}
+          TO_STAGE: ${{ inputs.to_stage }}
+          CLOUD: "1"
+          PGHOST: ${{ vars.DOKU_DB_HOST }}
+          PGUSER: ${{ vars.DOKU_DB_USER }}
+          PGPASSWORD: ${{ secrets.DOKU_DB_PASSWORD }}
+          PGPORT: "5432"
+          PGSSLMODE: require
+          PGDATABASE: postgres
+        run: bash src/supabase/sandbox/doku/tools/run_sandbox.sh "$FROM_STAGE" "$TO_STAGE"

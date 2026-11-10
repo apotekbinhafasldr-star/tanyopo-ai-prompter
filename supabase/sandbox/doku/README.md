@@ -68,3 +68,6 @@ Claude tidak menjalankannya dan tidak menyentuh project itu. Dari hasilnya, shim
 - Project Supabase baru biasanya punya event trigger `rls_auto_enable` yang mengaktifkan RLS otomatis pada tabel baru. Akibatnya verifikasi
   "tabel tanpa RLS = 0" bisa lolos walau migrasi tidak mengaktifkan RLS. Di replay lokal (tanpa trigger itu) RLS terbukti berasal dari migrasi.
 - Cakupan: skrip ini menguji SQL jalur pembayaran, bukan DOKU (tanpa panggilan jaringan), dan bukan RLS dari sisi klien PostgREST.
+
+## Runner otomatis (opsional, T6–T14)
+Lihat `RUNNER.md`: runner `tools/run_sandbox.sh` + workflow `doku-sandbox-runner.yml` (manual, bertahap, berhenti pada penyimpangan pertama). Uji lokal: `bash tools/test_runner_local.sh`.
