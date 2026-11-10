@@ -68,7 +68,7 @@ export async function POST(request: NextRequest) {
 
     try {
       const result = await handler(job);
-      await completeJob(admin, job.id, result ?? undefined);
+      await completeJob(admin, job, result ?? undefined);
       processed.push({ jobId: job.id, status: "SUCCEEDED" });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Job gagal dijalankan.";

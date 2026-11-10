@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { SupabaseJobQueue } from "@/lib/jobs/providers/supabase-job-queue";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
+import { fakeJobsAdmin, makeJob } from "../helpers/fake-jobs-admin";
 
 /**
  * A minimal chainable mock covering exactly the builder calls
@@ -112,43 +113,50 @@ describe("SupabaseJobQueue.claimNext", () => {
 });
 
 describe("SupabaseJobQueue.fail", () => {
-  it("schedules a retry (stays PENDING) when attempts are still below max_attempts", async () => {
-    const supabase = mockSupabase({ selectSingleResult: { data: { attempts: 1, max_attempts: 5 }, error: null } });
-    const queue = new SupabaseJobQueue(supabase);
+  it("schedules a retry (back to PENDING, run_at pushed forward) while attempts are below max_attempts", async () => {
+    const f = fakeJobsAdmin([makeJob({ id: "job-1", tenant_id: "t1", attempts: 1, max_attempts: 5 })]);
+    const before = Date.now();
 
-    // Should not throw; the retry-vs-terminal branch is exercised via the
-    // fetched attempts/max_attempts above (unit-testing the branch choice,
-    // not the exact update payload, which the mock doesn't capture here).
-    await expect(queue.fail("job-1", "transient error")).resolves.toBeUndefined();
+    const outcome = await new SupabaseJobQueue(f.admin).fail({ id: "job-1", tenantId: "t1" }, "transient error");
+
+    expect(outcome).toEqual({ applied: true, terminal: false });
+    expect(f.rows[0].status).toBe("PENDING");
+    expect(f.rows[0].error).toBe("transient error");
+    expect(Date.parse(f.rows[0].run_at)).toBeGreaterThan(before + 20_000);
   });
 
   it("marks the job terminally FAILED once attempts reach max_attempts", async () => {
-    const supabase = mockSupabase({ selectSingleResult: { data: { attempts: 5, max_attempts: 5 }, error: null } });
-    const queue = new SupabaseJobQueue(supabase);
+    const f = fakeJobsAdmin([makeJob({ id: "job-1", tenant_id: "t1", attempts: 5, max_attempts: 5 })]);
 
-    await expect(queue.fail("job-1", "final error")).resolves.toBeUndefined();
+    const outcome = await new SupabaseJobQueue(f.admin).fail({ id: "job-1", tenantId: "t1" }, "final error");
+
+    expect(outcome).toEqual({ applied: true, terminal: true });
+    expect(f.rows[0].status).toBe("FAILED");
+    expect(f.rows[0].finished_at).toBeTruthy();
   });
 
-  it("no-ops when the job can't be found", async () => {
-    const supabase = mockSupabase({ selectSingleResult: { data: null, error: { message: "not found" } } });
-    const queue = new SupabaseJobQueue(supabase);
+  it("no-ops (applied: false) when the job can't be found", async () => {
+    const f = fakeJobsAdmin([]);
 
-    await expect(queue.fail("missing-job", "error")).resolves.toBeUndefined();
+    expect(await new SupabaseJobQueue(f.admin).fail({ id: "missing-job", tenantId: "t1" }, "error")).toEqual({
+      applied: false,
+      terminal: false,
+    });
   });
 });
 
 describe("SupabaseJobQueue.cancel", () => {
-  it("reports canceled: true when a PENDING job was updated", async () => {
-    const supabase = mockSupabase({ updateResult: { data: { id: "job-1" }, error: null } });
-    const queue = new SupabaseJobQueue(supabase);
+  it("reports canceled: true when the tenant's PENDING job was updated", async () => {
+    const f = fakeJobsAdmin([makeJob({ id: "job-1", tenant_id: "t1", status: "PENDING", attempts: 0 })]);
 
-    expect(await queue.cancel("job-1")).toEqual({ canceled: true });
+    expect(await new SupabaseJobQueue(f.admin).cancel({ id: "job-1", tenantId: "t1" })).toEqual({ canceled: true });
+    expect(f.rows[0].status).toBe("CANCELED");
   });
 
   it("reports canceled: false when no PENDING row matched (already running/finished)", async () => {
-    const supabase = mockSupabase({ updateResult: { data: null, error: null } });
-    const queue = new SupabaseJobQueue(supabase);
+    const f = fakeJobsAdmin([makeJob({ id: "job-1", tenant_id: "t1", status: "RUNNING" })]);
 
-    expect(await queue.cancel("job-1")).toEqual({ canceled: false });
+    expect(await new SupabaseJobQueue(f.admin).cancel({ id: "job-1", tenantId: "t1" })).toEqual({ canceled: false });
+    expect(f.rows[0].status).toBe("RUNNING");
   });
 });
