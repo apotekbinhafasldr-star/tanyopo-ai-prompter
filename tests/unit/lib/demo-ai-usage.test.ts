@@ -8,7 +8,7 @@ vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: () => createAdminClientMock(),
 }));
 
-import { checkAndConsumeDemoAiUsage, DEMO_AI_HARD_CAP } from "@/lib/demo/ai-usage";
+import { checkAndConsumeDemoAiUsage, DEMO_AI_GLOBAL_HOURLY_CAP, DEMO_AI_HARD_CAP } from "@/lib/demo/ai-usage";
 
 describe("checkAndConsumeDemoAiUsage — Founder hard-cap/rate-limit/fail-closed requirement", () => {
   beforeEach(() => {
@@ -70,5 +70,15 @@ describe("checkAndConsumeDemoAiUsage — Founder hard-cap/rate-limit/fail-closed
 
     const otherSession = await checkAndConsumeDemoAiUsage("session-g");
     expect(otherSession.allowed).toBe(true);
+  });
+
+  it("caps live AI calls instance-wide across many sessions, before reaching the database", async () => {
+    rpcMock.mockResolvedValue({ data: [{ allowed: true, used_count: 1 }], error: null });
+
+    for (let i = 0; i < DEMO_AI_GLOBAL_HOURLY_CAP; i += 1) {
+      expect((await checkAndConsumeDemoAiUsage(`many-${i}`)).allowed).toBe(true);
+    }
+    expect(await checkAndConsumeDemoAiUsage("many-over")).toEqual({ allowed: false, reason: "GLOBAL_LIMIT" });
+    expect(rpcMock).toHaveBeenCalledTimes(DEMO_AI_GLOBAL_HOURLY_CAP);
   });
 });

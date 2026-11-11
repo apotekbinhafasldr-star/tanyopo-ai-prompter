@@ -82,7 +82,7 @@ describe("MetaConnector#getAuthorizationUrl", () => {
     metaEnv.loginConfigId = DUMMY_CONFIG_ID;
     const url = new URL(new MetaConnector().getAuthorizationUrl("state-xyz"));
 
-    expect(url.origin + url.pathname).toBe("https://www.facebook.com/v21.0/dialog/oauth");
+    expect(url.origin + url.pathname).toBe("https://www.facebook.com/v25.0/dialog/oauth");
     expect(url.searchParams.get("config_id")).toBe(DUMMY_CONFIG_ID);
     expect(url.searchParams.get("response_type")).toBe("code");
     expect(url.searchParams.get("override_default_response_type")).toBe("true");

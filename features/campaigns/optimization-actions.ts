@@ -60,7 +60,9 @@ export async function generateOptimizationRecommendationsAction(
   const { data: channelCampaigns } = await supabase
     .from("prompter_channel_campaigns")
     .select("id, channel, status, budget_percentage")
-    .eq("master_campaign_id", masterCampaignId);
+    .eq("master_campaign_id", masterCampaignId)
+    // Defense in depth on top of RLS: never read another tenant's channel rows.
+    .eq("tenant_id", session.tenantId);
 
   if (!channelCampaigns || channelCampaigns.length === 0) {
     return { error: "Campaign ini belum punya channel untuk dibandingkan." };
@@ -72,11 +74,13 @@ export async function generateOptimizationRecommendationsAction(
     supabase
       .from("prompter_marketing_metrics")
       .select("channel_campaign_id, spend")
-      .in("channel_campaign_id", channelCampaignIds),
+      .in("channel_campaign_id", channelCampaignIds)
+      .eq("tenant_id", session.tenantId),
     supabase
       .from("prompter_conversions")
       .select("channel_campaign_id, value, event_type")
       .in("channel_campaign_id", channelCampaignIds)
+      .eq("tenant_id", session.tenantId)
       .eq("event_type", "PURCHASE"),
     campaign.product_id
       ? supabase
