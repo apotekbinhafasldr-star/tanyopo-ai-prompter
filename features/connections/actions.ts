@@ -68,7 +68,7 @@ async function fetchOwnMetaPagesOrError(
     .maybeSingle();
 
   if (!credentials) {
-    return { error: "Kredensial koneksi tidak ditemukan. Coba hubungkan ulang akun Meta." };
+    return { error: "Kredensial koneksi tidak ditemukan. Hubungkan ulang akun Meta di halaman Connections; koneksi Anda tidak dihapus." };
   }
 
   let accessToken: string;
