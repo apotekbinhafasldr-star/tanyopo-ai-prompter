@@ -23,10 +23,34 @@
 
 import type { SubscriptionPlan } from "@/types/database";
 
+/**
+ * Closed set of machine-readable reasons a gateway answer was rejected. Safe to persist and to print: no gateway text, no amount,
+ * no identifier. Lets a sandbox run PROVE (e.g. blocker B-CUR: "does DOKU send order.currency on a paid VA?") without logging
+ * response bodies. Adding a code never changes whether a payment activates: every code is still fail-closed.
+ */
+export const PAYMENT_REASON_CODES = [
+  "STATUS_INCOMPLETE",
+  "ORDER_MISMATCH",
+  "CURRENCY_NOT_IDR",
+  "CURRENCY_MISSING",
+  "AMOUNT_MISSING",
+  "REFERENCE_MISSING",
+  "GATEWAY_REJECTED",
+  "GATEWAY_UNREACHABLE",
+  "GATEWAY_TIMEOUT",
+  "RESPONSE_NOT_JSON",
+] as const;
+export type PaymentReasonCode = (typeof PAYMENT_REASON_CODES)[number];
+
+export function isPaymentReasonCode(value: unknown): value is PaymentReasonCode {
+  return typeof value === "string" && (PAYMENT_REASON_CODES as readonly string[]).includes(value);
+}
+
 export class PaymentProviderConfigError extends Error {
   constructor(
     public readonly provider: string,
     message: string,
+    public readonly reasonCode?: PaymentReasonCode,
   ) {
     super(message);
     this.name = "PaymentProviderConfigError";
