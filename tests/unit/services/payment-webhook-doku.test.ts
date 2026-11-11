@@ -397,7 +397,15 @@ describe("DOKU webhook — P1-A / P1-B / P1-C through the full flow", () => {
     expect(db.rpcCalls).toEqual([]);
     expect(db.txns[0].status).toBe("PENDING");
     expect(db.periods).toEqual({});
-    expect(db.events[0]).toMatchObject({ status: "FAILED", error: "GATEWAY_VERIFICATION_FAILED" });
+    expect(db.events[0]).toMatchObject({ status: "FAILED", error: "GATEWAY_VERIFICATION_FAILED:CURRENCY_MISSING" });
+  });
+  it("a currency other than IDR is refused with its own reason code (evidence for B-CUR, still never activates)", async () => {
+    dokuTxn();
+    gateway.answer(TXN_A, { order: { currency: "USD" } });
+    const r = await deliver(notification());
+    expect(r.status).toBe(503);
+    expect(db.rpcCalls).toEqual([]);
+    expect(db.events[0]).toMatchObject({ status: "FAILED", error: "GATEWAY_VERIFICATION_FAILED:CURRENCY_NOT_IDR" });
   });
   it("repeated unclassifiable answers stay queryable (VERIFIED_STATUS_UNKNOWN) and never close or activate", async () => {
     dokuTxn();

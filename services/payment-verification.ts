@@ -2,7 +2,13 @@ import "server-only";
 
 import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { PaymentProvider, VerifiedPayment, VerifiedPaymentStatus } from "@/lib/billing/payment-provider";
+import {
+  isPaymentReasonCode,
+  PaymentProviderConfigError,
+  type PaymentProvider,
+  type VerifiedPayment,
+  type VerifiedPaymentStatus,
+} from "@/lib/billing/payment-provider";
 import { recordPaymentAlarm } from "@/services/payment-alerts";
 import type { Database, Json } from "@/types/database";
 
@@ -73,8 +79,10 @@ export async function verifyAndSettle(
   let verified: VerifiedPayment;
   try {
     verified = await provider.getVerifiedPayment(transactionId);
-  } catch {
-    return { kind: "UNVERIFIABLE", message: "GATEWAY_VERIFICATION_FAILED" };
+  } catch (error) {
+    // Only a closed-set reason code is appended (never gateway text): the delivery log then says WHY a sandbox answer was refused.
+    const code = error instanceof PaymentProviderConfigError && isPaymentReasonCode(error.reasonCode) ? error.reasonCode : null;
+    return { kind: "UNVERIFIABLE", message: code ? `GATEWAY_VERIFICATION_FAILED:${code}` : "GATEWAY_VERIFICATION_FAILED" };
   }
 
   // The gateway must be talking about the very order we asked about.

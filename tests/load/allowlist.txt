@@ -1,0 +1,15 @@
+# Allowlist target uji beban. Dibaca skrip k6 SEBELUM request pertama.
+#
+# Aturan:
+# - Satu pola host per baris. Hanya situs Netlify: harus berakhir ".netlify.app", huruf kecil.
+# - "*" hanya mewakili huruf/angka/tanda hubung dalam SATU label (tidak pernah titik).
+# - Pola allow WAJIB memuat salah satu kata: sandbox, staging, loadtest (menjaga agar situs produksi tidak masuk).
+# - Awalan "!" = LARANGAN (menang atas allow). Isi host produksi di sini sebagai pagar tambahan.
+# - Kosong = SEMUA target ditolak. Isi diubah hanya oleh/atas persetujuan Founder.
+# - Situs yang diizinkan harus TIDAK memakai database produksi (umkmpro-ai). Verifikasi di Netlify -> Environment
+#   variables (cukup periksa bahwa nilainya menunjuk project sandbox; jangan salin nilainya ke mana pun).
+#
+# Contoh (hapus tanda # dan sesuaikan dengan nama situs sandbox yang sudah dibuat Founder):
+# linoe-sandbox.netlify.app
+# deploy-preview-*--linoe-sandbox.netlify.app
+# !nama-situs-produksi.netlify.app
