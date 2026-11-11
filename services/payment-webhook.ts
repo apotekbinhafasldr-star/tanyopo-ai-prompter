@@ -2,6 +2,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getPaymentProvider } from "@/lib/billing/get-payment-provider";
+import { unknownStatusMarker } from "@/lib/billing/webhook-markers";
 import type { WebhookRequestContext } from "@/lib/billing/payment-provider";
 import { canVerifyServerSide, verifyAndSettle } from "@/services/payment-verification";
 import type { Database, Json } from "@/types/database";
@@ -218,6 +219,13 @@ export async function processPaymentWebhook(
           // Claimed PAID, gateway says cancelled/expired/denied: a manipulated or stale notification. Nothing activates.
           await markVerifiedEvent("FAILED", "STATUS_MISMATCH_CLAIMED_PAID");
           return { ok: true, status: 200, message: "Notification does not match the gateway status; ignored." };
+        }
+        if (provider.name === "doku" && outcome.status === "UNKNOWN") {
+          // P0-A: a notification that does not claim PAID but whose gateway answer we cannot classify must not vanish as a
+          // plain IGNORED. Same idempotent row and same 200 (DOKU stops retrying), but with a queryable marker
+          // `UNKNOWN_STATUS:<gateway status words>`. status stays within the existing CHECK (IGNORED); nothing activates.
+          await markVerifiedEvent("IGNORED", unknownStatusMarker(outcome.rawStatus));
+          return { ok: true, status: 200, message: `Recorded ${outcome.status} event, no activation needed.` };
         }
         await markVerifiedEvent("IGNORED", null);
         return { ok: true, status: 200, message: `Recorded ${outcome.status} event, no activation needed.` };

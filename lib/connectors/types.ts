@@ -30,11 +30,19 @@ export class ConnectorApiError extends Error {
   readonly code?: number | string;
   readonly subcode?: number | string;
   readonly type?: string;
+  /** Seconds from a `Retry-After` response header, when the provider sent one. Used only for back-off. */
+  readonly retryAfterSeconds?: number;
 
   constructor(
     public readonly platform: string,
     message: string,
-    details: { status?: number; code?: number | string; subcode?: number | string; type?: string } = {},
+    details: {
+      status?: number;
+      code?: number | string;
+      subcode?: number | string;
+      type?: string;
+      retryAfterSeconds?: number;
+    } = {},
   ) {
     super(message);
     this.name = "ConnectorApiError";
@@ -42,6 +50,7 @@ export class ConnectorApiError extends Error {
     this.code = details.code;
     this.subcode = details.subcode;
     this.type = details.type;
+    this.retryAfterSeconds = details.retryAfterSeconds;
   }
 }
 
@@ -89,6 +98,11 @@ export interface AdSetInput {
    */
   ageMin?: number;
   ageMax?: number;
+  /**
+   * Meta only: ad-set end time as UTC UNIX seconds (the planned run length, so a
+   * daily budget cannot keep spending past it). Omitted = ongoing, as before.
+   */
+  endTimeUnixSeconds?: number;
 }
 
 export interface CreativeInput {

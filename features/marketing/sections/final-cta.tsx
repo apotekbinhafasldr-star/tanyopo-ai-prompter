@@ -36,7 +36,8 @@ export function FinalCta() {
               isolated, temporary demo session (no account, no shared
               credential). See /demo and app/api/demo/start/route.ts. */}
           <Button asChild size="lg" variant="ghost">
-            <Link href="/api/demo/start">Coba Demo</Link>
+            {/* Plain <a>: see ide-ke-hasil.tsx (no prefetch / RSC fetch of the session starter). */}
+            <a href="/api/demo/start">Coba Demo</a>
           </Button>
         </div>
       </Reveal>
