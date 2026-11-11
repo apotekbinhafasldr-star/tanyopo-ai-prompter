@@ -23,14 +23,14 @@ setelah bukti di bagian 7 terisi.
 | Kolom | Isi |
 |---|---|
 | Bisa dikode (Claude, PR terpisah, perlu review) | Gap P0/P1 bagian 9: penanda event UNKNOWN, kartu kesehatan webhook di `/ops/payments`, aksi verifikasi ulang operator, kolom rekonsiliasi, catat refund/chargeback manual, capture channel. Rancangan migrasi (hanya rancangan) |
-| Butuh Founder | Membuat situs Netlify sandbox + isi env (nilai rahasia hanya di dashboard), membuat 2 user uji di Supabase sandbox, mengisi Notification URL di Back Office DOKU sandbox, menjalankan pembayaran lewat simulator, menjalankan query baca-saja dan mengisi tabel bukti, menyetujui PR #114 sebelum dipakai sebagai bukti, keputusan B-CUR, persetujuan tertulis sebelum membahas live |
+| Butuh Founder | Membuat situs Netlify sandbox + isi env (nilai rahasia hanya di dashboard), membuat 2 user uji di Supabase sandbox, mengisi Notification URL di Back Office DOKU sandbox, menjalankan pembayaran lewat simulator, menjalankan query baca-saja dan mengisi tabel bukti, memastikan situs sandbox men-deploy `main` yang sudah memuat PR #114 (merged 11 Nov 2026), keputusan B-CUR, persetujuan tertulis sebelum membahas live |
 | Butuh DOKU (EXTERNAL BLOCKED) | Perbaikan kode pos merchant (belum ada konfirmasi), KYB disetujui, aktivasi channel produksi, konfirmasi apakah Check Status VA/QRIS/e-wallet mengirim `order.currency`, ketersediaan refund/chargeback/settlement di sandbox, daftar dokumen per badan usaha |
 
 ## 2. Prasyarat (centang sebelum mulai)
 
 - [ ] PR #112 dan #113 sudah merged (benar per checkpoint). Runner T15..T17 PASS (run #4, #5).
 - [ ] Migrasi P0-3 hanya terpasang di `linoe-doku-sandbox`; produksi (`umkmpro-ai`) belum disentuh. Jangan diubah oleh runbook ini.
-- [ ] PR #114 (Draft: kode alasan penolakan verifikasi DOKU) dibahas di bagian 7.1. Tanpa #114 terdeploy di situs sandbox, bukti B-CUR tidak sah.
+- [ ] PR #114 (kode alasan penolakan verifikasi DOKU) sudah MERGED ke `main` (11 Nov 2026) dan dibahas di bagian 7.1. Situs sandbox harus men-deploy `main` yang memuatnya; kalau belum, bukti B-CUR tidak sah.
 - [ ] Founder sudah bisa login portal DOKU (akun ada). Yang dibutuhkan dari portal: Client ID dan Secret Key **sandbox**, serta halaman Notification URL.
 - [ ] `PAYMENT_LIVE_ENABLED` kosong di semua situs. Jangan diisi untuk uji apa pun: nilai apa pun mematikan adapter DOKU (`resolveDokuConfig`).
 - [ ] Wadah rahasia: pengelola kata sandi di HP. Tidak ada kata sandi, Secret Key, atau service key yang ditulis ke chat, issue, PR, atau log Actions (repo ini PUBLIK).
@@ -216,11 +216,11 @@ dana dipotong dari settlement berikutnya, dan kekurangan saldo dibayar maks. 7 h
 B-CUR: apakah Check Status DOKU mengirim `order.currency` untuk pembayaran PAID di tiap channel. Kode saat ini fail-closed: PAID tanpa `currency` ditolak (503, tidak aktif).
 Dokumen Check Status Non-SNAP DOKU yang terjangkau memang tidak mencantumkan `order.currency` (konsisten dengan asumsi A6 di `docs/BILLING_DOKU_SANDBOX_ADAPTER.md`).
 
-### 7.1 Hubungan dengan PR #114 (Draft, belum merge)
+### 7.1 Hubungan dengan PR #114 (sudah merged ke main)
 - Tanpa #114, penolakan apa pun tertulis `GATEWAY_VERIFICATION_FAILED` saja: tidak bisa dibedakan antara currency hilang, timeout, order tidak cocok, dll. Bukti B-CUR TIDAK sah.
 - Dengan #114, penanda menjadi `GATEWAY_VERIFICATION_FAILED:<KODE>` dengan kode dari himpunan tertutup: `STATUS_INCOMPLETE`, `ORDER_MISMATCH`, `CURRENCY_NOT_IDR`,
   `CURRENCY_MISSING`, `AMOUNT_MISSING`, `REFERENCE_MISSING`, `GATEWAY_REJECTED`, `GATEWAY_UNREACHABLE`, `GATEWAY_TIMEOUT`, `RESPONSE_NOT_JSON`. Perilaku fail-closed tidak berubah.
-- Syarat sebelum mengumpulkan bukti: #114 direview Founder dan di-merge (atau, khusus sandbox, situs sandbox sengaja men-deploy cabang #114; catat SHA yang dideploy di tabel bukti).
+- Syarat sebelum mengumpulkan bukti: situs sandbox men-deploy `main` yang memuat #114 (merged 11 Nov 2026); catat SHA yang dideploy di tabel bukti.
 - Kode alasan hanya tertulis lewat jalur webhook. Perjalanan kembali `/billing?txn=` tidak menulis baris event, jadi bukti B-CUR harus berasal dari notifikasi.
 
 ### 7.2 Query baca-saja (SQL Editor project sandbox)
@@ -333,7 +333,7 @@ Antrean B4 hanya mengenal `REVIEW`, `REFUND`, `CHARGEBACK`, `REVERSAL` (CHECK pa
 
 ### P1-D. Channel pembayaran tidak tercatat, sehingga bukti B-CUR per channel bergantung catatan manual
 - Rancangan: `getVerifiedPayment` mengembalikan `channelId` opsional (`channel.id`/`service.id` dari Check Status, kata saja), disimpan pada `payload` event lewat `extraPayload` di `markVerifiedEvent` (kolom `payload` sudah jsonb; tanpa migrasi).
-- File: `lib/billing/payment-provider.ts`, `lib/billing/providers/doku-payment-provider.ts`, `services/payment-webhook.ts`, tes. Kerjakan SETELAH #114 merge (menyentuh file yang sama).
+- File: `lib/billing/payment-provider.ts`, `lib/billing/providers/doku-payment-provider.ts`, `services/payment-webhook.ts`, tes. #114 sudah merged; rebase di atas `main` terbaru.
 - Acceptance: nilai dibatasi panjang dan karakter; tidak mengubah keputusan aktivasi; Midtrans tidak berubah; Q-A bisa dikelompokkan per channel.
 
 ### P1-E. Ekspor rekonsiliasi tidak memuat nomor invoice DOKU
@@ -375,7 +375,7 @@ persetujuan tertulis Founder dengan frasa persetujuan eksplisit. Catatan kode: a
 - [ ] KYB DOKU disetujui dan kode pos merchant terkoreksi (bukti: status Back Office atau konfirmasi tertulis DOKU, tanpa data sensitif). EXTERNAL BLOCKED sampai ada konfirmasi.
 - [ ] Channel yang akan dibuka sudah aktif untuk merchant produksi (Service Management) dan Notification URL produksi diisi per channel.
 - [ ] Untuk tiap channel yang akan dibuka: S1-S4 (sesuai channel), S5-S8, S12, S13, S15 berstatus SANDBOX E2E PASS dengan bukti di tabel 7.4.
-- [ ] B-CUR tertutup per channel (kriteria A) atau keputusan B diimplementasi dan teruji; PR #114 merged.
+- [ ] B-CUR tertutup per channel (kriteria A) atau keputusan B diimplementasi dan teruji; PR #114 merged (sudah, 11 Nov 2026).
 - [ ] A8 dan A10 diputuskan dari data nyata (S6), A13 (tipe kartu) terbukti, A9 (domain halaman bayar) terbukti.
 - [ ] P0-A, P0-B1, P0-C selesai dan teruji; P0-B2 diputuskan (dikerjakan atau ditolak dengan alasan tertulis).
 - [ ] Jalur refund dan chargeback DOKU terdokumentasi final (P1-F dan P1-G), dan satu refund uji sandbox atau tiket DOKU nyata dicatat.
