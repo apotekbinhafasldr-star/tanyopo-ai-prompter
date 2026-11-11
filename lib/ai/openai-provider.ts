@@ -69,7 +69,7 @@ export class OpenAIProvider implements AIProvider {
         throw new AIProviderError("Tidak dapat menghubungi OpenAI. Periksa koneksi jaringan.", "CONNECTION");
       }
       if (err instanceof OpenAI.APIError) {
-        throw new AIProviderError(`OpenAI mengembalikan error (${err.status}).`, "API");
+        throw new AIProviderError(`OpenAI mengembalikan error (${err.status}).`, "API", err.status);
       }
       throw err;
     }
