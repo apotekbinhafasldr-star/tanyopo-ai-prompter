@@ -91,7 +91,7 @@ export default async function PaymentQueuePage({ searchParams }: { searchParams:
       <header className="space-y-1">
         <h1 className="text-xl font-semibold">Antrean Pembayaran</h1>
         <p className="text-sm text-muted-foreground">
-          Alarm hanya dicatat dan ditandai. Satu-satunya aksi pembayaran adalah "Verifikasi ulang" DOKU, yang hanya bertanya ke gateway; halaman ini tidak bisa mengaktifkan dari input operator, me-refund, atau mengedit pembayaran dan langganan.
+          Alarm hanya dicatat dan ditandai. Satu-satunya aksi pembayaran adalah Verifikasi ulang DOKU, yang hanya bertanya ke gateway; halaman ini tidak bisa mengaktifkan dari input operator, me-refund, atau mengedit pembayaran dan langganan.
         </p>
       </header>
 

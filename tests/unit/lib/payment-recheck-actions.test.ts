@@ -113,4 +113,3 @@ describe("P0-C static guards", () => {
     expect(page).not.toMatch(/verifyAndSettle|fn_apply_verified_payment|prompter_payment_transactions/);
   });
 });
-});
