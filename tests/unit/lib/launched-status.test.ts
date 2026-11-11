@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 
-import { statusAfterSuccessfulLaunch } from "@/lib/campaigns/launched-status";
+import { canSyncInsights, statusAfterSuccessfulLaunch } from "@/lib/campaigns/launched-status";
 import { channelCampaignStatusDisplay } from "@/lib/campaigns/channel-status-display";
 import { CHANNEL_TO_CONNECTOR } from "@/lib/connectors/channel-map";
 
@@ -31,6 +31,16 @@ describe("status recorded after a successful launch (Phase 1B)", () => {
       const display = channelCampaignStatusDisplay(channel, "PAUSED");
       expect(display.label).toBe("Dijeda");
       expect(display.variant).not.toBe("success");
+    }
+  });
+
+  it("insight sync is allowed for ACTIVE and PAUSED with an external id, nothing else", () => {
+    expect(canSyncInsights("ACTIVE", "ext_1")).toBe(true);
+    expect(canSyncInsights("PAUSED", "ext_1")).toBe(true);
+    expect(canSyncInsights("ACTIVE", null)).toBe(false);
+    expect(canSyncInsights("PAUSED", "")).toBe(false);
+    for (const status of ["DRAFT", "AWAITING_APPROVAL", "SCHEDULED", "COMPLETED", "FAILED"]) {
+      expect(canSyncInsights(status, "ext_1")).toBe(false);
     }
   });
 
