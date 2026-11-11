@@ -12,6 +12,8 @@ import { resolveMetaLaunchBudget } from "@/lib/campaigns/meta-launch-budget";
 import { readSelectionConfirmed } from "@/features/connections/meta-selection-confirmation";
 import type { PlatformConnector } from "@/lib/connectors/types";
 import { checkBudgetGuard } from "@/lib/budget-guard";
+import { checkApprovalThreshold, type ApprovalRecordForThreshold } from "@/lib/campaigns/approval-threshold";
+import { checkTotalBudgetCoverage, resolveMetaFlightEndTime } from "@/lib/campaigns/meta-flight";
 import {
   BUDGET_WRITE_DISABLED_MESSAGE,
   evaluateExternalBudgetWrite,
@@ -395,7 +397,7 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
   const { data: masterCampaign, error: masterError } = await supabase
     .from("prompter_master_campaigns")
     .select(
-      "id, status, name, objective, currency, daily_budget, total_budget, ai_proposal, product_id, target_country, selected_media_id",
+      "id, status, name, objective, currency, daily_budget, total_budget, duration_days, start_date, ai_proposal, product_id, target_country, selected_media_id",
     )
     .eq("id", channelCampaign.master_campaign_id)
     .eq("tenant_id", session.tenantId)
@@ -422,10 +424,12 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
   // approval must be APPROVED. Read-only, before budget checks, the claim and
   // any Meta call. TikTok/X are untouched.
   let approvalContext: unknown = null;
+  // The same latest approval, kept for the approval-threshold check below (META only).
+  let latestApproval: ApprovalRecordForThreshold | null = null;
   if (connectorPlatform === "META") {
     const { data: approvalRows, error: approvalError } = await supabase
       .from("prompter_approvals")
-      .select("status, created_at, context")
+      .select("status, created_at, context, decided_by, decided_at")
       .eq("tenant_id", session.tenantId)
       .eq("approval_type", "CAMPAIGN_LAUNCH")
       .eq("resource_type", "prompter_master_campaigns")
@@ -440,9 +444,16 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
 
     // Same "latest" rule as checkLaunchApproval: the approval that was just verified is the one whose
     // snapshot is compared.
-    approvalContext =
-      [...(approvalRows ?? [])].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))[0]?.context ??
-      null;
+    const latestRow = [...(approvalRows ?? [])].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))[0];
+    approvalContext = latestRow?.context ?? null;
+    latestApproval = latestRow
+      ? {
+          status: latestRow.status,
+          decided_by: latestRow.decided_by ?? null,
+          decided_at: latestRow.decided_at ?? null,
+          context: latestRow.context ?? null,
+        }
+      : null;
   }
 
   // P0 budget launch safety — ALL budget validation completes here, BEFORE
@@ -541,6 +552,52 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
   });
   if (!guard.allowed) {
     return { error: guard.reason ?? "Peluncuran ditolak oleh Budget Guard." };
+  }
+
+  // Approval threshold (Settings > "Minta persetujuan jika biaya melebihi"):
+  // above the threshold the latest approval must be an explicit, recorded Owner
+  // decision that covers the current daily AND total budget. Read-only, before
+  // the claim and any connector call; threshold not set = previous behaviour.
+  // Only META reads its approval rows in this action, so only META is checked.
+  if (connectorPlatform === "META") {
+    const threshold = checkApprovalThreshold({
+      threshold: policy.require_approval_above,
+      dailyBudget: masterCampaign.daily_budget,
+      totalBudget: masterCampaign.total_budget,
+      approval: latestApproval,
+    });
+    if (!threshold.ok) {
+      return { error: threshold.message };
+    }
+  }
+
+  // Total budget: Meta is sent ONE budget (the approved DAILY budget), so the
+  // Owner's total budget is enforced here: daily x duration must not exceed it.
+  // Only evaluated when total_budget AND duration_days are set (see
+  // lib/campaigns/meta-flight.ts). Refusal-only, before the claim.
+  const coverage = checkTotalBudgetCoverage({
+    dailyBudget: masterCampaign.daily_budget,
+    totalBudget: masterCampaign.total_budget,
+    durationDays: masterCampaign.duration_days,
+  });
+  if (!coverage.ok) {
+    return { error: coverage.message };
+  }
+
+  // Planned end of the Meta run: launch time + duration (the ad set is created
+  // without start_time, so start_date is NOT used). Refusal cases (duration out
+  // of range, total_budget without duration) also happen BEFORE the claim.
+  let metaFlightEnd: number | null = null;
+  if (connectorPlatform === "META") {
+    const flight = resolveMetaFlightEndTime({
+      durationDays: masterCampaign.duration_days,
+      totalBudget: masterCampaign.total_budget,
+      now: new Date(),
+    });
+    if (!flight.ok) {
+      return { error: flight.message };
+    }
+    metaFlightEnd = flight.endTime;
   }
 
   // Connection reads, still BEFORE the atomic claim: a failed read writes
@@ -818,6 +875,9 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
       // explicit optimization goal. TikTok/X keep their existing behaviour.
       targetingCountries: metaPlan ? metaPlan.targetingCountries : ["ID"],
       ...(metaPlan ? { optimizationGoal: metaPlan.optimizationGoal } : {}),
+      // META only: the planned end of the run, so the daily budget cannot keep
+      // spending past the campaign's duration. null = none sent (ongoing, as before).
+      ...(metaFlightEnd !== null ? { endTimeUnixSeconds: metaFlightEnd } : {}),
     });
     const adSetId = requireCreatedId(adSet, "createAdSet");
     created.adSetId = adSetId;

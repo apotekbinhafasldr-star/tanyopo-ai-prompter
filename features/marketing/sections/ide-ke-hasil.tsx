@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { ArrowRight, ArrowLeft, Plug2, Brain, Rocket, TrendingUp, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Reveal } from "@/features/marketing/components/reveal";
@@ -187,10 +186,12 @@ export function IdeToResult() {
             size="lg"
             className="mt-2 bg-gradient-to-r from-brand to-brand-2 shadow-[var(--shadow-glow)] hover:opacity-95"
           >
-            <Link href="/api/demo/start">
+            {/* Plain <a>, not <Link>: this is a route handler that mints a session. Link would prefetch it and
+                route client-side with RSC headers; a full document navigation is what the handler expects. */}
+            <a href="/api/demo/start">
               Lihat Demo
               <ArrowRight className="size-4" aria-hidden />
-            </Link>
+            </a>
           </Button>
         </Reveal>
 
