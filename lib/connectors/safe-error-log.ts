@@ -10,7 +10,13 @@
  * `response`.
  */
 
-import { STATE_REJECTION_REASONS, type StatePresence, type StateRejectionReason } from "@/lib/connectors/oauth-state";
+import {
+  PKCE_REJECTION_REASONS,
+  STATE_REJECTION_REASONS,
+  type PkceRejectionReason,
+  type StatePresence,
+  type StateRejectionReason,
+} from "@/lib/connectors/oauth-state";
 
 const NAME_PATTERN = /^[A-Za-z]{1,40}$/;
 const TYPE_PATTERN = /^[A-Za-z_]{1,40}$/;
@@ -80,6 +86,14 @@ export function logOauthStateRejection(platform: string, reason: StateRejectionR
     has_code: present.code === true,
     has_state: present.state === true,
     has_cookie: present.cookie === true,
+  });
+}
+
+/** PKCE verifier rejection: platform + allowlisted reason only. Never the verifier, state or cookie. */
+export function logOauthPkceRejection(platform: string, reason: PkceRejectionReason): void {
+  console.warn("[oauth-callback] pkce verifier rejected", {
+    platform,
+    reason: PKCE_REJECTION_REASONS.includes(reason) ? reason : "unknown",
   });
 }
 

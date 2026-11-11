@@ -75,3 +75,60 @@ export function checkOauthState(input: {
 
   return { ok: true, code };
 }
+
+// ---------------------------------------------------------------------------
+// PKCE (RFC 7636) verifier cookie — used only by connectors that declare
+// `usesPkce` (X). The verifier is a secret: it lives ONLY in this httpOnly
+// cookie, is never put in a URL, a redirect, a log line or an error code, and
+// is deleted on the first callback (so a replayed callback has nothing to use).
+// ---------------------------------------------------------------------------
+
+/** RFC 7636 section 4.1: 43..128 characters of [A-Za-z0-9-._~]. We only mint base64url. */
+const CODE_VERIFIER_PATTERN = /^[A-Za-z0-9_-]{43,128}$/;
+
+/** `x_oauth_state` -> `x_oauth_verifier`. Throws for a name that does not follow the convention. */
+export function pkceVerifierCookieName(stateCookieName: string): string {
+  if (!stateCookieName.endsWith("_state")) {
+    throw new Error("State cookie name must end with _state.");
+  }
+  return `${stateCookieName.slice(0, -"_state".length)}_verifier`;
+}
+
+/**
+ * `state:tenantId:verifier`. Binding the verifier to the state AND the tenant
+ * means a verifier minted for one authorization (or one tenant) can never be
+ * used to finish another. Base64url and UUIDs contain no `:`.
+ */
+export function buildPkceVerifierCookieValue(input: { state: string; tenantId: string; codeVerifier: string }): string {
+  return `${input.state}:${input.tenantId}:${input.codeVerifier}`;
+}
+
+export const PKCE_REJECTION_REASONS = [
+  "no_verifier",
+  "verifier_malformed",
+  "verifier_state_mismatch",
+  "verifier_tenant_mismatch",
+] as const;
+
+export type PkceRejectionReason = (typeof PKCE_REJECTION_REASONS)[number];
+
+export type PkceCheckResult =
+  | { ok: true; codeVerifier: string }
+  | { ok: false; reason: PkceRejectionReason };
+
+export function checkPkceVerifier(input: {
+  state: string;
+  verifierCookie: string | undefined;
+  tenantId: string;
+}): PkceCheckResult {
+  const { state, verifierCookie, tenantId } = input;
+  if (!verifierCookie) return { ok: false, reason: "no_verifier" };
+
+  const parts = verifierCookie.split(":");
+  if (parts.length !== 3) return { ok: false, reason: "verifier_malformed" };
+  const [boundState, boundTenantId, codeVerifier] = parts;
+  if (!CODE_VERIFIER_PATTERN.test(codeVerifier)) return { ok: false, reason: "verifier_malformed" };
+  if (boundState !== state) return { ok: false, reason: "verifier_state_mismatch" };
+  if (boundTenantId !== tenantId) return { ok: false, reason: "verifier_tenant_mismatch" };
+  return { ok: true, codeVerifier };
+}
