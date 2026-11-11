@@ -914,3 +914,75 @@ describe("launchChannelCampaignAction — approval destination snapshot", () => 
     });
   });
 });
+
+describe("launchChannelCampaignAction — approval threshold (require_approval_above)", () => {
+  const policyWith = (requireApprovalAbove: number | null) => ({
+    tenant_id: "t1",
+    daily_limit: null,
+    monthly_limit: null,
+    campaign_limit: null,
+    currency: "IDR",
+    require_approval_above: requireApprovalAbove,
+    autopilot_limit: null,
+    created_at: "",
+    updated_at: "",
+  });
+  const THRESHOLD_MESSAGE = /batas persetujuan/;
+  const decided = { decided_by: "owner-1", decided_at: "2026-10-01T01:00:00Z" };
+
+  beforeEach(() => {
+    requireSessionContextMock.mockClear();
+    connectorMock.createCampaign.mockClear();
+    connectorMock.createAdSet.mockClear();
+  });
+
+  function expectRefused(result: { error: string | null }, pattern: RegExp) {
+    expect(result.error).toMatch(pattern);
+    expect(harness.claimUpdate).not.toHaveBeenCalled();
+    expect(connectorMock.createCampaign).not.toHaveBeenCalled();
+    expect(connectorMock.createAdSet).not.toHaveBeenCalled();
+  }
+
+  it("above the threshold: an approval without a recorded Owner decision is refused before any side effect", async () => {
+    harness = buildHarness({ policy: policyWith(50_000) });
+    fx.approvals = [{ status: "APPROVED", created_at: "2026-10-01T00:00:00Z", context: { daily_budget: 100_000, total_budget: null } }];
+    expectRefused(await launchChannelCampaignAction("cc1"), THRESHOLD_MESSAGE);
+  });
+
+  it("above the threshold: an approved budget below the current budget is refused", async () => {
+    harness = buildHarness({ policy: policyWith(50_000) });
+    fx.approvals = [
+      { status: "APPROVED", created_at: "2026-10-01T00:00:00Z", ...decided, context: { daily_budget: 60_000, total_budget: null } },
+    ];
+    expectRefused(await launchChannelCampaignAction("cc1"), /melebihi nilai yang disetujui/);
+  });
+
+  it("above the threshold: an approval that does not record the total budget cannot cover a campaign that has one", async () => {
+    harness = buildHarness({ policy: policyWith(50_000), master: { daily_budget: 100_000, total_budget: 900_000 } });
+    fx.approvals = [{ status: "APPROVED", created_at: "2026-10-01T00:00:00Z", ...decided, context: { daily_budget: 100_000 } }];
+    expectRefused(await launchChannelCampaignAction("cc1"), THRESHOLD_MESSAGE);
+  });
+
+  it("above the threshold: an explicit Owner decision covering daily and total passes this check", async () => {
+    harness = buildHarness({ policy: policyWith(50_000), master: { daily_budget: 100_000, total_budget: 900_000 } });
+    fx.approvals = [
+      { status: "APPROVED", created_at: "2026-10-01T00:00:00Z", ...decided, context: { daily_budget: 100_000, total_budget: 900_000 } },
+    ];
+    const result = await launchChannelCampaignAction("cc1");
+    expect(result.error ?? "").not.toMatch(THRESHOLD_MESSAGE);
+  });
+
+  it("threshold not set: a legacy approval without decided_by behaves as before", async () => {
+    harness = buildHarness({ policy: policyWith(null) });
+    fx.approvals = [{ status: "APPROVED", created_at: "2026-10-01T00:00:00Z" }];
+    const result = await launchChannelCampaignAction("cc1");
+    expect(result.error ?? "").not.toMatch(THRESHOLD_MESSAGE);
+  });
+
+  it("budget at or below the threshold: no extra requirement", async () => {
+    harness = buildHarness({ policy: policyWith(100_000) });
+    fx.approvals = [{ status: "APPROVED", created_at: "2026-10-01T00:00:00Z" }];
+    const result = await launchChannelCampaignAction("cc1");
+    expect(result.error ?? "").not.toMatch(THRESHOLD_MESSAGE);
+  });
+});
