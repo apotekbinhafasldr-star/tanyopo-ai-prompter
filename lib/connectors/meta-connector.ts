@@ -12,7 +12,9 @@ import {
   META_VERIFIED_BILLING_EVENTS,
   resolveMetaAgeTargeting,
   resolveMetaCtaType,
+  resolveMetaEndTime,
 } from "@/lib/connectors/meta-connector-contract";
+import { META_READ_MAX_RETRIES, decideMetaRetry } from "@/lib/connectors/meta-rate-limit";
 import {
   ConnectorApiError,
   ConnectorConfigError,
@@ -38,12 +40,21 @@ import {
  * IMPORTANT: this code has not been exercised against a live Meta ad
  * account — this environment has neither META_APP_ID/META_APP_SECRET nor
  * network access to graph.facebook.com. The request/response shapes below
- * follow the documented Marketing API v21.0 contracts as closely as
- * possible, but treat this as a first implementation to verify against a
- * real ad account before relying on it, not as battle-tested code.
+ * follow the documented Marketing API contracts as closely as possible, but
+ * treat this as a first implementation to verify against a real ad account
+ * before relying on it, not as battle-tested code.
+ *
+ * API version: v25.0. Meta's version table (developers.facebook.com/docs/
+ * graph-api/changelog/versions, accessed 2026-11-11) lists v25.0 as the latest
+ * Marketing API version, and lists Marketing API v21.0 (this file's previous
+ * pin) as expired on 2025-09-09, v22.0 on 2026-02-19, v23.0 on 2026-06-09 and
+ * v24.0 on 2026-10-06. Meta's versioning page says a call to an unavailable
+ * version "may fail or be upgraded to the next available version" and that
+ * affected endpoints, such as POST /{adset-id}, fail instead. Re-check the
+ * table before each upgrade; this is a constant, not a per-tenant setting.
  */
 
-const GRAPH_API_VERSION = "v21.0";
+const GRAPH_API_VERSION = "v25.0";
 const GRAPH_BASE_URL = `https://graph.facebook.com/${GRAPH_API_VERSION}`;
 const DIALOG_BASE_URL = `https://www.facebook.com/${GRAPH_API_VERSION}/dialog/oauth`;
 
@@ -83,7 +94,31 @@ interface GraphFetchOptions {
   timeoutMs?: number;
 }
 
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Every Graph call goes through here. NON-create calls (read, pause, budget,
+ * OAuth) are retried with exponential back-off, at most META_READ_MAX_RETRIES
+ * times, and only when Meta answered with a documented throttling error (see
+ * lib/connectors/meta-rate-limit.ts). The four CREATE calls are never retried:
+ * Meta offers no idempotency key for them and launch reconciliation relies on
+ * "no automatic retry" (a throttled create is reported as not created and the
+ * Owner decides).
+ */
 async function graphFetch<T>(path: string, init?: RequestInit, options: GraphFetchOptions = {}): Promise<T> {
+  const maxRetries = options.create ? 0 : META_READ_MAX_RETRIES;
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await graphFetchOnce<T>(path, init, options);
+    } catch (error) {
+      const decision = decideMetaRetry(error, attempt, maxRetries);
+      if (!decision.retry) throw error;
+      await sleep(decision.delayMs);
+    }
+  }
+}
+
+async function graphFetchOnce<T>(path: string, init?: RequestInit, options: GraphFetchOptions = {}): Promise<T> {
   if (!options.create && options.timeoutMs === undefined) {
     // Previous behaviour, unchanged.
     const response = await fetch(`${GRAPH_BASE_URL}${path}`, init);
@@ -127,10 +162,22 @@ function interpretGraphResponse<T>(response: Response, body: T & GraphErrorBody)
       code: body.error?.code,
       subcode: body.error?.error_subcode,
       type: body.error?.type,
+      retryAfterSeconds: readRetryAfterSeconds(response),
     });
   }
 
   return body;
+}
+
+/** `Retry-After` in whole seconds, or undefined (absent, an HTTP date, or a response without readable headers). */
+function readRetryAfterSeconds(response: Response): number | undefined {
+  try {
+    const raw = response.headers.get("retry-after");
+    if (typeof raw === "string" && /^\d{1,5}$/.test(raw.trim())) return Number(raw.trim());
+  } catch {
+    // Not every response object exposes headers (tests, proxies): back-off then uses its own schedule.
+  }
+  return undefined;
 }
 
 /** F-2a: timeout for the read-only readiness lookups. */
@@ -509,6 +556,16 @@ export class MetaConnector implements PlatformConnector {
         "Rentang umur targeting tidak valid (harus bilangan bulat 18-65, minimum tidak melebihi maksimum). Ad set tidak dibuat.",
       );
     }
+    // Optional planned end (UTC UNIX seconds). Absent -> nothing added (ongoing, as before).
+    // Present but invalid -> refuse before any request. Only ONE budget is ever sent
+    // (daily_budget): Meta's docs do not say daily and lifetime may be combined.
+    const end = resolveMetaEndTime(input.endTimeUnixSeconds);
+    if (!end.ok) {
+      throw new ConnectorConfigError(
+        this.platform,
+        "Waktu berakhir ad set tidak valid (harus UNIX timestamp positif). Ad set tidak dibuat.",
+      );
+    }
     return graphFetch(`/${adAccountId}/adsets`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -516,6 +573,7 @@ export class MetaConnector implements PlatformConnector {
         name: input.name,
         campaign_id: input.campaignId,
         daily_budget: input.dailyBudgetMinorUnits,
+        ...(end.value !== null ? { end_time: end.value } : {}),
         billing_event: billingEvent,
         optimization_goal: input.optimizationGoal,
         bid_strategy: "LOWEST_COST_WITHOUT_CAP",

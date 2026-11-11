@@ -25,6 +25,7 @@ import {
 } from "@/services/channel-campaigns";
 import { getTenantChannelPerformance } from "@/services/channel-performance";
 import { getOrCreateBudgetPolicy, getMonthToDateSpend, checkBudgetGuard } from "@/services/budget-guard";
+import { evaluateApprovalThreshold } from "@/lib/campaigns/approval-threshold";
 import { parseLocalDateTimeInZone } from "@/lib/scheduling/recommend-time";
 import type { ApprovalStatus, Json } from "@/types/database";
 import { campaignHasManualAdMetrics } from "@/features/campaigns/manual-metrics-actions";
@@ -515,6 +516,16 @@ export async function submitForApprovalAction(campaignId: string): Promise<Campa
     context: {
       daily_budget: campaign.daily_budget,
       total_budget: campaign.total_budget,
+      // Snapshot of the Owner's approval threshold at submission time (audit only;
+      // the launch re-reads the live policy). See lib/campaigns/approval-threshold.ts.
+      approval_threshold: {
+        require_approval_above: policy.require_approval_above,
+        above_threshold: evaluateApprovalThreshold({
+          threshold: policy.require_approval_above,
+          dailyBudget: campaign.daily_budget,
+          totalBudget: campaign.total_budget,
+        }).required,
+      },
       destination_snapshot: destinationSnapshot,
     } as unknown as Json,
   });
