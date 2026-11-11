@@ -8,7 +8,12 @@ import { getConnector } from "@/lib/connectors/get-connector";
 import { encryptToken, isTokenCipherConfigured } from "@/lib/crypto/token-cipher";
 import { ConnectorConfigError } from "@/lib/connectors/types";
 import { logOauthFailure, logOauthPkceRejection, logOauthStateRejection } from "@/lib/connectors/safe-error-log";
-import { checkOauthState, checkPkceVerifier, pkceVerifierCookieName } from "@/lib/connectors/oauth-state";
+import {
+  checkOauthState,
+  checkPkceVerifier,
+  pkceVerifierCookieName,
+  pkceVerifierCookiePath,
+} from "@/lib/connectors/oauth-state";
 import { isPkceConnector } from "@/lib/connectors/pkce-connector";
 import type { ConnectorPlatform, Database, StoredConnectionStatus } from "@/types/database";
 
@@ -65,7 +70,7 @@ export async function handleConnectorOauthCallback(
   if (pkceConnector) {
     const verifierCookieName = pkceVerifierCookieName(stateCookieName);
     verifierCookie = cookieStore.get(verifierCookieName)?.value;
-    cookieStore.delete(verifierCookieName);
+    cookieStore.delete({ name: verifierCookieName, path: pkceVerifierCookiePath(platform) });
   }
 
   if (oauthError) {
@@ -91,7 +96,12 @@ export async function handleConnectorOauthCallback(
     if (!pkceConnector.isConfigured()) {
       return redirectWith(request, { error: "not_configured" });
     }
-    const pkceCheck = checkPkceVerifier({ state: state as string, verifierCookie, tenantId: session.tenantId });
+    const pkceCheck = checkPkceVerifier({
+      state: state as string,
+      verifierCookie,
+      tenantId: session.tenantId,
+      userId: session.userId,
+    });
     if (!pkceCheck.ok) {
       logOauthPkceRejection(platform, pkceCheck.reason);
       return redirectWith(request, { error: "invalid_state" });

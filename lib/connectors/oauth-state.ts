@@ -1,3 +1,5 @@
+import { timingSafeEqual } from "node:crypto";
+
 /**
  * Pure helpers for the OAuth `state` cookie shared by the Meta/TikTok/X
  * authorize + callback handlers. No Next.js / server-only imports so they are
@@ -95,12 +97,27 @@ export function pkceVerifierCookieName(stateCookieName: string): string {
 }
 
 /**
- * `state:tenantId:verifier`. Binding the verifier to the state AND the tenant
- * means a verifier minted for one authorization (or one tenant) can never be
- * used to finish another. Base64url and UUIDs contain no `:`.
+ * Path the verifier cookie is limited to: ONLY the platform's callback route
+ * (`/api/connections/x/callback`). The browser never sends it to any other
+ * route of the app. A wrong path fails closed (cookie not sent -> no_verifier).
  */
-export function buildPkceVerifierCookieValue(input: { state: string; tenantId: string; codeVerifier: string }): string {
-  return `${input.state}:${input.tenantId}:${input.codeVerifier}`;
+export function pkceVerifierCookiePath(platform: string): string {
+  return `/api/connections/${platform.toLowerCase()}/callback`;
+}
+
+/**
+ * `state:tenantId:userId:verifier`. Binding the verifier to the state, the
+ * tenant AND the user means a verifier minted for one authorization (or one
+ * tenant, or one user) can never be used to finish another. Base64url and
+ * UUIDs contain no `:`; anything else makes the cookie malformed (fail-closed).
+ */
+export function buildPkceVerifierCookieValue(input: {
+  state: string;
+  tenantId: string;
+  userId: string;
+  codeVerifier: string;
+}): string {
+  return `${input.state}:${input.tenantId}:${input.userId}:${input.codeVerifier}`;
 }
 
 export const PKCE_REJECTION_REASONS = [
@@ -108,6 +125,7 @@ export const PKCE_REJECTION_REASONS = [
   "verifier_malformed",
   "verifier_state_mismatch",
   "verifier_tenant_mismatch",
+  "verifier_user_mismatch",
 ] as const;
 
 export type PkceRejectionReason = (typeof PKCE_REJECTION_REASONS)[number];
@@ -116,19 +134,28 @@ export type PkceCheckResult =
   | { ok: true; codeVerifier: string }
   | { ok: false; reason: PkceRejectionReason };
 
+/** Constant-time string equality (length is not secret here). */
+function safeEqual(a: string, b: string): boolean {
+  const left = Buffer.from(a);
+  const right = Buffer.from(b);
+  return left.length === right.length && timingSafeEqual(left, right);
+}
+
 export function checkPkceVerifier(input: {
   state: string;
   verifierCookie: string | undefined;
   tenantId: string;
+  userId: string;
 }): PkceCheckResult {
-  const { state, verifierCookie, tenantId } = input;
+  const { state, verifierCookie, tenantId, userId } = input;
   if (!verifierCookie) return { ok: false, reason: "no_verifier" };
 
   const parts = verifierCookie.split(":");
-  if (parts.length !== 3) return { ok: false, reason: "verifier_malformed" };
-  const [boundState, boundTenantId, codeVerifier] = parts;
+  if (parts.length !== 4) return { ok: false, reason: "verifier_malformed" };
+  const [boundState, boundTenantId, boundUserId, codeVerifier] = parts;
   if (!CODE_VERIFIER_PATTERN.test(codeVerifier)) return { ok: false, reason: "verifier_malformed" };
-  if (boundState !== state) return { ok: false, reason: "verifier_state_mismatch" };
-  if (boundTenantId !== tenantId) return { ok: false, reason: "verifier_tenant_mismatch" };
+  if (!safeEqual(boundState, state)) return { ok: false, reason: "verifier_state_mismatch" };
+  if (!safeEqual(boundTenantId, tenantId)) return { ok: false, reason: "verifier_tenant_mismatch" };
+  if (!safeEqual(boundUserId, userId)) return { ok: false, reason: "verifier_user_mismatch" };
   return { ok: true, codeVerifier };
 }

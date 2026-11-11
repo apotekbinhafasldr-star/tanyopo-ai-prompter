@@ -10,6 +10,7 @@ import { isTokenCipherConfigured } from "@/lib/crypto/token-cipher";
 import {
   buildPkceVerifierCookieValue,
   pkceVerifierCookieName,
+  pkceVerifierCookiePath,
   resolveStateCookieMaxAge,
 } from "@/lib/connectors/oauth-state";
 import { isPkceConnector } from "@/lib/connectors/pkce-connector";
@@ -78,11 +79,17 @@ export async function handleConnectorOauthAuthorize(
     };
     cookieStore.set(stateCookieName, `${state}:${session.tenantId}`, cookieOptions);
     if (pkce) {
-      // Same lifetime and attributes as the state cookie; bound to state + tenant.
+      // Same lifetime and attributes as the state cookie, but limited to the
+      // callback route; bound to state + tenant + user.
       cookieStore.set(
         pkceVerifierCookieName(stateCookieName),
-        buildPkceVerifierCookieValue({ state, tenantId: session.tenantId, codeVerifier: pkce.codeVerifier }),
-        cookieOptions,
+        buildPkceVerifierCookieValue({
+          state,
+          tenantId: session.tenantId,
+          userId: session.userId,
+          codeVerifier: pkce.codeVerifier,
+        }),
+        { ...cookieOptions, path: pkceVerifierCookiePath(platform) },
       );
     }
 
