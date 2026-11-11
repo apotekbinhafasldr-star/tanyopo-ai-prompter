@@ -38,6 +38,7 @@ import {
   channelCampaignStatusDisplay,
   requiresManualCheck,
 } from "@/lib/campaigns/channel-status-display";
+import { canSyncInsights } from "@/lib/campaigns/launched-status";
 import { SyncInsightsButton } from "@/features/campaigns/sync-insights-button";
 import { ManualMetricsSection } from "@/features/campaigns/manual-metrics-section";
 import { GenerateOptimizationButton } from "@/features/campaigns/generate-optimization-button";
@@ -497,7 +498,7 @@ export default async function CampaignDetailPage({
                         ) : reason ? (
                           <p className="max-w-xs text-right text-xs text-muted-foreground">{reason}</p>
                         ) : null
-                      ) : cc.status === "ACTIVE" ? (
+                      ) : canSyncInsights(cc.status, cc.external_campaign_id) ? (
                         <SyncInsightsButton channelCampaignId={cc.id} />
                       ) : null}
                     </div>
