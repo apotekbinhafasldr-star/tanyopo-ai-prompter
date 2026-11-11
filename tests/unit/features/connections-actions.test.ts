@@ -34,15 +34,15 @@ function makeSelectChain(result: any) {
   return { select, eq1, eq2, maybeSingle };
 }
 
-// prompter_oauth_credentials is only ever filtered by one column
-// (connected_account_id) before .maybeSingle() — a distinct shape from
-// the two-.eq() chain above.
+// prompter_oauth_credentials is filtered by connected_account_id AND
+// tenant_id (defense-in-depth) before .maybeSingle().
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function makeSingleEqSelectChain(result: any) {
   const maybeSingle = vi.fn(async () => result);
-  const eq1 = vi.fn(() => ({ maybeSingle }));
+  const eq2 = vi.fn(() => ({ maybeSingle }));
+  const eq1 = vi.fn(() => ({ eq: eq2, maybeSingle }));
   const select = vi.fn(() => ({ eq: eq1 }));
-  return { select, eq1, maybeSingle };
+  return { select, eq1, eq2, maybeSingle };
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -154,6 +154,7 @@ describe("listMetaPagesAction / selectMetaPageAction — Track B Meta Page Picke
       await listMetaPagesAction();
 
       expect(harness.credentialsSelect.eq1).toHaveBeenCalledWith("connected_account_id", "acct_1");
+      expect(harness.credentialsSelect.eq2).toHaveBeenCalledWith("tenant_id", "t1");
     });
 
     it("scopes the persisted update to the caller's own tenant and platform META, never a client-supplied tenant", async () => {

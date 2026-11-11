@@ -64,6 +64,7 @@ async function fetchOwnMetaPagesOrError(
     .from("prompter_oauth_credentials")
     .select("encrypted_access_token")
     .eq("connected_account_id", connectedAccount.id)
+    .eq("tenant_id", tenantId)
     .maybeSingle();
 
   if (!credentials) {
@@ -198,6 +199,7 @@ export async function disconnectAction(platform: ConnectorPlatform): Promise<Con
       .from("prompter_oauth_credentials")
       .select("encrypted_access_token")
       .eq("connected_account_id", account.id)
+      .eq("tenant_id", session.tenantId)
       .maybeSingle();
 
     if (credentials) {
@@ -212,7 +214,11 @@ export async function disconnectAction(platform: ConnectorPlatform): Promise<Con
   }
 
   // prompter_oauth_credentials cascades on delete via its FK.
-  await supabase.from("prompter_connected_accounts").delete().eq("id", account.id);
+  await supabase
+    .from("prompter_connected_accounts")
+    .delete()
+    .eq("id", account.id)
+    .eq("tenant_id", session.tenantId);
 
   await supabase.from("prompter_audit_logs").insert({
     tenant_id: session.tenantId,
