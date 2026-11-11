@@ -42,7 +42,7 @@ export function LoginForm({ next, resetSuccess }: { next?: string; resetSuccess?
           <div className="flex flex-col gap-1.5">
             <div className="flex items-center justify-between">
               <Label htmlFor="password">Kata Sandi</Label>
-              <Link href="/forgot-password" className="text-xs font-medium text-brand hover:underline">
+              <Link href="/forgot-password" className="inline-flex min-h-11 items-center text-xs font-medium text-brand hover:underline">
                 Lupa kata sandi?
               </Link>
             </div>
