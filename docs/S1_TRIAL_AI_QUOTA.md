@@ -1,6 +1,10 @@
 # S1 — Trial 14 hari & kuota AI (LINOE-only, Draft)
 
-Status: **Draft PR. NOT applied to any database.** Replaces the S1 slice of PR #31 (which also carries S3 trial-abuse and S4 shared-table
+Status berkas ini: ditulis saat S1 masih Draft PR (2026-10-19 s/d 2026-10-23). Kalimat "NOT applied to any database" menggambarkan keadaan
+saat itu; **status terapan saat ini: klaim dokumen, UNKNOWN, butuh bukti baca-saja bertanggal.** Klaim lain (`docs/AI_JOBS_QUOTA_GUARD.md`: "S1 sudah di
+production", pembacaan katalog 2026-11-07) juga hanya klaim dokumen. Apa yang harus dibuktikan: [docs/S1_STATUS_EVIDENCE.md](S1_STATUS_EVIDENCE.md).
+
+Draft PR. Replaces the S1 slice of PR #31 (which also carries S3 trial-abuse and S4 shared-table
 changes; those stay out of this PR). Applying needs explicit Founder approval.
 
 ## Problem (read-only production catalog, 2026-10-19/21)
