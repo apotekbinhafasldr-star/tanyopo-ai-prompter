@@ -129,8 +129,11 @@ Terverifikasi: host sandbox, path `POST /checkout/v1/payment` dan `GET /orders/v
 7. **B-CUR** — apakah Check Status VA/e-wallet mengembalikan `order.currency`. Jika tidak, pembayaran channel itu tetap 503 (aman) sampai ada bukti dan keputusan terpisah.
 8. **B-DB** (BLOCKED, butuh migrasi + persetujuan): atestasi sisi-database bahwa DB adalah lingkungan uji (mis. baris penanda yang
    diperiksa server). Guard kode di atas membuktikan project yang dituju, bukan isinya.
-9. **B-ALERT** (BLOCKED, butuh migrasi + persetujuan): `fn_sync_payment_alerts` masih memfilter `source_system='midtrans'` dan tidak ada jenis
-   alarm untuk UNKNOWN/unverifiable berulang. Alarm refund DOKU tercatat lewat jalur verifikasi langsung; jaring pengaman sinkronisasi belum mencakup DOKU.
+9. **B-ALERT** (SEBAGIAN: migrasi P0-3 disiapkan, BELUM diterapkan ke database mana pun): migrasi
+   `20261111130000_prompter_p0_3_doku_alert_coverage.sql` memperluas `fn_sync_payment_alerts` ke `source_system in ('midtrans','doku')`, sehingga event
+   `ALARM_REFUND/CHARGEBACK/REVERSAL` dari DOKU ikut menjadi alert (idempoten, provider transaksi harus sama dengan provider event). Masih terbuka:
+   tidak ada jenis alarm untuk UNKNOWN/unverifiable berulang (`VERIFIED_STATUS_UNKNOWN` hanya tercatat di `prompter_webhook_events`). Menerapkan P0-3 ke
+   database apa pun butuh persetujuan terpisah (paket produksi tidak dibuat di PR ini).
 10. Rate limit per-IP/endpoint untuk webhook publik butuh infrastruktur (edge/WAF) — belum ada; short-circuit replay hanya menutup
     pengiriman ulang yang sudah final.
 

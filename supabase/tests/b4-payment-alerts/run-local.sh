@@ -19,6 +19,8 @@ M1b="$MIG/20261030100100_prompter_b1_trial_remainder_carryover.sql"
 M2="$MIG/20261030140000_prompter_b2_double_payment_safety.sql"
 M4="$MIG/20261031100000_prompter_b4_payment_alerts.sql"
 D4="$root/supabase/rollback/20261031100000_prompter_b4_payment_alerts.down.sql"
+M5="$MIG/20261111130000_prompter_p0_3_doku_alert_coverage.sql"
+D5="$root/supabase/rollback/20261111130000_prompter_p0_3_doku_alert_coverage.down.sql"
 export PGOPTIONS="-c client_min_messages=warning"
 PS() { psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q "$@"; }
 P() { PS -v ON_ERROR_STOP=1 "$@"; }
@@ -71,6 +73,7 @@ mk() { P -d postgres -c "drop database if exists $1" -c "create database $1" >/d
   && P -1 -d "$1" -f "$M1" >/dev/null && P -1 -d "$1" -f "$M1b" >/dev/null && P -1 -d "$1" -f "$M2" >/dev/null \
   && P -d "$1" -f "$W/real_webhook_audit.sql" >/dev/null && P -d "$1" -f "$W/default_privs.sql" >/dev/null; }
 m4() { P -1 -d "$1" -f "$M4" >/dev/null; }
+m5() { P -1 -d "$1" -f "$M5" >/dev/null; }
 
 # 1) apply on top of B2, existing rows untouched, idempotent
 mk b4_main || bad "mk b4_main"
@@ -185,5 +188,29 @@ if P -d b4_rb -f "$D4" >/dev/null 2>&1; then pass "rollback applies when the que
 m4 b4_rb && [ "$(PA -d b4_rb -c "select count(*) from pg_class where relnamespace='public'::regnamespace and relname in ('prompter_payment_alerts','prompter_payment_alert_actions','prompter_payment_alert_evidence','prompter_payment_alert_sync_state') and relkind='r'")" = 4 ] && [ "$(PA -d b4_rb -c "select count(*) from pg_proc where pronamespace='public'::regnamespace and proname in ('fn_sync_payment_alerts','fn_record_payment_alarm','fn_ack_payment_alert','fn_resolve_payment_alert','fn_is_payment_operator','fn_note_payment_alert_sync_failure')")" = 6 ] \
   && pass "migration re-applies cleanly after a rollback" || bad "re-migrate after rollback"
 if (cd "$here" && PGOPTIONS="-c client_min_messages=notice" P -d b4_rb -f scenarios.sql >"$W/o2.txt" 2>&1); then pass "full scenarios pass after rollback + re-migrate: $(grep -c 'PASS:' "$W/o2.txt") checks"; else bad "scenarios after rollback + re-migrate"; grep -E "FAIL|ERROR" "$W/o2.txt" | head -5; fi
-[ "$(grep -cE '^[[:space:]]*\\' "$D4")" = 0 ] && [ "$(grep -cE '^[[:space:]]*\\' "$M4")" = 0 ] && pass "migration and rollback are plain SQL" || bad "meta-commands in SQL files"
+# 6) P0-3: DOKU webhook alarms reach the queue (fn_sync_payment_alerts v2). The new migration is an additive function replacement.
+mk b4_p03_before && m4 b4_p03_before || bad "mk b4_p03_before"
+if (cd "$here" && P -d b4_p03_before -f scenarios_doku.sql >"$W/o_before.txt" 2>&1); then bad "P0-3 scenarios PASSED on B4.1 alone: they do not detect the DOKU gap"; else grep -q "FAIL:" "$W/o_before.txt" && pass "P0-3 scenarios FAIL on B4.1 alone (the DOKU gap is real and detected)" || bad "P0-3 scenarios failed for another reason on B4.1 alone: $(grep -E 'ERROR' "$W/o_before.txt" | head -2)"; fi
+mk b4_p03 && m4 b4_p03 || bad "mk b4_p03"
+LP0=$(PA -d b4_p03 -c "$LEG"); SP0=$(PA -d b4_p03 -c "$SUBS")
+m5 b4_p03 && pass "P0-3 migration applies in one transaction on top of B4.1" || bad "P0-3 migration failed"
+m5 b4_p03 && pass "P0-3 migration re-applies cleanly (idempotent)" || bad "P0-3 re-apply failed"
+[ "$LP0" = "$(PA -d b4_p03 -c "$LEG")" ] && [ "$SP0" = "$(PA -d b4_p03 -c "$SUBS")" ] && [ "$(PA -d b4_p03 -c "select count(*) from prompter_payment_alerts")" = 0 ] && pass "P0-3 migration changes no transaction, subscription or alert row" || bad "P0-3 migration modified rows"
+FDEF="select pg_get_functiondef('public.fn_sync_payment_alerts(interval)'::regprocedure)"
+OLDDEF=$(PA -d b4_p03_before -c "$FDEF" | md5sum | cut -d' ' -f1)
+NEWDEF_AS_OLD=$(PA -d b4_p03 -c "$FDEF" | sed "s/in ('midtrans', 'doku')/= 'midtrans'/" | md5sum | cut -d' ' -f1)
+[ "$OLDDEF" != d41d8cd98f00b204e9800998ecf8427e ] && [ "$OLDDEF" = "$NEWDEF_AS_OLD" ] && [ "$(PA -d b4_p03 -c "$FDEF" | md5sum | cut -d' ' -f1)" != "$OLDDEF" ] \
+  && pass "P0-3 function differs from B4.1 ONLY in the provider predicate" || bad "P0-3 function differs from B4.1 in more than the provider predicate"
+if (cd "$here" && PGOPTIONS="-c client_min_messages=notice" P -d b4_p03 -f scenarios_doku.sql >"$W/o_p03.txt" 2>&1); then pass "P0-3 DOKU scenarios: $(grep -c 'PASS:' "$W/o_p03.txt") checks"; else bad "P0-3 DOKU scenarios"; grep -E "FAIL|ERROR" "$W/o_p03.txt" | head -8; fi
+mk b4_p03_reg && m4 b4_p03_reg && m5 b4_p03_reg || bad "mk b4_p03_reg"
+if (cd "$here" && PGOPTIONS="-c client_min_messages=notice" P -d b4_p03_reg -f scenarios.sql >"$W/o_reg.txt" 2>&1); then pass "all existing B4.1 (Midtrans) scenarios still pass with the P0-3 function: $(grep -c 'PASS:' "$W/o_reg.txt") checks"; else bad "B4.1 regression on top of P0-3"; grep -E "FAIL|ERROR" "$W/o_reg.txt" | head -8; fi
+if P -d b4_p03 -f "$D5" >/dev/null 2>&1; then pass "P0-3 rollback applies"; else bad "P0-3 rollback failed"; fi
+[ "$(PA -d b4_p03 -c "$FDEF" | md5sum | cut -d' ' -f1)" = "$OLDDEF" ] && [ "$OLDDEF" != d41d8cd98f00b204e9800998ecf8427e ] && pass "P0-3 rollback restores the exact B4.1 function body" || bad "P0-3 rollback did not restore the B4.1 body"
+[ "$(PA -d b4_p03 -c "select count(*) from pg_proc where pronamespace='public'::regnamespace and proname='fn_sync_payment_alerts'")" = 1 ] && [ "$(PA -d b4_p03 -c "select has_function_privilege('service_role','public.fn_sync_payment_alerts(interval)','execute') and not has_function_privilege('authenticated','public.fn_sync_payment_alerts(interval)','execute') and not has_function_privilege('anon','public.fn_sync_payment_alerts(interval)','execute')")" = t ] \
+  && pass "after rollback: one function, grants unchanged" || bad "grants / overloads after P0-3 rollback"
+m5 b4_p03 && pass "P0-3 migration re-applies after its rollback" || bad "P0-3 re-apply after rollback"
+mk b4_p03_rb && m4 b4_p03_rb && m5 b4_p03_rb || bad "mk b4_p03_rb"
+if P -d b4_p03_rb -f "$D4" >/dev/null 2>&1; then pass "B4.1 rollback still applies on an empty queue after P0-3"; else bad "B4.1 rollback broken by P0-3"; fi
+
+[ "$(grep -cE '^[[:space:]]*\\' "$D4")" = 0 ] && [ "$(grep -cE '^[[:space:]]*\\' "$M4")" = 0 ] && [ "$(cat "$M5" "$D5" | grep -cE '^[[:space:]]*\\')" = 0 ] && pass "migration and rollback are plain SQL" || bad "meta-commands in SQL files"
 [ "$fail" = 0 ] && echo "ALL PASSED" || { echo "SOME FAILED"; exit 1; }
