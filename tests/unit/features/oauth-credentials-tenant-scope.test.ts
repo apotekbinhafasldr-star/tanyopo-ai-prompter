@@ -204,3 +204,94 @@ describe("same-tenant behavior is unchanged", () => {
     expect(connector.pauseCampaign).toHaveBeenCalledTimes(1);
   });
 });
+
+/**
+ * Legacy / inconsistent data: the tenant's OWN, CONNECTED account exists, but
+ * its credential row carries another tenant_id (or none). The tenant filter
+ * then finds no credential. The required behavior is fail-safe: a "reconnect"
+ * message, no decrypt, no platform call, and NO change to the connection or
+ * the credential rows (a legitimate customer is never silently disconnected).
+ */
+describe("legacy credential row (tenant_id differs or is NULL): fail-safe, no data loss", () => {
+  const OWN = { id: "acctB", tenant_id: "tenant-B", platform: "META", status: "CONNECTED", external_account_id: "act_B" };
+
+  function seedLegacy(credentialTenant: string | null) {
+    db.tables = {
+      prompter_connected_accounts: [{ ...ACCOUNT_A }, { ...OWN }],
+      prompter_oauth_credentials: [
+        { tenant_id: "tenant-A", connected_account_id: "acctA", encrypted_access_token: "cipher-A" },
+        { tenant_id: credentialTenant, connected_account_id: "acctB", encrypted_access_token: "cipher-B-legacy" },
+      ],
+      prompter_channel_campaigns: [
+        { id: "ccB", tenant_id: "tenant-B", channel: "FACEBOOK", status: "ACTIVE", external_campaign_id: "ext_B", master_campaign_id: "mcB" },
+      ],
+    };
+    // Parent lookups are tenant-correct here (not leaky): this is about the credential row only.
+    db.leakyParents = new Set();
+    db.filtersByTable = {};
+    db.regular = fakeClient({ leaky: false });
+    db.admin = fakeClient({ leaky: false });
+  }
+
+  const snapshot = () => JSON.stringify([db.tables.prompter_connected_accounts, db.tables.prompter_oauth_credentials]);
+
+  it.each([
+    ["another tenant", "tenant-LEGACY"],
+    ["NULL", null],
+  ])("listMetaPagesAction (%s): asks to reconnect, calls nothing, changes nothing", async (_label, credTenant) => {
+    seedLegacy(credTenant);
+    const before = snapshot();
+    const result = await listMetaPagesAction();
+    expect(result.error).toMatch(/hubungkan ulang/i);
+    expect(decryptMock).not.toHaveBeenCalled();
+    expect(getPagesMock).not.toHaveBeenCalled();
+    expect(snapshot()).toBe(before);
+    expect(JSON.stringify(result)).not.toMatch(/cipher/);
+  });
+
+  it.each([
+    ["another tenant", "tenant-LEGACY"],
+    ["NULL", null],
+  ])("syncChannelCampaignInsightsAction (%s): asks to reconnect, no platform call, rows intact", async (_label, credTenant) => {
+    seedLegacy(credTenant);
+    const before = snapshot();
+    const result = await syncChannelCampaignInsightsAction("ccB");
+    expect(result.error).toMatch(/hubungkan ulang/i);
+    expect(decryptMock).not.toHaveBeenCalled();
+    expect(connector.getInsights).not.toHaveBeenCalled();
+    expect(snapshot()).toBe(before);
+    expect(JSON.stringify(result)).not.toMatch(/cipher/);
+  });
+
+  it("decideApprovalAction (autopilot): reconnect note, no platform write, no connection change", async () => {
+    sessionMock.mockResolvedValue({ tenantId: "t1", userId: "u1", role: "owner" });
+    approvalHarness = buildApprovalHarness({ actionType: "PAUSE_CHANNEL", suggestedDailyBudget: null, credentialsTenantId: "legacy-tenant" });
+    await decideApprovalAction("ap1", "APPROVED", null);
+    expect(decryptMock).not.toHaveBeenCalled();
+    expect(connector.pauseCampaign).not.toHaveBeenCalled();
+    const note = approvalHarness.approvalUpdates.find((u) => "reason" in u && u.reason);
+    expect(String(note?.reason)).toMatch(/hubungkan ulang/i);
+    expect(JSON.stringify(approvalHarness.approvalUpdates)).not.toMatch(/cipher/);
+  });
+
+  it("disconnectAction on an explicit Owner request: no revoke with the unmatched credential, removes ONLY the caller's own connection", async () => {
+    seedLegacy("tenant-LEGACY");
+    const result = await disconnectAction("META");
+    expect(result.error).toBeNull();
+    expect(decryptMock).not.toHaveBeenCalled();
+    expect(connector.disconnect).not.toHaveBeenCalled();
+    // Tenant A's connection and credential are untouched.
+    expect(db.tables.prompter_connected_accounts.map((r) => r.id)).toEqual(["acctA"]);
+    expect(db.tables.prompter_oauth_credentials.some((r) => r.connected_account_id === "acctA")).toBe(true);
+  });
+
+  it("disconnectAction delete is scoped by tenant_id as well as id", async () => {
+    seedLegacy("tenant-B");
+    await disconnectAction("META");
+    expect(connector.disconnect).toHaveBeenCalledWith("plain(cipher-B-legacy)", "act_B");
+    const deleteFilters = (db.filtersByTable["prompter_connected_accounts"] ?? []).find(
+      (f) => f.some(([c, v]) => c === "id" && v === "acctB") && f.some(([c]) => c === "tenant_id"),
+    );
+    expect(deleteFilters).toContainEqual(["tenant_id", "tenant-B"]);
+  });
+});

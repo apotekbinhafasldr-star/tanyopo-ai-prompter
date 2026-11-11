@@ -86,7 +86,7 @@ export async function syncChannelCampaignInsightsAction(
     .maybeSingle();
 
   if (!credentials) {
-    return { error: "Kredensial koneksi tidak ditemukan." };
+    return { error: "Kredensial koneksi tidak ditemukan. Hubungkan ulang akun di halaman Connections; koneksi Anda tidak dihapus." };
   }
 
   let accessToken: string;
