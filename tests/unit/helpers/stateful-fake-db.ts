@@ -3,15 +3,15 @@
  * approval / campaign status flows (H1 / PR #39). Each statement executes
  * ATOMICALLY when it is awaited (like a single PostgREST request), so tests
  * can interleave two server actions and observe real lost-update behaviour.
- * Supports: select / update / insert / delete, .eq(), .select(), .single(),
- * .maybeSingle(). Failure injection and a pre-execution hook (to model a
+ * Supports: select / update / insert / delete / upsert, .eq(), .gte(), .is(), .in(),
+ * .select(), .single(), .maybeSingle(). Failure injection and a pre-execution hook (to model a
  * concurrent writer slipping in) are available.
  */
 export type Row = Record<string, unknown>;
 
 export interface LoggedStatement {
   table: string;
-  op: "select" | "update" | "insert" | "delete";
+  op: "select" | "update" | "insert" | "delete" | "upsert";
   payload?: Row;
   filters: Array<[string, unknown]>;
   matched: number;
@@ -55,6 +55,7 @@ export function createFakeDb(seed: Record<string, Row[]>, options: FakeDbOptions
   db.from = (table: string) => {
     let op: LoggedStatement["op"] = "select";
     let payload: Row | undefined;
+    let upsertConflict: string[] = [];
     let returning = false;
     let single: "single" | "maybe" | null = null;
     const filters: Array<[string, unknown]> = [];
@@ -74,6 +75,15 @@ export function createFakeDb(seed: Record<string, Row[]>, options: FakeDbOptions
       const denied = options.denyWhen?.({ table, op }) ?? false;
       if (denied && op === "insert") return { data: null, error: { message: "new row violates row-level security policy" } };
 
+      if (op === "upsert") {
+        // PostgREST upsert: a row matching the onConflict columns is merged, otherwise inserted.
+        const incoming = payload as Row;
+        const existing = rows.find((r) => upsertConflict.length > 0 && upsertConflict.every((c) => r[c] === incoming[c]));
+        if (existing) Object.assign(existing, incoming);
+        else rows.push({ ...incoming });
+        entry.matched = 1;
+        return { data: null, error: null };
+      }
       if (op === "insert") {
         const n = (insertCounts[table] = (insertCounts[table] ?? 0) + 1);
         rows.push({ ...(options.insertDefaults?.[table]?.(n) ?? {}), ...(payload as Row) });
@@ -123,6 +133,12 @@ export function createFakeDb(seed: Record<string, Row[]>, options: FakeDbOptions
         payload = p;
         return builder;
       },
+      upsert: (p: Row, opts?: { onConflict?: string }) => {
+        op = "upsert";
+        payload = p;
+        upsertConflict = (opts?.onConflict ?? "").split(",").map((c) => c.trim()).filter(Boolean);
+        return builder;
+      },
       delete: () => {
         op = "delete";
         return builder;
@@ -133,6 +149,10 @@ export function createFakeDb(seed: Record<string, Row[]>, options: FakeDbOptions
       },
       is: (c: string, v: unknown) => {
         predicates.push((r) => (v === null ? r[c] === null || r[c] === undefined : r[c] === v));
+        return builder;
+      },
+      gte: (c: string, v: unknown) => {
+        predicates.push((r) => r[c] != null && (r[c] as string | number) >= (v as string | number));
         return builder;
       },
       in: (c: string, vs: unknown[]) => {
