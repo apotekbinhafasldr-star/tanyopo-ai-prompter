@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================================
-# run_sandbox.sh -- runner T6..T14 LINOE DOKU sandbox. FAIL-CLOSED: berhenti pada penyimpangan pertama.
+# run_sandbox.sh -- runner T6..T17 LINOE (T15..T17 = paket P0-3; default tetap sampai T14) DOKU sandbox. FAIL-CLOSED: berhenti pada penyimpangan pertama.
 # Hanya untuk project linoe-doku-sandbox (ref eskqngzhtndkfqjoxxou). Tidak pernah mencetak/menyimpan kredensial.
 #
 # Koneksi HANYA lewat variabel lingkungan libpq standar (tanpa URL, tanpa argumen proses yang memuat rahasia):
@@ -59,11 +59,11 @@ fp="$(Q "select (select count(*) from public._linoe_sandbox_marker)||'|'||(selec
 [ "$fp" = "1|0" ] || stop C1 "sidik jari bukan sandbox ($fp)"
 
 STATE_SQL="select (select count(*) from pg_class where relnamespace='public'::regnamespace and relkind='r')||'|'||(select count(*) from pg_policies where schemaname='public')||'|'||(select count(*) from pg_trigger t join pg_class c on c.oid=t.tgrelid where not tgisinternal and c.relnamespace='public'::regnamespace)||'|'||(select count(*) from pg_proc where pronamespace='public'::regnamespace)||'|'||(select count(*) from pg_constraint k join pg_class c on c.oid=k.conrelid where k.contype='f' and c.relnamespace='public'::regnamespace)||'|'||(select count(*) from public._linoe_sandbox_applied)||'|'||coalesce((select max(version) from public._linoe_sandbox_applied),'-')||'|'||(select count(*) from pg_class where relnamespace='public'::regnamespace and relkind='r' and not relrowsecurity)||'|'||(select count(*) from pg_proc where pronamespace='public'::regnamespace and prosecdef and not coalesce(proconfig::text like '%search_path=%',false))||'|'||(case when to_regclass('cron.job') is null then 'x' else (select count(*) from cron.job)::text end)||'|'||(select count(*) from auth.users)"
-declare -A FILE=( [T6]=10_migrations_part_3.sql [T7]=10_migrations_part_4.sql [T8]=10_migrations_part_5.sql [T9]=10_migrations_part_6.sql [T10]=10_migrations_part_7.sql [T11]=10_migrations_part_8.sql [T12]=20_seed_dummy.sql [T13]=30_verify_readonly.sql [T14]=31_smoke_checkout_apply_rollback.sql )
-declare -A PREV=( [T6]=T5 [T7]=T6 [T8]=T7 [T9]=T8 [T10]=T9 [T11]=T10 [T12]=T11 [T13]=T12 [T14]=T13 )
-declare -A BEFORE=( [T6]=14 [T7]=27 [T8]=32 [T9]=40 [T10]=45 [T11]=47 [T12]=49 [T13]=49 [T14]=49 )
-ORDER=(T6 T7 T8 T9 T10 T11 T12 T13 T14)
-[ -n "${FILE[$FROM]:-}" ] && [ -n "${FILE[$TO]:-}" ] || stop A0 "tahap harus T6..T14" 3
+declare -A FILE=( [T6]=10_migrations_part_3.sql [T7]=10_migrations_part_4.sql [T8]=10_migrations_part_5.sql [T9]=10_migrations_part_6.sql [T10]=10_migrations_part_7.sql [T11]=10_migrations_part_8.sql [T12]=20_seed_dummy.sql [T13]=30_verify_readonly.sql [T14]=31_smoke_checkout_apply_rollback.sql [T15]=40_p03_doku_alert_coverage.sql [T16]=41_verify_p03_readonly.sql [T17]=42_smoke_doku_alert_rollback.sql )
+declare -A PREV=( [T6]=T5 [T7]=T6 [T8]=T7 [T9]=T8 [T10]=T9 [T11]=T10 [T12]=T11 [T13]=T12 [T14]=T13 [T15]=T14 [T16]=T15 [T17]=T16 )
+declare -A BEFORE=( [T6]=14 [T7]=27 [T8]=32 [T9]=40 [T10]=45 [T11]=47 [T12]=49 [T13]=49 [T14]=49 [T15]=49 [T16]=50 [T17]=50 )
+ORDER=(T6 T7 T8 T9 T10 T11 T12 T13 T14 T15 T16 T17)
+[ -n "${FILE[$FROM]:-}" ] && [ -n "${FILE[$TO]:-}" ] || stop A0 "tahap harus T6..T17" 3
 golden_of() { grep "^$1|" "$GOLDEN" | head -1 | cut -d'|' -f2-; }
 
 # --- D. keadaan awal HARUS persis sama dengan keadaan acuan tahap sebelumnya
@@ -86,11 +86,11 @@ for T in "${ORDER[@]}"; do
   if [ "${CLOUD:-0}" != 1 ]; then F="$LOG/$T.local.sql"   # LOKAL SAJA: PG lokal tak punya ekstensi pg_cron
     sed 's/^create extension if not exists pg_cron;/-- (lokal: pg_cron dinonaktifkan)/' "$SRC/${FILE[$T]}" > "$F"; fi
   case $T in
-    T13) PSQL -F'|' -f "$F" >"$LOG/T13.out" 2>"$LOG/T13.err"; rc=$?
-         [ $rc = 0 ] || { grep -m3 -E 'ERROR|DETAIL' "$LOG/T13.err"; stop E13 "T13 error"; }
-         grep -q '^99|ALL_PASS|semua PASS||PASS$' "$LOG/T13.out" || { grep '|FAIL$' "$LOG/T13.out"; stop E13 "T13 ada baris FAIL"; };;
-    T14) PSQL -f "$F" >"$LOG/T14.out" 2>"$LOG/T14.err"
-         grep -q 'SMOKE_OVERALL=PASS' "$LOG/T14.err" || { grep -m3 -E 'ERROR|SMOKE' "$LOG/T14.err" | cut -c1-200; stop E14 "T14 smoke bukan PASS"; };;
+    T13|T16) PSQL -F'|' -f "$F" >"$LOG/$T.out" 2>"$LOG/$T.err"; rc=$?
+         [ $rc = 0 ] || { grep -m3 -E 'ERROR|DETAIL' "$LOG/$T.err"; stop E13 "$T error"; }
+         grep -q '^99|ALL_PASS|semua PASS||PASS$' "$LOG/$T.out" || { grep '|FAIL$' "$LOG/$T.out"; stop E13 "$T ada baris FAIL"; };;
+    T14|T17) PSQL -f "$F" >"$LOG/$T.out" 2>"$LOG/$T.err"
+         grep -q 'SMOKE_OVERALL=PASS' "$LOG/$T.err" || { grep -m3 -E 'ERROR|SMOKE' "$LOG/$T.err" | cut -c1-200; stop E14 "$T smoke bukan PASS"; };;
     *)   PSQL -q -f "$F" >"$LOG/$T.out" 2>"$LOG/$T.err"; rc=$?
          [ $rc = 0 ] || { grep -m3 -E 'ERROR|DETAIL' "$LOG/$T.err"; stop E1 "$T GAGAL (transaksi dibatalkan; tahap berikutnya tidak dijalankan)"; };;
   esac

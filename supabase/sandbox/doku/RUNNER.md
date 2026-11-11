@@ -37,3 +37,16 @@ Menjalankan T6–T14 tanpa copy-paste SQL dari HP. Runner = `tools/run_sandbox.s
 6. Setelah selesai, reset lagi kata sandi sandbox.
 
 GitHub hanya menjalankan `workflow_dispatch` dari berkas yang sudah ada di `main`; workflow baru bisa dipakai setelah PR ini digabung.
+
+## Paket P0-3 (alert webhook DOKU) — T15..T17, BELUM dijalankan di cloud
+Menerapkan migrasi `20261111130000_prompter_p0_3_doku_alert_coverage.sql` (sudah di `main`, PR #112) ke **sandbox saja**. Default runner tetap `T6..T14`;
+paket ini hanya jalan bila `from_stage`/`to_stage` diisi `T15`/`T17` secara eksplisit (dan tetap lewat persetujuan Environment `doku-sandbox`).
+- **T15** `40_p03_doku_alert_coverage.sql`: satu transaksi. *Preflight drift* di dalam SQL: marker sandbox, tidak ada tabel UMKMpro, tepat 49 migrasi dengan versi terakhir
+  `20261103170000`, objek B4.1 lengkap, **md5 badan** `fn_sync_payment_alerts` dan `fn_note_payment_alert_sync_failure` = badan B4.1 yang diaudit, `SECURITY DEFINER` + `search_path`, ACL
+  hanya service_role. Selisih sekecil apa pun = ABORT, tidak ada yang berubah dan tidak ada yang ditimpa. Lalu migrasi disalin apa adanya, diperiksa ulang (md5 badan baru, ACL), dan dicatat (50).
+- **T16** `41_verify_p03_readonly.sql` (baca-saja, 15 baris + `ALL_PASS`). Menggantikan `30_` setelah T15 (`30_` mengharapkan 49 migrasi, jangan dijalankan ulang).
+- **T17** `42_smoke_doku_alert_rollback.sql`: transaksi dummy DOKU/Midtrans lewat fungsi resmi, event `ALARM_*`, sync dua kali; **selalu rollback** (`SMOKE_OVERALL=PASS`).
+- **Rollback manual** `98_rollback_p03_sandbox.sql` (bukan bagian runner): hanya dari keadaan P0-3 persis (50 migrasi, md5 badan P0-3); mengembalikan badan B4.1 dan menghapus satu baris pelacak. Tidak menghapus data alert.
+- Berkas `40/41/42/98` dibangun otomatis: `python3 tools/build_p03_package.py` (`--check` memastikan repo = hasil bangun; hash dihitung dari berkas migrasi, bukan diketik).
+- Uji lokal: `bash tools/test_runner_local.sh` (68 cek, termasuk drift sync/fn_note/ACL, tabel UMKMpro, verify menolak drift, rollback bolak-balik, smoke mendeteksi B4.1).
+- Karena `supabase/sandbox/doku` berubah, **hash pohon (`tree`) untuk workflow berubah** setelah PR ini di-merge; ambil nilai baru dari laporan audit.
