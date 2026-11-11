@@ -333,7 +333,7 @@ async function executeAutopilotAction(
     .maybeSingle();
 
   if (!credentials) {
-    return "Eksekusi dibatalkan: kredensial koneksi tidak ditemukan.";
+    return "Eksekusi dibatalkan: kredensial koneksi tidak ditemukan. Hubungkan ulang akun di halaman Connections; koneksi Anda tidak dihapus.";
   }
 
   let accessToken: string;

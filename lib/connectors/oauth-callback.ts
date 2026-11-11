@@ -7,8 +7,14 @@ import { requireSessionContext } from "@/services/session";
 import { getConnector } from "@/lib/connectors/get-connector";
 import { encryptToken, isTokenCipherConfigured } from "@/lib/crypto/token-cipher";
 import { ConnectorConfigError } from "@/lib/connectors/types";
-import { logOauthFailure, logOauthStateRejection } from "@/lib/connectors/safe-error-log";
-import { checkOauthState } from "@/lib/connectors/oauth-state";
+import { logOauthFailure, logOauthPkceRejection, logOauthStateRejection } from "@/lib/connectors/safe-error-log";
+import {
+  checkOauthState,
+  checkPkceVerifier,
+  pkceVerifierCookieName,
+  pkceVerifierCookiePath,
+} from "@/lib/connectors/oauth-state";
+import { isPkceConnector } from "@/lib/connectors/pkce-connector";
 import type { ConnectorPlatform, Database, StoredConnectionStatus } from "@/types/database";
 
 type AccountInsert = Database["public"]["Tables"]["prompter_connected_accounts"]["Insert"];
@@ -55,6 +61,18 @@ export async function handleConnectorOauthCallback(
   const stateCookie = cookieStore.get(stateCookieName)?.value;
   cookieStore.delete(stateCookieName);
 
+  // PKCE connectors (X) also carry a verifier cookie. It is read and deleted
+  // here, before ANY early return, so a callback can never be replayed with it
+  // and a rejected attempt leaves nothing behind.
+  const connector = getConnector(platform);
+  const pkceConnector = connector && isPkceConnector(connector) ? connector : null;
+  let verifierCookie: string | undefined;
+  if (pkceConnector) {
+    const verifierCookieName = pkceVerifierCookieName(stateCookieName);
+    verifierCookie = cookieStore.get(verifierCookieName)?.value;
+    cookieStore.delete({ name: verifierCookieName, path: pkceVerifierCookiePath(platform) });
+  }
+
   if (oauthError) {
     return redirectWith(request, { error: "denied" });
   }
@@ -67,9 +85,28 @@ export async function handleConnectorOauthCallback(
     return redirectWith(request, { error: "invalid_state" });
   }
 
-  const connector = getConnector(platform);
   if (!connector) {
     return redirectWith(request, { error: "not_available" });
+  }
+
+  // PKCE: fail-closed on the wiring flag BEFORE the one-time code is spent,
+  // then require a verifier bound to this exact state and tenant.
+  let codeVerifier: string | null = null;
+  if (pkceConnector) {
+    if (!pkceConnector.isConfigured()) {
+      return redirectWith(request, { error: "not_configured" });
+    }
+    const pkceCheck = checkPkceVerifier({
+      state: state as string,
+      verifierCookie,
+      tenantId: session.tenantId,
+      userId: session.userId,
+    });
+    if (!pkceCheck.ok) {
+      logOauthPkceRejection(platform, pkceCheck.reason);
+      return redirectWith(request, { error: "invalid_state" });
+    }
+    codeVerifier = pkceCheck.codeVerifier;
   }
 
   const admin = createAdminClient();
@@ -84,7 +121,10 @@ export async function handleConnectorOauthCallback(
   }
 
   try {
-    const tokenResult = await connector.exchangeCodeForToken(stateCheck.code);
+    const tokenResult =
+      pkceConnector && codeVerifier !== null
+        ? await pkceConnector.exchangeCodeForTokenWithPkce(stateCheck.code, codeVerifier)
+        : await connector.exchangeCodeForToken(stateCheck.code);
     const accounts = await connector.getAccounts(tokenResult.accessToken);
     const primaryAccount = accounts[0];
 

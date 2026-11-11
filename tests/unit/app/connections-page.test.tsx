@@ -21,6 +21,8 @@ interface QueryResult {
 const hoisted = vi.hoisted(() => ({
   role: "owner" as string,
   configured: true,
+  /** X's isConfigured() is false in production while the PKCE flag is off. */
+  xConfigured: false,
   list: { data: [], error: null } as QueryResult,
   pageRead: { data: null, error: null } as QueryResult,
   selects: [] as string[],
@@ -53,7 +55,9 @@ vi.mock("@/lib/supabase/server", () => ({
 }));
 
 vi.mock("@/lib/connectors/get-connector", () => ({
-  getConnector: vi.fn(() => ({ isConfigured: () => hoisted.configured })),
+  getConnector: vi.fn((platform: string) => ({
+    isConfigured: () => (platform === "X" ? hoisted.xConfigured : hoisted.configured),
+  })),
 }));
 vi.mock("@/lib/connectors/capability-registry", () => ({ getCapabilities: vi.fn(async () => []) }));
 vi.mock("@/lib/feature-flags", () => ({ isFeatureEnabled: vi.fn(async () => false) }));
@@ -95,6 +99,7 @@ describe("ConnectionsPage — schema without Track B columns and failed reads", 
   beforeEach(() => {
     hoisted.role = "owner";
     hoisted.configured = true;
+    hoisted.xConfigured = false;
     hoisted.list = { data: [], error: null };
     hoisted.pageRead = { data: null, error: null };
     hoisted.selects = [];
@@ -193,31 +198,61 @@ describe("ConnectionsPage — schema without Track B columns and failed reads", 
     expect(screen.queryByText("Belum Terhubung")).toBeNull();
   });
 
-  it("still shows 'Belum Terhubung' when the read succeeds and there really are no accounts", async () => {
+  it("still shows 'Belum Terhubung' for Meta when the read succeeds and there really are no accounts", async () => {
     hoisted.list = { data: [], error: null };
 
     await renderPage();
 
     expect(screen.queryByRole("alert")).toBeNull();
-    // Only Meta can be connected; TikTok and X are "Segera hadir" (see below).
+    // Only Meta can really start OAuth: X is switched off and TikTok awaits the provider.
     expect(screen.getAllByText("Belum Terhubung")).toHaveLength(1);
     expect(screen.getAllByRole("link", { name: "Hubungkan" })).toHaveLength(1);
   });
 
-  it("shows TikTok and X as 'Segera hadir' with a disabled button and no OAuth link", async () => {
-    hoisted.configured = true; // even with credentials present, nothing may start OAuth for these two
+  it("shows TikTok as 'Menunggu Persetujuan Penyedia' with a disabled button and no OAuth link, even with credentials", async () => {
+    hoisted.configured = true;
     hoisted.list = { data: [], error: null };
 
     await renderPage();
 
-    expect(screen.getAllByText("Segera hadir")).toHaveLength(2);
+    expect(screen.getAllByText("Menunggu Persetujuan Penyedia")).toHaveLength(1);
     const disabled = screen.getAllByRole("button", { name: "Hubungkan" });
-    expect(disabled).toHaveLength(2);
+    expect(disabled.length).toBeGreaterThanOrEqual(1);
     for (const button of disabled) expect(button).toBeDisabled();
     expect(document.querySelector('a[href*="/api/connections/tiktok/authorize"]')).toBeNull();
-    expect(document.querySelector('a[href*="/api/connections/x/authorize"]')).toBeNull();
-    // Meta keeps its working connect link.
     expect(document.querySelector('a[href="/api/connections/meta/authorize"]')).not.toBeNull();
+  });
+
+  it("shows X as 'Belum Dikonfigurasi' with no OAuth link while its flow is switched off", async () => {
+    hoisted.xConfigured = false;
+    hoisted.list = { data: [], error: null };
+
+    await renderPage();
+
+    expect(document.querySelector('a[href*="/api/connections/x/authorize"]')).toBeNull();
+    expect(screen.getAllByText("Belum Dikonfigurasi")).toHaveLength(1);
+  });
+
+  it("offers the X connect link only when X reports itself configured", async () => {
+    hoisted.xConfigured = true;
+    hoisted.list = { data: [], error: null };
+
+    await renderPage();
+
+    expect(document.querySelector('a[href="/api/connections/x/authorize"]')).not.toBeNull();
+    expect(screen.getAllByText("Belum Terhubung")).toHaveLength(2);
+  });
+
+  it("explains organic posting and ads separately for TikTok and X, without claiming readiness", async () => {
+    hoisted.list = { data: [], error: null };
+
+    await renderPage();
+
+    expect(screen.getAllByText("Posting organik")).toHaveLength(2);
+    expect(screen.getAllByText("Iklan")).toHaveLength(2);
+    expect(screen.getByText(/Content Posting API/)).toBeInTheDocument();
+    expect(screen.getByText(/X Ads API butuh persetujuan/)).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/\bsiap\b|Segera hadir/i);
   });
 
   it("keeps 'Belum Dikonfigurasi' for unconfigured connectors on a successful read", async () => {
@@ -226,9 +261,31 @@ describe("ConnectionsPage — schema without Track B columns and failed reads", 
 
     await renderPage();
 
-    // Meta only: TikTok and X show "Segera hadir" instead of a configuration status.
-    expect(screen.getAllByText("Belum Dikonfigurasi")).toHaveLength(1);
+    expect(screen.getAllByText("Belum Dikonfigurasi")).toHaveLength(3);
     expect(screen.queryByText("Belum Terhubung")).toBeNull();
+    expect(screen.queryByText("Menunggu Persetujuan Penyedia")).toBeNull();
+  });
+
+  it("shows 'Perlu Hubungkan Ulang' with a reconnect link for an expired Meta connection", async () => {
+    hoisted.list = { data: [{ ...META_CONNECTED, expires_at: "2020-01-01T00:00:00.000Z" }], error: null };
+
+    await renderPage();
+
+    expect(screen.getByText("Perlu Hubungkan Ulang")).toBeInTheDocument();
+    expect(screen.queryByText("Terhubung")).toBeNull();
+    expect(screen.getByRole("link", { name: "Sambungkan Ulang" })).toBeInTheDocument();
+  });
+
+  it("does not offer reconnect for a stored TikTok connection while the provider gate is closed", async () => {
+    hoisted.list = {
+      data: [{ platform: "TIKTOK", external_account_name: "adv", status: "ACTION_REQUIRED", expires_at: null, last_refreshed_at: null }],
+      error: null,
+    };
+
+    await renderPage();
+
+    expect(document.querySelector('a[href*="/api/connections/tiktok/authorize"]')).toBeNull();
+    expect(screen.getByText(/Menyambungkan ulang belum tersedia untuk TikTok/)).toBeInTheDocument();
   });
 });
 
@@ -238,6 +295,7 @@ describe("ConnectionsPage — Meta readiness check (F-2a/F-2b)", () => {
   beforeEach(() => {
     hoisted.role = "owner";
     hoisted.configured = true;
+    hoisted.xConfigured = false;
     hoisted.list = { data: [], error: null };
     hoisted.pageRead = { data: null, error: null };
     hoisted.selects = [];

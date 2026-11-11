@@ -7,7 +7,14 @@ import { requireSessionContext } from "@/services/session";
 import { getConnector } from "@/lib/connectors/get-connector";
 import { ConnectorConfigError } from "@/lib/connectors/types";
 import { isTokenCipherConfigured } from "@/lib/crypto/token-cipher";
-import { resolveStateCookieMaxAge } from "@/lib/connectors/oauth-state";
+import {
+  buildPkceVerifierCookieValue,
+  pkceVerifierCookieName,
+  pkceVerifierCookiePath,
+  resolveStateCookieMaxAge,
+} from "@/lib/connectors/oauth-state";
+import { isPkceConnector } from "@/lib/connectors/pkce-connector";
+import { generatePkcePair, type XPkcePair } from "@/lib/connectors/x-pkce";
 import type { ConnectorPlatform } from "@/types/database";
 
 /**
@@ -44,18 +51,47 @@ export async function handleConnectorOauthAuthorize(
 
   try {
     const state = randomBytes(24).toString("base64url");
-    const authorizationUrl = connector.getAuthorizationUrl(state);
+
+    let authorizationUrl: string;
+    let pkce: XPkcePair | null = null;
+    if (isPkceConnector(connector)) {
+      // PKCE connector (X). Fail-closed: isConfigured() includes the wiring
+      // flag, so while the flag is off nothing is generated, stored or sent.
+      if (!connector.isConfigured()) {
+        return NextResponse.redirect(new URL("/connections?error=not_configured", request.url));
+      }
+      pkce = generatePkcePair();
+      // Only the S256 challenge goes into the URL; the verifier never does.
+      authorizationUrl = connector.getAuthorizationUrlWithPkce(state, pkce.codeChallenge);
+    } else {
+      authorizationUrl = connector.getAuthorizationUrl(state);
+    }
 
     const cookieStore = await cookies();
-    cookieStore.set(stateCookieName, `${state}:${session.tenantId}`, {
+    const cookieOptions = {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
+      sameSite: "lax" as const,
       // 300 s unless the platform asks for longer (Meta: 900 s); never above
       // the ceiling in oauth-state.ts.
       maxAge: resolveStateCookieMaxAge(options.stateCookieMaxAgeSeconds),
       path: "/",
-    });
+    };
+    cookieStore.set(stateCookieName, `${state}:${session.tenantId}`, cookieOptions);
+    if (pkce) {
+      // Same lifetime and attributes as the state cookie, but limited to the
+      // callback route; bound to state + tenant + user.
+      cookieStore.set(
+        pkceVerifierCookieName(stateCookieName),
+        buildPkceVerifierCookieValue({
+          state,
+          tenantId: session.tenantId,
+          userId: session.userId,
+          codeVerifier: pkce.codeVerifier,
+        }),
+        { ...cookieOptions, path: pkceVerifierCookiePath(platform) },
+      );
+    }
 
     return NextResponse.redirect(authorizationUrl);
   } catch (err) {
