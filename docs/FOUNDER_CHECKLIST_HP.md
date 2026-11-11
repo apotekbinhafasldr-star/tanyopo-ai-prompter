@@ -1,9 +1,48 @@
 # Checklist Founder (dari HP) dan audit kesiapan soft launch 10 tenant
 
 Status: **DOKUMEN (Draft)**. Tidak ada perubahan database, env, Netlify, billing, auth, proxy, atau migrasi oleh dokumen ini. Tidak ada query ke database mana pun.
-Audit atas kode `origin/main` commit `732b818` (2026-11-11); `/api/ready` dan `docs/MONITORING_HP.md` ada di Draft PR #127 (belum merge).
+Audit kode awal atas `origin/main` commit `732b818`; diperbarui 2026-11-11 terhadap `main` `9b56ddb`. `/api/ready` dan `docs/MONITORING_HP.md` sudah ada di `main` (PR #127, merged). Respons langsung `/api/ready` dari situs mana pun belum teruji (UNKNOWN).
 Semua langkah Founder memakai browser/aplikasi Android saja. Pelengkap [SOFT_LAUNCH_10_TENANTS.md](SOFT_LAUNCH_10_TENANTS.md), [RUNBOOK.md](RUNBOOK.md), [BACKUP_RESTORE.md](BACKUP_RESTORE.md).
 Label status: CODE READY, belum CUSTOMER READY (tidak ada REAL E2E; pembayaran riil OFF).
+
+---
+
+## Bagian 0. Dua situs Netlify: jangan dicampur
+
+Pembacaan Netlify (baca-saja, 2026-11-11) menunjukkan DUA situs yang men-deploy `main` yang sama (`9b56ddb`, context production, ready):
+
+| Situs | Proteksi akses | Tautan admin (Chrome Android) | Status sebagai situs pelanggan |
+|---|---|---|---|
+| `tanyopo-ai-prompter` | Tanpa SSO | https://app.netlify.com/projects/tanyopo-ai-prompter | **UNKNOWN**. Namanya sama dengan repo, tetapi itu bukan bukti. |
+| `linoe-otp-test-2026` | SSO tim untuk semua deploy, termasuk production | https://app.netlify.com/projects/linoe-otp-test-2026 | **UNKNOWN**; namanya menyiratkan situs uji. Pelanggan eksternal akan terhalang SSO. |
+
+Aturan:
+1. **Situs pelanggan belum diverifikasi.** Dokumen ini tidak menyatakan satu pun dari dua situs itu sebagai situs pelanggan. Founder yang menentukan (langkah P0-1 di bawah).
+2. Hasil deploy `linoe-otp-test-2026` **bukan** bukti kesiapan production. Status deploy hijau di situs uji tidak boleh dipakai untuk menyatakan situs pelanggan siap.
+3. Di seluruh dokumen ini, `<domain-produksi>` berarti domain situs pelanggan yang SUDAH Anda tentukan di P0-1. Selama belum ditentukan, jangan memasang monitor atau menjalankan uji daftar.
+4. Kedua situs memiliki fungsi terjadwal `payment-alert-notify` dan `payment-pending-sweep`. Apakah keduanya menunjuk ke database yang sama (sehingga fungsi berjalan ganda) tidak terlihat dari sini: UNKNOWN.
+5. Basic Auth `PREVIEW_BASIC_AUTH_*` di `proxy.ts` hanya untuk preview, bukan proteksi production.
+
+Tautan lain: [Supabase dashboard](https://supabase.com/dashboard) · [OpenAI limits](https://platform.openai.com/settings/organization/limits) · [Anthropic workspaces](https://platform.claude.com/settings/workspaces) · [UptimeRobot](https://uptimerobot.com) · [RUNBOOK.md](https://github.com/apotekbinhafasldr-star/tanyopo-ai-prompter/blob/main/docs/RUNBOOK.md) · [OSS (PSE)](https://oss.go.id)
+
+### Checklist P0 soft launch (maksimal 10 tenant)
+
+Label bukti: **CODE** = ada di kode `main`; **UNIT** = lulus tes/CI; **MOCK** = lulus dengan mock; **REAL** = uji nyata di lingkungan sebenarnya; **UNKNOWN** = belum ada bukti. Tidak ada butir yang berstatus SANDBOX E2E atau REAL E2E saat ini.
+
+| # | P0 | Bukti saat ini | Langkah Founder (hanya lihat, kecuali P0-4) | Langkah rinci |
+|---|---|---|---|---|
+| P0-1 | Tentukan situs pelanggan dan database tiap situs | UNKNOWN | Di dua tautan Netlify di atas, lihat daftar domain dan nama variabel (bukan nilai) `NEXT_PUBLIC_SUPABASE_URL`. Catat hasilnya. | C6 |
+| P0-2 | Proteksi akses situs pelanggan | Terbukti dari data Netlify: satu SSO, satu tidak. Situs pelanggan UNKNOWN. | Buka `/login` di domain pelanggan dari jendela penyamaran. Halaman login LINOE harus terbuka tanpa SSO. | C5 |
+| P0-3 | Endpoint monitoring `/api/health` dan `/api/ready` | CODE, UNIT (`main`, PR #127). REAL: UNKNOWN | Buka `https://<domain-produksi>/api/health` dan `/api/ready`. Keduanya harus `{"status":"ok"}`. `degraded` atau halaman login berarti STOP. | C2 |
+| P0-4 | Email konfirmasi ke alamat non-tim | CODE, UNIT untuk alur. REAL: UNKNOWN | Daftar satu kali dengan email non-tim di `https://<domain-produksi>/register` (membuat akun nyata, lihat C5). | C5 |
+| P0-5 | Migrasi S1 pada database yang benar | UNIT (CI). Status terapan: UNKNOWN (dokumen saling bertentangan) | Setelah P0-1: lihat [Supabase dashboard](https://supabase.com/dashboard), cek nama proyek, cari tiga versi S1. | C4 |
+| P0-6 | Env pembayaran dan admin | CODE (dua saklar pembayaran, admin hanya `true`). Nilai env: UNKNOWN | Lihat nama dan status variabel di Netlify situs pelanggan. | C6 |
+| P0-7 | Batas biaya AI | Tidak ada di kode. UNKNOWN di penyedia | Pasang batas di dashboard penyedia yang aktif. | C1 |
+| P0-8 | Fungsi terjadwal ganda | UNKNOWN | Pastikan hanya situs pelanggan yang menjalankan fungsi terjadwal terhadap database yang benar. | C6 |
+| P0-9 | Kontak eskalasi | Kosong di RUNBOOK bagian 4 | Isi sesuai C3, tanpa nomor pribadi. | C3 |
+| P0-10 | Jalur PSE | Keputusan Founder | Putuskan dan catat secara tertulis. | A3 |
+
+Selama P0-1 sampai P0-5 dan P0-7 belum selesai dengan bukti tertulis: **HOLD** untuk mengundang tenant eksternal.
 
 ---
 
@@ -19,7 +58,7 @@ Legenda: **TERBUKTI** = ada di kode/skema/CI repo. **BELUM TERBUKTI** = hanya kl
 | G4 Email konfirmasi ke alamat non-tim | **BUTUH FOUNDER (risiko blocker)** | Repo tidak mencatat SMTP kustom. Dokumentasi resmi Supabase: SMTP bawaan hanya mengirim ke alamat anggota tim proyek, batas 2 pesan/jam, "tidak untuk produksi" (lihat bagian D1). Bila SMTP bawaan masih dipakai, calon tenant biasa tidak menerima email konfirmasi dan pendaftaran mereka macet. Uji: langkah C5. |
 | G5 Batas biaya AI di penyedia | **BUTUH FOUNDER** | Kode hanya membatasi per tenant (30 AI/trial) dan per sesi demo (5) serta batas memori per instance. Biaya total tidak punya batas di kode (`estimated_cost` belum diisi, `docs/AI_SYSTEM.md`). Pagar terakhir hanya di dashboard penyedia: langkah C1. |
 | G6 Kontak eskalasi RUNBOOK bagian 4 | **BELUM TERBUKTI (kosong)** | `docs/RUNBOOK.md` bagian 4: kolom Level 1 dan 2 masih `(isi)`. Perhatian: repo PUBLIK, jangan tulis nomor pribadi di sana (langkah C3). |
-| G7 Pemantau uptime | **BELUM TERBUKTI** | Belum ada monitor (tindakan Founder). `/api/health` ada di main (hanya liveness, tidak cek DB). `/api/ready` TIDAK ada di main (hanya di Draft PR #127, menyentuh `proxy.ts`, butuh persetujuan merge terpisah). Langkah C2. |
+| G7 Pemantau uptime | **BELUM TERBUKTI** | Belum ada monitor (tindakan Founder). `/api/health` ada di `main` (hanya liveness, tidak cek DB). `/api/ready` sudah ada di `main` (PR #127, merged; CODE, UNIT): satu `select` ringan, respons hanya `{status}`, `no-store`, satu entri exact-match di `proxy.ts`. Respons langsung dari situs pelanggan belum teruji (UNKNOWN). Langkah C2. |
 | G8 Backup/restore | **BUTUH FOUNDER** | `docs/BACKUP_RESTORE.md` ada di main tetapi berstatus DRAFT "belum pernah diuji"; tabel RPO/RTO sengaja kosong; paket Supabase dan ketersediaan backup belum dicatat siapa pun. Membuka halaman Backups `umkmpro-ai` butuh persetujuan eksplisit (dokumen itu bagian 0-1). |
 | G9 PSE Lingkup Privat (TDPSE) | **BUTUH FOUNDER** | Keputusan hukum Founder/konsultan; bukan hal yang bisa dibuktikan dari kode. |
 | G10 Halaman hukum | **TERBUKTI sebagian** | `/privacy`, `/terms`, `/refund`, `/data-deletion` ada di `PUBLIC_PATHS` `proxy.ts`. Tanggal berlaku `LEGAL.effectiveDate` masih `undefined` (`features/legal/legal-meta.ts`): BELUM. Form daftar mewajibkan kotak `acceptLegal`. |
@@ -61,7 +100,7 @@ Syarat tersisa (urutan kerja):
 | 8 | G8: status backup tercatat, RPO/RTO diisi, rencana unduh/ekspor | WAJIB (persetujuan eksplisit untuk membuka halaman `umkmpro-ai`) | `BACKUP_RESTORE.md` bagian 1-2 |
 | 9 | G9: keputusan jalur PSE tertulis (tunda undangan atau risiko sadar) | WAJIB sebelum pengguna eksternal | `LEGAL_PSE_CHECKLIST.md` |
 | 10 | G10: tanggal berlaku halaman hukum | Disarankan | keputusan Founder |
-| 11 | Disarankan: PR #127 (`/api/ready`) setelah ditinjau; pembatas login; penutup pendaftaran; error tracker | Opsional | butuh persetujuan (menyentuh `proxy.ts`/auth/env) |
+| 11 | Disarankan: pembatas login; penutup pendaftaran; error tracker | Opsional | butuh persetujuan (menyentuh `proxy.ts`/auth/env) |
 
 Tidak ada langkah di bagian C yang mengubah apa pun. Setiap langkah berlaku aturan: **jika hasil berbeda dari yang diharapkan: STOP dan kabari** (tulis apa yang terlihat; jangan memperbaiki sendiri).
 
@@ -85,7 +124,7 @@ Tidak ada langkah di bagian C yang mengubah apa pun. Setiap langkah berlaku atur
 Penyedia yang dipakai kode: OpenAI dan/atau Anthropic (`lib/ai/openai-provider.ts`, `lib/ai/anthropic-provider.ts`; `lib/env.ts`: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `AI_DEFAULT_PROVIDER`). Penyedia mana yang aktif di produksi tidak diketahui dari repo.
 
 **C1.0 Tentukan penyedia aktif (hanya lihat).**
-- Buka: Netlify > situs LINOE > pengaturan situs > Environment variables **[nama menu BELUM TERVERIFIKASI; dokumentasi Netlify tidak terjangkau 2026-11-11]**.
+- Buka: Netlify > situs pelanggan (bagian 0) > pengaturan situs > Environment variables **[nama menu BELUM TERVERIFIKASI; dokumentasi Netlify tidak terjangkau 2026-11-11]**.
 - Cari: apakah ada nama `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `AI_DEFAULT_PROVIDER` (nama saja; jangan tampilkan nilai).
 - Diharapkan: minimal satu kunci ada. Tidak ada kunci = AI tampil "belum dikonfigurasi" dan G5 tidak relevan (tetapi smoke test AI akan gagal).
 - Jika berbeda (misalnya kunci dipakai bersama produk lain di akun penyedia yang sama): STOP dan kabari, karena batas tingkat organisasi bisa ikut menghentikan produk lain.
@@ -112,7 +151,7 @@ Penyedia yang dipakai kode: OpenAI dan/atau Anthropic (`lib/ai/openai-provider.t
 Sumber paket: https://uptimerobot.com/pricing/?no_head=1 (diakses 2026-11-11): Free 50 monitor, interval 5 menit, untuk proyek pribadi dan komersial, tanpa kartu kredit; SMS/telepon berbayar terpisah. Keterangan email/push pada paket Free tidak tegas di halaman itu: **[BELUM TERVERIFIKASI]**.
 
 1. Buka https://uptimerobot.com di browser HP, daftar dengan email perusahaan (paket Free). Pasang aplikasi UptimeRobot Android bila tersedia untuk notifikasi push **[BELUM TERVERIFIKASI untuk paket Free]**.
-2. Add New Monitor, tiga entri (ganti `<domain-produksi>` dengan domain produksi LINOE; jangan pantau URL preview):
+2. Add New Monitor, tiga entri (ganti `<domain-produksi>` dengan domain situs pelanggan yang sudah Anda tentukan di bagian 0; jangan pantau URL preview, dan jangan pantau situs uji `linoe-otp-test-2026`):
 
 | Nama | Tipe | URL | Kata kunci | Interval | Alert |
 |---|---|---|---|---|---|
@@ -121,7 +160,7 @@ Sumber paket: https://uptimerobot.com/pricing/?no_head=1 (diakses 2026-11-11): F
 | LINOE siap | HTTP(s) | `https://<domain-produksi>/api/ready` | n/a | 5 menit | email + push |
 
    - Kata kunci `Masuk` terbukti ada di halaman: judul `Masuk — LINOE` dan kartu `Masuk ke akun Anda` (`app/(auth)/login/page.tsx`, `features/auth/login-form.tsx`).
-   - **Monitor ketiga HANYA setelah PR #127 di-merge dan terdeploy.** Di `main` saat ini `/api/ready` belum ada (akan 404/redirect ke login). Jangan pasang sekarang.
+   - `/api/ready` sudah ada di `main` (PR #127), tetapi pasang monitor ketiga HANYA setelah Anda membuka URL itu sendiri di domain pelanggan dan melihat `{"status":"ok"}`. Di situs ber-SSO (`linoe-otp-test-2026`) endpoint ini terhalang login, jadi jangan dipantau di sana.
 3. Uji: buka monitor > jeda lalu aktifkan lagi, atau gunakan uji notifikasi bila ada. Alert harus sampai ke HP dalam 10 menit.
 4. Diharapkan: dua monitor hijau (Up). `/api/health` menampilkan `{"status":"ok"}` di browser.
 5. Aturan baca alert: satu kegagalan lalu pulih = catat saja; dua pemeriksaan berturut-turut Down (sekitar 10 menit) = ikuti RUNBOOK bagian 1-2.
@@ -178,7 +217,7 @@ Sumber (https://supabase.com/docs/guides/auth/auth-smtp, diakses 2026-11-11): SM
 
 ### C6. Cek env Netlify (G2, G11), hanya melihat
 
-1. Buka Netlify (browser atau aplikasi) > situs LINOE > Environment variables **[nama menu BELUM TERVERIFIKASI]**.
+1. Buka Netlify (browser atau aplikasi) > situs pelanggan (bagian 0; lakukan juga untuk situs satunya agar jelas mana yang menjalankan apa) > Environment variables **[nama menu BELUM TERVERIFIKASI]**.
 2. Cari nama berikut dan catat statusnya tanpa mengungkap nilai rahasia:
 
 | Variabel | Diharapkan |
