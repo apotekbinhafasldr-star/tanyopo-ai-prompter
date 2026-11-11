@@ -5,7 +5,14 @@ import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { loginSchema, registerSchema, forgotPasswordSchema, resetPasswordSchema } from "@/schemas/auth";
 import { publicEnv } from "@/lib/env";
-import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
+import { checkRateLimit } from "@/lib/rate-limit";
+import {
+  checkLoginThrottle,
+  getAuthClientBucket,
+  LOGIN_THROTTLED_MESSAGE,
+  recordLoginFailure,
+  resetLoginThrottle,
+} from "@/lib/security/login-throttle";
 import { isExistingAccountSignUp } from "@/lib/auth/existing-account";
 import { isUncertainSignupOutcome, mapSignupError, UNCERTAIN_SIGNUP_MESSAGE } from "@/lib/auth/signup-error";
 import { safeNextPath } from "@/lib/auth/safe-next";
@@ -21,6 +28,11 @@ import { isEmailOtpEnabled } from "@/lib/auth/email-otp";
  */
 const REGISTER_RATE_LIMIT = 5;
 const REGISTER_RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
+/**
+ * Shared bucket for requests without a trustworthy client IP (SEC-01). Stricter than "everyone", looser than one IP.
+ * The IP comes from getTrustedClientIp only, never from the client-controllable x-forwarded-for.
+ */
+const REGISTER_UNIDENTIFIED_LIMIT = 20;
 
 export interface AuthActionState {
   error: string | null;
@@ -73,10 +85,18 @@ export async function loginAction(
     return { error: parsed.error.issues[0]?.message ?? "Data tidak valid" };
   }
 
+  // SEC-02: brake on password guessing, before Supabase is called. Counts failures per IP+email and per IP (never per
+  // email alone, which would let anyone lock a victim out). One generic message; fails open if the limiter breaks.
+  const bucket = getAuthClientBucket(await headers());
+  if (!checkLoginThrottle(bucket, parsed.data.email).allowed) {
+    return { error: LOGIN_THROTTLED_MESSAGE };
+  }
+
   const supabase = await createClient();
   const { error } = await supabase.auth.signInWithPassword(parsed.data);
 
   if (error) {
+    if (error.status === 400) recordLoginFailure(bucket, parsed.data.email);
     return {
       error:
         error.status === 400
@@ -85,6 +105,7 @@ export async function loginAction(
     };
   }
 
+  resetLoginThrottle(bucket, parsed.data.email);
   redirect(safeNextPath(formData.get("next")));
 }
 
@@ -126,8 +147,12 @@ export async function registerAction(
   // Runs only after validation succeeds, so a typo retry never counts
   // against the limit — and before signUp(), so a blocked attempt never
   // reaches Supabase Auth at all.
-  const clientIp = getClientIp(await headers());
-  const rateLimit = checkRateLimit(`register:${clientIp}`, REGISTER_RATE_LIMIT, REGISTER_RATE_LIMIT_WINDOW_MS);
+  const bucket = getAuthClientBucket(await headers());
+  const rateLimit = checkRateLimit(
+    `register:${bucket.key}`,
+    bucket.identified ? REGISTER_RATE_LIMIT : REGISTER_UNIDENTIFIED_LIMIT,
+    REGISTER_RATE_LIMIT_WINDOW_MS,
+  );
   if (!rateLimit.allowed) {
     return {
       error: "Terlalu banyak percobaan pendaftaran dari jaringan ini. Silakan coba lagi dalam beberapa saat.",

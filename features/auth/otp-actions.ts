@@ -4,7 +4,8 @@ import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { registerSchema } from "@/schemas/auth";
-import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
+import { checkRateLimit } from "@/lib/rate-limit";
+import { getAuthClientBucket } from "@/lib/security/login-throttle";
 import {
   isEmailOtpEnabled,
   mapResendError,
@@ -50,9 +51,10 @@ export async function verifyEmailOtpAction(_prev: OtpActionState, formData: Form
   const token = normalizeOtpInput(formData.get("token"));
   if (!OTP_PATTERN.test(token)) return { error: OTP_MESSAGES.invalidFormat };
 
-  const ip = getClientIp(await headers());
+  // SEC-01: trusted IP only (never x-forwarded-for); requests without one share a single bucket.
+  const bucket = getAuthClientBucket(await headers());
   if (
-    !checkRateLimit(`otp-verify-ip:${ip}`, 20, 5 * 60_000).allowed ||
+    !checkRateLimit(`otp-verify-ip:${bucket.key}`, bucket.identified ? 20 : 60, 5 * 60_000).allowed ||
     !checkRateLimit(`otp-verify-email:${email.toLowerCase()}`, 8, 15 * 60_000).allowed
   ) {
     return { error: OTP_MESSAGES.tooMany };
@@ -85,10 +87,10 @@ export async function resendSignupOtpAction(_prev: OtpActionState, formData: For
   const email = parseEmail(formData.get("email"));
   if (!email) return { error: OTP_MESSAGES.invalidEmail };
 
-  const ip = getClientIp(await headers());
+  const bucket = getAuthClientBucket(await headers());
   if (
     !checkRateLimit(`otp-resend-email:${email.toLowerCase()}`, 1, RESEND_COOLDOWN_SECONDS * 1000).allowed ||
-    !checkRateLimit(`otp-resend-ip:${ip}`, 6, 60 * 60_000).allowed
+    !checkRateLimit(`otp-resend-ip:${bucket.key}`, bucket.identified ? 6 : 30, 60 * 60_000).allowed
   ) {
     return { error: OTP_MESSAGES.resendWait };
   }
