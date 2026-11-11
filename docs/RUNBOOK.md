@@ -22,6 +22,8 @@ Pakai bila setelah deploy baru ada error besar (halaman putih, login gagal, chec
 
 Catatan: rollback hanya mengembalikan kode. Perubahan database (migrasi) TIDAK ikut kembali. Jangan jalankan SQL perbaikan tanpa persetujuan Founder.
 
+Backup, RPO/RTO, dan latihan restore ke project baru: lihat [BACKUP_RESTORE.md](BACKUP_RESTORE.md).
+
 ## 3. Pembayaran macet
 
 Gejala: pelanggan sudah bayar tapi paket belum aktif, atau status tertahan "pending".
