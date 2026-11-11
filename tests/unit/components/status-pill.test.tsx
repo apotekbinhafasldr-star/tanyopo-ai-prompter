@@ -12,4 +12,11 @@ describe("StatusPill", () => {
     render(<StatusPill status="CONNECTED" />);
     expect(screen.getByText("Terhubung")).toBeInTheDocument();
   });
+
+  it("renders the provider-pending and reconnect states with their own labels", () => {
+    render(<StatusPill status="PROVIDER_PENDING" />);
+    expect(screen.getByText("Menunggu Persetujuan Penyedia")).toBeInTheDocument();
+    render(<StatusPill status="RECONNECT_REQUIRED" />);
+    expect(screen.getByText("Perlu Hubungkan Ulang")).toBeInTheDocument();
+  });
 });

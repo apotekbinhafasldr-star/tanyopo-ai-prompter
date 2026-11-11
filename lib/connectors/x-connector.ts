@@ -6,9 +6,9 @@ import {
   type ConnectorAccount,
   type ConnectorInsights,
   type ConnectorTokenResult,
-  type PlatformConnector,
 } from "@/lib/connectors/types";
 import { buildXAuthorizationUrl } from "@/lib/connectors/x-pkce";
+import type { PkceConnector } from "@/lib/connectors/pkce-connector";
 import {
   X_PUBLISH_SCOPES,
   createXClient,
@@ -31,24 +31,27 @@ import {
  *    (kampanye, ad set, creative, ad, statistik iklan, jeda, anggaran)
  *    sekarang FAIL-CLOSED dengan ConnectorConfigError, bukan mengirim
  *    permintaan yang tidak bisa dibuktikan benar.
- * 2. OAuth 2.0 X memakai PKCE (`code_challenge`). Antarmuka bersama
- *    `PlatformConnector.getAuthorizationUrl(state)` / `exchangeCodeForToken(code)`
- *    tidak membawa `code_verifier`, dan menyimpannya butuh perubahan di
- *    jalur OAuth bersama (oauth-authorize/oauth-callback), yang terlarang
- *    untuk diubah tanpa persetujuan Founder. Maka jalur bersama TIDAK
- *    dihubungkan: kedua metode itu melempar ConnectorConfigError dan
- *    `isConfigured()` tetap false. Bagian X-spesifik yang sudah siap dan
- *    teruji: `getAuthorizationUrlWithPkce` dan `exchangeCodeForTokenWithPkce`.
+ * 2. OAuth 2.0 X memakai PKCE (`code_challenge`). Jalur bersama kini membawa
+ *    `code_verifier` lewat cookie httpOnly terpisah (lihat pkce-connector.ts dan
+ *    oauth-state.ts), tetapi tetap fail-closed: `X_OAUTH_PKCE_WIRED` bernilai
+ *    `false` sehingga `isConfigured()` false dan tombol Hubungkan tidak aktif
+ *    sampai Founder menyetujui perubahan saklar itu. Dua metode non-PKCE
+ *    (`getAuthorizationUrl`/`exchangeCodeForToken`) tetap melempar
+ *    ConnectorConfigError.
  * 3. Posting organik (teks/gambar/video) tersedia lewat `publishPost` /
  *    `uploadMedia`, tetapi belum dipanggil dari mana pun di aplikasi dan
  *    capability PUBLISH_CONTENT tetap nonaktif.
  */
 
 /**
- * Saklar fail-closed: tetap `false` sampai penyimpanan code_verifier di jalur
- * OAuth bersama disetujui dan diimplementasikan (lihat docs/X_INTEGRATION.md).
+ * Saklar fail-closed: TETAP `false`. Jalur OAuth bersama sudah mendukung PKCE
+ * (cookie verifier httpOnly terikat state + tenant, lihat oauth-authorize.ts /
+ * oauth-callback.ts / oauth-state.ts), tetapi saklar ini hanya boleh diubah ke
+ * `true` lewat perubahan kode yang disetujui Founder dengan frasa persetujuan
+ * eksplisit. Tidak dibaca dari env, tidak menyala otomatis, dan tes
+ * mengunci nilainya `false`.
  */
-const X_OAUTH_PKCE_WIRED = false;
+export const X_OAUTH_PKCE_WIRED = false;
 
 const PKCE_BLOCKED_MESSAGE =
   "Alur OAuth X membutuhkan PKCE (code_verifier) yang belum tersambung di jalur OAuth bersama — butuh persetujuan Founder (lihat docs/X_INTEGRATION.md). Koneksi X dinonaktifkan sampai itu selesai.";
@@ -65,14 +68,20 @@ function toTokenResult(tokens: XTokenSet): ConnectorTokenResult {
   };
 }
 
-export class XConnector implements PlatformConnector {
+export class XConnector implements PkceConnector {
   readonly platform = "X" as const;
+  readonly usesPkce = true as const;
 
   private readonly client: XClient;
+  private readonly pkceWired: boolean;
 
-  /** `client` dapat disuntik oleh tes; default memakai fetch global (dibaca saat dipanggil). */
-  constructor(client?: XClient) {
+  /**
+   * `client` dapat disuntik oleh tes; default memakai fetch global (dibaca saat dipanggil).
+   * `options.pkceWired` hanya untuk tes; produksi (`get-connector.ts`) memakai `X_OAUTH_PKCE_WIRED`.
+   */
+  constructor(client?: XClient, options: { pkceWired?: boolean } = {}) {
     this.client = client ?? createXClient({ fetch: (input, init) => fetch(input, init) });
+    this.pkceWired = options.pkceWired ?? X_OAUTH_PKCE_WIRED;
   }
 
   private hasCredentials(): boolean {
@@ -85,7 +94,7 @@ export class XConnector implements PlatformConnector {
 
   /** Siap dipakai penuh hanya bila kredensial ada DAN alur PKCE tersambung. */
   isConfigured(): boolean {
-    return X_OAUTH_PKCE_WIRED && this.hasCredentials();
+    return this.pkceWired && this.hasCredentials();
   }
 
   private requireCredentials() {
@@ -104,19 +113,19 @@ export class XConnector implements PlatformConnector {
 
   // --- OAuth -------------------------------------------------------------
 
-  /** Jalur bersama: fail-closed sampai PKCE tersambung (lihat komentar atas file). */
+  /** Jalur non-PKCE: selalu fail-closed untuk X. Handler bersama memakai getAuthorizationUrlWithPkce. */
   getAuthorizationUrl(_state: string): string {
     this.requireCredentials();
     throw new ConnectorConfigError(this.platform, PKCE_BLOCKED_MESSAGE);
   }
 
-  /** Jalur bersama: fail-closed — tidak ada `code_verifier` di antarmuka ini. */
+  /** Jalur non-PKCE: selalu fail-closed — tidak ada `code_verifier` di antarmuka ini. */
   async exchangeCodeForToken(_code: string): Promise<ConnectorTokenResult> {
     this.requireCredentials();
     throw new ConnectorConfigError(this.platform, PKCE_BLOCKED_MESSAGE);
   }
 
-  /** Bagian X-spesifik yang siap dipakai setelah penyimpanan verifier disetujui. */
+  /** Dipanggil handler bersama hanya bila `isConfigured()` (saklar PKCE menyala). */
   getAuthorizationUrlWithPkce(state: string, codeChallenge: string): string {
     const { clientId, redirectUri } = this.requireCredentials();
     return buildXAuthorizationUrl({

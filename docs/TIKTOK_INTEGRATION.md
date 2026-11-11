@@ -11,7 +11,7 @@ Tanggal audit: 2026-11-11. Dokumen resmi dibaca lewat `developers.tiktok.com` pa
 | Login nyata, upload/publikasi nyata, insight Ads nyata | **EXTERNAL BLOCKED** (butuh TikTok, lihat bagian 8) |
 | Mock/sandbox/real E2E | Belum ada: **bukan** MOCK E2E, SANDBOX E2E, atau REAL E2E PASS. Tidak ada klaim CUSTOMER READY |
 
-Tidak ada panggilan jaringan ke TikTok dari tes. Gerbang S1 (`BUDGET_WRITE_ENABLED_PLATFORMS`) dan `PAYMENT_LIVE_ENABLED` tidak disentuh. UI `/connections` masih menampilkan TikTok sebagai "Segera hadir", jadi tidak ada jalur pengguna yang memanggil kode ini.
+Tidak ada panggilan jaringan ke TikTok dari tes. Gerbang S1 (`BUDGET_WRITE_ENABLED_PLATFORMS`) dan `PAYMENT_LIVE_ENABLED` tidak disentuh. UI `/connections` menampilkan TikTok sebagai "Menunggu Persetujuan Penyedia" (tombol Hubungkan nonaktif; gerbang di `lib/connectors/connection-readiness.ts`, `PROVIDER_GATES.TIKTOK`) dan route `/api/connections/tiktok/authorize` menolak (`provider_pending`), jadi tidak ada jalur pengguna yang memanggil kode ini.
 
 ## 2. Dua produk TikTok yang berbeda (jangan dicampur)
 
@@ -23,7 +23,7 @@ Tidak ada panggilan jaringan ke TikTok dari tes. Gerbang S1 (`BUDGET_WRITE_ENABL
 | Otorisasi | `https://www.tiktok.com/v2/auth/authorize/` dengan `scope`, `response_type=code` | `https://business-api.tiktok.com/portal/auth` (`app_id`, `redirect_uri`, `state`; tidak ada parameter `scope`) |
 | Token | `POST open.tiktokapis.com/v2/oauth/token/`; akses 24 jam, refresh 365 hari, refresh token bisa berganti | `POST business-api.tiktok.com/open_api/v1.3/oauth2/access_token/`; umur token **BELUM TERVERIFIKASI** |
 | Kode di repo | `lib/connectors/tiktok-content-posting.ts` (baru) | `lib/connectors/tiktok-connector.ts` (ada, diperkuat) |
-| Dipakai app | Belum (tidak terdaftar) | Terdaftar di `get-connector.ts` sebagai `TIKTOK`, tetapi UI "Segera hadir" |
+| Dipakai app | Belum (tidak terdaftar) | Terdaftar di `get-connector.ts` sebagai `TIKTOK`, tetapi UI "Menunggu Persetujuan Penyedia" dan route authorize ditutup |
 
 Token satu produk tidak boleh dikirim ke produk lain. Catatan: tabel `prompter_connected_accounts` unik per `(tenant_id, platform)` dan `platform` hanya `META | TIKTOK | X`, jadi satu tenant hanya bisa punya **satu** koneksi TikTok. Memakai Ads dan Konten bersamaan butuh migrasi (lihat bagian 7).
 
