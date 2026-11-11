@@ -2,13 +2,15 @@
 
 Status dokumen: DRAFT, hanya baca kode dan tes. Basis: `main` 6287160 (2026-11-11). Repo PUBLIK, log Actions publik.
 
+**Pembaruan (PR perbaikan SEC-01/SEC-02, bertumpuk di atas PR audit ini, 2026-11-11, atas persetujuan Founder untuk file auth terbatas):** SEC-01 dan SEC-02 berstatus **DIPERBAIKI DI PR INI (menunggu merge, belum di produksi)** dengan batas yang tertulis di baris temuan dan di bagian 2.6. Bagian lain dokumen tetap kondisi audit awal.
+
 Label bukti (TADS): **CODE** = dibaca di kode, **UNIT** = tes unit (CI), **INTEGRATION** = tes pada Postgres sekali pakai di CI, **MOCK**, **SANDBOX**, **REAL** = diverifikasi di sistem nyata, **UNKNOWN** = tidak bisa diverifikasi dari repo.
 Tidak ada panggilan ke Supabase, Netlify, penyedia pembayaran atau platform iklan. Tidak ada perubahan pada kode produk. Semua nilai rahasia sengaja tidak ditulis di sini.
 
 ## 0. Ringkasan (baca ini dulu)
 
 - **Tidak ada temuan P0** (tidak ditemukan kebocoran rahasia, jalur tanpa autentikasi ke data tenant, atau open redirect yang bisa dieksploitasi). Bukti: CODE + UNIT.
-- **P1 (2)**, keduanya perubahan di `features/auth/*` sehingga **butuh persetujuan Founder**: SEC-01 (IP untuk pembatas daftar/OTP bisa dipalsukan lewat `x-forwarded-for`) dan SEC-02 (login tanpa pembatas aplikasi).
+- **P1 (2)**, keduanya perubahan di `features/auth/*`: SEC-01 (IP untuk pembatas daftar/OTP bisa dipalsukan lewat `x-forwarded-for`) dan SEC-02 (login tanpa pembatas aplikasi). **Update: keduanya DIPERBAIKI di PR perbaikan (Draft, belum merge, atas persetujuan Founder untuk file auth terbatas); batas perbaikan di bagian 2.6 dan baris temuan.**
 - **P2 (5)**, **P3 (4)**: bagian 3.
 - Yang belum bisa diverifikasi dari repo (UNKNOWN): header keamanan benar-benar keluar di Netlify, status advisor RLS di proyek Supabase bersama, kerentanan dependensi (`npm audit` tidak terjangkau), nilai env produksi.
 - PR ini menambah 6 berkas tes (`tests/unit/security/`) dan dokumen ini. Celah yang terverifikasi dikunci sebagai "keadaan saat ini" supaya CI memberi tanda tepat saat celah ditutup.
@@ -66,14 +68,32 @@ Semua diklasifikasikan di `tests/unit/security/security-route-registry.test.ts`;
 
 Lihat SEC-03 dan SEC-05. Server action mengembalikan pesan tetap berbahasa Indonesia, bukan teks galat mentah (diverifikasi lewat pemindaian statis; satu-satunya jalur `err.message` ke klien ada di 4 route UMKMpro).
 
+### 2.6 Perilaku header IP di Netlify (diperiksa 2026-11-11, akses 2026-11-11)
+
+Pertanyaan: apakah Netlify menimpa/men-sanitasi `x-nf-client-connection-ip` dan `x-forwarded-for` yang dikirim klien?
+
+| Klaim | Status | Sumber |
+|---|---|---|
+| `x-nf-client-connection-ip` adalah header yang "tepat untuk memeriksa IP penyambung" dan tetap dipertahankan pada permintaan function setelah pembersihan header `X-Nf-`/`X-Bb-` (dijadwalkan 3 Maret 2022) | TERVERIFIKASI dari jawaban staf Netlify (bukan halaman dokumentasi resmi) | https://answers.netlify.com/t/upcoming-change-stripping-exposed-netlify-headers-from-function-and-proxy-requests/52665 (staf "mheffner", 28 Feb dan 1 Mar 2022; akses 2026-11-11) |
+| Objek `context` function Netlify menyediakan `ip` ("A string containing the client IP address") | TERVERIFIKASI dari dokumentasi resmi (jalur ini tidak dipakai kode ini; aksi auth memakai header) | https://docs.netlify.com/build/functions/api/ (akses 2026-11-11) |
+| Netlify MENIMPA/MENGHAPUS `x-nf-client-connection-ip` yang dikirim klien | **UNKNOWN**: tidak ada dokumen resmi atau jawaban staf yang ditemukan yang menyatakannya | Halaman di atas, https://answers.netlify.com/t/reverse-proxy-how-to-forward-client-ip-address-to-netlify/89099 (staf mengonfirmasi header itu diluncurkan 3 April 2023, tanpa pernyataan soal penimpaan; akses 2026-11-11) |
+| Netlify MENIMPA/MEN-SANITASI `x-forwarded-for` kiriman klien | **UNKNOWN**: staf hanya menyatakan Netlify "tidak mem-parse x-forwarded-for" untuk geolokasi (12 April 2023) dan staf lain menyebut `x-forwarded-for` seharusnya IP klien tanpa jaminan | https://answers.netlify.com/t/reverse-proxy-how-to-forward-client-ip-address-to-netlify/89099 dan https://answers.netlify.com/t/how-to-access-ip-address-in-my-backend/101825 (akses 2026-11-11) |
+| Halaman "trusted proxies" Netlify membahas penyaringan header | TIDAK: halaman itu hanya membahas IP sumber di tingkat jaringan (deteksi proxy sah), bukan header | https://docs.netlify.com/manage/security/secure-access-to-sites/trusted-proxies/ (akses 2026-11-11) |
+| `proxy.ts` menulis ulang header IP | TERVERIFIKASI dari kode (hanya DIBACA, tidak diubah): tidak ada pembacaan atau penulisan `x-forwarded-for` atau `x-nf-*`; satu-satunya pembacaan header adalah `authorization` (Basic preview) dan `NextResponse.next({ request })` meneruskan header permintaan apa adanya | `proxy.ts` baris 113, 154-180 (CODE) |
+
+Akibat rancangan (pilihan yang aman TANPA bergantung pada jawaban UNKNOWN di atas):
+- `x-forwarded-for` tidak pernah dipakai sebagai identitas pembatas, sehingga memutar atau memalsukannya tidak berpengaruh apa pun (UNIT: tes memutar XFF mendarat di satu bucket bersama dan tidak menghabiskan bucket IP asli).
+- `x-nf-client-connection-ip` dipakai hanya bila literal IP valid. Bila ternyata klien bisa memalsukannya (UNKNOWN), penyerang masih bisa memutar nilainya untuk menghindari batas per-IP, dan bisa menghabiskan bucket IP korban. Dua batas penahan: kunci login adalah IP+email (bukan email saja), dan batas per-email OTP (8 per 15 menit) tidak bergantung pada IP.
+- Cara memverifikasi: butuh endpoint diagnostik yang menampilkan header (tidak ada hari ini; perubahan terpisah yang perlu persetujuan Founder, bukan bagian PR ini). Sampai itu dilakukan statusnya tetap UNKNOWN.
+
 ## 3. Temuan
 
-Peringkat: P0 = hentikan peluncuran; P1 = sebelum tenant ke-11 atau 2 minggu pertama; P2 = jadwalkan; P3 = kebersihan. "Perbaikan" tidak dikerjakan di PR ini (file bukan milik tugas atau terlarang).
+Peringkat: P0 = hentikan peluncuran; P1 = sebelum tenant ke-11 atau 2 minggu pertama; P2 = jadwalkan; P3 = kebersihan. "Perbaikan" tidak dikerjakan di PR audit (file bukan milik tugas atau terlarang); SEC-01 dan SEC-02 dikerjakan di PR perbaikan terpisah, sisanya masih rancangan.
 
 | ID | Pri | Temuan | Bukti | Perbaikan (rancangan) | Pemilik |
 |---|---|---|---|---|---|
-| SEC-01 | P1 | `registerAction`, `verifyEmailOtpAction`, `resendSignupOtpAction` memakai `getClientIp` (`lib/rate-limit.ts` baris 67-78) yang jatuh ke hop pertama `x-forwarded-for` bila header Netlify tak ada. Klien bisa memutar nilainya sehingga pembatas per-IP (anti trial-farming dan tebak kode OTP) tidak mengikat. Pembatas per-email OTP tetap bekerja. Apakah klien bisa memalsukan `x-nf-client-connection-ip`: UNKNOWN | CODE + UNIT (tes bukti memutar XFF menghasilkan kunci berbeda) | Pakai `getTrustedClientIp` + `ipBucketKey` (`lib/security/client-ip.ts`) di `features/auth/actions.ts` baris 129 dan `features/auth/otp-actions.ts` baris 53, 88, dengan satu bucket ketat bersama bila IP `null`, persis pola `app/api/demo/start/route.ts` | **Butuh persetujuan Founder** (auth) |
-| SEC-02 | P1 | `loginAction` tanpa pembatas aplikasi; `lib/security/login-throttle.ts` sudah ada, teruji, tetapi tidak terpasang. Hanya batas Supabase Auth per-IP (sama dengan T1 di dokumen soft launch) | CODE + UNIT | Panggil `checkLoginThrottle(ip, email)` setelah validasi skema dan sebelum `signInWithPassword` (`features/auth/actions.ts` baris 77), balas `LOGIN_THROTTLED_MESSAGE`; gabungkan dengan SEC-01 agar IP tepercaya | **Butuh persetujuan Founder** (auth) |
+| SEC-01 | P1 | **DIPERBAIKI DI PR INI (belum merge, belum di produksi).** Temuan awal: `registerAction`, `verifyEmailOtpAction`, `resendSignupOtpAction` memakai `getClientIp` yang jatuh ke hop pertama `x-forwarded-for`, sehingga pembatas per-IP bisa dilewati dengan memutar header. Perbaikan: ketiganya kini memakai `getAuthClientBucket` (`lib/security/login-throttle.ts`) yang hanya membaca `x-nf-client-connection-ip` lewat `getTrustedClientIp` + `ipBucketKey` (IPv6 per /64) dan TIDAK PERNAH membaca `x-forwarded-for`; tanpa IP tepercaya semua permintaan masuk SATU bucket bersama (daftar 20/jam, verifikasi OTP 60/5 menit, kirim ulang OTP 30/jam; IP teridentifikasi tetap 5/jam, 20/5 menit, 6/jam). `getClientIp` ditandai `@deprecated` dan tidak dipakai lagi oleh aksi auth. Batas yang tersisa: (1) apakah Netlify menimpa `x-nf-client-connection-ip` kiriman klien: UNKNOWN (bagian 2.6); bila tidak ditimpa, penyerang yang memalsukannya ke IP korban bisa menghabiskan bucket korban, jadi nilai dibatasi ke literal IP valid tetapi ini TIDAK menutup pemalsuan sepenuhnya; (2) pembatas in-memory per instance serverless (SEC-06); (3) bucket bersama bisa dihabiskan penyerang tanpa IP tepercaya sehingga pengguna sah tanpa header ikut tertahan sampai jendela habis. | UNIT (tes perilaku memakai aksi asli + pembatas asli, Supabase dimock; hijau hanya bila CI PR hijau) | Perbaikan selesai di kode; merge dan verifikasi header di produksi (UNKNOWN) | Founder memutuskan merge |
+| SEC-02 | P1 | **DIPERBAIKI DI PR INI (belum merge, belum di produksi).** Temuan awal: `loginAction` tanpa pembatas aplikasi. Perbaikan: `loginAction` memanggil `checkLoginThrottle` setelah validasi skema dan sebelum `signInWithPassword`. Hanya GAGAL-masuk (status 400) yang dihitung, pada dua kunci: IP+email (5 per 15 menit) dan IP saja (30 per 15 menit; bucket bersama tanpa IP tepercaya 60). TIDAK ada kunci per-email saja, jadi penyerang tidak bisa mengunci korban dari IP lain. Pesan galat tunggal generik (`LOGIN_THROTTLED_MESSAGE`), sama untuk akun ada/tidak dan untuk kedua alasan; sukses mereset kunci IP+email (kunci IP saja sengaja tidak direset); cek tidak menambah hitungan sehingga jendela tidak diperpanjang oleh percobaan yang diblokir; bila pembatas error, login tetap jalan (fail-safe). Batas yang tersisa: in-memory per instance serverless (tidak dibagi antar instance, reset saat deploy/cold start; rem untuk tebakan naif, bukan jaminan terdistribusi); pengguna di balik NAT operator seluler yang sama bisa saling menahan sampai 15 menit; penyerang di IP yang sama dengan korban (NAT) bisa menahan kunci IP+email korban pada IP itu; batas Supabase Auth per-IP tetap berlaku di bawahnya. | UNIT (aksi asli + pembatas asli, Supabase dimock; hijau hanya bila CI PR hijau) | Perbaikan selesai di kode; merge | Founder memutuskan merge |
 | SEC-03 | P2 | Empat route UMKMpro mengembalikan `err.message` mentah pada 500 (`conversions` baris 49-50, `products` 48-49, `promotions` 59-60, `webhooks` 49-50). Pesan driver DB bisa memuat nama tabel/constraint. Pemanggil sudah terautentikasi HMAC, jadi sempit | CODE + UNIT (tes mengunci tepat 4 berkas dan perilakunya) | Ganti dengan pesan tetap (`"Gagal ..."`), catat detail ke `console.error` lewat `describeSafeError` (`lib/connectors/safe-error-log`) | Pemilik route UMKMpro (file di luar lingkup tugas ini) |
 | SEC-04 | P2 | Integrasi UMKMpro memakai SATU rahasia bersama untuk semua tenant; `tenantId` diambil dari body dan ditulis dengan klien service-role (bypass RLS). Pemegang token bisa menulis ke tenant mana pun. Tanpa nonce (replay dalam 5 menit; efeknya dibatasi idempotensi `external_event_id` untuk konversi/webhook, tetapi `promotions` membuat handoff baru). Rate limit 60/menit/route hanya di memori. Rute dikecualikan dari gating sesi di `proxy.ts` | CODE + UNIT | Pastikan `UMKMPRO_SERVICE_TOKEN` acak panjang dan hanya di Netlify (UNKNOWN apakah terisi); rotasi saat staf berubah; jangka menengah tambah nonce/cache idempotensi dan pembatasan IP asal | Founder (konfigurasi), kode: `lib/umkmpro/*` |
 | SEC-05 | P3 | `/api/internal/jobs/process` menjawab 503 dengan nama variabel env (`JOBS_PROCESSOR_SECRET`, `SUPABASE_SECRET_KEY`) sebelum memeriksa Bearer; route UMKMpro serupa (`UMKMPRO_SERVICE_TOKEN kosong`). Route jobs hanya terjangkau pengguna login (proxy), route UMKMpro terjangkau siapa pun: menyingkap status konfigurasi | CODE | Pesan generik "Layanan belum dikonfigurasi" tanpa nama env | Pemilik route; `lib/umkmpro/route-helpers.ts` |
@@ -105,18 +125,18 @@ Tes baru (semua UNIT, tanpa jaringan, tanpa database):
 | `security-tenant-binding.test.ts` | Tidak ada tenant dari request; semua server action mengautentikasi; kueri kredensial service-role memfilter tenant |
 | `security-open-redirect.test.ts` | 18 vektor pada dua route + penolakan tipe OTP selain `signup` |
 | `security-error-leak.test.ts` | Mengunci tepat 4 route yang membocorkan `err.message` (SEC-03) dan perilaku 500 saat ini |
-| `security-auth-abuse-controls.test.ts` | Bukti SEC-01/SEC-02 sebagai keadaan saat ini + kontrol yang sudah berlaku |
+| `security-auth-abuse-controls.test.ts` | Dibalik dari "mengunci celah" menjadi menguji perilaku aman SEC-01/SEC-02 (XFF palsu tidak mengubah bucket, IP null masuk bucket bersama, login dibatasi setelah N gagal, reset saat sukses, pesan generik, fail-safe) plus regresi login/daftar/OTP normal |
 | `security-repo-hygiene.test.ts` | Pola rahasia, berkas `.env`, `.env.example`, keamanan workflow pada repo publik |
 
-Cara kerja kunci "keadaan saat ini": tes lulus selama celah ada dan GAGAL saat celah ditutup; pesan kegagalan memberi tahu bahwa tes perlu dibalik menjadi penjaga perbaikan. Itu disengaja, bukan tanda regresi.
+Cara kerja kunci "keadaan saat ini": tes lulus selama celah ada dan GAGAL saat celah ditutup; pesan kegagalan memberi tahu bahwa tes perlu dibalik menjadi penjaga perbaikan. Itu disengaja, bukan tanda regresi. Pengecualian: `security-auth-abuse-controls.test.ts` sudah dibalik di PR perbaikan SEC-01/SEC-02 dan kini menjaga perilaku aman.
 
 ## 5. Risiko soft launch 10 tenant, berperingkat
 
 | # | Risiko | Pri | Bukti | Mitigasi |
 |---|---|---|---|---|
 | 1 | Biaya AI tak terbatas bila batas pengeluaran penyedia belum dipasang (demo publik + trial; pembatas hanya in-memory) | Tinggi | CODE; nilai dashboard penyedia: UNKNOWN | G5: pasang batas bulanan di dashboard penyedia (Founder, HP) |
-| 2 | Trial-farming dan tebak OTP lewat pemalsuan IP (SEC-01), tanpa batas jumlah tenant | Sedang | CODE + UNIT | SEC-01, P1-2; batas 10 tenant sebagai aturan operasional |
-| 3 | Tebak sandi login tanpa rem aplikasi (SEC-02) | Sedang | CODE + UNIT | Batas Supabase 150 token/5 menit/IP sementara; SEC-02 |
+| 2 | Trial-farming dan tebak OTP lewat pemalsuan IP (SEC-01): diperbaiki di PR perbaikan (belum merge); sisa risiko: pemalsuan `x-nf-client-connection-ip` UNKNOWN, pembatas per instance; tanpa batas jumlah tenant | Sedang → Rendah-sedang setelah merge | CODE + UNIT | Merge PR perbaikan; P1-2; batas 10 tenant sebagai aturan operasional |
+| 3 | Tebak sandi login (SEC-02): rem aplikasi dipasang di PR perbaikan (belum merge); sisa risiko: per instance, NAT seluler | Sedang → Rendah setelah merge | CODE + UNIT | Merge PR perbaikan; batas Supabase 150 token/5 menit/IP tetap berlaku |
 | 4 | Proyek Supabase dibagi dengan PUBLOE/UMKMpro: kesalahan RLS di satu produk berdampak ke yang lain; ref publik; advisor lama mencatat RPC anon | Sedang | CODE; status sekarang UNKNOWN | SEC-10: jalankan advisor baca-saja dan catat |
 | 5 | Kegagalan senyap: tidak ada pelacak error, `/api/health` dan `/api/ready` hanya probe | Sedang | CODE | P1-4; pasang UptimeRobot (G6, G7) |
 | 6 | Penghapusan data/PDP: tidak ada fungsi penghapusan per tenant, kontak eskalasi kosong | Sedang | CODE | P1-7, G6 (Founder) |
@@ -128,11 +148,11 @@ Cara kerja kunci "keadaan saat ini": tes lulus selama celah ada dan GAGAL saat c
 ## 6. Tindakan Founder (semua dari HP)
 
 Wajib sebelum undangan pertama (belum dikerjakan PR ini, sudah ada di `docs/FOUNDER_CHECKLIST_HP.md`): G5 batas pengeluaran penyedia AI, G6/G7 kontak eskalasi dan monitor. Tambahan dari audit ini:
-1. Putuskan persetujuan untuk SEC-01 dan SEC-02 (perubahan `features/auth/*`). Frasa persetujuan yang dibutuhkan ditentukan Founder.
+1. Tinjau dan putuskan merge PR perbaikan SEC-01/SEC-02 (Draft; CI harus hijau). Setelah merge, cek di produksi apakah pendaftaran dan login normal dari HP berjalan (lihat risiko NAT seluler di SEC-02).
 2. Aktifkan Secret scanning, Push protection dan Dependabot alerts di GitHub (Settings > Code security).
 3. Cek header di produksi lewat browser (SEC-07/2.3) dan catat hasilnya.
 4. Konfirmasi apakah `UMKMPRO_SERVICE_TOKEN` terisi di Netlify; bila belum dipakai, biarkan kosong.
 
 ## 7. Batas audit
 
-Tidak diperiksa: nilai env produksi, konfigurasi Supabase/Netlify, RLS dan data produksi, kerentanan dependensi, perilaku jaringan nyata (header Netlify, validitas `x-nf-client-connection-ip`), penyedia pihak ketiga. Pemindaian rahasia hanya mencakup pola yang dikenal; rahasia tanpa pola khas (kata sandi biasa) tidak terdeteksi. Tes baru belum dijalankan di lingkungan ini (dependensi tidak terpasang); bukti lulus hanya dari CI pada PR.
+Tidak diperiksa: nilai env produksi, konfigurasi Supabase/Netlify, RLS dan data produksi, kerentanan dependensi, perilaku jaringan nyata (apakah Netlify menimpa header IP kiriman klien: UNKNOWN, lihat 2.6), penyedia pihak ketiga. Pemindaian rahasia hanya mencakup pola yang dikenal; rahasia tanpa pola khas (kata sandi biasa) tidak terdeteksi. Tes baru belum dijalankan di lingkungan ini (dependensi tidak terpasang); bukti lulus hanya dari CI pada PR.

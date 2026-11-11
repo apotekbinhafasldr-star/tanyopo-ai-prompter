@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { __resetRateLimitStateForTests, checkRateLimit, getClientIp } from "@/lib/rate-limit";
+import {
+  __resetRateLimitStateForTests,
+  checkRateLimit,
+  getClientIp,
+  peekRateLimit,
+  resetRateLimit,
+} from "@/lib/rate-limit";
 
 describe("checkRateLimit", () => {
   beforeEach(() => {
@@ -107,5 +113,36 @@ describe("registerAction's rate-limit shape (5 attempts / hour per IP)", () => {
       5 * 1000,
     );
     expect(otherIp.allowed).toBe(true);
+  });
+});
+
+describe("peekRateLimit / resetRateLimit / sweep", () => {
+  beforeEach(() => {
+    __resetRateLimitStateForTests();
+  });
+
+  it("peek never counts a hit and reports the remaining budget", () => {
+    for (let i = 0; i < 10; i += 1) expect(peekRateLimit("p", 2, 1_000, 0)).toMatchObject({ allowed: true, remaining: 2 });
+    checkRateLimit("p", 2, 1_000, 0);
+    expect(peekRateLimit("p", 2, 1_000, 10)).toMatchObject({ allowed: true, remaining: 1 });
+    checkRateLimit("p", 2, 1_000, 20);
+    expect(peekRateLimit("p", 2, 1_000, 30)).toMatchObject({ allowed: false, remaining: 0, resetAt: 1_000 });
+    expect(peekRateLimit("p", 2, 1_000, 1_000).allowed).toBe(true);
+  });
+
+  it("reset forgets one bucket only", () => {
+    checkRateLimit("a", 1, 60_000, 0);
+    checkRateLimit("b", 1, 60_000, 0);
+    resetRateLimit("a");
+    expect(checkRateLimit("a", 1, 60_000, 1).allowed).toBe(true);
+    expect(checkRateLimit("b", 1, 60_000, 1).allowed).toBe(false);
+  });
+
+  it("sweeps expired windows once the map is large, keeping live ones", () => {
+    for (let i = 0; i < 5_000; i += 1) checkRateLimit(`old:${i}`, 1, 1_000, 0);
+    checkRateLimit("live", 1, 1_000_000, 0);
+    checkRateLimit("trigger", 1, 1_000, 5_000); // size >= threshold and old entries expired: sweep runs
+    expect(checkRateLimit("live", 1, 1_000_000, 5_001).allowed).toBe(false); // still tracked
+    expect(checkRateLimit("old:1", 1, 1_000, 5_002).allowed).toBe(true); // expired anyway; the sweep itself is only memory hygiene
   });
 });
