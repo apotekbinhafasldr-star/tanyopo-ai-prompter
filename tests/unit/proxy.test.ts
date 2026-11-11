@@ -13,6 +13,17 @@ describe("isPublicAsset — B12 hotfix regression: auth routes that handle their
     expect(isPublicAsset("/api/healthz")).toBe(false);
   });
 
+  it("exempts /api/ready (readiness probe) exactly, no prefix or sibling path", () => {
+    expect(isPublicAsset("/api/ready")).toBe(true);
+    expect(isPublicAsset("/api/ready/")).toBe(false);
+    expect(isPublicAsset("/api/ready/extra")).toBe(false);
+    expect(isPublicAsset("/api/readyz")).toBe(false);
+    expect(isPublicAsset("/api/ready2")).toBe(false);
+    expect(isPublicAsset("/api/readiness")).toBe(false);
+    expect(isPublicAsset("/api")).toBe(false);
+    expect(isPublicAsset("/api/")).toBe(false);
+  });
+
   it("exempts /auth/confirm from cookie gating (signup confirmation arrives with no session yet)", () => {
     expect(isPublicAsset("/auth/confirm")).toBe(true);
   });

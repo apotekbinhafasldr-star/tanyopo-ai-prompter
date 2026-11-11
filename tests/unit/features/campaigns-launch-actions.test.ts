@@ -914,3 +914,133 @@ describe("launchChannelCampaignAction — approval destination snapshot", () => 
     });
   });
 });
+
+describe("launchChannelCampaignAction — approval threshold (require_approval_above)", () => {
+  const policyWith = (requireApprovalAbove: number | null) => ({
+    tenant_id: "t1",
+    daily_limit: null,
+    monthly_limit: null,
+    campaign_limit: null,
+    currency: "IDR",
+    require_approval_above: requireApprovalAbove,
+    autopilot_limit: null,
+    created_at: "",
+    updated_at: "",
+  });
+  const THRESHOLD_MESSAGE = /batas persetujuan/;
+  const decided = { decided_by: "owner-1", decided_at: "2026-10-01T01:00:00Z" };
+
+  beforeEach(() => {
+    requireSessionContextMock.mockClear();
+    connectorMock.createCampaign.mockClear();
+    connectorMock.createAdSet.mockClear();
+  });
+
+  function expectRefused(result: { error: string | null }, pattern: RegExp) {
+    expect(result.error).toMatch(pattern);
+    expect(harness.claimUpdate).not.toHaveBeenCalled();
+    expect(connectorMock.createCampaign).not.toHaveBeenCalled();
+    expect(connectorMock.createAdSet).not.toHaveBeenCalled();
+  }
+
+  it("above the threshold: an approval without a recorded Owner decision is refused before any side effect", async () => {
+    harness = buildHarness({ policy: policyWith(50_000) });
+    fx.approvals = [{ status: "APPROVED", created_at: "2026-10-01T00:00:00Z", context: { daily_budget: 100_000, total_budget: null } }];
+    expectRefused(await launchChannelCampaignAction("cc1"), THRESHOLD_MESSAGE);
+  });
+
+  it("above the threshold: an approved budget below the current budget is refused", async () => {
+    harness = buildHarness({ policy: policyWith(50_000) });
+    fx.approvals = [
+      { status: "APPROVED", created_at: "2026-10-01T00:00:00Z", ...decided, context: { daily_budget: 60_000, total_budget: null } },
+    ];
+    expectRefused(await launchChannelCampaignAction("cc1"), /melebihi nilai yang disetujui/);
+  });
+
+  it("above the threshold: an approval that does not record the total budget cannot cover a campaign that has one", async () => {
+    harness = buildHarness({ policy: policyWith(50_000), master: { daily_budget: 100_000, total_budget: 900_000 } });
+    fx.approvals = [{ status: "APPROVED", created_at: "2026-10-01T00:00:00Z", ...decided, context: { daily_budget: 100_000 } }];
+    expectRefused(await launchChannelCampaignAction("cc1"), THRESHOLD_MESSAGE);
+  });
+
+  it("above the threshold: an explicit Owner decision covering daily and total passes this check", async () => {
+    harness = buildHarness({ policy: policyWith(50_000), master: { daily_budget: 100_000, total_budget: 900_000, duration_days: 9 } });
+    fx.approvals = [
+      { status: "APPROVED", created_at: "2026-10-01T00:00:00Z", ...decided, context: { daily_budget: 100_000, total_budget: 900_000 } },
+    ];
+    const result = await launchChannelCampaignAction("cc1");
+    expect(result.error ?? "").not.toMatch(THRESHOLD_MESSAGE);
+  });
+
+  it("threshold not set: a legacy approval without decided_by behaves as before", async () => {
+    harness = buildHarness({ policy: policyWith(null) });
+    fx.approvals = [{ status: "APPROVED", created_at: "2026-10-01T00:00:00Z" }];
+    const result = await launchChannelCampaignAction("cc1");
+    expect(result.error ?? "").not.toMatch(THRESHOLD_MESSAGE);
+  });
+
+  it("budget at or below the threshold: no extra requirement", async () => {
+    harness = buildHarness({ policy: policyWith(100_000) });
+    fx.approvals = [{ status: "APPROVED", created_at: "2026-10-01T00:00:00Z" }];
+    const result = await launchChannelCampaignAction("cc1");
+    expect(result.error ?? "").not.toMatch(THRESHOLD_MESSAGE);
+  });
+});
+
+describe("launchChannelCampaignAction — Meta flight end_time (launch time + duration, start_date ignored)", () => {
+  beforeEach(() => {
+    requireSessionContextMock.mockClear();
+    connectorMock.createCampaign.mockClear();
+    connectorMock.createAdSet.mockClear();
+  });
+
+  const adSetInput = () => (connectorMock.createAdSet.mock.calls[0] as unknown[])[2] as Record<string, unknown>;
+
+  it.each([
+    ["future start_date", "2027-03-01"],
+    ["past start_date", "2020-01-01"],
+    ["no start_date", null],
+  ])("%s: end_time is launch time + duration, never counted from start_date", async (_label, startDate) => {
+    harness = buildHarness({ master: { duration_days: 5, start_date: startDate } });
+    const before = Math.floor(Date.now() / 1000);
+    const result = await launchChannelCampaignAction("cc1");
+    const after = Math.floor(Date.now() / 1000);
+    expect(result.error).toBeNull();
+    const end = adSetInput().endTimeUnixSeconds as number;
+    expect(end).toBeGreaterThanOrEqual(before + 5 * 86_400);
+    expect(end).toBeLessThanOrEqual(after + 5 * 86_400);
+    expect(adSetInput()).not.toHaveProperty("startTimeUnixSeconds");
+  });
+
+  it("a duration of 1 day is refused BEFORE the claim (nothing created)", async () => {
+    harness = buildHarness({ master: { duration_days: 1 } });
+    const result = await launchChannelCampaignAction("cc1");
+    expect(result.error).toMatch(/Durasi campaign tidak valid/);
+    expect(harness.claimUpdate).not.toHaveBeenCalled();
+    expect(connectorMock.createCampaign).not.toHaveBeenCalled();
+    expect(connectorMock.createAdSet).not.toHaveBeenCalled();
+  });
+
+  it("total_budget without duration is refused BEFORE the claim (spend could not be bounded)", async () => {
+    harness = buildHarness({ master: { daily_budget: 100_000, total_budget: 900_000, duration_days: null } });
+    const result = await launchChannelCampaignAction("cc1");
+    expect(result.error).toMatch(/durasi campaign belum diisi/);
+    expect(harness.claimUpdate).not.toHaveBeenCalled();
+    expect(connectorMock.createCampaign).not.toHaveBeenCalled();
+  });
+
+  it("daily x duration above total_budget is refused BEFORE the claim", async () => {
+    harness = buildHarness({ master: { daily_budget: 100_000, total_budget: 899_999, duration_days: 9 } });
+    const result = await launchChannelCampaignAction("cc1");
+    expect(result.error).toMatch(/melebihi budget total/);
+    expect(harness.claimUpdate).not.toHaveBeenCalled();
+    expect(connectorMock.createAdSet).not.toHaveBeenCalled();
+  });
+
+  it("neither total_budget nor duration: no end_time (unchanged behaviour)", async () => {
+    harness = buildHarness();
+    const result = await launchChannelCampaignAction("cc1");
+    expect(result.error).toBeNull();
+    expect(adSetInput()).not.toHaveProperty("endTimeUnixSeconds");
+  });
+});

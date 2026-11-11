@@ -1,9 +1,16 @@
+import type { Metadata } from "next";
 import { AppShell } from "@/components/layout/app-shell";
 import { TrialBanner } from "@/components/layout/trial-banner";
 import { requireSessionContext } from "@/services/session";
 import { canSeeAdminCenterLink } from "@/services/platform-admin";
 import { createClient } from "@/lib/supabase/server";
 import { getTrialState } from "@/services/billing";
+
+// The signed-in app is never a search landing page. Unauthenticated crawlers are redirected to /login (also noindex),
+// and this tag covers any response that is ever served without that redirect. Child pages keep their own titles.
+export const metadata: Metadata = {
+  robots: { index: false, follow: false },
+};
 
 /**
  * Read-only trial strip. It only reads the subscription row and derives the

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import {
   Hero,
   TanyopoIntelligence,
@@ -17,6 +18,7 @@ import {
   Faq,
   FinalCta,
 } from "@/features/marketing/sections";
+import { DemoNotice } from "@/features/marketing/demo-notice";
 import { OG_IMAGE, SITE_DESCRIPTION, SITE_TITLE } from "@/lib/seo/og";
 import { buildLandingJsonLd, serializeJsonLd } from "@/lib/seo/json-ld";
 import { getSiteOrigin } from "@/lib/seo/site-url";
@@ -51,6 +53,10 @@ export default function LandingPage() {
         // eslint-disable-next-line react/no-danger
         dangerouslySetInnerHTML={{ __html: serializeJsonLd(buildLandingJsonLd(getSiteOrigin())) }}
       />
+      {/* Reads ?demo=busy|unavailable on the client; Suspense keeps the page static. */}
+      <Suspense fallback={null}>
+        <DemoNotice />
+      </Suspense>
       <Hero />
       <TanyopoIntelligence />
       <IdeToResult />

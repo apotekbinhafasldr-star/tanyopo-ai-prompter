@@ -32,9 +32,18 @@ export const DEMO_AI_HARD_CAP = 5;
 const BURST_LIMIT = 2;
 const BURST_WINDOW_MS = 60 * 1000;
 
+/**
+ * Instance-wide ceiling on live demo AI calls per hour, whatever the number of sessions. Sessions are cheap to mint
+ * (bounded only by the per-IP/global limits in lib/demo/start-guard.ts), so the per-session cap alone does not bound
+ * total spend. In-memory and per instance like every limiter here: it caps the blast radius of one instance, it is not
+ * a global counter. Past the ceiling the demo serves its canned content (see features/demo/ai-actions.ts).
+ */
+export const DEMO_AI_GLOBAL_HOURLY_CAP = 100;
+const GLOBAL_WINDOW_MS = 60 * 60 * 1000;
+
 export type DemoAiUsageCheck =
   | { allowed: true }
-  | { allowed: false; reason: "BURST_LIMIT" | "HARD_CAP_REACHED" | "NOT_CONFIGURED" | "DB_ERROR" };
+  | { allowed: false; reason: "BURST_LIMIT" | "GLOBAL_LIMIT" | "HARD_CAP_REACHED" | "NOT_CONFIGURED" | "DB_ERROR" };
 
 /**
  * Atomically checks and, if allowed, consumes one unit of a demo
@@ -46,6 +55,10 @@ export async function checkAndConsumeDemoAiUsage(sessionId: string): Promise<Dem
   const burst = checkRateLimit(`demo-ai:${sessionId}`, BURST_LIMIT, BURST_WINDOW_MS);
   if (!burst.allowed) {
     return { allowed: false, reason: "BURST_LIMIT" };
+  }
+
+  if (!checkRateLimit("demo-ai:global", DEMO_AI_GLOBAL_HOURLY_CAP, GLOBAL_WINDOW_MS).allowed) {
+    return { allowed: false, reason: "GLOBAL_LIMIT" };
   }
 
   const admin = createAdminClient();

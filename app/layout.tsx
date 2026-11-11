@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { getSiteOrigin } from "@/lib/seo/site-url";
 import { OG_IMAGE, SITE_DESCRIPTION, SITE_TITLE } from "@/lib/seo/og";
+import { googleSiteVerification } from "@/lib/seo/search-console";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -18,6 +19,9 @@ export const metadata: Metadata = {
   metadataBase: new URL(getSiteOrigin()),
   title: { default: SITE_TITLE, template: "%s" },
   description: SITE_DESCRIPTION,
+  // Google Search Console meta-tag verification. Rendered only when NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION is set
+  // to a well-formed token (lib/seo/search-console.ts); nothing is emitted otherwise.
+  ...(googleSiteVerification() ? { verification: { google: googleSiteVerification() } } : {}),
   openGraph: {
     title: SITE_TITLE,
     description: SITE_DESCRIPTION,

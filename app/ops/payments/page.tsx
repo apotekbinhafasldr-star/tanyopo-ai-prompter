@@ -10,7 +10,9 @@ import {
   notifyHealth,
 } from "@/lib/billing/payment-alerts";
 import { formatCurrency } from "@/lib/utils/format";
+import { getDokuWebhookHealth, listRecheckCandidates } from "@/services/payment-health";
 import { ackAlertAction, resolveAlertAction, syncAlertsAction } from "./actions";
+import { recheckPaymentAction } from "./recheck-actions";
 
 export const metadata: Metadata = { title: "Antrean Pembayaran — LINOE", robots: { index: false, follow: false } };
 export const dynamic = "force-dynamic";
@@ -26,6 +28,17 @@ const MESSAGES: Record<string, string> = {
   invalid: "Permintaan tidak valid.",
   rate: "Terlalu banyak permintaan. Tunggu semenit.",
   denied: "Akses ditolak.",
+  recheck_applied: "Gateway DOKU mengonfirmasi LUNAS; langganan diaktifkan lewat jalur verifikasi.",
+  recheck_closed: "Gateway DOKU menyatakan pembayaran batal/kedaluwarsa/gagal; invoice ditutup.",
+  recheck_still_pending: "Gateway DOKU masih menyatakan PENDING. Tidak ada yang diubah.",
+  recheck_unknown: "Gateway DOKU menjawab status yang tidak dikenal. Tidak ada yang diubah; periksa di Back Office DOKU.",
+  recheck_review: "Pembayaran tercatat untuk ditinjau manual; langganan tidak diaktifkan.",
+  recheck_alarm: "Refund/chargeback tercatat sebagai alarm; langganan tidak berubah.",
+  recheck_unverifiable: "Gateway tidak dapat diverifikasi sekarang. Tidak ada yang diubah; coba lagi nanti.",
+  recheck_not_eligible: "Transaksi tidak memenuhi syarat (harus DOKU, PENDING, lebih dari 10 menit).",
+  recheck_not_configured: "DOKU sandbox belum dikonfigurasi; verifikasi ulang tidak dijalankan.",
+  recheck_failed: "Verifikasi ulang gagal. Tidak ada yang diubah.",
+  recheck_invalid: "Permintaan tidak valid.",
 };
 
 function str(v: string | string[] | undefined): string | undefined {
@@ -52,13 +65,15 @@ export default async function PaymentQueuePage({ searchParams }: { searchParams:
   const showDone = str(params.view) === "selesai";
 
   await syncIfStale(operator.admin);
-  const [alerts, state, notify] = await Promise.all([
+  const [alerts, state, notify, health, candidates] = await Promise.all([
     listPaymentAlerts(operator.admin, { states: showDone ? ["RESOLVED"] : ["OPEN", "ACKED"], limit: 100 }),
     getSyncState(operator.admin),
     getNotifyStatus(operator.admin),
+    getDokuWebhookHealth(operator.admin),
+    listRecheckCandidates(operator.admin),
   ]);
 
-  const tenantIds = [...new Set(alerts.map((a) => a.tenant_id))];
+  const tenantIds = [...new Set([...alerts.map((a) => a.tenant_id), ...(candidates ?? []).map((c) => c.tenant_id)])];
   const names = new Map<string, string>();
   if (tenantIds.length > 0) {
     const { data } = await operator.admin.from("tenants").select("id, nama_usaha").in("id", tenantIds);
@@ -76,7 +91,7 @@ export default async function PaymentQueuePage({ searchParams }: { searchParams:
       <header className="space-y-1">
         <h1 className="text-xl font-semibold">Antrean Pembayaran</h1>
         <p className="text-sm text-muted-foreground">
-          Hanya mencatat dan menandai. Halaman ini tidak bisa mengaktifkan, me-refund, atau mengubah pembayaran dan langganan.
+          Alarm hanya dicatat dan ditandai. Satu-satunya aksi pembayaran adalah Verifikasi ulang DOKU, yang hanya bertanya ke gateway; halaman ini tidak bisa mengaktifkan dari input operator, me-refund, atau mengedit pembayaran dan langganan.
         </p>
       </header>
 
@@ -116,6 +131,69 @@ export default async function PaymentQueuePage({ searchParams }: { searchParams:
             Sinkronkan sekarang
           </button>
         </form>
+      </section>
+
+      <section className="rounded-md border border-border bg-surface p-3 text-sm" aria-labelledby="doku-health">
+        <h2 id="doku-health" className="font-medium">
+          Kesehatan webhook DOKU (24 jam terakhir)
+        </h2>
+        {health.ok ? (
+          <>
+            <dl className="mt-2 grid grid-cols-[1fr_auto] gap-x-3 gap-y-1">
+              <dt>Status tak dikenal</dt>
+              <dd className={health.unknown > 0 ? "font-semibold text-warning" : ""}>{health.unknown}</dd>
+              <dt>Verifikasi gateway gagal</dt>
+              <dd className={health.verificationFailed > 0 ? "font-semibold text-warning" : ""}>{health.verificationFailed}</dd>
+              <dt>Gateway belum LUNAS (notifikasi mengklaim lunas)</dt>
+              <dd>{health.notPaid}</dd>
+              <dt>Transaksi gagal/tak dikenal berulang (3x atau lebih)</dt>
+              <dd className={health.repeatedTransactions > 0 ? "font-semibold text-danger" : ""}>{health.repeatedTransactions}</dd>
+              <dt>Kejadian tertua</dt>
+              <dd>{when(health.oldestAt)}</dd>
+            </dl>
+            {health.truncated ? <p className="mt-1 text-warning">Data dipotong; angka di atas minimal segitu.</p> : null}
+            {health.unknown + health.verificationFailed + health.notPaid === 0 ? (
+              <p className="mt-1 text-muted-foreground">Tidak ada kejadian bermasalah dalam 24 jam terakhir.</p>
+            ) : (
+              <p className="mt-1 text-muted-foreground">Hanya hitungan; tidak ada data pembayaran yang ditampilkan.</p>
+            )}
+          </>
+        ) : (
+          <p className="mt-1 text-warning">Gagal membaca kesehatan webhook. Jangan anggap aman; muat ulang halaman.</p>
+        )}
+      </section>
+
+      <section className="rounded-md border border-border bg-surface p-3 text-sm" aria-labelledby="doku-recheck">
+        <h2 id="doku-recheck" className="font-medium">
+          Verifikasi ulang pembayaran DOKU yang menggantung
+        </h2>
+        <p className="mt-1 text-muted-foreground">
+          Transaksi DOKU berstatus PENDING lebih dari 10 menit. Tombol hanya menanyakan status ke DOKU; langganan aktif hanya jika DOKU sendiri
+          menyatakan LUNAS dan nominalnya cocok.
+        </p>
+        {candidates === null ? (
+          <p className="mt-2 text-warning">Gagal membaca daftar transaksi.</p>
+        ) : candidates.length === 0 ? (
+          <p className="mt-2">Tidak ada transaksi DOKU yang menggantung.</p>
+        ) : (
+          <ul className="mt-2 space-y-2">
+            {candidates.map((c) => (
+              <li key={c.id} className="space-y-1 rounded-md border border-border p-2">
+                <p className="break-words">
+                  {names.get(c.tenant_id) ?? c.tenant_id.slice(0, 8)} · {c.plan} · {formatCurrency(c.amount, c.currency)}
+                </p>
+                <p className="break-all font-mono text-xs">{c.id}</p>
+                <p className="text-xs text-muted-foreground">Dibuat {when(c.created_at)}</p>
+                <form action={recheckPaymentAction}>
+                  <input type="hidden" name="transactionId" value={c.id} />
+                  <button type="submit" className="h-11 w-full rounded-md border border-border-strong px-4 text-sm font-medium">
+                    Verifikasi ulang
+                  </button>
+                </form>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       <section className="rounded-md border border-border bg-surface p-3 text-sm">
