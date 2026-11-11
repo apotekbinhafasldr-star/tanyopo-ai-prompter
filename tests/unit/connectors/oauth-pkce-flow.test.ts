@@ -460,7 +460,7 @@ describe("source locks", () => {
   it("the verifier is never logged, placed in a URL or written to the database", () => {
     for (const file of ["lib/connectors/oauth-authorize.ts", "lib/connectors/oauth-callback.ts"]) {
       const src = read(file);
-      expect(src).not.toMatch(/console\.\w+\([^;]*codeVerifier/s);
+      expect(src).not.toMatch(/console\.\w+\([^;]*codeVerifier/);
       expect(src).not.toMatch(/codeVerifier[^\n]*(searchParams|redirectWith|\.insert|\.upsert|\.update)/);
     }
   });
