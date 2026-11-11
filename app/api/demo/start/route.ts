@@ -1,43 +1,69 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { serverEnv } from "@/lib/env";
-import { createDemoSessionToken, DEMO_SESSION_COOKIE, DEMO_SESSION_TTL_MS } from "@/lib/demo/session";
-import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
+import {
+  createDemoSessionToken,
+  DEMO_SESSION_COOKIE,
+  DEMO_SESSION_TTL_MS,
+  verifyDemoSessionToken,
+} from "@/lib/demo/session";
+import { checkDemoStartLimit, isNonNavigationRequest } from "@/lib/demo/start-guard";
+import { getTrustedClientIp } from "@/lib/security/client-ip";
 
 /**
- * Soft-launch hardening (docs/SOFT_LAUNCH_10_TENANTS.md, P0-1). Every demo session gets its own hard cap of real AI
- * calls (lib/demo/ai-usage.ts), but sessions themselves were free to mint, so the AI cost ceiling was only per
- * session, not per visitor. This best-effort per-IP limit on session creation bounds that. It is in-memory (see
- * lib/rate-limit.ts: per instance, resets on deploy), so it is a brake, not a guarantee; the provider-side spend cap
- * remains the real ceiling. Not exported: a Next.js route file may only export route handlers and config.
- */
-const DEMO_START_RATE_LIMIT = 10;
-const DEMO_START_RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
-
-/**
- * "Coba Demo" entry point (Founder requirement #1 — Isolated Temporary
- * Demo Session, low friction, no shared public username/password).
+ * "Coba Demo" entry point (Founder requirement #1 — Isolated Temporary Demo Session, low friction, no shared public
+ * username/password).
  *
- * Issues a brand-new, per-visitor signed demo token and redirects into
- * the demo. No Supabase auth call, no tenant lookup, no database write —
- * this route cannot fail because of anything in the real tenant/auth
- * system, and has nothing to roll back if it does fail.
+ * Issues a brand-new, per-visitor signed demo token and redirects into the demo. No Supabase auth call, no tenant
+ * lookup, no database write — nothing here touches the real tenant/auth system.
+ *
+ * Abuse controls (docs/SOFT_LAUNCH_10_TENANTS.md, "Audit sesi demo"). All in-memory and per instance (lib/rate-limit.ts),
+ * so they are a brake, not a guarantee; the real ceilings are the DB per-session AI cap and the provider spend limit.
+ *  - Only navigations mint sessions: prefetch, sub-resource loads, HEAD and crawlers get 204 with no side effect and
+ *    without spending quota (lib/demo/start-guard.ts).
+ *  - A visitor who already holds a valid demo cookie is sent back in without minting a new session or spending quota,
+ *    which also protects people behind shared carrier NAT from burning the shared IP's quota by re-clicking.
+ *  - The IP comes only from `x-nf-client-connection-ip` (lib/security/client-ip.ts); `x-forwarded-for` is never trusted,
+ *    so it can neither bypass the limit nor be used to lock out another visitor. No trusted IP = one shared, stricter bucket.
+ *  - A global per-instance cap bounds total sessions even against an attacker with many IPs.
+ * Not exported: a Next.js route file may only export route handlers and config.
  */
+const NO_STORE = { "cache-control": "no-store" } as const;
+
+function noSideEffect() {
+  return new NextResponse(null, { status: 204, headers: NO_STORE });
+}
+
+function redirectTo(request: NextRequest, path: string, search?: Record<string, string>) {
+  const url = new URL(path, request.url);
+  for (const [key, value] of Object.entries(search ?? {})) url.searchParams.set(key, value);
+  return NextResponse.redirect(url, { headers: NO_STORE });
+}
+
+export async function HEAD() {
+  return noSideEffect();
+}
+
 export async function GET(request: NextRequest) {
-  if (!serverEnv.demo.sessionSecret) {
-    const url = new URL("/", request.url);
-    url.searchParams.set("demo", "unavailable");
-    return NextResponse.redirect(url);
+  if (isNonNavigationRequest(request.headers)) {
+    return noSideEffect();
   }
 
-  const clientIp = getClientIp(request.headers);
-  if (!checkRateLimit(`demo-start:${clientIp}`, DEMO_START_RATE_LIMIT, DEMO_START_RATE_LIMIT_WINDOW_MS).allowed) {
-    const url = new URL("/", request.url);
-    url.searchParams.set("demo", "busy");
-    return NextResponse.redirect(url);
+  const secret = serverEnv.demo.sessionSecret;
+  if (!secret) {
+    return redirectTo(request, "/", { demo: "unavailable" });
   }
 
-  const token = createDemoSessionToken(serverEnv.demo.sessionSecret);
-  const response = NextResponse.redirect(new URL("/demo/dashboard", request.url));
+  const existing = verifyDemoSessionToken(request.cookies.get(DEMO_SESSION_COOKIE)?.value, secret);
+  if (existing.ok) {
+    return redirectTo(request, "/demo/dashboard");
+  }
+
+  if (!checkDemoStartLimit(getTrustedClientIp(request.headers)).allowed) {
+    return redirectTo(request, "/", { demo: "busy" });
+  }
+
+  const token = createDemoSessionToken(secret);
+  const response = redirectTo(request, "/demo/dashboard");
 
   response.cookies.set(DEMO_SESSION_COOKIE, token, {
     httpOnly: true,
