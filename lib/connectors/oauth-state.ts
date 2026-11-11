@@ -1,3 +1,5 @@
+import { timingSafeEqual } from "node:crypto";
+
 /**
  * Pure helpers for the OAuth `state` cookie shared by the Meta/TikTok/X
  * authorize + callback handlers. No Next.js / server-only imports so they are
@@ -74,4 +76,86 @@ export function checkOauthState(input: {
   if (expectedTenantId !== tenantId) return { ok: false, reason: "tenant_mismatch", present };
 
   return { ok: true, code };
+}
+
+// ---------------------------------------------------------------------------
+// PKCE (RFC 7636) verifier cookie — used only by connectors that declare
+// `usesPkce` (X). The verifier is a secret: it lives ONLY in this httpOnly
+// cookie, is never put in a URL, a redirect, a log line or an error code, and
+// is deleted on the first callback (so a replayed callback has nothing to use).
+// ---------------------------------------------------------------------------
+
+/** RFC 7636 section 4.1: 43..128 characters of [A-Za-z0-9-._~]. We only mint base64url. */
+const CODE_VERIFIER_PATTERN = /^[A-Za-z0-9_-]{43,128}$/;
+
+/** `x_oauth_state` -> `x_oauth_verifier`. Throws for a name that does not follow the convention. */
+export function pkceVerifierCookieName(stateCookieName: string): string {
+  if (!stateCookieName.endsWith("_state")) {
+    throw new Error("State cookie name must end with _state.");
+  }
+  return `${stateCookieName.slice(0, -"_state".length)}_verifier`;
+}
+
+/**
+ * Path the verifier cookie is limited to: ONLY the platform's callback route
+ * (`/api/connections/x/callback`). The browser never sends it to any other
+ * route of the app. A wrong path fails closed (cookie not sent -> no_verifier).
+ */
+export function pkceVerifierCookiePath(platform: string): string {
+  return `/api/connections/${platform.toLowerCase()}/callback`;
+}
+
+/**
+ * `state:tenantId:userId:verifier`. Binding the verifier to the state, the
+ * tenant AND the user means a verifier minted for one authorization (or one
+ * tenant, or one user) can never be used to finish another. Base64url and
+ * UUIDs contain no `:`; anything else makes the cookie malformed (fail-closed).
+ */
+export function buildPkceVerifierCookieValue(input: {
+  state: string;
+  tenantId: string;
+  userId: string;
+  codeVerifier: string;
+}): string {
+  return `${input.state}:${input.tenantId}:${input.userId}:${input.codeVerifier}`;
+}
+
+export const PKCE_REJECTION_REASONS = [
+  "no_verifier",
+  "verifier_malformed",
+  "verifier_state_mismatch",
+  "verifier_tenant_mismatch",
+  "verifier_user_mismatch",
+] as const;
+
+export type PkceRejectionReason = (typeof PKCE_REJECTION_REASONS)[number];
+
+export type PkceCheckResult =
+  | { ok: true; codeVerifier: string }
+  | { ok: false; reason: PkceRejectionReason };
+
+/** Constant-time string equality (length is not secret here). */
+function safeEqual(a: string, b: string): boolean {
+  const left = Buffer.from(a);
+  const right = Buffer.from(b);
+  return left.length === right.length && timingSafeEqual(left, right);
+}
+
+export function checkPkceVerifier(input: {
+  state: string;
+  verifierCookie: string | undefined;
+  tenantId: string;
+  userId: string;
+}): PkceCheckResult {
+  const { state, verifierCookie, tenantId, userId } = input;
+  if (!verifierCookie) return { ok: false, reason: "no_verifier" };
+
+  const parts = verifierCookie.split(":");
+  if (parts.length !== 4) return { ok: false, reason: "verifier_malformed" };
+  const [boundState, boundTenantId, boundUserId, codeVerifier] = parts;
+  if (!CODE_VERIFIER_PATTERN.test(codeVerifier)) return { ok: false, reason: "verifier_malformed" };
+  if (!safeEqual(boundState, state)) return { ok: false, reason: "verifier_state_mismatch" };
+  if (!safeEqual(boundTenantId, tenantId)) return { ok: false, reason: "verifier_tenant_mismatch" };
+  if (!safeEqual(boundUserId, userId)) return { ok: false, reason: "verifier_user_mismatch" };
+  return { ok: true, codeVerifier };
 }

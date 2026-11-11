@@ -7,7 +7,7 @@ Terakhir diaudit: **2026-11-11**. Semua klaim dari dokumentasi resmi mencantumka
 | Area | Status | Catatan |
 |---|---|---|
 | Klien X API v2 (token, refresh, revoke, `users/me`, posting teks/gambar/video, metrik organik) | **CODE READY + UNIT TEST PASS** | Diuji dengan `fetch` palsu. Belum pernah menyentuh X sungguhan. |
-| Alur OAuth lewat jalur bersama (`oauth-authorize.ts` / `oauth-callback.ts`) | **DINONAKTIFKAN (fail-closed)** | PKCE butuh penyimpanan `code_verifier` di jalur bersama — butuh persetujuan Founder (bagian 5). |
+| Alur OAuth lewat jalur bersama (`oauth-authorize.ts` / `oauth-callback.ts`) | **CODE READY + UNIT TEST PASS, saklar MATI (fail-closed)** | Jalur bersama kini mendukung PKCE (cookie `x_oauth_verifier` httpOnly terikat state + tenant + user, Path hanya route callback, dihapus saat callback). `X_OAUTH_PKCE_WIRED` tetap `false`: `isConfigured()` false, authorize/callback X menolak `not_configured`. Mengubah saklar = persetujuan Founder (bagian 7A). |
 | Operasi iklan X (kampanye, ad set, creative, ad, statistik iklan, jeda, anggaran) | **TIDAK DIDUKUNG (fail-closed)** | X Ads API hanya OAuth 1.0a + butuh persetujuan akses Ads (bagian 2). |
 | Posting organik dari UI/aksi aplikasi | **BELUM TERSAMBUNG** | `publishPost`/`uploadMedia` ada di `XConnector`, tetapi tidak dipanggil dari mana pun; capability `PUBLISH_CONTENT` tetap nonaktif. |
 | Penjadwalan | **TIDAK ADA di sisi X** | Lihat bagian 4. |
@@ -55,8 +55,9 @@ Klien tidak punya state/cache global; token diberikan per panggilan (diuji: dua 
 
 ## 7. Blocker eksternal & rancangan yang butuh persetujuan
 
-**A. PKCE di jalur OAuth bersama — BUTUH PERSETUJUAN FOUNDER** (file terlarang: `lib/connectors/oauth-authorize.ts`, `oauth-callback.ts`, `oauth-state.ts`, `types.ts`, `x-oauth-state.ts`).
-Rancangan: (1) `handleConnectorOauthAuthorize` memanggil `generatePkcePair()` (sudah ada di `lib/connectors/x-pkce.ts`) hanya untuk platform yang menyatakan `usesPkce`, menyimpan `codeVerifier` dalam cookie httpOnly terpisah (`x_oauth_verifier`, umur sama dengan cookie state, dihapus saat callback); (2) `getAuthorizationUrl(state, { codeChallenge })` dan `exchangeCodeForToken(code, { codeVerifier })` menerima argumen opsional; (3) `XConnector` memanggil `getAuthorizationUrlWithPkce`/`exchangeCodeForTokenWithPkce` (sudah ada & teruji) dan `X_OAUTH_PKCE_WIRED` diubah ke `true`; (4) tes `oauth-flow.test.ts` ditambah kasus X. Alternatif tanpa cookie baru: verifier = HMAC(secret, state), tetap perlu perubahan antarmuka dan kunci rahasia.
+**A. PKCE di jalur OAuth bersama — TERIMPLEMENTASI, SAKLAR BUTUH PERSETUJUAN FOUNDER.**
+Yang sudah ada (Draft PR terpisah): antarmuka tambahan `PkceConnector` (`lib/connectors/pkce-connector.ts`, `PlatformConnector` tidak diubah); `handleConnectorOauthAuthorize` membuat pasangan PKCE hanya untuk konektor `usesPkce`, mengirim hanya `code_challenge` S256 ke X, dan menyimpan verifier di cookie httpOnly `x_oauth_verifier` (nilai `state:tenantId:userId:verifier`, umur dan atribut sama dengan cookie state, tetapi `Path=/api/connections/x/callback`); `handleConnectorOauthCallback` membaca dan MENGHAPUS cookie itu sebelum penolakan apa pun (replay ditolak), memeriksa keterikatan state + tenant + user (perbandingan waktu-konstan) + format RFC 7636, lalu memanggil `exchangeCodeForTokenWithPkce`. Verifier, state, kode, dan token tidak pernah masuk URL, redirect, atau log (hanya alasan allowlist). Tidak menyentuh enkripsi, skema, migrasi, RLS, `proxy.ts`.
+Untuk menyalakan: ubah `X_OAUTH_PKCE_WIRED` ke `true` di `x-connector.ts` (bukan env, tidak otomatis) hanya setelah frasa persetujuan Founder, kredensial X terisi (7D), dan uji sandbox.
 
 **B. Akses X Ads API — EXTERNAL BLOCKED.** Butuh persetujuan aplikasi untuk Ads API + alur OAuth 1.0a (access token **dan token secret**). Skema DB saat ini hanya menyimpan access/refresh token terenkripsi, jadi butuh migrasi (terlarang tanpa persetujuan). Sampai itu ada, iklan X tetap tidak didukung.
 
