@@ -6,7 +6,9 @@ export type ConnectionStatus =
   | "EXPIRED"
   | "ACTION_REQUIRED"
   | "NOT_AVAILABLE"
-  | "NOT_CONFIGURED";
+  | "NOT_CONFIGURED"
+  | "PROVIDER_PENDING"
+  | "RECONNECT_REQUIRED";
 
 const STATUS_LABEL: Record<ConnectionStatus, string> = {
   CONNECTED: "Terhubung",
@@ -15,11 +17,13 @@ const STATUS_LABEL: Record<ConnectionStatus, string> = {
   ACTION_REQUIRED: "Perlu Tindakan",
   NOT_AVAILABLE: "Tidak Tersedia",
   NOT_CONFIGURED: "Belum Dikonfigurasi",
+  PROVIDER_PENDING: "Menunggu Persetujuan Penyedia",
+  RECONNECT_REQUIRED: "Perlu Hubungkan Ulang",
 };
 
 const STATUS_VARIANT: Record<
   ConnectionStatus,
-  "success" | "neutral" | "warning" | "danger" | "outline"
+  "success" | "neutral" | "warning" | "danger" | "outline" | "info"
 > = {
   CONNECTED: "success",
   NOT_CONNECTED: "neutral",
@@ -27,6 +31,8 @@ const STATUS_VARIANT: Record<
   ACTION_REQUIRED: "warning",
   NOT_AVAILABLE: "outline",
   NOT_CONFIGURED: "outline",
+  PROVIDER_PENDING: "info",
+  RECONNECT_REQUIRED: "warning",
 };
 
 /**
