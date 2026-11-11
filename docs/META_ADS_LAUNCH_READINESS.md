@@ -11,10 +11,10 @@ Tanggal dokumen: 2026-11-11. Semua rujukan dokumentasi resmi Meta diakses pada t
 | Alur peluncuran (persetujuan, Budget Guard, klaim, 4 objek PAUSED) | UNIT TEST PASS | Semua objek dibuat `PAUSED`. Persetujuan Owner wajib. |
 | Gerbang S1 (`BUDGET_WRITE_ENABLED_PLATFORMS`) | TERKUNCI (sengaja) | Tidak diubah. Selama terkunci, peluncuran ke Meta ditolak sebelum klaim. |
 | Satuan budget IDR | BELUM TERVERIFIKASI | Lihat bagian 4. `meta-budget-units.ts` tetap `verified: false`. |
-| Versi API | CODE READY (belum dites nyata) | Dinaikkan dari v21.0 ke v25.0. |
+| Versi API | CODE READY (belum dites nyata) | Dinaikkan dari v21.0 ke v25.0. Perubahan payload v24 (`is_adset_budget_sharing_enabled`) sudah ditambahkan; bagian 3.4. |
 | Backoff rate limit | UNIT TEST PASS | Hanya untuk panggilan non-create. |
 | `require_approval_above` | UNIT TEST PASS | Sekarang dipakai di jalur pengajuan dan peluncuran Meta. |
-| Budget total / `end_time` | UNIT TEST PASS (sebagian) | Lihat bagian 3. |
+| Budget total / `end_time` | UNIT TEST PASS | `end_time` = waktu peluncuran + durasi; kasus tepi ditolak (fail closed). Batas harian Meta bukan batas keras: bagian 3.2. |
 | Panggilan nyata ke Meta | EXTERNAL BLOCKED | Butuh izin Meta (bagian 5) dan akun uji. |
 | Siap pelanggan | BELUM | Bukan CUSTOMER READY. |
 
@@ -23,7 +23,7 @@ Tanggal dokumen: 2026-11-11. Semua rujukan dokumentasi resmi Meta diakses pada t
 | # | Temuan audit | Hasil verifikasi di kode terbaru | Tindakan |
 |---|---|---|---|
 | 1 | `require_approval_above` tidak dipakai | Benar sebelum PR ini. | Diimplementasikan (bagian 3.1). |
-| 2 | `total_budget` tidak dikirim ke Meta | Benar: hanya `daily_budget`, tanpa `end_time`. | Sebagian (bagian 3.2). |
+| 2 | `total_budget` tidak dikirim ke Meta | Benar: hanya `daily_budget`, tanpa `end_time`. | Diimplementasikan di sisi LINOE (bagian 3.2). Audit lanjutan: `end_time` versi pertama dihitung dari `start_date`, padahal ad set tidak mengirim `start_time`; diperbaiki. |
 | 3 | `meta-campaign-spec` tidak terhubung, negara hard-coded `["ID"]` | Sebagian salah: untuk **Meta**, negara berasal dari `master.target_country` yang divalidasi (`resolveTargetCountry`). `["ID"]` hanya tersisa untuk TikTok dan X. Modul `meta-campaign-spec` memang masih tidak dipakai jalur peluncuran, dan ada tes yang sengaja mengunci itu. | Tidak diubah (bagian 3.5). |
 | 4 | Audiens terstruktur belum ada | Benar. Hanya rentang umur yang didukung konektor; peluncuran tidak mengirimnya. Kolom `audience_notes` hanya teks bebas. | Dilaporkan (bagian 6). |
 | 5 | Graph v21.0 usang, scope tanpa `pages_*` | Versi: benar, dan lebih buruk dari dugaan. Scope: belum terverifikasi. | Versi diperbarui; scope tidak diubah (bagian 3.4 dan 5). |
@@ -54,10 +54,12 @@ Sumber resmi (diakses 2026-11-11):
 Keputusan: LINOE tetap mengirim **satu** budget (budget harian yang disetujui Owner), tidak pernah keduanya.
 
 - `checkTotalBudgetCoverage` (`lib/campaigns/meta-flight.ts`): bila `total_budget` dan `duration_days` terisi, peluncuran ditolak jika `daily_budget x duration_days` melebihi `total_budget`. Ini penegakan di sisi LINOE.
-- `resolveMetaFlightEndTime`: menghitung `end_time` (UNIX detik, UTC) dari `start_date` (00:00 WIB) atau sekarang, ditambah `duration_days`. Durasi kurang dari 2 hari, atau data tidak terbaca, berarti tidak ada `end_time` (berjalan terus seperti sebelumnya).
+- `resolveMetaFlightEndTime` (diperbaiki setelah audit): `createAdSet` **tidak** mengirim `start_time`, sehingga ad set mulai segera setelah diaktifkan, apa pun `start_date`. Versi pertama menghitung `end_time` dari `start_date` (00:00 WIB), sehingga `start_date` di masa depan membuat iklan berjalan melebihi `duration_days` (dan `total_budget`). Kini `end_time = waktu peluncuran (dibulatkan ke bawah ke detik) + duration_days x 86.400 detik`. `start_date` tidak lagi menjadi masukan. Hitungan memakai detik berlalu (UNIX UTC), jadi zona waktu dan batas hari kalender tidak berpengaruh; pembulatan hanya memajukan akhir.
+- Fail closed, dihitung **sebelum klaim** (tidak ada objek dibuat, status tidak berubah): `duration_days` terisi tetapi bukan bilangan bulat 2 sampai 365 (1 hari tidak memenuhi aturan Meta "longer than 24 hours" untuk budget harian; di atas 365 atau tak terbaca dulu diam-diam menjadi "tanpa akhir"); `total_budget` terisi tetapi `duration_days` kosong (pengeluaran harian tidak bisa dibatasi; ini menutup celah yang sebelumnya dicatat). Keduanya kosong tetap berarti perilaku lama (tanpa `end_time`).
+- Konsekuensi yang disengaja: ad set dibuat `PAUSED` dan baru berjalan saat diaktifkan, lalu `end_time` tetap dihitung dari saat peluncuran. Aktivasi yang ditunda hanya **memperpendek** masa tayang, tidak pernah memperpanjang. Ad set tidak menunggu `start_date` di masa depan (perilaku ini sudah demikian sebelum PR ini).
 - Konektor Meta menerima `endTimeUnixSeconds` opsional dan mengirim `end_time` bersama `daily_budget`. Nilai tidak valid ditolak sebelum permintaan. Nilai `0` ditolak karena itu penanda "tanpa akhir" milik Meta.
-- Belum dilakukan: `lifetime_budget`. Butuh keputusan produk (pacing berbeda dari budget harian yang disetujui) dan tes pada akun uji.
-- Celah yang tersisa: campaign dengan `total_budget` tetapi tanpa `duration_days` tidak punya batas akhir dan tidak bisa dicek terhadap total. Ini perlu keputusan produk (mewajibkan durasi).
+- Anggaran: budget yang dikirim <= budget harian master <= budget harian yang disetujui (`resolveMetaLaunchBudget`), dan `checkTotalBudgetCoverage` menolak `daily x durasi > total_budget`.
+- **Risiko tersisa (BELUM TERVERIFIKASI penuh): budget harian Meta bukan batas keras.** Changelog Marketing API v24.0 (<https://developers.facebook.com/docs/graph-api/changelog/version24.0>, 2026-11-11): "Daily budget flexibility is increasing from 25% to 75%"; pembacaan ringkasan halaman menyebut pengeluaran mingguan tidak melebihi 7x budget harian. Halaman Budgets (<https://developers.facebook.com/documentation/ads-commerce/marketing-api/bidding/overview/budgets.md>) masih menyebut 25% dan tidak menyebut batas mingguan; kedua sumber berbeda dan tidak dapat didamaikan. Akibatnya total pengeluaran sungguhan bisa melebihi `daily x durasi` pada hari-hari tertentu, terutama untuk durasi di bawah 7 hari. Penyangga yang kokoh hanya `lifetime_budget` + `end_time`, yang belum dikerjakan (butuh keputusan Founder dan tes pada akun uji, bagian 6).
 
 ### 3.3 Backoff rate limit
 
@@ -85,7 +87,22 @@ Halaman yang sama menyebut Graph API v26.0 dirilis 2026-07-29, tetapi versi Mark
 
 Alasan mendesak: halaman versioning (<https://developers.facebook.com/docs/marketing-api/overview/versioning>) menyatakan panggilan ke versi yang tidak tersedia "may fail or be upgraded to the next available version", dan endpoint yang terdampak, misalnya `POST /{adset-id}`, **gagal** alih-alih di-upgrade otomatis. Pin v21.0 berarti pembuatan ad set bisa gagal.
 
-Belum terverifikasi: apakah ada perubahan perilaku v22 hingga v25 yang memengaruhi payload kita (campaign, ad set, creative, ad). Periksa changelog Marketing API sebelum uji nyata: <https://developers.facebook.com/documentation/ads-commerce/marketing-api/marketing-api-changelog>.
+#### Audit kompatibilitas v25.0 (2026-11-11)
+
+Sumber yang berhasil dibaca (WebFetch, 2026-11-11): tabel versi <https://developers.facebook.com/docs/graph-api/changelog/versions>; changelog <https://developers.facebook.com/docs/graph-api/changelog/version22.0>, `.../version23.0`, `.../version24.0`, `.../version25.0` (masing-masing memuat bagian Graph API dan Marketing API); panduan <https://developers.facebook.com/documentation/ads-commerce/marketing-api/bidding/guides/adset-budget-sharing>; referensi Ad Set <https://developers.facebook.com/documentation/ads-commerce/marketing-api/reference/ad-campaign>. Halaman `marketing-api-changelog/versionNN.0` dan referensi `ad-campaign-group` **tidak terjangkau** (di luar allowlist atau gagal). Isi changelog dibaca lewat ringkasan WebFetch, bukan salinan penuh.
+
+| Panggilan | Hasil | Status |
+|---|---|---|
+| URL dialog OAuth (`/v25.0/dialog/oauth`) | Hanya segmen versi yang berubah. Changelog Graph v22 sampai v25 tidak memuat perubahan Login/OAuth. | Changelog: tidak ada perubahan. Dokumen Facebook Login sendiri BELUM TERVERIFIKASI. |
+| Tukar token (`/oauth/access_token`, `fb_exchange_token`), `debug_token`, `/me/permissions` | Tidak ada perubahan tercantum v22 sampai v25. Satu-satunya perubahan lintas-node di v25: parameter `metadata=1` dihentikan; kita tidak memakainya. | Changelog: tidak ada dampak. |
+| `/me/adaccounts`, `/me/accounts`, `/{act_id}` (`id,name,account_status,currency,is_prepay_account,funding_source,min_daily_budget`) | Tidak ada penghapusan field ini di changelog yang terbaca. Referensi tingkat field tidak dibaca. | BELUM TERVERIFIKASI (tingkat field). |
+| `POST /{act}/campaigns` | **Berubah di v24.0**: `is_adset_budget_sharing_enabled` wajib bila budget diatur di level ad set; bila dihilangkan Meta menolak dengan error 4834011. Kita memakai budget ad set. **Diperbaiki**: konektor kini mengirim `false` (tanpa berbagi budget antar ad set; tidak mengubah budget). Pembuatan Advantage+ shopping/app campaign dihentikan sejak v24/v25 dan `smart_promotion_type` dihapus di v25; kita tidak mengirimnya. | Perbaikan: UNIT TEST PASS. Diterima Meta: BELUM DIUJI NYATA. Nilai `false` dipilih konservatif; panduan tidak menjelaskan perilaku `false` saat pembuatan. |
+| `POST /{act}/adsets` | `daily_budget`, `end_time` (tanpa `start_time`), `bid_strategy=LOWEST_COST_WITHOUT_CAP`, `billing_event=IMPRESSIONS` konsisten dengan referensi Ad Set. v23.0: ad set baru default ikut Advantage+ Audience (usia/jenis kelamin bisa menjadi saran, jangkauan bisa melampaui rentang). v24.0: fleksibilitas budget harian 25% ke 75% (lihat 3.2). | Dampak Advantage+ Audience pada `age_min/age_max` kita BELUM TERVERIFIKASI (parameter opt-out tidak dibaca); dicatat sebagai risiko, tidak diubah. |
+| `POST /{act}/adcreatives` | Perubahan v22 (`instagram_actor_id` diganti `instagram_user_id`, bundel `STANDARD_ENHANCEMENTS`, Segment Asset Customization) tidak menyangkut payload kita (`object_story_spec.link_data`, `picture`, `call_to_action`). | Tidak ada dampak yang terlihat; field-level BELUM TERVERIFIKASI. |
+| `POST /{act}/ads` | Tidak ada perubahan tercantum yang relevan. | Tidak ada dampak yang terlihat. |
+| `GET /{campaign}/insights` (`spend,impressions,reach,clicks`) | Penghapusan metrik di v25/v26 hanya untuk Page, Post, Video, dan Stories Insights. Field kerja asinkron baru tidak kita pakai. | Tidak ada dampak. |
+
+Pembulatan: yang terbukti hanyalah "tidak ada perubahan relevan yang tercantum di changelog yang terbaca" ditambah satu perubahan nyata (v24 budget sharing) yang sudah diperbaiki. Itu bukan bukti Meta menerima payload; hanya uji pada akun uji yang membuktikannya.
 
 Catatan: tabel `prompter_platform_capabilities` (di basis data, diisi migrasi) masih mencatat `api_version = v21.0`. Itu butuh migrasi dan tidak disentuh di PR ini (bagian 6).
 
@@ -96,6 +113,13 @@ Tidak diubah. Menghubungkan spek ke jalur peluncuran berarti mengubah tripwire y
 ### 3.6 Filter `tenant_id`
 
 `generateOptimizationRecommendationsAction` kini memakai `.eq("tenant_id", session.tenantId)` pada baca `prompter_channel_campaigns`, `prompter_marketing_metrics`, dan `prompter_conversions` (sebelumnya hanya mengandalkan RLS).
+
+### 3.7 Verifikasi tidak melemahkan gerbang (setelah audit)
+
+- OAuth: `getAuthorizationUrl` dan `exchangeCodeForToken` tidak berubah selain segmen versi pada `DIALOG_BASE_URL` dan `GRAPH_BASE_URL`; `SCOPES` tetap, dan `features/oauth*` tidak disentuh.
+- `require_approval_above` fail closed: ambang terisi tetapi tak terbaca dianggap terlampaui (`lib/campaigns/approval-threshold.ts:76`); pemeriksaan berjalan sebelum klaim (`features/campaigns/launch-actions.ts:563`, klaim di baris 793).
+- Gerbang S1: `lib/campaigns/external-budget-guard.ts` tidak diubah (selisih nol terhadap `main`); `evaluateExternalBudgetWrite` tetap dipanggil sebelum klaim (baris 381 dan 718).
+- Tidak ada jalur publish/aktivasi baru: semua pembuatan objek Meta tetap `status: "PAUSED"` (`lib/connectors/meta-connector.ts:524, 587, 647`); creative tidak punya status. Penolakan `end_time` dan durasi terjadi sebelum klaim (baris 592 vs 793), jadi tidak ada objek dibuat dan status tidak berubah.
 
 ## 4. Satuan minor IDR (belum terverifikasi)
 
@@ -122,7 +146,7 @@ Batas laju menurut dokumen yang sama: blokir pada skor maksimum berlangsung 300 
 
 1. **Migrasi**: perbarui `prompter_platform_capabilities.api_version` dari `v21.0` ke `v25.0` untuk baris Meta. Menyentuh `supabase/migrations` dan basis data bersama, jadi harus disetujui dan diterapkan terpisah.
 2. **Audiens terstruktur**: butuh keputusan tempat simpan (kolom baru di `prompter_master_campaigns` = migrasi, atau perluasan skema `ai_proposal`). Minat/perilaku Meta memakai ID dari Targeting Search API, jadi tidak boleh dikarang. Usulan awal tanpa minat: jenis kelamin dan rentang umur.
-3. **Wajib durasi bila ada budget total** (lihat 3.2), dan keputusan memakai `lifetime_budget`.
+3. **Keputusan memakai `lifetime_budget` + `end_time`** sebagai batas keras total, atau mewajibkan `budget total >= budget harian x durasi x faktor fleksibilitas Meta` (lihat risiko di 3.2). Kewajiban durasi saat ada budget total sudah diterapkan di sisi peluncuran Meta (3.2); input form belum mewajibkannya, sehingga Owner baru melihat penolakan saat meluncurkan.
 4. **Scope OAuth**: tambah `pages_read_engagement` atau `pages_manage_ads` hanya bila uji akun uji membuktikan perlu. Mengubah scope menyentuh alur OAuth dan App Review.
 5. **Panel kesiapan, preview internal, metrik konversi**: belum ada. Panel kesiapan dapat memakai hasil `checkApprovalThreshold`, validator budget, dan `getAccountReadinessSnapshot`. Metrik konversi butuh Pixel/CAPI atau kolom baru. Belum dikerjakan agar PR ini kecil dan aman; perlu desain UI.
 

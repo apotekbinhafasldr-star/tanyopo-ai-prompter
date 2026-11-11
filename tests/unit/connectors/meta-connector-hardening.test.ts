@@ -199,6 +199,18 @@ describe("CREATE calls are never retried", () => {
   });
 });
 
+describe("createCampaign v24+ payload", () => {
+  it("sends is_adset_budget_sharing_enabled=false (ad-set budgets), stays PAUSED, no campaign-level budget", async () => {
+    const calls = stubFetch([okResponse({ id: "camp_1" })]);
+    await new MetaConnector().createCampaign(TOKEN, "act_1", { name: "N", objective: "OUTCOME_AWARENESS", dailyBudgetMinorUnits: 1000 });
+    const body = JSON.parse(String(calls[0].init?.body));
+    expect(calls[0].url).toContain("/v25.0/act_1/campaigns");
+    expect(body).toMatchObject({ status: "PAUSED", special_ad_categories: [], is_adset_budget_sharing_enabled: false });
+    expect(body).not.toHaveProperty("daily_budget");
+    expect(body).not.toHaveProperty("lifetime_budget");
+  });
+});
+
 describe("createAdSet end_time", () => {
   const baseInput = {
     campaignId: "123",

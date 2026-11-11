@@ -523,6 +523,12 @@ export class MetaConnector implements PlatformConnector {
         objective: input.objective,
         status: "PAUSED",
         special_ad_categories: [],
+        // Marketing API v24.0+: required when the budget is set on the ad set
+        // (we send no campaign-level budget). "false" = no budget sharing between
+        // ad sets; omitting it is rejected by Meta (error 4834011). Source:
+        // developers.facebook.com/documentation/ads-commerce/marketing-api/bidding/guides/adset-budget-sharing,
+        // accessed 2026-11-11. Not yet exercised against a live account.
+        is_adset_budget_sharing_enabled: false,
         access_token: accessToken,
       }),
     }, { create: true });

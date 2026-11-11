@@ -52,46 +52,84 @@ describe("resolveMetaFlightEndTime", () => {
   const NOW = new Date("2026-11-11T00:00:00Z");
   const DAY = 86_400;
   const nowSeconds = NOW.getTime() / 1000;
+  const endOf = (input: Parameters<typeof resolveMetaFlightEndTime>[0]) => {
+    const r = resolveMetaFlightEndTime(input);
+    if (!r.ok) throw new Error(r.message);
+    return r.endTime;
+  };
 
-  it("future start_date: the run starts at 00:00 WIB of that date and lasts durationDays", () => {
-    const start = Date.parse("2026-12-01T00:00:00+07:00") / 1000;
-    expect(resolveMetaFlightEndTime({ startDate: "2026-12-01", durationDays: 10, now: NOW })).toBe(start + 10 * DAY);
+  it("the ad set starts when launched (no start_time is sent), so the end is always now + durationDays", () => {
+    expect(endOf({ durationDays: 10, now: NOW })).toBe(nowSeconds + 10 * DAY);
   });
 
-  it("past start_date: the run is counted from now, never from the past", () => {
-    expect(resolveMetaFlightEndTime({ startDate: "2026-01-01", durationDays: 7, now: NOW })).toBe(nowSeconds + 7 * DAY);
+  it("start_date is not an input: a future or past start_date cannot move the end", () => {
+    // @ts-expect-error startDate is intentionally not part of the contract
+    const future = endOf({ startDate: "2027-03-01", durationDays: 7, now: NOW });
+    // @ts-expect-error startDate is intentionally not part of the contract
+    const past = endOf({ startDate: "2020-01-01", durationDays: 7, now: NOW });
+    expect(future).toBe(nowSeconds + 7 * DAY);
+    expect(past).toBe(nowSeconds + 7 * DAY);
   });
 
-  it("no start_date: counted from now", () => {
-    expect(resolveMetaFlightEndTime({ startDate: null, durationDays: 3, now: NOW })).toBe(nowSeconds + 3 * DAY);
-    expect(resolveMetaFlightEndTime({ startDate: undefined, durationDays: 3, now: NOW })).toBe(nowSeconds + 3 * DAY);
+  it("the run never exceeds durationDays: end - now equals exactly durationDays * 24h (no calendar/time-zone effect)", () => {
+    // Around the WIB midnight boundary and a UTC day boundary.
+    for (const iso of ["2026-11-10T16:59:59Z", "2026-11-10T17:00:00Z", "2026-12-31T23:59:59Z", "2026-03-29T01:30:00Z"]) {
+      const now = new Date(iso);
+      expect(endOf({ durationDays: 3, now })).toBe(Math.floor(now.getTime() / 1000) + 3 * DAY);
+    }
   });
 
-  it("the end is always strictly after now by more than 24 hours", () => {
-    const end = resolveMetaFlightEndTime({ startDate: null, durationDays: 2, now: NOW });
-    expect(end).not.toBeNull();
-    expect((end as number) - nowSeconds).toBeGreaterThan(DAY);
+  it("sub-second clock is floored, so rounding can only end the run earlier", () => {
+    const now = new Date("2026-11-11T00:00:00.999Z");
+    const end = endOf({ durationDays: 2, now }) as number;
+    expect(end * 1000).toBeLessThanOrEqual(now.getTime() + 2 * DAY * 1000);
   });
 
-  it.each([null, undefined, 0, 1, -3, 1.5, 366, Number.NaN, "7"])("durationDays %j gives no end_time (ongoing, as before)", (durationDays) => {
-    expect(resolveMetaFlightEndTime({ startDate: null, durationDays, now: NOW })).toBeNull();
+  it("the minimum accepted duration (2 days) ends more than 24 hours after now (Meta daily-budget rule)", () => {
+    expect((endOf({ durationDays: 2, now: NOW }) as number) - nowSeconds).toBeGreaterThan(DAY);
   });
 
-  it.each(["2026-13-45", "01/12/2026", "2026-12-01T00:00:00Z", " 2026-12-01", 20261201, {}])(
-    "an unreadable start_date %j gives no end_time",
-    (startDate) => {
-      expect(resolveMetaFlightEndTime({ startDate, durationDays: 7, now: NOW })).toBeNull();
+  it("the maximum accepted duration (365 days) is accepted", () => {
+    expect(endOf({ durationDays: 365, now: NOW })).toBe(nowSeconds + 365 * DAY);
+  });
+
+  it("neither duration nor total_budget: no end_time (ongoing, as before)", () => {
+    expect(resolveMetaFlightEndTime({ durationDays: null, now: NOW })).toEqual({ ok: true, endTime: null });
+    expect(resolveMetaFlightEndTime({ durationDays: undefined, totalBudget: null, now: NOW })).toEqual({ ok: true, endTime: null });
+  });
+
+  it("total_budget without duration fails closed (daily spend could not be bounded)", () => {
+    const r = resolveMetaFlightEndTime({ durationDays: null, totalBudget: 1_000_000, now: NOW });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.message).toMatch(/durasi campaign belum diisi/);
+  });
+
+  it.each([1, 0, -3, 1.5, 366, 10_000, Number.NaN, Number.POSITIVE_INFINITY, "7", {}, true])(
+    "durationDays %j fails closed (never silently ongoing)",
+    (durationDays) => {
+      const r = resolveMetaFlightEndTime({ durationDays, now: NOW });
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.message).toMatch(/Durasi campaign tidak valid/);
     },
   );
 
-  it("an invalid reference date gives no end_time and never throws", () => {
-    expect(resolveMetaFlightEndTime({ startDate: null, durationDays: 7, now: new Date("nope") })).toBeNull();
+  it("an invalid reference date fails closed and never throws", () => {
+    expect(resolveMetaFlightEndTime({ durationDays: 7, now: new Date("nope") }).ok).toBe(false);
   });
 
   it("returns a safe positive integer of seconds that resolveMetaEndTime accepts", () => {
-    const end = resolveMetaFlightEndTime({ startDate: "2026-12-01", durationDays: 30, now: NOW });
+    const end = endOf({ durationDays: 30, now: NOW });
     expect(Number.isSafeInteger(end)).toBe(true);
-    expect(resolveMetaEndTime(end)).toEqual({ ok: true, value: end });
+    expect(resolveMetaEndTime(end as number)).toEqual({ ok: true, value: end });
+  });
+
+  it("budget bound: with the accepted duration, daily x duration <= total_budget is what checkTotalBudgetCoverage enforces together", () => {
+    for (const days of [2, 7, 365]) {
+      const daily = 100_000;
+      expect(endOf({ durationDays: days, totalBudget: daily * days, now: NOW })).not.toBeNull();
+      expect(checkTotalBudgetCoverage({ dailyBudget: daily, totalBudget: daily * days, durationDays: days })).toEqual({ ok: true });
+      expect(checkTotalBudgetCoverage({ dailyBudget: daily, totalBudget: daily * days - 1, durationDays: days }).ok).toBe(false);
+    }
   });
 });
 

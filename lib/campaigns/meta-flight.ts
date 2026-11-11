@@ -14,11 +14,12 @@
  * `total_budget` is therefore enforced on our side, not by Meta:
  *  1. `checkTotalBudgetCoverage` refuses a launch whose projected spend
  *     (daily budget x duration days) is above the Owner's total budget;
- *  2. `resolveMetaFlightEndTime` gives the connector an `end_time`, so the ad
- *     set cannot keep spending past the planned run length.
+ *  2. `resolveMetaFlightEndTime` gives the connector an `end_time` of
+ *     (launch time + duration), so the ad set cannot keep spending past the
+ *     planned run length. It also refuses the cases that could not be bounded.
  * Neither check can raise a budget or open any gate; both only add refusals or
- * an end date. A campaign without `total_budget` or `duration_days` behaves as
- * before.
+ * an end date. A campaign with neither `total_budget` nor `duration_days`
+ * behaves as before.
  *
  * Pure: no network, database, environment or connector access.
  */
@@ -52,34 +53,57 @@ export function checkTotalBudgetCoverage(input: {
 }
 
 const DAY_MS = 86_400_000;
-/** `start_date` is a calendar date in Indonesian local time (WIB, UTC+7). */
-const START_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const MIN_DURATION_DAYS = 2;
 const MAX_DURATION_DAYS = 365;
 
+const FLIGHT_DURATION_INVALID =
+  "Durasi campaign tidak valid untuk Meta (harus bilangan bulat 2 sampai 365 hari; budget harian Meta butuh durasi lebih dari 24 jam). Peluncuran dibatalkan; perbaiki durasi lalu ajukan ulang.";
+const FLIGHT_DURATION_REQUIRED =
+  "Budget total sudah ditetapkan tetapi durasi campaign belum diisi, sehingga pengeluaran harian tidak bisa dibatasi. Peluncuran dibatalkan; isi durasi campaign lalu ajukan ulang.";
+const FLIGHT_CLOCK_INVALID = "Waktu sistem tidak terbaca. Peluncuran dibatalkan; coba lagi.";
+
+export type MetaFlightEndTimeResult = { ok: true; endTime: number | null } | { ok: false; message: string };
+
 /**
- * `end_time` (UTC UNIX seconds) for the ad set, or `null` = send none (ongoing,
- * as before). The run starts at the later of `start_date` (00:00 WIB) and now,
- * and lasts `durationDays`. Fewer than 2 days cannot satisfy Meta's "longer
- * than 24 hours" rule for a daily budget, so no end_time is sent then either.
- * Never throws; unreadable input yields `null`.
+ * `end_time` (UTC UNIX seconds) for the ad set.
+ *
+ * `createAdSet` sends NO `start_time`, so Meta starts the ad set as soon as it
+ * is activated, regardless of `start_date`. The end is therefore always
+ * `now + durationDays` (elapsed seconds, so time zones and calendar-day
+ * boundaries cannot matter); `start_date` is deliberately NOT an input. Using
+ * a future `start_date` here would let the ad set run past `duration_days`
+ * (and past `total_budget`); a past one would do the same the other way round.
+ * `now` is floored to whole seconds, so any rounding only ends the run earlier.
+ *
+ * Fail closed (the caller must refuse the launch, nothing is created):
+ *  - `durationDays` set but not an integer in 2..365 (1 day cannot satisfy
+ *    Meta's "longer than 24 hours" rule for a daily budget; more than 365 or an
+ *    unreadable value would otherwise silently become "ongoing");
+ *  - `totalBudget` set while `durationDays` is not: daily spend cannot be bounded;
+ *  - an unreadable clock.
+ * Both unset: `endTime: null` (ongoing, as before). Never throws.
  */
-export function resolveMetaFlightEndTime(input: { startDate: unknown; durationDays: unknown; now: Date }): number | null {
-  const { startDate, durationDays, now } = input;
+export function resolveMetaFlightEndTime(input: {
+  durationDays: unknown;
+  totalBudget?: unknown;
+  now: Date;
+}): MetaFlightEndTimeResult {
+  const { durationDays, totalBudget, now } = input;
   const nowMs = now.getTime();
-  if (!Number.isFinite(nowMs)) return null;
-  if (typeof durationDays !== "number" || !Number.isSafeInteger(durationDays) || durationDays < 2 || durationDays > MAX_DURATION_DAYS) {
-    return null;
+  if (!Number.isFinite(nowMs)) return { ok: false, message: FLIGHT_CLOCK_INVALID };
+
+  if (isUnset(durationDays)) {
+    return isUnset(totalBudget) ? { ok: true, endTime: null } : { ok: false, message: FLIGHT_DURATION_REQUIRED };
+  }
+  if (
+    typeof durationDays !== "number" ||
+    !Number.isSafeInteger(durationDays) ||
+    durationDays < MIN_DURATION_DAYS ||
+    durationDays > MAX_DURATION_DAYS
+  ) {
+    return { ok: false, message: FLIGHT_DURATION_INVALID };
   }
 
-  let startMs = nowMs;
-  if (typeof startDate === "string" && startDate.length > 0) {
-    if (!START_DATE_PATTERN.test(startDate)) return null;
-    const parsed = Date.parse(`${startDate}T00:00:00+07:00`);
-    if (!Number.isFinite(parsed)) return null;
-    startMs = Math.max(parsed, nowMs);
-  } else if (startDate !== null && startDate !== undefined) {
-    return null;
-  }
-
-  return Math.floor((startMs + durationDays * DAY_MS) / 1000);
+  const endTime = Math.floor(nowMs / 1000) + (durationDays * DAY_MS) / 1000;
+  return Number.isSafeInteger(endTime) && endTime > 0 ? { ok: true, endTime } : { ok: false, message: FLIGHT_CLOCK_INVALID };
 }

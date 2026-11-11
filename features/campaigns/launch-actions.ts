@@ -584,6 +584,22 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
     return { error: coverage.message };
   }
 
+  // Planned end of the Meta run: launch time + duration (the ad set is created
+  // without start_time, so start_date is NOT used). Refusal cases (duration out
+  // of range, total_budget without duration) also happen BEFORE the claim.
+  let metaFlightEnd: number | null = null;
+  if (connectorPlatform === "META") {
+    const flight = resolveMetaFlightEndTime({
+      durationDays: masterCampaign.duration_days,
+      totalBudget: masterCampaign.total_budget,
+      now: new Date(),
+    });
+    if (!flight.ok) {
+      return { error: flight.message };
+    }
+    metaFlightEnd = flight.endTime;
+  }
+
   // Connection reads, still BEFORE the atomic claim: a failed read writes
   // nothing and calls no platform API (fail closed).
   //
@@ -785,14 +801,6 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
   // META: the unit-converted value from resolveMetaLaunchBudget (never the
   // whole-IDR number). TikTok/X keep their existing behaviour.
   const dailyBudgetMinorUnits = launchDailyBudgetMinorUnits;
-  const metaFlightEnd =
-    connectorPlatform === "META"
-      ? resolveMetaFlightEndTime({
-          startDate: masterCampaign.start_date,
-          durationDays: masterCampaign.duration_days,
-          now: new Date(),
-        })
-      : null;
   const budgetAuditContext = {
     allocated_daily_budget: allocatedDailyBudget,
     budget_percentage: channelRows.find((row) => row.id === channelCampaign.id)?.budget_percentage ?? null,
