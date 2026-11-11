@@ -388,14 +388,14 @@ export class DokuPaymentProvider implements PaymentProvider {
         // network, or is too large is always a verification failure, never a half-read answer.
         reader.cancel().catch(() => undefined);
         if (error instanceof PaymentProviderConfigError) throw error;
-        throw new PaymentProviderConfigError(this.name, "Respons DOKU terputus atau melewati batas waktu.");
+        throw new PaymentProviderConfigError(this.name, "Respons DOKU terputus atau melewati batas waktu.", "GATEWAY_TIMEOUT");
       }
     }
     let parsed: unknown;
     try {
       parsed = JSON.parse(text);
     } catch {
-      throw new PaymentProviderConfigError(this.name, "Respons DOKU bukan JSON yang valid.");
+      throw new PaymentProviderConfigError(this.name, "Respons DOKU bukan JSON yang valid.", "RESPONSE_NOT_JSON");
     }
     if (!isRecord(parsed)) throw new PaymentProviderConfigError(this.name, "Respons DOKU tidak valid.");
     return parsed;
@@ -438,10 +438,10 @@ export class DokuPaymentProvider implements PaymentProvider {
         cache: "no-store",
       });
     } catch {
-      throw new PaymentProviderConfigError(this.name, "Tidak dapat menghubungi DOKU.");
+      throw new PaymentProviderConfigError(this.name, "Tidak dapat menghubungi DOKU.", "GATEWAY_UNREACHABLE");
     }
     if (!response.ok) {
-      throw new PaymentProviderConfigError(this.name, `DOKU menolak permintaan (HTTP ${response.status}).`);
+      throw new PaymentProviderConfigError(this.name, `DOKU menolak permintaan (HTTP ${response.status}).`, "GATEWAY_REJECTED");
     }
     return this.readJson(response);
   }
@@ -493,18 +493,18 @@ export class DokuPaymentProvider implements PaymentProvider {
     const answeredInvoice = asString(order.invoice_number);
     const transactionStatus = asString(transaction.status);
     if (!answeredInvoice || !transactionStatus) {
-      throw new PaymentProviderConfigError(this.name, "Respons status DOKU tidak lengkap.");
+      throw new PaymentProviderConfigError(this.name, "Respons status DOKU tidak lengkap.", "STATUS_INCOMPLETE");
     }
     // The gateway must be talking about the very order we asked about.
     if (answeredInvoice !== invoiceNumber || decodeDokuInvoiceNumber(answeredInvoice)?.toLowerCase() !== orderId.toLowerCase()) {
-      throw new PaymentProviderConfigError(this.name, "Respons status DOKU untuk order yang berbeda.");
+      throw new PaymentProviderConfigError(this.name, "Respons status DOKU untuk order yang berbeda.", "ORDER_MISMATCH");
     }
 
     // Currency is checked strictly and is NEVER assumed: a present value must be exactly "IDR"; for a PAID answer it must be
     // present (DOKU's VA / e-wallet examples omit it - that case stays fail-closed until sandbox proves what DOKU returns).
     const currency: unknown = order.currency;
     if (currency !== undefined && currency !== null && currency !== "IDR") {
-      throw new PaymentProviderConfigError(this.name, "Mata uang respons DOKU bukan IDR.");
+      throw new PaymentProviderConfigError(this.name, "Mata uang respons DOKU bukan IDR.", "CURRENCY_NOT_IDR");
     }
 
     const facts = readStatusFacts(root, order, transaction);
@@ -514,15 +514,15 @@ export class DokuPaymentProvider implements PaymentProvider {
 
     if (status === "PAID") {
       if (currency !== "IDR") {
-        throw new PaymentProviderConfigError(this.name, "Mata uang pada respons DOKU tidak ada; aktivasi ditolak sampai terbukti IDR (blocker A6).");
+        throw new PaymentProviderConfigError(this.name, "Mata uang pada respons DOKU tidak ada; aktivasi ditolak sampai terbukti IDR (blocker A6).", "CURRENCY_MISSING");
       }
       // A "paid" answer is only usable with everything needed to reconcile it later. Missing => throw => safe retry,
       // never an activation (and never a guess such as "assume the amount is right").
       if (amount === null || amount <= 0) {
-        throw new PaymentProviderConfigError(this.name, "Nominal pada respons DOKU tidak ada atau tidak valid.");
+        throw new PaymentProviderConfigError(this.name, "Nominal pada respons DOKU tidak ada atau tidak valid.", "AMOUNT_MISSING");
       }
       if (!reference || !REQUEST_ID_PATTERN.test(reference)) {
-        throw new PaymentProviderConfigError(this.name, "Referensi pembayaran pada respons DOKU tidak ada.");
+        throw new PaymentProviderConfigError(this.name, "Referensi pembayaran pada respons DOKU tidak ada.", "REFERENCE_MISSING");
       }
     }
 
