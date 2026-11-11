@@ -122,7 +122,8 @@ describe("DOKU adapter — static guards (sandbox only, secrets stay on the serv
 
   it("adds no database migration, does not touch the proxy allowlist and does not enable the sweeper", () => {
     const known = new Set(readdirSync(path.join(root, "supabase/migrations")).map((m) => m.slice(0, 14)));
-    expect([...known].filter((v) => v > "20261103170000" && v !== "20261103170000")).toEqual([]);
+    // The adapter itself added none. The only later migration allowed is P0-3 (20261111130000, DOKU alert coverage), reviewed separately.
+    expect([...known].filter((v) => v > "20261103170000" && v !== "20261111130000")).toEqual([]);
     expect(read("proxy.ts")).toContain('pathname === "/api/webhooks/payment"');
     expect(read("proxy.ts")).not.toMatch(/doku/i);
   });
