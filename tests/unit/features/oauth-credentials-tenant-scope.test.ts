@@ -30,7 +30,7 @@ const { connector, getPagesMock } = vi.hoisted(() => ({
     pauseCampaign: vi.fn(async () => undefined),
     updateBudget: vi.fn(async () => undefined),
   },
-  getPagesMock: vi.fn(async () => [{ id: "p1", name: "Page" }]),
+  getPagesMock: vi.fn(async (_token: string) => [{ id: "p1", name: "Page" }]),
 }));
 vi.mock("@/lib/connectors/get-connector", () => ({ getConnector: vi.fn(() => connector) }));
 vi.mock("@/lib/connectors/meta-connector", () => ({
