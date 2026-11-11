@@ -47,7 +47,8 @@ export async function syncChannelCampaignInsightsAction(
 
   // ACTIVE or PAUSED with a platform object (Meta launches are recorded PAUSED).
   // Read-only: only getInsights() is called, never anything that writes to the platform.
-  if (!canSyncInsights(channelCampaign.status, channelCampaign.external_campaign_id)) {
+  const externalCampaignId = channelCampaign.external_campaign_id;
+  if (!externalCampaignId || !canSyncInsights(channelCampaign.status, externalCampaignId)) {
     return { error: "Insight hanya bisa disinkronkan untuk campaign yang sudah dibuat di platform (Aktif atau Dijeda)." };
   }
 
@@ -98,7 +99,7 @@ export async function syncChannelCampaignInsightsAction(
     const insights = await connector.getInsights(
       accessToken,
       connectedAccount.external_account_id,
-      channelCampaign.external_campaign_id,
+      externalCampaignId,
     );
 
     const today = new Date().toISOString().slice(0, 10);
