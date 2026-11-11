@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireSessionContext } from "@/services/session";
 import { getConnector } from "@/lib/connectors/get-connector";
+import { canSyncInsights } from "@/lib/campaigns/launched-status";
 import { CHANNEL_TO_CONNECTOR } from "@/lib/connectors/channel-map";
 import { decryptToken } from "@/lib/crypto/token-cipher";
 import type { Json } from "@/types/database";
@@ -44,8 +45,10 @@ export async function syncChannelCampaignInsightsAction(
     return { error: "Channel campaign tidak ditemukan." };
   }
 
-  if (channelCampaign.status !== "ACTIVE" || !channelCampaign.external_campaign_id) {
-    return { error: "Insight hanya bisa disinkronkan untuk campaign yang sudah Aktif di platform." };
+  // ACTIVE or PAUSED with a platform object (Meta launches are recorded PAUSED).
+  // Read-only: only getInsights() is called, never anything that writes to the platform.
+  if (!canSyncInsights(channelCampaign.status, channelCampaign.external_campaign_id)) {
+    return { error: "Insight hanya bisa disinkronkan untuk campaign yang sudah dibuat di platform (Aktif atau Dijeda)." };
   }
 
   const connectorPlatform = CHANNEL_TO_CONNECTOR[channelCampaign.channel];
