@@ -2,12 +2,12 @@ import type { Metadata } from "next";
 import { Share2, Music2, X as XIcon, Globe, Store } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { StatusPill, type ConnectionStatus } from "@/components/ui/status-pill";
 import { requireSessionContext } from "@/services/session";
 import { createClient } from "@/lib/supabase/server";
 import { getConnector } from "@/lib/connectors/get-connector";
 import { getCapabilities, type CapabilityRow } from "@/lib/connectors/capability-registry";
+import { PLATFORM_HELP, resolveConnectionView, type ConnectionView } from "@/lib/connectors/connection-readiness";
 import { formatDate } from "@/lib/utils/format";
 import { DisconnectButton } from "@/features/connections/disconnect-button";
 import { MetaPagePicker } from "@/features/connections/meta-page-picker";
@@ -28,6 +28,7 @@ const ERROR_LABEL: Record<string, string> = {
   encryption_not_configured: "Penyimpanan token belum dikonfigurasi di server (kunci enkripsi kosong atau tidak valid). Hubungi admin.",
   server_not_configured: "Server belum dikonfigurasi untuk menyimpan koneksi (SUPABASE_SECRET_KEY kosong).",
   connect_failed: "Gagal menghubungkan akun. Silakan coba lagi.",
+  provider_pending: "Koneksi ini belum dibuka: aplikasi LINOE masih menunggu persetujuan dari penyedia.",
 };
 
 const CONNECTED_LABEL: Record<ConnectorPlatform, string> = {
@@ -35,14 +36,6 @@ const CONNECTED_LABEL: Record<ConnectorPlatform, string> = {
   TIKTOK: "TikTok",
   X: "X",
 };
-
-/**
- * Connectors whose connect flow is not offered from the UI yet. Display only:
- * the connector code and the /api/connections/<platform>/authorize routes stay
- * as they are, but no button or link on this page can trigger them for these
- * platforms. Remove a platform from this set to offer its connect button again.
- */
-const COMING_SOON_PLATFORMS: ReadonlySet<ConnectorPlatform> = new Set<ConnectorPlatform>(["TIKTOK", "X"]);
 
 const PLATFORM_INFO: Record<
   ConnectorPlatform,
@@ -68,7 +61,8 @@ const PLATFORM_INFO: Record<
     title: "X",
     subtitle: "X Ads API",
     authorizePath: "/api/connections/x/authorize",
-    notConfiguredHint: "Tambahkan X_CLIENT_ID, X_CLIENT_SECRET, dan X_REDIRECT_URI di server untuk mengaktifkan.",
+    notConfiguredHint:
+      "Koneksi X belum aktif: butuh X_CLIENT_ID, X_CLIENT_SECRET, dan X_REDIRECT_URI di server, serta alur otorisasi PKCE yang belum diaktifkan.",
   },
 };
 
@@ -88,13 +82,13 @@ interface ConnectedAccountRow {
  */
 type MetaPageSelection = { readable: true; name: string | null } | { readable: false };
 
-function computeStatus(platform: ConnectorPlatform, account: ConnectedAccountRow | undefined): ConnectionStatus {
+function computeView(platform: ConnectorPlatform, account: ConnectedAccountRow | undefined): ConnectionView {
   const connector = getConnector(platform);
-  if (!connector) return "NOT_AVAILABLE";
-  if (!connector.isConfigured()) return "NOT_CONFIGURED";
-  if (!account) return "NOT_CONNECTED";
-  if (account.expires_at && new Date(account.expires_at) < new Date()) return "EXPIRED";
-  return account.status as ConnectionStatus;
+  return resolveConnectionView(platform, {
+    connectorExists: Boolean(connector),
+    configured: connector ? connector.isConfigured() : false,
+    account,
+  });
 }
 
 export default async function ConnectionsPage({
@@ -227,38 +221,9 @@ function ConnectorCard({
 }) {
   const info = PLATFORM_INFO[platform];
   const Icon = info.icon;
-  const status = computeStatus(platform, account);
-
-  if (COMING_SOON_PLATFORMS.has(platform)) {
-    return (
-      <Card>
-        <CardContent className="flex flex-col gap-4 p-5">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <div className="flex size-10 items-center justify-center rounded-[var(--radius-md)] bg-surface-muted">
-                <Icon className="size-5 text-foreground" aria-hidden />
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-foreground">{info.title}</p>
-                <p className="text-xs text-muted-foreground">{info.subtitle}</p>
-              </div>
-            </div>
-            <Badge variant="outline">Segera hadir</Badge>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Koneksi {info.title} belum tersedia dan sedang dalam persiapan. Tombol hubungkan baru aktif setelah
-            integrasinya siap.
-          </p>
-          <div className="flex gap-2">
-            <Button size="sm" disabled aria-disabled="true">
-              Hubungkan
-            </Button>
-            {isOwner && account ? <DisconnectButton platform={platform} /> : null}
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
+  const { status, canStartOauth } = computeView(platform, account);
+  const help = PLATFORM_HELP[platform];
+  const hasStoredConnection = status === "CONNECTED" || status === "RECONNECT_REQUIRED";
 
   return (
     <Card>
@@ -283,24 +248,63 @@ function ConnectorCard({
           </p>
         ) : null}
 
+        {help ? (
+          <dl className="flex flex-col gap-2 text-xs text-muted-foreground">
+            <div>
+              <dt className="font-medium text-foreground">Posting organik</dt>
+              <dd>{help.organic}</dd>
+            </div>
+            <div>
+              <dt className="font-medium text-foreground">Iklan</dt>
+              <dd>{help.ads}</dd>
+            </div>
+          </dl>
+        ) : null}
+
         {!isOwner ? (
           <p className="text-xs text-muted-foreground">Hanya Owner yang dapat mengelola koneksi ini.</p>
         ) : status === "NOT_CONFIGURED" ? (
           <p className="text-xs text-muted-foreground">{info.notConfiguredHint}</p>
-        ) : status === "CONNECTED" || status === "EXPIRED" || status === "ACTION_REQUIRED" ? (
-          <div className="flex gap-2">
-            <Button asChild size="sm" variant="secondary">
-              <a href={info.authorizePath}>Sambungkan Ulang</a>
-            </Button>
-            <DisconnectButton platform={platform} />
+        ) : hasStoredConnection ? (
+          <div className="flex flex-col gap-2">
+            <div className="flex gap-2">
+              {canStartOauth ? (
+                <Button asChild size="sm" variant="secondary">
+                  <a href={info.authorizePath}>Sambungkan Ulang</a>
+                </Button>
+              ) : (
+                <Button size="sm" variant="secondary" disabled aria-disabled="true">
+                  Sambungkan Ulang
+                </Button>
+              )}
+              <DisconnectButton platform={platform} />
+            </div>
+            {!canStartOauth ? (
+              <p className="text-xs text-muted-foreground">
+                Menyambungkan ulang belum tersedia untuk {info.title}. Anda tetap dapat memutuskan koneksi.
+              </p>
+            ) : null}
           </div>
-        ) : (
+        ) : canStartOauth ? (
           <Button asChild size="sm">
             <a href={info.authorizePath}>Hubungkan</a>
           </Button>
+        ) : (
+          <div className="flex flex-col gap-2">
+            <div>
+              <Button size="sm" disabled aria-disabled="true">
+                Hubungkan
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {status === "PROVIDER_PENDING"
+                ? `Menunggu persetujuan dari penyedia. Tombol Hubungkan aktif setelah ${info.title} menyetujui aplikasi LINOE dan alur otorisasi tersedia.`
+                : `Alur koneksi ${info.title} belum tersedia di LINOE.`}
+            </p>
+          </div>
         )}
 
-        {platform === "META" && isOwner && (status === "CONNECTED" || status === "EXPIRED" || status === "ACTION_REQUIRED") ? (
+        {platform === "META" && isOwner && hasStoredConnection ? (
           metaPageSelection.readable ? (
             <MetaPagePicker selectedPageName={metaPageSelection.name} />
           ) : (

@@ -68,6 +68,10 @@ vi.mock("@/lib/connectors/get-connector", () => ({
   getConnector: () => (h.connectorAvailable ? h.connector : null),
 }));
 
+// The TikTok authorize route has its own provider gate (tests/unit/connectors/
+// tiktok-authorize-gate.test.ts). Here it is opened so the SHARED handler stays covered.
+vi.mock("@/lib/connectors/connection-readiness", () => ({ canStartOauth: () => true }));
+
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: () => (h.adminAvailable ? makeClient(h.db as FakeDb) : null),
 }));
@@ -265,6 +269,7 @@ beforeEach(() => {
   h.adminAvailable = true;
   h.connectorAvailable = true;
   h.connector = {
+    isConfigured: vi.fn(() => true),
     getAuthorizationUrl: vi.fn((state: string) => `https://auth.example/dialog?state=${state}`),
     exchangeCodeForToken: vi.fn(async () => ({
       accessToken: ACCESS,
