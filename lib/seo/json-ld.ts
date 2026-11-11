@@ -28,6 +28,15 @@ export function buildLandingJsonLd(origin: string) {
         address: LEGAL.location,
       },
       {
+        "@type": "WebSite",
+        "@id": `${origin}/#website`,
+        name: "LINOE",
+        alternateName: LEGAL.product,
+        url: origin,
+        inLanguage: "id",
+        publisher: { "@id": orgId },
+      },
+      {
         "@type": "SoftwareApplication",
         "@id": `${origin}/#software`,
         name: "LINOE",
@@ -54,8 +63,8 @@ export function buildLandingJsonLd(origin: string) {
 }
 
 /** JSON.stringify that is safe to inline in a <script> tag (no </script>, no HTML injection). */
-export function serializeJsonLd(data: unknown): string {
-  return JSON.stringify(data)
+export function serializeJsonLd(data: unknown, space?: number): string {
+  return JSON.stringify(data, null, space)
     .replace(/</g, "\\u003c")
     .replace(/>/g, "\\u003e")
     .replace(/&/g, "\\u0026")
