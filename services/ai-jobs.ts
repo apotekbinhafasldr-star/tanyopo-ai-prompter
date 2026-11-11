@@ -163,7 +163,13 @@ export async function runAiJob<T>(params: RunAiJobParams<T>): Promise<RunAiJobRe
   // Ensures a subscription row exists (lazily starting a new tenant's
   // trial on first access) before the atomic entitlement check below —
   // unchanged from before Batch B9.
-  await getOrCreateSubscription(supabase, tenantId);
+  try {
+    await getOrCreateSubscription(supabase, tenantId);
+  } catch {
+    // Fail closed (F1): no subscription row means no entitlement check and
+    // no AI call. Generic message, no database details.
+    return { ok: false, error: "Gagal memeriksa paket Anda. Silakan coba lagi.", jobId: null };
+  }
 
   // Batch B9 P0-1/P1-2/P2-1 — every AI generation in the app funnels
   // through here, so this is the one place entitlement (trial expiry,
