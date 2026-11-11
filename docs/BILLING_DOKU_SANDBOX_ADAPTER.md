@@ -78,11 +78,23 @@ lewat halaman kembali/sweeper (sweeper tetap MATI).
 `Request-Timestamp` tetap tidak dicek kesegarannya (A10: kebijakan retry DOKU tidak terdokumentasi); dengan short-circuit di atas,
 replay tidak lagi menimbulkan panggilan Check Status berulang. Jendela timestamp ditambahkan setelah perilaku resend DOKU terukur di sandbox.
 
-**UNKNOWN berulang (P2).** Jawaban yang tidak bisa diklasifikasi dengan aman (tipe/status baru, `ORDER_EXPIRED`, bentuk field aneh) tidak
-mengaktifkan dan tidak menutup invoice; webhook menjawab 503 dan baris event ditandai `error=VERIFIED_STATUS_UNKNOWN`
-(berbeda dari `VERIFIED_STATUS_NOT_PAID` = gateway masih PENDING). Pantau lewat query baca-saja pada `prompter_webhook_events`
-(`source_system='doku' and error='VERIFIED_STATUS_UNKNOWN'`). Alarm antrean khusus untuk UNKNOWN **BLOCKED**: tabel/fungsi alert (B4)
-hanya mengenal REFUND/CHARGEBACK/REVERSAL — menambah jenis alarm butuh migrasi (lihat blocker B-ALERT).
+**UNKNOWN berulang (P2) dan P0-A.** Jawaban yang tidak bisa diklasifikasi dengan aman (tipe/status baru, `ORDER_EXPIRED`, bentuk field aneh) tidak
+mengaktifkan dan tidak menutup invoice. Tiga penanda pada `prompter_webhook_events.error` (tanpa migrasi; CHECK `status` hanya mengizinkan
+RECEIVED/PROCESSED/FAILED/IGNORED, jadi `status` tidak ditambah):
+- Notifikasi mengklaim PAID, gateway UNKNOWN: `status=FAILED`, `error=VERIFIED_STATUS_UNKNOWN`, webhook 503 (DOKU mencoba ulang).
+- Notifikasi **tidak** mengklaim PAID (mis. kata status baru), gateway UNKNOWN: `status=IGNORED`, `error=UNKNOWN_STATUS:<kata status gateway>`
+  (hanya `[A-Za-z0-9_/+.-]`, maks. 60 karakter, tanpa payload), webhook 200. Sebelumnya baris ini `IGNORED` tanpa penanda sehingga tak terlihat.
+- Gateway masih PENDING: `FAILED` + `VERIFIED_STATUS_NOT_PAID`.
+Query pantau **tidak boleh menyaring kolom `status`**; saring pada `error`:
+`source_system='doku' and (error='VERIFIED_STATUS_UNKNOWN' or error like 'UNKNOWN_STATUS:%' or error like 'GATEWAY_VERIFICATION_FAILED%' or error='VERIFIED_STATUS_NOT_PAID')`.
+Hanya Midtrans yang tidak berubah (cabang baru khusus provider `doku`). Kartu "Kesehatan webhook DOKU" di `/ops/payments` menghitung 24 jam terakhir dari
+penanda ini (hanya hitungan, tanpa payload). Alarm antrean khusus untuk UNKNOWN **BLOCKED** (butuh migrasi): rancangan di
+`docs/DOKU_UNKNOWN_ALERT_DESIGN.md`.
+
+**Verifikasi ulang operator (P0-C).** Di `/ops/payments`, operator (allowlist `prompter_payment_operators`) dapat menekan "Verifikasi ulang" untuk transaksi DOKU
+`PENDING` lebih dari 10 menit. Aksi hanya menerima id transaksi dan memanggil `verifyAndSettle` (Check Status = satu-satunya sumber aktivasi; idempoten di
+`fn_apply_verified_payment`); batas 6 kali per menit per operator; dua baris audit (`payment.operator_recheck_requested` dan `..._result`). Konfigurasi DOKU
+sandbox yang fail-closed tetap berlaku (provider tidak terkonfigurasi = tidak ada panggilan).
 
 ## Nomor invoice (≤ 30 karakter)
 `order.invoice_number = "LN" + 25 digit base-36 huruf besar` dari UUID transaksi (27 karakter). Deterministik, unik (injektif),

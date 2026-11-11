@@ -288,6 +288,37 @@ describe("DOKU webhook — amount / currency mismatch and missing verification d
     expect(db.rpcCalls).toEqual([]);
     expect(db.txns[0].status).toBe("PENDING");
   });
+  it("P0-A: a non-PAID claim + unclassifiable gateway answer is recorded IGNORED with an explicit UNKNOWN_STATUS marker (200, nothing activates)", async () => {
+    dokuTxn();
+    gateway.answer(TXN_A, { transaction: { status: "SOMETHING_NEW" } });
+    const r = await deliver(notification({ status: "SOMETHING_NEW" }));
+    expect(r).toMatchObject({ ok: true, status: 200 });
+    expect(db.events).toHaveLength(1);
+    expect(db.events[0]).toMatchObject({ source_system: "doku", status: "IGNORED", error: "UNKNOWN_STATUS:SOMETHING_NEW/-/-" });
+    expect(db.txns[0].status).toBe("PENDING");
+    expect(db.rpcCalls).toEqual([]);
+    expect(db.periods).toEqual({});
+    expect(db.alerts).toEqual([]);
+  });
+  it("P0-A: the marker is idempotent: the same delivery twice leaves one row with the same marker", async () => {
+    dokuTxn();
+    gateway.answer(TXN_A, { transaction: { status: "SOMETHING_NEW" } });
+    const n = notification({ status: "SOMETHING_NEW" });
+    await deliver(n);
+    await deliver(n);
+    expect(db.events).toHaveLength(1);
+    expect(db.events[0]).toMatchObject({ status: "IGNORED", error: "UNKNOWN_STATUS:SOMETHING_NEW/-/-" });
+    expect(db.txns[0].status).toBe("PENDING");
+    expect(db.rpcCalls).toEqual([]);
+  });
+  it("P0-A: a PAID claim with an UNKNOWN answer is still 503 + FAILED/VERIFIED_STATUS_UNKNOWN", async () => {
+    dokuTxn();
+    gateway.answer(TXN_A, { transaction: { status: "SOMETHING_NEW" } });
+    const r = await deliver(notification({ status: "SUCCESS" }));
+    expect(r.status).toBe(503);
+    expect(db.events[0]).toMatchObject({ status: "FAILED", error: "VERIFIED_STATUS_UNKNOWN" });
+    expect(db.rpcCalls).toEqual([]);
+  });
   it.each(["TIMEOUT", "HTTP_500", "HTTP_404", "GARBAGE", "HUGE"] as const)("Check Status %s → fail closed (503), nothing activates", async (failure) => {
     dokuTxn();
     gateway.answer(TXN_A, failure);
