@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -53,6 +54,11 @@ import { isQuickReview } from "@/lib/campaigns/review-mode";
 import type { CampaignProposal } from "@/schemas/ai/campaign-proposal";
 import { PurchaseDestinationCard } from "@/features/campaigns/purchase-destination-card";
 import { RecoverToDraft } from "@/features/campaigns/recover-to-draft";
+import { LaunchReadinessPanel } from "@/features/campaigns/launch-readiness-panel";
+import { evaluateLaunchReadiness, type Read } from "@/lib/campaigns/launch-readiness";
+import { buildInternalPreview } from "@/lib/campaigns/internal-preview";
+import { readSelectionConfirmed } from "@/features/connections/meta-selection-confirmation";
+import { readEmergencyStopStrict } from "@/services/automation-settings";
 import type { Channel, ConnectorPlatform, OptimizationActionType, RiskLevel } from "@/types/database";
 
 export const metadata: Metadata = { title: "Detail Campaign — LINOE" };
@@ -249,6 +255,101 @@ export default async function CampaignDetailPage({
     (channelCampaigns ?? []).filter((cc) => cc.status === "ACTIVE").map((cc) => cc.channel),
   );
   const hasChannelData = (channelCampaigns ?? []).length > 0;
+
+  // Read-only Meta readiness panel. Every source below is a plain read, scoped
+  // to the session tenant; none contacts Meta. A failed read becomes
+  // `{ ok: false }` so the checklist shows "belum siap", never a guess.
+  const showMetaReadiness = campaign.channels.some((c) => CHANNEL_TO_CONNECTOR[c] === "META");
+  let readinessPanel: ReactNode = null;
+  if (showMetaReadiness) {
+    const [metaConnRes, policyRes, approvalsRes, emergencyStop] = await Promise.all([
+      supabase
+        .from("prompter_connected_accounts")
+        .select("id, external_account_id, status, last_refreshed_at, expires_at")
+        .eq("tenant_id", session.tenantId)
+        .eq("platform", "META")
+        .maybeSingle(),
+      supabase
+        .from("prompter_budget_policies")
+        .select("require_approval_above, currency")
+        .eq("tenant_id", session.tenantId)
+        .maybeSingle(),
+      supabase
+        .from("prompter_approvals")
+        .select("status, created_at")
+        .eq("tenant_id", session.tenantId)
+        .eq("resource_type", "prompter_master_campaigns")
+        .eq("resource_id", id)
+        .eq("approval_type", "CAMPAIGN_LAUNCH"),
+      readEmergencyStopStrict(supabase, session.tenantId),
+    ]);
+
+    const metaConn = metaConnRes.data;
+    const connection: Read<{ status: string; expiresAt: string | null; hasAdAccount: boolean } | null> =
+      metaConnRes.error
+        ? { ok: false }
+        : {
+            ok: true,
+            value: metaConn
+              ? {
+                  status: metaConn.status,
+                  expiresAt: metaConn.expires_at,
+                  hasAdAccount: !!metaConn.external_account_id,
+                }
+              : null,
+          };
+
+    let adAccountConfirmed: Read<boolean> = { ok: false };
+    if (metaConn && !metaConnRes.error) {
+      try {
+        const confirmation = await readSelectionConfirmed(session.tenantId, {
+          id: metaConn.id,
+          external_account_id: metaConn.external_account_id,
+          last_refreshed_at: metaConn.last_refreshed_at,
+        });
+        adAccountConfirmed = confirmation.ok ? { ok: true, value: confirmation.confirmed } : { ok: false };
+      } catch {
+        adAccountConfirmed = { ok: false };
+      }
+    }
+
+    const readiness = evaluateLaunchReadiness({
+      now: new Date(),
+      connection,
+      adAccountConfirmed,
+      dailyBudget: campaign.daily_budget,
+      currency: campaign.currency,
+      approvalPolicy: policyRes.error
+        ? { ok: false }
+        : {
+            ok: true,
+            value: policyRes.data
+              ? { requireApprovalAbove: policyRes.data.require_approval_above, currency: policyRes.data.currency }
+              : null,
+          },
+      launchApprovals: approvalsRes.error || !approvalsRes.data ? { ok: false } : { ok: true, value: approvalsRes.data },
+      budgetWriteEnabled: isBudgetWritePlatformEnabled("META"),
+      emergencyStopActive: emergencyStop,
+      // The existing Meta readiness check reads from Meta; it is not run from
+      // this page, so it is shown as "belum diperiksa" (UNKNOWN).
+      metaReadiness: null,
+    });
+
+    const readinessPreview = buildInternalPreview({
+      aiProposal: campaign.ai_proposal,
+      audienceNotes: campaign.audience_notes,
+      targetCity: campaign.target_city,
+      targetRegion: campaign.target_region,
+      targetCountry: campaign.target_country,
+      targetLanguage: campaign.target_language,
+      dailyBudget: campaign.daily_budget,
+      totalBudget: campaign.total_budget,
+      currency: campaign.currency,
+      durationDays: campaign.duration_days,
+      channelShares: (channelCampaigns ?? []).map((cc) => ({ channel: cc.channel, percentage: cc.budget_percentage })),
+    });
+    readinessPanel = <LaunchReadinessPanel readiness={readiness} preview={readinessPreview} />;
+  }
 
   const proposal = campaign.ai_proposal as CampaignProposal | null;
   const boundCopyAction = updateCampaignCopyAction.bind(null, id);
@@ -515,6 +616,8 @@ export default async function CampaignDetailPage({
           </CardContent>
         </Card>
       ) : null}
+
+      {readinessPanel}
 
       {/* Winning Ads Phase 2B: manual ad metrics + verdict. Self-contained and
           read-only toward everything else on this page (no launch, approval,
