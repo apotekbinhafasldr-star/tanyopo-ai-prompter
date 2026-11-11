@@ -134,13 +134,6 @@ function expectNoPlatformContactAndNoWrites(logLengthBefore: number): void {
   expect(writesSince(logLengthBefore)).toEqual([]);
 }
 
-/** Tindakan di luar aplikasi: Owner mengaktifkan campaign di Ads Manager. Kode produksi belum punya langkah ini. */
-function simulateManualActivationInAdsManager(channelId: string): void {
-  const row = rowOf(world, "prompter_channel_campaigns", channelId);
-  expect(row).toBeDefined();
-  row!.status = "ACTIVE";
-}
-
 beforeEach(() => {
   vi.clearAllMocks();
   stubLaunchEnv();
@@ -165,7 +158,7 @@ describe("MOCK E2E (in-memory, BUKAN bukti E2E nyata) — urutan alur One-Click"
 
     // 2. Belum disetujui: launch ditolak tanpa menyentuh platform.
     world.session = SESSION_A_OWNER;
-    let mark = world.db.log.length;
+    const mark = world.db.log.length;
     expect((await launch(CHANNEL_A1)).error).toMatch(/harus berstatus Terjadwal/);
     expectNoPlatformContactAndNoWrites(mark);
 
@@ -182,15 +175,12 @@ describe("MOCK E2E (in-memory, BUKAN bukti E2E nyata) — urutan alur One-Click"
     expect(world.ads.objects.map((o) => o.type)).toEqual(["campaign", "adSet", "creative", "ad"]);
     expect(world.ads.objects.every((o) => o.status === "PAUSED")).toBe(true);
 
-    // 5. Sync insight: campaign PAUSED belum boleh disinkronkan (hanya yang Aktif).
-    mark = world.db.log.length;
-    expect((await syncChannelCampaignInsightsAction(CHANNEL_A1)).error).toMatch(/sudah Aktif/);
-    expect(world.ads.countOf("getInsights")).toBe(0);
-    expect(writesSince(mark)).toEqual([]);
-
-    //    SIMULASI aktivasi manual di luar aplikasi (bukan bagian alur produksi), lalu sync nyata.
-    simulateManualActivationInAdsManager(CHANNEL_A1);
+    // 5. Sync insight: campaign PAUSED yang punya id platform BOLEH sync (read-only, setelah PR #115).
+    const platformWritesBeforeSync = world.ads.writeCalls().length;
     expect((await syncChannelCampaignInsightsAction(CHANNEL_A1)).error).toBeNull();
+    expect(world.ads.countOf("getInsights")).toBe(1);
+    expect(world.ads.writeCalls()).toHaveLength(platformWritesBeforeSync);
+    expect(channelStatus(world, CHANNEL_A1)).toBe("PAUSED");
     expect(world.db.tables.prompter_marketing_metrics).toHaveLength(1);
     expect(world.db.tables.prompter_marketing_metrics[0]).toMatchObject({
       tenant_id: TENANT_A,
@@ -519,10 +509,9 @@ describe("MOCK E2E (in-memory, BUKAN bukti E2E nyata) — (7) isolasi tenant", (
     expect(rowOf(world, "prompter_master_campaigns", MASTER_A)?.status).toBe("AWAITING_APPROVAL");
   });
 
-  it("tenant B tidak bisa menyinkronkan insight campaign tenant A yang Aktif", async () => {
+  it("tenant B tidak bisa menyinkronkan insight campaign tenant A yang sudah diluncurkan (PAUSED)", async () => {
     await approveCampaignA();
     expect((await launch(CHANNEL_A1)).error).toBeNull();
-    simulateManualActivationInAdsManager(CHANNEL_A1);
 
     world.session = SESSION_B_OWNER;
     const mark = world.db.log.length;
@@ -535,7 +524,6 @@ describe("MOCK E2E (in-memory, BUKAN bukti E2E nyata) — (7) isolasi tenant", (
   it("tenant B tidak bisa membuat rekomendasi optimasi untuk campaign tenant A", async () => {
     await approveCampaignA();
     expect((await launch(CHANNEL_A1)).error).toBeNull();
-    simulateManualActivationInAdsManager(CHANNEL_A1);
     expect((await syncChannelCampaignInsightsAction(CHANNEL_A1)).error).toBeNull();
 
     world.session = SESSION_B_OWNER;
@@ -548,14 +536,28 @@ describe("MOCK E2E (in-memory, BUKAN bukti E2E nyata) — (7) isolasi tenant", (
 });
 
 describe("MOCK E2E (in-memory, BUKAN bukti E2E nyata) — sync insight dan rekomendasi optimasi", () => {
-  async function launchedAndActivated(): Promise<void> {
+  // Campaign hasil launch Meta berstatus PAUSED; sync dan rekomendasi berjalan tanpa aktivasi apa pun.
+  async function launchedPaused(): Promise<void> {
     await approveCampaignA();
     expect((await launch(CHANNEL_A1)).error).toBeNull();
-    simulateManualActivationInAdsManager(CHANNEL_A1);
+    expect(channelStatus(world, CHANNEL_A1)).toBe("PAUSED");
   }
 
+  it.each(["SCHEDULED", "DRAFT"])("status %s dengan external_campaign_id terisi tetap ditolak sync", async (status) => {
+    const row = rowOf(world, "prompter_channel_campaigns", CHANNEL_A1)!;
+    row.status = status;
+    row.external_campaign_id = "ext_campaign_stray";
+
+    const mark = world.db.log.length;
+    expect((await syncChannelCampaignInsightsAction(CHANNEL_A1)).error).toMatch(/Aktif atau Dijeda/);
+    expect(world.ads.countOf("getInsights")).toBe(0);
+    expect(world.ads.calls).toEqual([]);
+    expect(writesSince(mark)).toEqual([]);
+    expect(world.db.tables.prompter_marketing_metrics).toEqual([]);
+  });
+
   it("sync berulang pada hari yang sama memperbarui satu baris metrik (upsert), tidak menggandakan", async () => {
-    await launchedAndActivated();
+    await launchedPaused();
 
     expect((await syncChannelCampaignInsightsAction(CHANNEL_A1)).error).toBeNull();
     world.ads.insights.spend = 20000;
@@ -567,7 +569,7 @@ describe("MOCK E2E (in-memory, BUKAN bukti E2E nyata) — sync insight dan rekom
   });
 
   it("rekomendasi ditolak selama belum ada data spend atau konversi (tidak memanggil AI)", async () => {
-    await launchedAndActivated();
+    await launchedPaused();
 
     expect((await generateOptimizationRecommendationsAction(MASTER_A)).error).toMatch(/Belum ada data spend/);
     expect(runAiJobMock).not.toHaveBeenCalled();
@@ -575,7 +577,7 @@ describe("MOCK E2E (in-memory, BUKAN bukti E2E nyata) — sync insight dan rekom
   });
 
   it("rekomendasi memakai data hasil sync, hanya menyimpan saran, dan tidak menulis budget ke platform", async () => {
-    await launchedAndActivated();
+    await launchedPaused();
     expect((await syncChannelCampaignInsightsAction(CHANNEL_A1)).error).toBeNull();
     const writesBefore = world.ads.writeCalls().length;
 

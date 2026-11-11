@@ -149,7 +149,8 @@ describe("MOCK E2E (in-memory, BUKAN bukti E2E nyata) — (2) launch ditolak sel
   });
 
   it("rekomendasi optimasi yang disetujui tidak bisa menulis budget: gate menolak sebelum kredensial dan connector", async () => {
-    // Baris yang oleh jalur produksi hanya bisa jadi ACTIVE lewat langkah aktivasi yang belum ada; disiapkan langsung sebagai fixture.
+    // Eksekusi autopilot memang hanya untuk channel ACTIVE. Kode produksi belum punya langkah aktivasi, jadi baris ini
+    // disiapkan langsung sebagai fixture (bukan hasil alur launch, yang berhenti di PAUSED).
     const channel = rowOf(world, "prompter_channel_campaigns", CHANNEL_A1)!;
     channel.status = "ACTIVE";
     channel.external_campaign_id = "ext_campaign_9";
