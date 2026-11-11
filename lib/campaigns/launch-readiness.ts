@@ -77,7 +77,7 @@ export interface LaunchReadinessInput {
   approvalPolicy: Read<{ requireApprovalAbove: number | null; currency: string } | null>;
   /** CAMPAIGN_LAUNCH approvals of this master campaign. */
   launchApprovals: Read<readonly { status: string; created_at: string }[]>;
-  /** Whether META is in the S1 allowlist (BUDGET_WRITE_ENABLED_PLATFORMS). `null` = unknown. */
+  /** Whether META is in the S1 allowlist (daftar platform yang diizinkan menulis budget). `null` = unknown. */
   budgetWriteEnabled: boolean | null;
   /** `null` = the Emergency Stop flag could not be read. */
   emergencyStopActive: boolean | null;
