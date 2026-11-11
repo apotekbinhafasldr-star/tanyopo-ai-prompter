@@ -52,6 +52,21 @@ export function resolveMetaAgeTargeting(ageMin: unknown, ageMax: unknown): MetaA
   return { ok: true, value: { age_min: ageMin, age_max: ageMax } };
 }
 
+export type MetaEndTimeResolution = { ok: true; value: number | null } | { ok: false };
+
+/**
+ * Optional ad-set `end_time` as UTC UNIX seconds. Absent -> `value: null`
+ * (nothing is added to the payload). Present but not a positive safe integer
+ * -> `ok: false` and the caller must refuse to create the ad set. `0` is
+ * rejected on purpose: Meta reads `end_time=0` as "ongoing" and LINOE only
+ * sends a real end date, never that sentinel.
+ */
+export function resolveMetaEndTime(endTime: unknown): MetaEndTimeResolution {
+  if (endTime === undefined) return { ok: true, value: null };
+  if (typeof endTime !== "number" || !Number.isSafeInteger(endTime) || endTime < 1) return { ok: false };
+  return { ok: true, value: endTime };
+}
+
 /**
  * Names of VERIFIED objective contracts whose optimization goal the connector
  * cannot create an ad set for. Must be empty: otherwise a launch would create

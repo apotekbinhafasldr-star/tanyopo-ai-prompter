@@ -2,6 +2,8 @@ import { Bot, HelpCircle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { parseStoredAiSearchReadiness } from "@/lib/seo/ai-search-readiness";
+import { buildCustomerJsonLdExport } from "@/lib/seo/customer-json-ld";
+import { JsonLdSnippet } from "@/features/seo/structured-data-export";
 
 const FORMAT_LABEL: Record<string, string> = {
   FAQ: "FAQ",
@@ -18,6 +20,7 @@ const FORMAT_LABEL: Record<string, string> = {
  */
 export function AiSearchReadinessSection({ stored }: { stored: unknown }) {
   const data = parseStoredAiSearchReadiness(stored);
+  const jsonLd = data ? buildCustomerJsonLdExport(data) : null;
 
   return (
     <div className="flex flex-col gap-4" data-testid="ai-search-readiness">
@@ -103,6 +106,27 @@ export function AiSearchReadinessSection({ stored }: { stored: unknown }) {
               ) : null}
             </CardContent>
           </Card>
+
+          {jsonLd && (jsonLd.faq || jsonLd.product) ? (
+            <Card data-testid="structured-data-export">
+              <CardHeader>
+                <CardTitle>Data Terstruktur (JSON-LD) untuk Website Anda</CardTitle>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-4 pt-4">
+                <p className="text-xs text-muted-foreground">
+                  Salin lalu tempel ke halaman website Anda sendiri. Isinya hanya data yang Anda isi di LINOE dan
+                  jawaban yang lolos pemeriksaan fakta; tidak ada rating, ulasan, atau ketersediaan stok yang dibuat.
+                  Pastikan pertanyaan, jawaban, dan harga yang sama juga tampil di halaman tersebut. Google sudah
+                  tidak menampilkan hasil kaya (rich result) FAQ, dan LINOE tidak menjamin ranking atau kutipan oleh AI;
+                  ini hanya markup standar schema.org.
+                </p>
+                {jsonLd.faq ? (
+                  <JsonLdSnippet label={`FAQPage (${jsonLd.faq.count} pertanyaan)`} snippet={jsonLd.faq.snippet} />
+                ) : null}
+                {jsonLd.product ? <JsonLdSnippet label="Product" snippet={jsonLd.product.snippet} /> : null}
+              </CardContent>
+            </Card>
+          ) : null}
 
           {data.entity_context ? (
             <Card>

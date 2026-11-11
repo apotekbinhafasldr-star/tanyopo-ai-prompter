@@ -29,7 +29,7 @@ export type SettleOutcome =
   | { kind: "APPLIED"; reason: "APPLIED" | "ALREADY_PROCESSED" }
   | { kind: "NEEDS_REVIEW" }
   | { kind: "NOT_APPLIED"; reason: string }
-  | { kind: "NOT_PAID"; status: VerifiedPaymentStatus; closed: boolean }
+  | { kind: "NOT_PAID"; status: VerifiedPaymentStatus; closed: boolean; rawStatus?: string }
   | { kind: "ALARM"; alarm: PaymentAlarmKind; evidenceRef: string }
   | { kind: "NOT_FOUND" }
   | { kind: "WRONG_PROVIDER" }
@@ -108,7 +108,7 @@ export async function verifyAndSettle(
         return recordAlarm(admin, txn, "REVERSAL", verified);
       }
       if (txn.status !== "PENDING") {
-        return { kind: "NOT_PAID", status: verified.status, closed: false };
+        return { kind: "NOT_PAID", status: verified.status, closed: false, rawStatus: verified.rawStatus };
       }
       const { error } = await admin
         .from("prompter_payment_transactions")
@@ -116,12 +116,12 @@ export async function verifyAndSettle(
         .eq("id", txn.id)
         .eq("status", "PENDING");
       if (error) return { kind: "RPC_ERROR", message: "CLOSE_INVOICE_FAILED" };
-      return { kind: "NOT_PAID", status: verified.status, closed: true };
+      return { kind: "NOT_PAID", status: verified.status, closed: true, rawStatus: verified.rawStatus };
     }
 
     default:
       // PENDING, and anything unrecognised: not paid, nothing closed, nothing activated.
-      return { kind: "NOT_PAID", status: verified.status, closed: false };
+      return { kind: "NOT_PAID", status: verified.status, closed: false, rawStatus: verified.rawStatus };
   }
 }
 

@@ -116,6 +116,8 @@ export interface ApprovalHarnessOptions {
   channel?: string;
   suggestedDailyBudget?: number | null;
   settings?: Result | "throw";
+  /** Tenant that owns the stored credential row for acct1 (default "t1" = the session tenant). */
+  credentialsTenantId?: string;
   /** What the confirmed PAUSED write answers (default: exactly one row). */
   pauseUpdate?: "ok" | "zero" | "two" | "error" | "throw";
 }
@@ -127,12 +129,32 @@ export function buildApprovalHarness(options: ApprovalHarnessOptions) {
   /** The .eq() filters of each channel UPDATE, in call order. */
   const channelUpdateFilters: [string, unknown][][] = [];
   const auditInsert = vi.fn(async (..._args: unknown[]) => ({ error: null }));
+  /** The .eq() filters of each credentials SELECT, in call order. */
+  const credentialFilters: [string, unknown][][] = [];
+  const credentialRow = {
+    tenant_id: options.credentialsTenantId ?? "t1",
+    connected_account_id: "acct1",
+    encrypted_access_token: "cipher",
+  };
   const adminFrom = vi.fn((table: string) => {
     touched.push(`admin:${table}`);
     return {
-      select: () => ({
-        eq: () => ({ maybeSingle: async () => ({ data: { encrypted_access_token: "cipher" }, error: null }) }),
-      }),
+      select: () => {
+        const filters: [string, unknown][] = [];
+        credentialFilters.push(filters);
+        const builder = {
+          eq: (column: string, value: unknown) => {
+            filters.push([column, value]);
+            return builder;
+          },
+          maybeSingle: async () => {
+            const row = credentialRow as Record<string, unknown>;
+            const match = filters.every(([column, value]) => row[column] === value);
+            return { data: match ? { encrypted_access_token: credentialRow.encrypted_access_token } : null, error: null };
+          },
+        };
+        return builder;
+      },
     };
   });
 
@@ -235,5 +257,5 @@ export function buildApprovalHarness(options: ApprovalHarnessOptions) {
     }
   });
 
-  return { from, adminFrom, touched, approvalUpdates, channelUpdates, channelUpdateFilters, auditInsert };
+  return { from, adminFrom, touched, approvalUpdates, channelUpdates, channelUpdateFilters, auditInsert, credentialFilters };
 }
