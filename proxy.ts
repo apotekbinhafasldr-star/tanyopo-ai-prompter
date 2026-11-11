@@ -57,6 +57,8 @@ export function isPublicAsset(pathname: string) {
     // Liveness probe for uptime monitors (app/api/health/route.ts): returns a fixed {status:"ok"}, no data, no
     // session. Without this it is redirected to /login (or 401 on Basic-Auth previews). Exact match only.
     pathname === "/api/health" ||
+    // Readiness probe (app/api/ready/route.ts): read-only DB reachability, returns only {status:"ok"|"degraded"}. Exact match only.
+    pathname === "/api/ready" ||
     // Both handle their own auth (exchange a Supabase recovery/PKCE code,
     // or verify a token_hash) for a session — the request arrives with no
     // session cookie yet, so cookie gating below would otherwise bounce it
