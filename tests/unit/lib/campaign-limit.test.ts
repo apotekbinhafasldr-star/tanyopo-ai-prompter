@@ -37,8 +37,8 @@ describe("checkCampaignLimitCoverage", () => {
   });
 
   it("messages never echo a number from the input", () => {
-    const result = checkCampaignLimitCoverage({ ...base, campaignLimit: 123_456_789, durationDays: 999 });
+    const result = checkCampaignLimitCoverage({ ...base, campaignLimit: 123_456_789, durationDays: 9999 });
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.message).not.toMatch(/123456789|123\.456\.789|999/);
+    if (!result.ok) expect(result.message).not.toMatch(/123456789|123\.456\.789|9999/);
   });
 });
