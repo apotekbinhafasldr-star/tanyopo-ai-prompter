@@ -174,7 +174,7 @@ export function MarketingHeader() {
             aria-controls="marketing-mobile-nav"
             onClick={() => setMenuOpen((v) => !v)}
             className={cn(
-              "flex size-9 items-center justify-center rounded-[var(--radius-md)]",
+              "flex size-11 items-center justify-center rounded-[var(--radius-md)]",
               onDark ? "text-white hover:bg-white/10" : "text-foreground hover:bg-surface-muted",
             )}
           >

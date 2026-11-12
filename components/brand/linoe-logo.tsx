@@ -52,7 +52,7 @@ export function LinoeLogo({ size = "md", href = "/", className, variant = "offic
   if (href === null) return img;
 
   return (
-    <Link href={href} aria-label={`${brand.name} — Beranda`} className="inline-flex items-center">
+    <Link href={href} aria-label={`${brand.name} — Beranda`} className="inline-flex min-h-11 min-w-11 items-center">
       {img}
     </Link>
   );

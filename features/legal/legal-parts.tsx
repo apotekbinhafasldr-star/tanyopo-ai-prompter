@@ -37,10 +37,10 @@ export function LegalDocument({
 
       <nav aria-label="Daftar isi" className="mb-10 rounded-xl border border-border p-4">
         <p className="text-sm font-semibold text-foreground">Daftar isi</p>
-        <ol className="mt-2 grid list-decimal gap-1 pl-5 text-sm text-muted-foreground sm:grid-cols-2">
+        <ol className="mt-2 grid list-decimal pl-5 text-sm text-muted-foreground sm:grid-cols-2">
           {toc.map((item) => (
             <li key={item.id}>
-              <a href={`#${item.id}`} className="hover:text-foreground hover:underline">
+              <a href={`#${item.id}`} className="inline-flex min-h-11 items-center hover:text-foreground hover:underline">
                 {item.title}
               </a>
             </li>
@@ -52,10 +52,10 @@ export function LegalDocument({
 
       <nav aria-label="Dokumen hukum lainnya" className="mt-14 border-t border-border pt-6 text-sm">
         <p className="text-muted-foreground">Dokumen terkait:</p>
-        <ul className="mt-2 flex flex-wrap gap-x-6 gap-y-2">
+        <ul className="mt-2 flex flex-wrap gap-x-6">
           {LEGAL_LINKS.filter((l) => l.href !== current).map((l) => (
             <li key={l.href}>
-              <Link href={l.href} className="font-medium text-brand hover:underline">
+              <Link href={l.href} className="inline-flex min-h-11 items-center font-medium text-brand hover:underline">
                 {l.label}
               </Link>
             </li>
