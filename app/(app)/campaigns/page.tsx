@@ -33,7 +33,7 @@ export default async function CampaignsPage() {
           <h1 className="text-xl font-semibold tracking-tight text-foreground">Campaigns</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Campaign yang dibuat AI dari Promote Wizard. Ajukan untuk persetujuan di halaman detail — peluncuran
-            nyata ke channel tersedia setelah Connection Center aktif (Phase 3).
+            nyata ke channel tersedia setelah channel Anda terhubung di halaman Connections.
           </p>
         </div>
         <Button asChild>
