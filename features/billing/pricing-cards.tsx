@@ -112,7 +112,7 @@ const TIER_VISUALS: Record<PlanTierId, TierVisual> = {
     subtext: "text-slate-600",
     price: "text-foreground",
     actionBar: "bg-orange-100 text-orange-700",
-    primaryCta: "bg-orange-600 text-white hover:bg-orange-700",
+    primaryCta: "bg-orange-700 text-white hover:bg-orange-800",
     divider: "border-black/10",
   },
   BUSINESS: {
