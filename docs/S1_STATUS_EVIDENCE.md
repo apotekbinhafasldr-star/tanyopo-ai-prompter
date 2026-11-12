@@ -1,5 +1,11 @@
 # S1 dan quota guard: status terapan dan bukti yang dibutuhkan
 
+> **PEMBARUAN 2026-11-12 (malam, WIB): S1 dan quota guard TERBUKTI TERPASANG dan EFEKTIF di produksi (E1–E6 PASS, G3 PASS).**
+> Dasar: audit BACA-SAJA atas proyek bersama `umkmpro-ai` (`wjjyqovhmwenbcvbnkgx`), disetujui Founder dengan frasa `APPROVE READ-S1-2026-11-12`.
+> Satu `SELECT` metadata/katalog: `supabase_migrations.schema_migrations`, `information_schema` (grant tabel dan kolom), `pg_trigger`, dan md5 `pg_get_functiondef`. Tidak ada data tenant dibaca, tidak ada SQL tulis, tabel PUBLOE/UMKMpro tidak disentuh.
+> **Batas bukti:** ini verifikasi METADATA/KATALOG (kelas REAL, baca-saja), BUKAN uji perilaku langsung (tidak ada percobaan INSERT/DELETE/UPDATE sungguhan). Isi fungsi trigger tidak dibandingkan; yang dibuktikan adalah keberadaan dan status aktifnya. Ledger tidak memuat waktu terapan, jadi TANGGAL penerapan tiap migrasi tidak terbukti.
+> Bagian 1 sampai 6 di bawah adalah catatan 2026-11-11 (level CODE) dan dipertahankan sebagai riwayat; hasil terbaru ada di bagian 7.
+
 Dibuat 2026-11-11 pada `main` 6287160. Level: **CODE** (membaca repo). Tidak ada akses database, tidak ada tool MCP, tidak ada query.
 
 ## 1. Status
@@ -73,3 +79,30 @@ Catatan: butir 1 (F1) sudah dikerjakan di PR `fix/trial-subscription-insert` ata
 - `tests/unit/services/tenant-scope-queries.test.ts`: pembacaan billing terfilter `tenant_id`, penjaga statis seluruh query di `services/*.ts` (kueri tanpa filter tenant harus ada di daftar tinjauan beralasan), dan satu `it.fails` untuk F3.
 
 Hasil tes ini adalah UNIT TEST PASS pada CI, bukan bukti perilaku produksi.
+
+## 7. Hasil audit baca-saja 2026-11-12 (REAL, metadata/katalog)
+
+Proyek: `umkmpro-ai` (`wjjyqovhmwenbcvbnkgx`, PROYEK BERSAMA dengan PUBLOE/MITAPENG/UMKMpro). Cakupan: hanya tabel `prompter_ai_jobs`, `prompter_subscriptions`, `prompter_plan_entitlements`, ledger, dan satu fungsi.
+
+| # | Yang diperiksa | Hasil | Status |
+|---|---|---|---|
+| E1 | Ledger | Tiga versi S1 tercatat dengan nama yang benar: `20261019100000` `prompter_p0_ai_jobs_lockdown`, `20261019100100` `prompter_p0_subscription_trial_insert_guard`, `20261019100200` `prompter_p0_plan_entitlements_lockdown`. Tercatat juga: `20261021120000` `prompter_ai_jobs_quota_guard`, `20261021120100` `prompter_ai_jobs_delete_guard`, `20261029220000` plan tampering lockdown, B1 (`20261030100000`, `20261030100100`), B2 `20261030140000`, B4 `20261031100000`, B4.2 `20261101100000`, P0-2 `20261103170000` | PASS |
+| E2 | Grant `prompter_ai_jobs` | `authenticated` dan `anon`: hanya SELECT, REFERENCES, TRIGGER. Tanpa INSERT, DELETE, TRUNCATE, UPDATE tingkat tabel. UPDATE tingkat kolom tepat 10 kolom: `completed_at, error, error_category, fallback_provider, model, output_reference, provider, status, tokens_input, tokens_output` | PASS |
+| E3 | Grant `prompter_subscriptions` | `authenticated`: INSERT, SELECT, REFERENCES, TRIGGER; tanpa UPDATE (tabel maupun kolom), DELETE, TRUNCATE. `anon`: tanpa INSERT | PASS |
+| E4 | Grant `prompter_plan_entitlements` | `authenticated` dan `anon`: hanya SELECT, REFERENCES, TRIGGER | PASS |
+| E5 | Trigger | `trg_prompter_subscriptions_enforce_trial_insert` ada dan aktif (`tgenabled = O`). Juga aktif: `block_client_update`, `guard_plan`, `trial_carryover` (subscriptions); `immutable`, `no_delete`, `no_truncate` (ai_jobs). Fungsi `fn_enforce_trial_subscription_insert` ada | PASS (keberadaan dan status aktif; isi fungsi tidak dibandingkan) |
+| E6 | md5 `fn_create_ai_job_if_entitled(text,jsonb)` | `2042201955b6acbae5b10999413b0e49` = md5 "setelah bagian 1" (guard aktif) di runbook quota-guard (`manifest.json` `rpcMd5AfterPart1`). Bukan md5 B10 (`17bd1c2bee1069ca6460774e9021fa9d`) | PASS |
+
+**G3: PASS.**
+
+### Mengapa status sebelumnya bertentangan
+- Header `S1_TRIAL_AI_QUOTA.md` ("NOT applied") ditulis saat masih Draft (sekitar 2026-10-23) dan tidak diperbarui.
+- Komentar `20261029220000_...plan_tampering_lockdown.sql` (audit katalog 2026-10-29) benar pada tanggalnya: S1 belum terpasang saat itu.
+- Klaim "S1 sudah di production" (2026-11-07) hanya bersandar pada md5 RPC `17bd…`. S1 tidak mengubah RPC itu, jadi md5 tersebut tidak bisa membuktikan S1. Md5 sekarang `2042…`, artinya quota guard diterapkan setelah pembacaan itu.
+- Kesimpulan: tidak ada klaim yang salah pada tanggalnya masing-masing; yang kurang adalah bukti katalog bertanggal. Bagian ini kini menjadi bukti tersebut.
+
+### Catatan dan batas
+1. Verifikasi berdasarkan metadata/katalog, bukan uji perilaku langsung. Uji perilaku (mis. percobaan INSERT trial dengan periode kustom oleh pengguna uji) belum dilakukan.
+2. `20261111130000_prompter_p0_3_doku_alert_coverage` ada di repo tetapi **belum tercatat di ledger** (belum diterapkan). Dampaknya hanya pada alert DOKU (DOKU belum live). Penerapannya butuh persetujuan Founder TERPISAH; tidak dilakukan.
+3. `anon` dan `authenticated` masih memegang REFERENCES dan TRIGGER pada tiga tabel (default Supabase). Di luar kriteria E1–E6; hanya dicatat sebagai observasi, tanpa tindakan.
+4. Tidak ada perubahan database dalam audit ini.
