@@ -200,11 +200,11 @@ export default async function BillingPage({
                 <>
                   <p>Sisa masa coba: {trial.daysRemaining} hari</p>
                   {subscription.current_period_end ? (
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-xs text-foreground">
                       Berakhir pada {formatDate(subscription.current_period_end)}
                     </p>
                   ) : null}
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-xs text-foreground">
                     Anda masih dapat menggunakan LINOE selama masa coba.
                   </p>
                 </>
