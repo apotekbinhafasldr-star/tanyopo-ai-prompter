@@ -8,10 +8,20 @@ import { Input } from "@/components/ui/input";
 import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { ResendConfirmation } from "@/features/auth/resend-confirmation";
+import { CONFIRM_NOTICE_MESSAGES, type ConfirmNoticeCode } from "@/lib/auth/confirm-notice";
 
 const initialState: AuthActionState = { error: null };
 
-export function LoginForm({ next, resetSuccess }: { next?: string; resetSuccess?: boolean }) {
+export function LoginForm({
+  next,
+  resetSuccess,
+  notice,
+}: {
+  next?: string;
+  resetSuccess?: boolean;
+  notice?: ConfirmNoticeCode | null;
+}) {
   const [state, formAction, pending] = useActionState(loginAction, initialState);
 
   return (
@@ -24,6 +34,14 @@ export function LoginForm({ next, resetSuccess }: { next?: string; resetSuccess?
         {resetSuccess ? (
           <p className="mb-4 rounded-[var(--radius-md)] border border-brand/30 bg-brand/5 p-3 text-sm text-foreground">
             Kata sandi Anda berhasil diperbarui. Silakan masuk dengan kata sandi baru.
+          </p>
+        ) : null}
+        {notice ? (
+          <p
+            role="status"
+            className="mb-4 rounded-[var(--radius-md)] border border-border bg-surface-muted p-3 text-sm text-foreground"
+          >
+            {CONFIRM_NOTICE_MESSAGES[notice]}
           </p>
         ) : null}
         <form action={formAction} className="flex flex-col gap-4" noValidate>
@@ -57,6 +75,9 @@ export function LoginForm({ next, resetSuccess }: { next?: string; resetSuccess?
             Masuk
           </Button>
         </form>
+        {notice || state.unconfirmedEmail ? (
+          <ResendConfirmation key={state.unconfirmedEmail ?? "notice"} defaultEmail={state.unconfirmedEmail ?? ""} />
+        ) : null}
         <p className="mt-6 text-center text-sm text-muted-foreground">
           Belum punya akun?{" "}
           <Link href="/register" className="font-medium text-brand hover:underline">

@@ -10,6 +10,7 @@ import { isExistingAccountSignUp } from "@/lib/auth/existing-account";
 import { isUncertainSignupOutcome, mapSignupError, UNCERTAIN_SIGNUP_MESSAGE } from "@/lib/auth/signup-error";
 import { safeNextPath } from "@/lib/auth/safe-next";
 import { isEmailOtpEnabled } from "@/lib/auth/email-otp";
+import { mapLoginError } from "@/lib/auth/login-error";
 
 /**
  * Best-effort brake on trial-farming (repeated signups to get fresh
@@ -40,6 +41,9 @@ export interface AuthActionState {
   /** Set only with `existingAccount` while EMAIL_OTP_ENABLED is on: lets someone who never finished verifying open the
    * code screen for the address they typed. It says nothing about whether that account is verified. */
   otpAvailable?: boolean;
+  /** Set only by loginAction when Supabase refused a sign-in with a CORRECT password because the email is not confirmed
+   * yet; the login form then offers to resend the confirmation link. Never set for a wrong password. */
+  unconfirmedEmail?: string;
 }
 
 export interface RegisterKeptValues {
@@ -77,11 +81,10 @@ export async function loginAction(
   const { error } = await supabase.auth.signInWithPassword(parsed.data);
 
   if (error) {
+    const mapped = mapLoginError(error);
     return {
-      error:
-        error.status === 400
-          ? "Email atau kata sandi salah."
-          : "Gagal masuk. Silakan coba lagi.",
+      error: mapped.message,
+      unconfirmedEmail: mapped.unconfirmed ? parsed.data.email : undefined,
     };
   }
 
