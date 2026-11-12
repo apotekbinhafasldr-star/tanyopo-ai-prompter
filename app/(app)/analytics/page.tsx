@@ -69,7 +69,7 @@ export default async function AnalyticsPage() {
       <div>
         <h1 className="text-xl font-semibold tracking-tight text-foreground">Analytics</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Spend dan performa iklan aktif setelah channel terhubung (Phase 3). Konversi bisa dicatat manual
+          Spend dan performa iklan aktif setelah channel terhubung. Konversi bisa dicatat manual
           sejak sekarang.
         </p>
       </div>

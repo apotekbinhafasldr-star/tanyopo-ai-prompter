@@ -145,7 +145,7 @@ export default async function SettingsPage() {
         <CardContent className="pt-4">
           <p className="text-sm text-foreground">
             Ada pertanyaan atau kendala? Kirim email ke{" "}
-            <a href={`mailto:${LEGAL.contactEmail}`} className="break-all font-medium text-brand hover:underline">
+            <a href={`mailto:${LEGAL.contactEmail}`} className="font-medium text-brand [overflow-wrap:anywhere] hover:underline">
               {LEGAL.contactEmail}
             </a>
             .

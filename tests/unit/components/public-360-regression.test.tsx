@@ -75,4 +75,18 @@ describe("public pages at 360px: regression for the QA findings", () => {
     expect(src("app/demo/layout.tsx")).toMatch(/<p className="text-xs text-foreground">/);
     expect(src("app/demo/analytics/page.tsx")).toMatch(/max-w-full[^"]*whitespace-normal/);
   });
+
+  it("user-facing copy: no internal 'Phase N' label on Campaigns and Analytics", () => {
+    for (const f of ["app/(app)/campaigns/page.tsx", "app/(app)/analytics/page.tsx"]) {
+      expect(src(f)).not.toMatch(/Phase \d/);
+    }
+  });
+
+  it("settings help: the support e-mail is shown whole (no character-level breaking) and still comes from LEGAL", () => {
+    const page = src("app/(app)/settings/page.tsx");
+    expect(page).toMatch(/mailto:\$\{LEGAL\.contactEmail\}/);
+    const link = page.slice(page.indexOf("mailto:${LEGAL.contactEmail}"), page.indexOf("{LEGAL.contactEmail}\n"));
+    expect(link).not.toMatch(/break-all/);
+    expect(link).toMatch(/\[overflow-wrap:anywhere\]/);
+  });
 });
