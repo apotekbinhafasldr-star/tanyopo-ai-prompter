@@ -33,7 +33,12 @@ function psql(sql) {
 async function mailpit(path, init) {
   const res = await fetch(`${MAILPIT}${path}`, init);
   if (!res.ok) throw new Error(`Mailpit ${path} -> ${res.status}`);
-  return res.json();
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text; // DELETE /api/v1/messages membalas teks biasa ("ok")
+  }
 }
 
 async function waitForMail(timeoutMs = 30000) {
