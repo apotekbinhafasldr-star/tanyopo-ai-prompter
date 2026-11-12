@@ -96,7 +96,7 @@ describe("recordSingleTouchAttribution (runs on the service-role client for UMKM
     expect(calls).toHaveLength(0);
   });
 
-  it.fails("KNOWN GAP: the delete-before-insert is also scoped by tenant_id, not only by conversion_id", async () => {
+  it("the delete-before-insert is also scoped by tenant_id, not only by conversion_id", async () => {
     // services/attribution.ts deletes by conversion_id alone. With the service role (RLS bypassed) the only thing
     // keeping this inside one tenant is that the id came from the same tenant's upsert a moment earlier.
     // Defence in depth: add .eq("tenant_id", tenantId). Needs a change outside this task's files.
@@ -136,7 +136,6 @@ describe("services/*.ts: every query is tenant-scoped or explicitly reviewed (CO
     "session.ts|tenants|select": "by the tenant id of the signed-in user's own profile",
     "umkmpro.ts|tenants|select": "existence check of the tenant id in a signed webhook",
     "umkmpro.ts|prompter_webhook_events|select": "idempotency lookup by provider event id",
-    "attribution.ts|prompter_attributions|delete": "KNOWN GAP: delete by conversion_id only (see the it.fails above)",
   };
 
   const found = new Set<string>();

@@ -29,18 +29,14 @@ function walk(dir: string, accept: (name: string) => boolean, out: string[] = []
   return out;
 }
 
-const KNOWN_LEAKS = [
-  "app/api/v1/integrations/umkmpro/conversions/route.ts",
-  "app/api/v1/integrations/umkmpro/products/route.ts",
-  "app/api/v1/integrations/umkmpro/promotions/route.ts",
-  "app/api/v1/integrations/umkmpro/webhooks/route.ts",
-];
+// SEC-03 fixed: no route may echo a caught error. The list must stay empty.
+const KNOWN_LEAKS: string[] = [];
 
 /** `catch (err) { ... err instanceof Error ? err.message : ... }` feeding a response. */
 const RAW_ERROR_TO_CLIENT = /instanceof Error\s*\?\s*\w+\.message[\s\S]{0,200}?(apiError|NextResponse\.json|new Response)\(/;
 
 describe("security: caught error text must not be echoed to the client", () => {
-  it("only the known UMKMpro routes echo err.message; no other route or server action does", () => {
+  it("no route or server action echoes a caught error to the client (SEC-03 fixed)", () => {
     const files = [
       ...walk(path.join(ROOT, "app"), (n) => n === "route.ts"),
       ...walk(path.join(ROOT, "features"), (n) => /actions?\.ts$/.test(n) || /-actions\.ts$/.test(n)),
@@ -58,8 +54,9 @@ describe("security: caught error text must not be echoed to the client", () => {
   });
 });
 
-describe("security: SEC-03 behavioural pin — UMKMpro conversions route 500", () => {
-  it("KNOWN GAP (pinned as-is): the 500 body currently contains the thrown error text; invert when fixed", async () => {
+describe("security: SEC-03 — UMKMpro conversions route 500 hides internal detail", () => {
+  it("the 500 body is a fixed message and never contains the thrown error text", async () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     vi.resetModules();
     vi.doMock("@/lib/umkmpro/route-helpers", () => ({
       authorizeUmkmproRequest: vi.fn(async () => ({ rawBody: "{}", admin: {} })),
@@ -79,7 +76,10 @@ describe("security: SEC-03 behavioural pin — UMKMpro conversions route 500", (
     const res = await POST(new Request("https://app.example/api/v1/integrations/umkmpro/conversions", { method: "POST", body: "{}" }) as never);
     expect(res.status).toBe(500);
     const text = await res.text();
-    expect(text).toContain("uq_internal_detail");
-    expect(text).toContain("prompter_conversions");
+    expect(text).not.toContain("uq_internal_detail");
+    expect(text).not.toContain("prompter_conversions");
+    expect(text).toContain("Gagal menyimpan data konversi.");
+    expect(errSpy.mock.calls.flat().join(" ")).not.toContain("uq_internal_detail");
+    errSpy.mockRestore();
   });
 });
