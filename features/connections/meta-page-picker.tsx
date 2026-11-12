@@ -82,7 +82,7 @@ export function MetaPagePicker({ selectedPageName }: { selectedPageName: string 
               <select
                 value={selectedId}
                 onChange={(e) => setSelectedId(e.target.value)}
-                className="h-9 rounded-[var(--radius-md)] border border-border-strong bg-surface px-2 text-sm text-foreground"
+                aria-label="Pilih Facebook Page" className="h-11 min-w-0 max-w-full rounded-[var(--radius-md)] border border-border-strong bg-surface px-2 text-sm sm:h-9 text-foreground"
               >
                 {pages.map((page) => (
                   <option key={page.id} value={page.id}>

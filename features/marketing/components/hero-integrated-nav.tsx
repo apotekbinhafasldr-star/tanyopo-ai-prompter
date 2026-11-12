@@ -46,7 +46,7 @@ export function HeroIntegratedNav() {
 
   return (
     <div className="flex h-full items-center justify-between gap-3 px-4 sm:px-6">
-      <Link href="#produk" aria-label="LINOE — Beranda" className="inline-flex shrink-0 items-center">
+      <Link href="#produk" aria-label="LINOE — Beranda" className="inline-flex min-h-11 min-w-11 shrink-0 items-center">
         <Image
           src={LOGO_SRC}
           alt="LINOE by Tanyopo"

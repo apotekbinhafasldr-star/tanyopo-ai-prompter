@@ -158,7 +158,7 @@ export function TeamCarousel({ slides }: { slides: TeamSlide[] }) {
           aria-label="Slide sebelumnya"
           onClick={() => goTo(activeIndex - 1)}
           disabled={activeIndex === 0}
-          className="flex size-9 items-center justify-center rounded-full border border-border-strong text-foreground transition-colors hover:bg-surface-muted disabled:pointer-events-none disabled:opacity-40"
+          className="flex size-11 items-center justify-center rounded-full border border-border-strong text-foreground transition-colors hover:bg-surface-muted disabled:pointer-events-none disabled:opacity-40"
         >
           <ChevronLeft className="size-4" aria-hidden />
         </button>
@@ -184,13 +184,13 @@ export function TeamCarousel({ slides }: { slides: TeamSlide[] }) {
           aria-label="Slide berikutnya"
           onClick={() => goTo(activeIndex + 1)}
           disabled={activeIndex === slides.length - 1}
-          className="flex size-9 items-center justify-center rounded-full border border-border-strong text-foreground transition-colors hover:bg-surface-muted disabled:pointer-events-none disabled:opacity-40"
+          className="flex size-11 items-center justify-center rounded-full border border-border-strong text-foreground transition-colors hover:bg-surface-muted disabled:pointer-events-none disabled:opacity-40"
         >
           <ChevronRight className="size-4" aria-hidden />
         </button>
       </div>
 
-      <div className="mt-4 flex items-center justify-center gap-1.5 sm:hidden">
+      <div className="mt-2 flex items-center justify-center sm:hidden">
         {slides.map((slide, index) => (
           <button
             key={slide.id}
@@ -198,11 +198,16 @@ export function TeamCarousel({ slides }: { slides: TeamSlide[] }) {
             aria-label={`Ke slide ${index + 1}: ${slide.titleLead} ${slide.titleAccent}`}
             aria-current={index === activeIndex}
             onClick={() => goTo(index)}
-            className={cn(
-              "h-1.5 rounded-full transition-all duration-300",
-              index === activeIndex ? "w-6 bg-brand" : "w-1.5 bg-border-strong",
-            )}
-          />
+            className="flex size-11 items-center justify-center"
+          >
+            <span
+              aria-hidden
+              className={cn(
+                "h-1.5 rounded-full transition-all duration-300",
+                index === activeIndex ? "w-6 bg-brand" : "w-1.5 bg-border-strong",
+              )}
+            />
+          </button>
         ))}
       </div>
     </div>

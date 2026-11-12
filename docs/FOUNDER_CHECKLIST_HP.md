@@ -54,7 +54,7 @@ Legenda: **TERBUKTI** = ada di kode/skema/CI repo. **BELUM TERBUKTI** = hanya kl
 |---|---|---|
 | G1 Gate S1 anggaran | **TERBUKTI** | `lib/campaigns/external-budget-guard.ts`: `BUDGET_WRITE_ENABLED_PLATFORMS` = `Object.freeze([])`, tanpa baca env/DB/klien. Tes `external-budget-guard`, `budget-write-callsites`, `soft-launch-docs` ada. CI `build` pada commit `732b818`: success. Ini "kode", bukan bukti E2E ke platform. |
 | G2 Pembayaran riil OFF | **TERBUKTI di kode; env BUTUH FOUNDER** | Midtrans: tanpa `PAYMENT_LIVE_ENABLED` hanya mode sandbox; live butuh DUA saklar (`PAYMENT_LIVE_ENABLED=="true"` dan `PAYMENT_PROVIDER_ENV=="production"`), nilai lain = adapter tidak terkonfigurasi (tutup). DOKU memakai saklar serupa. Tidak bisa menyala tanpa env. Nilai env produksi: lihat langkah C6. |
-| G3 Migrasi S1 aktif (trigger trial 14 hari, kuota AI) | **BELUM TERBUKTI** | Skema ada dan diuji CI (`s1-trial-quota-sql`, `s1-wrapper-pg17`: success): trigger `fn_enforce_trial_subscription_insert` memaksa TRIALING/FREE/`now()`/`now()+14 hari`; RPC kuota menolak `TRIAL_EXPIRED` dan `AI_USAGE_LIMIT_REACHED`. Tetapi "sudah diterapkan" hanya klaim: `docs/AI_JOBS_QUOTA_GUARD.md` menyebut "S1 sudah di production" (pembacaan katalog 2026-11-07, sudah 4 hari) dan RUNBOOK quota-guard menyebut "tercatat di ledger", sedangkan header `docs/S1_TRIAL_AI_QUOTA.md` masih berbunyi "NOT applied to any database". Dokumen saling bertentangan; tidak ada catatan applied yang bertanggal di repo. Periksa lewat langkah C4. |
+| G3 Migrasi S1 aktif (trigger trial 14 hari, kuota AI) | **TERBUKTI (REAL, baca-saja, 2026-11-12)** | Audit baca-saja proyek `umkmpro-ai` (persetujuan `APPROVE READ-S1-2026-11-12`): E1–E6 PASS. Tiga migrasi S1 tercatat di ledger; hak tulis klien pada `prompter_ai_jobs`, `prompter_subscriptions`, `prompter_plan_entitlements` sesuai kriteria; trigger trial `trg_prompter_subscriptions_enforce_trial_insert` aktif; md5 RPC kuota `2042201955b6acbae5b10999413b0e49` (guard aktif). **Batas:** verifikasi metadata/katalog, bukan uji perilaku langsung. Rincian: `docs/S1_STATUS_EVIDENCE.md` bagian 7. Migrasi DOKU P0-3 (`20261111130000`) belum tercatat di ledger dan butuh persetujuan terpisah (bukan blocker soft-launch). |
 | G4 Email konfirmasi ke alamat non-tim | **BUTUH FOUNDER (risiko blocker)** | Repo tidak mencatat SMTP kustom. Dokumentasi resmi Supabase: SMTP bawaan hanya mengirim ke alamat anggota tim proyek, batas 2 pesan/jam, "tidak untuk produksi" (lihat bagian D1). Bila SMTP bawaan masih dipakai, calon tenant biasa tidak menerima email konfirmasi dan pendaftaran mereka macet. Uji: langkah C5. |
 | G5 Batas biaya AI di penyedia | **BUTUH FOUNDER** | Kode hanya membatasi per tenant (30 AI/trial) dan per sesi demo (5) serta batas memori per instance. Biaya total tidak punya batas di kode (`estimated_cost` belum diisi, `docs/AI_SYSTEM.md`). Pagar terakhir hanya di dashboard penyedia: langkah C1. |
 | G6 Kontak eskalasi RUNBOOK bagian 4 | **BELUM TERBUKTI (kosong)** | `docs/RUNBOOK.md` bagian 4: kolom Level 1 dan 2 masih `(isi)`. Perhatian: repo PUBLIK, jangan tulis nomor pribadi di sana (langkah C3). |
@@ -69,7 +69,7 @@ Legenda: **TERBUKTI** = ada di kode/skema/CI repo. **BELUM TERBUKTI** = hanya kl
 | G15 Guard kuota AI #48 (peran, validasi input) | **BELUM TERBUKTI** | File migrasi `20261021120000`/`20261021120100` ada di repo, tetapi file di repo bukan bukti diterapkan; dokumen menyebut belum diterapkan. Risiko rendah: tenant trial 1 pengguna dan tidak ada fitur undang pengguna di kode. |
 | G16 Error tracker | **TIDAK ADA** | Hanya `console.error` di `app/error.tsx`/`app/global-error.tsx`; kegagalan senyap tidak terlihat. |
 
-Ringkasan: TERBUKTI (kode) G1, G2*, G10*, G11*; BELUM TERBUKTI G3, G6, G7, G12, G15, G16; BUTUH FOUNDER G2*, G4, G5, G8, G9, G11*, G13, G14. (*= sebagian)
+Ringkasan: TERBUKTI (kode) G1, G2*, G10*, G11*; TERBUKTI (REAL baca-saja, 2026-11-12) G3; BELUM TERBUKTI G6, G7, G12, G15, G16; BUTUH FOUNDER G2*, G4, G5, G8, G9, G11*, G13, G14. (*= sebagian)
 
 ### A2. Pemeriksaan khusus
 
@@ -91,7 +91,7 @@ Syarat tersisa (urutan kerja):
 | # | Syarat | Jenis | Langkah |
 |---|---|---|---|
 | 1 | G4: email konfirmasi tiba di alamat non-tim (jika gagal, SMTP kustom dulu) | WAJIB, blocker | C5 |
-| 2 | G3: migrasi S1 tercatat di ledger (tiga versi) | WAJIB | C4 |
+| 2 | G3: migrasi S1 tercatat di ledger (tiga versi) | SELESAI 2026-11-12 (PASS, lihat G3) | C4 (tidak perlu diulang) |
 | 3 | G5: batas biaya AI terpasang | WAJIB | C1 |
 | 4 | G6: kontak eskalasi diisi (tanpa data pribadi di repo publik) | WAJIB | C3 |
 | 5 | G7: UptimeRobot aktif dan alert uji sampai ke HP | WAJIB | C2 |
@@ -260,6 +260,6 @@ Menghitung tenant: cara paling aman bagi proyek bersama adalah meminta Claude me
 | D3 | Anthropic spend limit per workspace, tidak untuk Default Workspace | https://platform.claude.com/docs/en/manage-claude/workspaces.md | Terverifikasi dari dokumentasi; perilaku tepat saat tercapai belum terverifikasi |
 | D4 | UptimeRobot Free: 50 monitor, 5 menit, komersial boleh, SMS berbayar | https://uptimerobot.com/pricing/?no_head=1 | Terverifikasi; email/push khusus Free belum tegas |
 | D5 | Menu Supabase Database > Migrations; menu Netlify Environment variables | dokumentasi Supabase/Netlify tidak terjangkau dari lingkungan ini | **BELUM TERVERIFIKASI** |
-| D6 | Status "S1 sudah di production" | `docs/AI_JOBS_QUOTA_GUARD.md` (pembacaan katalog 2026-11-07) | Klaim dokumen; tidak diperiksa ulang (tanpa query database) |
+| D6 | Status "S1 sudah di production" | `docs/AI_JOBS_QUOTA_GUARD.md` (2026-11-07) | Dikonfirmasi oleh audit katalog baca-saja 2026-11-12 (`S1_STATUS_EVIDENCE.md` bagian 7); klaim 2026-11-07 sendiri tidak bertanggal buktinya |
 
 Dokumen ini tidak menyatakan E2E. Tidak ada panggilan ke database, MCP, platform iklan, atau penyedia pembayaran.

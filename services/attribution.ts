@@ -41,7 +41,7 @@ export async function recordSingleTouchAttribution(
 ): Promise<void> {
   if (!input.masterCampaignId && !input.channelCampaignId) return;
 
-  await supabase.from("prompter_attributions").delete().eq("conversion_id", input.conversionId);
+  await supabase.from("prompter_attributions").delete().eq("tenant_id", input.tenantId).eq("conversion_id", input.conversionId);
 
   await supabase.from("prompter_attributions").insert({
     tenant_id: input.tenantId,

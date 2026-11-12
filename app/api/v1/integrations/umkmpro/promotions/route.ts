@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { authorizeUmkmproRequest, parseJsonBody } from "@/lib/umkmpro/route-helpers";
 import { apiError, apiSuccess } from "@/lib/api/response";
+import { describeSafeError } from "@/lib/connectors/safe-error-log";
 import { publicEnv } from "@/lib/env";
 import { umkmproPromotionHandoffSchema } from "@/schemas/umkmpro";
 import { createPromotionHandoff, tenantExists } from "@/services/umkmpro";
@@ -56,7 +57,8 @@ export async function POST(request: NextRequest) {
       { status: result.alreadyExisted ? 200 : 201 },
     );
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Gagal membuat promotion handoff.";
-    return apiError("INTERNAL_ERROR", message, 500);
+    // SEC-03: never echo the thrown text (driver/DB messages can name tables or constraints).
+    console.error("umkmpro.promotions.failed", JSON.stringify(describeSafeError(err)));
+    return apiError("INTERNAL_ERROR", "Gagal membuat promotion handoff.", 500);
   }
 }

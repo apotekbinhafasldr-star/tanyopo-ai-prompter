@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { authorizeUmkmproRequest, parseJsonBody } from "@/lib/umkmpro/route-helpers";
 import { apiError, apiSuccess } from "@/lib/api/response";
+import { describeSafeError } from "@/lib/connectors/safe-error-log";
 import { umkmproConversionSchema } from "@/schemas/umkmpro";
 import { recordConversionFromUmkmpro, tenantExists } from "@/services/umkmpro";
 
@@ -46,7 +47,8 @@ export async function POST(request: NextRequest) {
 
     return apiSuccess(result);
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Gagal menyimpan data konversi.";
-    return apiError("INTERNAL_ERROR", message, 500);
+    // SEC-03: never echo the thrown text (driver/DB messages can name tables or constraints).
+    console.error("umkmpro.conversions.failed", JSON.stringify(describeSafeError(err)));
+    return apiError("INTERNAL_ERROR", "Gagal menyimpan data konversi.", 500);
   }
 }

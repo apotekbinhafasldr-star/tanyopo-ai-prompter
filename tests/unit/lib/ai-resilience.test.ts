@@ -42,6 +42,15 @@ describe("isRetryableAiError", () => {
     expect(isRetryableAiError(new AIProviderError("x", category))).toBe(expected);
   });
 
+  it("API is retryable only for a vendor 5xx (incl. 529); a 4xx or a missing status is not", () => {
+    expect(isRetryableAiError(new AIProviderError("x", "API", 500))).toBe(true);
+    expect(isRetryableAiError(new AIProviderError("x", "API", 529))).toBe(true);
+    expect(isRetryableAiError(new AIProviderError("x", "API", 499))).toBe(false);
+    expect(isRetryableAiError(new AIProviderError("x", "API", 400))).toBe(false);
+    expect(isRetryableAiError(new AIProviderError("x", "API"))).toBe(false);
+    expect(isRetryableAiError(new AIProviderError("x", "AUTH", 503))).toBe(false);
+  });
+
   it("never retries a plain Error or a non-error value", () => {
     expect(isRetryableAiError(new Error("boom"))).toBe(false);
     expect(isRetryableAiError("RATE_LIMIT")).toBe(false);

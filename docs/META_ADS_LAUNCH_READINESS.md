@@ -1,6 +1,7 @@
 # Kesiapan Peluncuran Meta Ads (One-Click Ads)
 
 Tanggal dokumen: 2026-11-11. Semua rujukan dokumentasi resmi Meta diakses pada tanggal itu.
+Klaim yang bisa kedaluwarsa (versi API, tier akses, izin, Business Verification) diverifikasi ulang 2026-11-11; hasilnya di bagian 5.1 dan di [INTEGRATIONS_READINESS_MATRIX.md](INTEGRATIONS_READINESS_MATRIX.md).
 
 > **Mock bukan nyata.** Seluruh tes di repositori ini (termasuk "mock E2E") memakai connector palsu dan basis data palsu. Tidak ada satu pun yang pernah memanggil `graph.facebook.com`, memakai akun iklan nyata, atau mengeluarkan uang. Lulus tes mock **tidak** membuktikan Meta menerima permintaan kita. Kode ini belum pernah dijalankan terhadap akun iklan Meta nyata.
 
@@ -59,7 +60,7 @@ Keputusan: LINOE tetap mengirim **satu** budget (budget harian yang disetujui Ow
 - Konsekuensi yang disengaja: ad set dibuat `PAUSED` dan baru berjalan saat diaktifkan, lalu `end_time` tetap dihitung dari saat peluncuran. Aktivasi yang ditunda hanya **memperpendek** masa tayang, tidak pernah memperpanjang. Ad set tidak menunggu `start_date` di masa depan (perilaku ini sudah demikian sebelum PR ini).
 - Konektor Meta menerima `endTimeUnixSeconds` opsional dan mengirim `end_time` bersama `daily_budget`. Nilai tidak valid ditolak sebelum permintaan. Nilai `0` ditolak karena itu penanda "tanpa akhir" milik Meta.
 - Anggaran: budget yang dikirim <= budget harian master <= budget harian yang disetujui (`resolveMetaLaunchBudget`), dan `checkTotalBudgetCoverage` menolak `daily x durasi > total_budget`.
-- **Risiko tersisa (BELUM TERVERIFIKASI penuh): budget harian Meta bukan batas keras.** Changelog Marketing API v24.0 (<https://developers.facebook.com/docs/graph-api/changelog/version24.0>, 2026-11-11): "Daily budget flexibility is increasing from 25% to 75%"; pembacaan ringkasan halaman menyebut pengeluaran mingguan tidak melebihi 7x budget harian. Halaman Budgets (<https://developers.facebook.com/documentation/ads-commerce/marketing-api/bidding/overview/budgets.md>) masih menyebut 25% dan tidak menyebut batas mingguan; kedua sumber berbeda dan tidak dapat didamaikan. Akibatnya total pengeluaran sungguhan bisa melebihi `daily x durasi` pada hari-hari tertentu, terutama untuk durasi di bawah 7 hari. Penyangga yang kokoh hanya `lifetime_budget` + `end_time`, yang belum dikerjakan (butuh keputusan Founder dan tes pada akun uji, bagian 6).
+- **Risiko tersisa (BELUM TERVERIFIKASI penuh): budget harian Meta bukan batas keras.** Changelog Marketing API v24.0 (<https://developers.facebook.com/docs/graph-api/changelog/version24.0>, 2026-11-11): "Daily budget flexibility is increasing from 25% to 75%"; pembacaan ringkasan halaman menyebut pengeluaran mingguan tidak melebihi 7x budget harian. Halaman Budgets (<https://developers.facebook.com/documentation/ads-commerce/marketing-api/bidding/overview/budgets.md>) masih menyebut 25% dan tidak menyebut batas mingguan; kedua sumber berbeda dan tidak dapat didamaikan. Dicek ulang 2026-11-11: halaman Budgets masih hanya menyebut "up to 25% more than your daily budget"; tidak ada "75%" atau batas mingguan di sana, jadi ketidakcocokan itu tetap terbuka. Akibatnya total pengeluaran sungguhan bisa melebihi `daily x durasi` pada hari-hari tertentu, terutama untuk durasi di bawah 7 hari. Penyangga yang kokoh hanya `lifetime_budget` + `end_time`, yang belum dikerjakan (butuh keputusan Founder dan tes pada akun uji, bagian 6).
 
 ### 3.3 Backoff rate limit
 
@@ -84,6 +85,8 @@ Sumber: <https://developers.facebook.com/docs/graph-api/changelog/versions> (202
 | v25.0 | 2026-02-18 | belum ditentukan (TBD) |
 
 Halaman yang sama menyebut Graph API v26.0 dirilis 2026-07-29, tetapi versi Marketing API terbaru yang tercantum adalah v25.0. Karena itu konektor dipin ke **v25.0**.
+
+Dibaca ulang 2026-11-11: tabel tidak berubah (tidak ada versi setelah v26.0; Marketing API v25.0 kedaluwarsa "TBD"; Graph API v25.0 kedaluwarsa 2028-07-29). Halaman yang sama menambahkan "Marketing API version auto-upgrade will release on July 29, 2026", dan halaman versioning menyatakan "The current version of the Marketing API is v25.0" serta dukungan versi sebelumnya "at least 90-days". Jadi v25.0 masih benar sebagai pin. Changelog v26.0 (`.../changelog/version26.0`) tidak terbaca (client_error), sehingga dampak v26.0 pada Marketing API BELUM TERVERIFIKASI; tidak perlu dinaikkan selama tabel menyebut v25.0 sebagai Marketing API terbaru.
 
 Alasan mendesak: halaman versioning (<https://developers.facebook.com/docs/marketing-api/overview/versioning>) menyatakan panggilan ke versi yang tidak tersedia "may fail or be upgraded to the next available version", dan endpoint yang terdampak, misalnya `POST /{adset-id}`, **gagal** alih-alih di-upgrade otomatis. Pin v21.0 berarti pembuatan ad set bisa gagal.
 
@@ -133,29 +136,41 @@ Sumber: <https://developers.facebook.com/documentation/ads-commerce/marketing-ap
 
 | Persyaratan | Isi menurut dokumen | Status untuk LINOE |
 |---|---|---|
-| Akses Standard | Cukup untuk `ads_read` dan `ads_management` pada akun iklan milik sendiri. | Hanya berguna untuk uji pada akun milik sendiri. |
+| Standard Access (istilah baru: "Limited Access") | Cukup untuk `ads_read` dan `ads_management` pada akun iklan milik sendiri. Halaman otorisasi (2026-11-11) mencatat pembaruan Mei 2026: "'Standard Access' is now Limited Access"; Limited: "Heavily rate-limited per ad account. For development only." | Hanya berguna untuk uji pada akun milik sendiri. |
 | Advanced Access | "For other people's accounts, you need advanced access to the ads_read and/or ads_management permissions." Disetujui lewat App Review per izin dan fitur. | **Wajib** agar tenant bisa menghubungkan akun iklan mereka. Belum diajukan: EXTERNAL BLOCKED. |
-| Business Verification | Diperlukan bila aplikasi mengakses data sensitif; memverifikasi identitas bisnis. | Kemungkinan besar wajib untuk Advanced Access. Halaman rujukan khusus (`access-verification`) tidak dapat dibaca pada 2026-11-11, jadi syarat rinci BELUM TERVERIFIKASI. |
+| Business Verification | Halaman otorisasi: diperlukan bila aplikasi mengakses data sensitif. Halaman izin (<https://developers.facebook.com/docs/permissions>, 2026-11-11): "Business Verification is required for all apps making requests for Advanced Access." | **Wajib** untuk Advanced Access (VERIFIED dari dokumen resmi, bukan lagi dugaan). Daftar dokumen yang diminta Meta dan lama prosesnya BELUM TERVERIFIKASI (halaman rinci tidak terjangkau). |
 | App Review | Ajukan di App Review > Permissions and Features, "Request advanced access". Butuh penjelasan penggunaan dan screencast. | Belum diajukan. |
-| Marketing API Access Tier | Untuk mempertahankan akses Full: minimal 500 panggilan Marketing API dalam 15 hari terakhir dengan tingkat error di bawah 15% dari 500 panggilan terakhir. | Perlu dipantau setelah live. |
-| Izin Halaman (`pages_*`) | Halaman otorisasi **tidak** menyebut `pages_read_engagement`, `pages_show_list`, atau `pages_manage_ads`. | BELUM TERVERIFIKASI. Scope saat ini `ads_management, ads_read, business_management, pages_show_list` (dikunci oleh tes dan tidak diubah). Cek kebutuhan izin Page untuk membuat creative pada uji di akun uji sebelum mengajukan App Review. |
+| Marketing API Access Tier | Tier yang tertulis kini Limited access (otomatis saat produk Marketing API ditambahkan) dan Full access (butuh App Review). Syarat 500 panggilan dalam 15 hari terakhir dengan tingkat error di bawah 15% dari 500 panggilan terakhir berlaku untuk **mempertahankan Advanced Access dan untuk naik ke Full** (ambang Full diturunkan dari 1.500 ke 500). | Perlu dipantau setelah live. |
+| Izin Halaman (`pages_*`) | Halaman otorisasi tidak menyebut izin Page, tetapi halaman izin (2026-11-11) mencantumkan **dependensi** `ads_management`: `pages_read_engagement` dan `pages_show_list`; `pages_manage_ads` (membuat dan mengelola iklan yang terkait Page) bergantung pada `pages_show_list`. | **Temuan baru:** scope saat ini `ads_management, ads_read, business_management, pages_show_list` (dikunci oleh tes dan tidak diubah) tidak memuat `pages_read_engagement`. Apakah itu menggagalkan pembuatan creative pada akun nyata BELUM TERBUKTI; buktikan di akun uji. Mengubah scope butuh persetujuan Founder (bagian 6 butir 4). |
 
-Batas laju menurut dokumen yang sama: blokir pada skor maksimum berlangsung 300 detik untuk tier pengembangan dan 60 detik untuk akses Full.
+Batas laju menurut halaman rate limiting (2026-11-11): blokir pada skor maksimum berlangsung 300 detik untuk Limited access (skor maks 60) dan 60 detik untuk Full access (skor maks 9000). Kode 32 tetap tidak tercakup halaman itu.
+
+### 5.1 Verifikasi ulang klaim yang bisa kedaluwarsa (2026-11-11)
+
+| Klaim | Hasil | Sumber |
+|---|---|---|
+| Marketing API terbaru v25.0; v24.0 kedaluwarsa 2026-10-06 | MASIH BENAR | <https://developers.facebook.com/docs/graph-api/changelog/versions>, <https://developers.facebook.com/docs/marketing-api/overview/versioning> |
+| Advanced Access wajib untuk akun orang lain; Standard cukup untuk akun sendiri | MASIH BENAR, istilah "Standard" kini "Limited Access" | <https://developers.facebook.com/documentation/ads-commerce/marketing-api/get-started/authorization> |
+| Business Verification | DIPERBARUI: wajib untuk Advanced Access | <https://developers.facebook.com/docs/permissions> |
+| Dependensi izin Page | DIPERBARUI: ada, lihat baris di atas | <https://developers.facebook.com/docs/permissions> |
+| Backoff dan kode galat | MASIH BENAR (kode 32 belum terverifikasi) | <https://developers.facebook.com/documentation/ads-commerce/marketing-api/overview/rate-limiting.md> |
+| Satuan budget IDR | TETAP BELUM TERVERIFIKASI | <https://developers.facebook.com/documentation/ads-commerce/marketing-api/bidding/overview/budgets.md> |
+| Waktu proses App Review dan daftar dokumen Business Verification | BELUM TERVERIFIKASI (halaman rinci di luar akses sesi) | tidak ada |
 
 ## 6. Butuh persetujuan Founder (tidak dikerjakan di PR ini)
 
 1. **Migrasi**: perbarui `prompter_platform_capabilities.api_version` dari `v21.0` ke `v25.0` untuk baris Meta. Menyentuh `supabase/migrations` dan basis data bersama, jadi harus disetujui dan diterapkan terpisah.
 2. **Audiens terstruktur**: butuh keputusan tempat simpan (kolom baru di `prompter_master_campaigns` = migrasi, atau perluasan skema `ai_proposal`). Minat/perilaku Meta memakai ID dari Targeting Search API, jadi tidak boleh dikarang. Usulan awal tanpa minat: jenis kelamin dan rentang umur.
 3. **Keputusan memakai `lifetime_budget` + `end_time`** sebagai batas keras total, atau mewajibkan `budget total >= budget harian x durasi x faktor fleksibilitas Meta` (lihat risiko di 3.2). Kewajiban durasi saat ada budget total sudah diterapkan di sisi peluncuran Meta (3.2); input form belum mewajibkannya, sehingga Owner baru melihat penolakan saat meluncurkan.
-4. **Scope OAuth**: tambah `pages_read_engagement` atau `pages_manage_ads` hanya bila uji akun uji membuktikan perlu. Mengubah scope menyentuh alur OAuth dan App Review.
+4. **Scope OAuth**: dokumen izin Meta mencantumkan `pages_read_engagement` sebagai dependensi `ads_management` (bagian 5). Tambah `pages_read_engagement` atau `pages_manage_ads` hanya bila uji akun uji membuktikan perlu. Mengubah scope menyentuh alur OAuth dan App Review.
 5. **Panel kesiapan, preview internal, metrik konversi**: belum ada. Panel kesiapan dapat memakai hasil `checkApprovalThreshold`, validator budget, dan `getAccountReadinessSnapshot`. Metrik konversi butuh Pixel/CAPI atau kolom baru. Belum dikerjakan agar PR ini kecil dan aman; perlu desain UI.
 
 ## 7. Langkah untuk Founder (cukup dari HP Android)
 
 Semua langkah lewat browser Chrome Android. Tidak butuh laptop atau CLI.
 
-1. Buka Meta Business Settings (business.facebook.com) lalu Pusat Keamanan, mulai **Business Verification** untuk PT Tanyopo Future Technology. Siapkan dokumen legalitas (akta/NIB) dalam bentuk foto atau PDF dari HP.
-2. Buka developers.facebook.com, aplikasi LINOE, App Review > Permissions and Features. Ajukan **Advanced Access** untuk `ads_management` dan `ads_read` (dan izin Page bila terbukti perlu). Siapkan video layar dari HP yang menunjukkan alur: hubungkan akun, ajukan campaign, persetujuan Owner, objek dibuat PAUSED.
+1. Buka <https://business.facebook.com/settings/security> (Pusat Keamanan; label menu Meta bisa berubah dan belum dicek di sesi ini), mulai **Business Verification** untuk PT Tanyopo Future Technology. Siapkan dokumen legalitas (akta/NIB) dalam bentuk foto atau PDF dari HP.
+2. Buka <https://developers.facebook.com/apps/>, pilih aplikasi LINOE, App Review > Permissions and Features (tautan langsung: `https://developers.facebook.com/apps/<APP_ID>/app-review/permissions/`, isi `<APP_ID>` dari daftar aplikasi; bentuk URL belum dicek). Ajukan **Advanced Access** untuk `ads_management` dan `ads_read` (dan izin Page bila terbukti perlu). Siapkan video layar dari HP yang menunjukkan alur: hubungkan akun, ajukan campaign, persetujuan Owner, objek dibuat PAUSED.
 3. Siapkan **akun iklan uji** dan Halaman Facebook uji (bukan akun pelanggan) untuk uji terkontrol satuan budget IDR dan pembuatan objek `PAUSED`. Minta persetujuan eksplisit sebelum gerbang S1 dibuka untuk uji itu.
 4. Jangan menghidupkan `PAYMENT_LIVE_ENABLED` dan jangan mengubah `BUDGET_WRITE_ENABLED_PLATFORMS` sampai langkah 1 hingga 3 selesai dan ditinjau.
 

@@ -12,11 +12,13 @@ import { DEMO_SESSION_COOKIE, verifyDemoSessionToken, type DemoSessionPayload } 
  * signed, tenant-less cookie.
  */
 export async function getDemoSession(): Promise<DemoSessionPayload | null> {
+  // Read the request cookies FIRST. This makes every /demo page dynamic even when the secret is missing at build
+  // time; otherwise Next prerenders the "no secret -> redirect(/demo)" result and serves it to everyone at runtime.
+  const cookieStore = await cookies();
   if (!serverEnv.demo.sessionSecret) {
     return null;
   }
 
-  const cookieStore = await cookies();
   const token = cookieStore.get(DEMO_SESSION_COOKIE)?.value;
   const result = verifyDemoSessionToken(token, serverEnv.demo.sessionSecret);
   return result.ok ? result.session : null;

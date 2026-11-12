@@ -118,3 +118,30 @@ Langkah minimum paling berguna sekarang: putuskan apakah prioritas pertama adala
 Semua di `https://developers.tiktok.com/doc/`: `login-kit-web`, `oauth-user-access-token-management`, `content-posting-api-get-started`, `content-posting-api-reference-direct-post`, `content-posting-api-reference-upload-video`, `content-posting-api-reference-query-creator-info`, `content-posting-api-reference-get-video-status`, `content-posting-api-media-transfer-guide`, `content-sharing-guidelines`, `tiktok-api-v2-error-handling`, `tiktok-api-v2-rate-limit`, `getting-started-create-an-app`, `webhooks-overview`.
 
 Tidak terjangkau (BLOCKED, tidak ada di allowlist sesi): `business-api.tiktok.com/portal/docs` (Marketing API: auth, umur token, kode error, batas laju). Semua klaim Marketing API di dokumen ini berasal dari kode yang sudah ada, bukan dari dokumen resmi, dan ditandai tidak terverifikasi.
+
+## 10. Verifikasi ulang klaim yang bisa kedaluwarsa (2026-11-11)
+
+Semua di `https://developers.tiktok.com/doc/`, diakses 2026-11-11.
+
+| Klaim | Hasil | Halaman |
+|---|---|---|
+| Token Open API v2: akses 24 jam (86.400 dtk), refresh 365 hari, refresh token baru wajib dipakai bila nilainya berbeda; endpoint `POST open.tiktokapis.com/v2/oauth/token/` dan `/v2/oauth/revoke/` | MASIH BENAR | `oauth-user-access-token-management` |
+| URL otorisasi `https://www.tiktok.com/v2/auth/authorize/`, `scope` dipisah koma, `response_type=code`; URL lama `.../auth/authorize/` harus migrasi; halaman Login Kit Web tidak menyebut PKCE | MASIH BENAR | `login-kit-web` |
+| Klien belum diaudit: konten dibatasi privat (`SELF_ONLY`), maks 5 pengguna per 24 jam, semua akun harus privat; batas posting kira-kira 15 per hari per akun kreator | MASIH BENAR | `content-sharing-guidelines`, `content-posting-api-get-started` |
+| Direct Post init: 6 permintaan/menit per token pengguna, scope `video.publish` | MASIH BENAR (halaman referensi endpoint) | `content-posting-api-reference-direct-post` |
+| Halaman rate-limit umum | CATATAN: hanya memuat `/v2/user/info/` (600), `/v2/video/query/`, `/v2/video/list/`; batas init, status, creator info hanya ada di halaman referensi endpoint masing-masing | `tiktok-api-v2-rate-limit` |
+| Cara mengajukan Direct Post | Halaman get-started tidak menjelaskan formulir pengajuan; ia hanya meminta scope `video.publish` disetujui dan konfigurasi Direct Post diaktifkan di app. Prosedur audit rinci (formulir, estimasi pengguna aktif) BELUM TERVERIFIKASI | `content-posting-api-get-started` |
+| Review app | BARU: "App review may take several days to two weeks after submission"; tanpa persetujuan tidak ada akses API; versi beta/uji "will not be approved in most cases". Sandbox: "try out integrations without having to submit your app for review" | `getting-started-faq`, `getting-started-create-an-app` |
+| Verifikasi URL | BARU: untuk app yang dibuat setelah 2024-09-09 URL tertentu wajib diverifikasi; semua app yang memakai upload URL / link sharing URL Content Posting wajib memverifikasi URL tanpa memandang tanggal pembuatan | `getting-started-create-an-app` |
+| Ikon app 1024x1024 px; demo video maks 5 berkas, masing-masing maks 50 MB | MASIH BENAR | `getting-started-create-an-app` |
+| Marketing API (auth, umur token, review, kode galat, batas laju) | TETAP BELUM TERVERIFIKASI: `business-api.tiktok.com/portal/docs` di luar akses sesi; halaman bantuan `ads.tiktok.com/help/article/marketing-api` hanya menyebut mendaftar sebagai developer | `https://ads.tiktok.com/help/article/marketing-api` |
+
+## 11. Tautan Founder (Chrome Android)
+
+| Tujuan | Tautan |
+|---|---|
+| Daftar dan kelola app Open API v2 (Login Kit, Content Posting) | <https://developers.tiktok.com/apps/> (label menu bisa berubah; belum dicek di sesi ini) |
+| Dokumentasi buat app dan review | <https://developers.tiktok.com/doc/getting-started-create-an-app> |
+| Pendaftaran developer Marketing API (iklan) | <https://business-api.tiktok.com/portal> (halaman portal; alur pembuatan app Marketing API BELUM TERVERIFIKASI) |
+
+Ringkasan blocker: pembuatan app, pengajuan review, audit Content Posting, dan akses advertiser hanya bisa dilakukan Founder dan TikTok. Status tetap EXTERNAL BLOCKED, tidak ada klaim LIVE. Matriks gabungan: [INTEGRATIONS_READINESS_MATRIX.md](INTEGRATIONS_READINESS_MATRIX.md).
