@@ -46,7 +46,8 @@ describe("public pages at 360px: regression for the QA findings", () => {
 
   it("team carousel: slide dots and arrows are 44px buttons (dot is drawn inside)", () => {
     const c = src("features/marketing/components/team-carousel.tsx");
-    expect(c).not.toMatch(/size-9/);
+    // the decorative icon bubble may stay size-9; the prev/next buttons may not
+    expect(c).not.toMatch(/aria-label="Slide (sebelumnya|berikutnya)"[\s\S]{0,260}size-9/);
     expect(c).toMatch(/className="flex size-11 items-center justify-center"\s*>\s*<span\s+aria-hidden/);
   });
 
