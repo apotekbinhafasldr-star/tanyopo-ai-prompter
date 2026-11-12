@@ -5,10 +5,10 @@ import { LEGAL_LINKS } from "./legal-meta";
 export function LegalLinks({ className }: { className?: string }) {
   return (
     <nav aria-label="Informasi hukum" className={className}>
-      <ul className="flex flex-wrap gap-x-5 gap-y-2">
+      <ul className="flex flex-wrap gap-x-5">
         {LEGAL_LINKS.map((l) => (
           <li key={l.href}>
-            <Link href={l.href} className="hover:text-foreground hover:underline">
+            <Link href={l.href} className="inline-flex min-h-11 items-center hover:text-foreground hover:underline">
               {l.label}
             </Link>
           </li>

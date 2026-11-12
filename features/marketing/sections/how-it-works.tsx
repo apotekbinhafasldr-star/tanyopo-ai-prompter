@@ -27,7 +27,7 @@ export function HowItWorks() {
 
         {/* Mobile/tablet: horizontal snap-scroll, so the whole workflow is a swipe away
             instead of a long vertical stack. Desktop: full grid, all visible at once. */}
-        <div className="-mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-2 no-scrollbar sm:mx-0 sm:gap-4 sm:px-0 lg:grid lg:grid-cols-4 lg:overflow-visible">
+        <div role="region" aria-label="Langkah cara kerja LINOE" tabIndex={0} className="-mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-2 no-scrollbar sm:mx-0 sm:gap-4 sm:px-0 lg:grid lg:grid-cols-4 lg:overflow-visible focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand">
           {STEPS.map((step, i) => (
             <div
               key={step.title}
