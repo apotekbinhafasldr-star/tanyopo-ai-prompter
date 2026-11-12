@@ -76,7 +76,7 @@ function ComplianceFlagRow({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <Label className="text-sm text-foreground">{FLAG_LABELS[flagType]}</Label>
         <div className="flex items-center gap-2">
-          <select name="status" defaultValue={status} className={selectClass}>
+          <select name="status" aria-label={`Status: ${FLAG_LABELS[flagType]}`} defaultValue={status} className={selectClass}>
             {(Object.keys(STATUS_LABELS) as ComplianceStatus[]).map((s) => (
               <option key={s} value={s}>
                 {STATUS_LABELS[s]}
@@ -89,9 +89,9 @@ function ComplianceFlagRow({
         </div>
       </div>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        <Input name="notes" defaultValue={flag?.notes ?? ""} placeholder="Catatan (opsional)" />
+        <Input name="notes" aria-label={`Catatan: ${FLAG_LABELS[flagType]}`} defaultValue={flag?.notes ?? ""} placeholder="Catatan (opsional)" />
         {flagType === "TERMS_PRIVACY_LINK" ? (
-          <Input name="url" type="url" defaultValue={flag?.url ?? ""} placeholder="https://" />
+          <Input name="url" type="url" aria-label={`Tautan: ${FLAG_LABELS[flagType]}`} defaultValue={flag?.url ?? ""} placeholder="https://" />
         ) : null}
       </div>
       {state.error ? (

@@ -54,4 +54,15 @@ describe("public pages at 360px: regression for the QA findings", () => {
     const h = src("features/marketing/sections/how-it-works.tsx");
     expect(h).toMatch(/role="region" aria-label="Langkah cara kerja LINOE" tabIndex=\{0\}/);
   });
+
+  it("settings compliance rows: every field has an accessible name (no bare select/input)", () => {
+    const f = src("features/settings/compliance-flags-form.tsx");
+    expect(f).toMatch(/<select name="status" aria-label=/);
+    expect(f).toMatch(/<Input name="notes" aria-label=/);
+    expect(f).toMatch(/<Input name="url" type="url" aria-label=/);
+  });
+
+  it("billing pricing cards: sub-text is dark enough on tinted card backgrounds (no muted-foreground on colour)", () => {
+    expect(src("features/billing/pricing-cards.tsx")).not.toMatch(/subtext: "text-(muted-foreground|white\/80)"/);
+  });
 });
