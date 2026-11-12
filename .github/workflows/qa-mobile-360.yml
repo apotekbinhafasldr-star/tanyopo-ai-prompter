@@ -8,7 +8,8 @@ jobs:
   mobile-360:
     runs-on: ubuntu-latest
     env:
-      NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
+      # CI-only: points the app at the fake backend scripts/qa/mock-supabase.mjs (runner-local). Never used in deploys.
+      NEXT_PUBLIC_SUPABASE_URL: http://localhost:54321
       NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_placeholder
       NEXT_PUBLIC_APP_URL: http://localhost:3000
     steps:
@@ -23,6 +24,9 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - name: Start app
         run: |
+          nohup node scripts/qa/mock-supabase.mjs > mock.log 2>&1 &
+          # Ephemeral value generated on this runner only, used so the demo entry can be exercised; never stored.
+          export DEMO_SESSION_SECRET="$(openssl rand -hex 32)"
           nohup npm run start > server.log 2>&1 &
           for i in $(seq 1 40); do curl -sf http://localhost:3000/login >/dev/null && break; sleep 2; done
       - name: QA 360px
@@ -31,4 +35,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: qa-mobile-360
-          path: qa-output
+          path: |
+            qa-output
+            server.log
+            mock.log
