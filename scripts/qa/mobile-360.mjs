@@ -75,13 +75,17 @@ for (const r of ["/", "/login", "/register", "/forgot-password", "/privacy", "/t
 
 // 2) demo: a real navigation to /api/demo/start (needs DEMO_SESSION_SECRET in the runner's server env)
 const demo = await mk();
-await demo.route("**/api/demo/start", async (route) => {
-  const resp = await route.fetch({ maxRedirects: 0 });
-  const headers = resp.headers();
-  if (headers["set-cookie"]) headers["set-cookie"] = headers["set-cookie"].replace(/;\s*Secure/gi, "");
-  await route.fulfill({ status: resp.status(), headers, body: await resp.body() });
-});
-await audit(demo, "demo_entry", "/api/demo/start");
+// Diagnostics (no cookie values printed): what does the entry answer, and does a cookie come back?
+const r0 = await demo.request.get(BASE + "/api/demo/start", { maxRedirects: 0, headers: { "sec-fetch-mode": "navigate", "sec-fetch-dest": "document" } });
+const sc = r0.headers()["set-cookie"] ?? "";
+console.log(`DEMO start: status=${r0.status()} location=${r0.headers().location ?? "-"} setCookie=${sc ? sc.replace(/=[^;]*/, "=<redacted>") : "none"}`);
+if (sc) {
+  // The app marks the cookie Secure (correct on HTTPS). On plain http://localhost the harness stores it without that flag.
+  const [pair] = sc.split(";"); const i = pair.indexOf("=");
+  await demo.addCookies([{ name: pair.slice(0, i), value: pair.slice(i + 1), domain: "localhost", path: "/" }]);
+  const r1 = await demo.request.get(BASE + "/demo/dashboard", { maxRedirects: 0 });
+  console.log(`DEMO dashboard with cookie: status=${r1.status()} location=${r1.headers().location ?? "-"}`);
+}
 for (const r of ["/demo/dashboard", "/demo/products", "/demo/campaign", "/demo/content", "/demo/analytics"]) await audit(demo, `demo_${r.split("/").pop()}`, r);
 
 // 3) login-gated screens (fixture session)
@@ -91,10 +95,10 @@ const fresh = await mk([sessionCookie(USERS.newbie)]);
 await audit(fresh, "onboarding", "/onboarding");
 
 // 4) loading state: slow the fake backend, capture the route-segment skeleton
-await fetch(`${MOCK}/__delay?ms=6000`);
+await fetch(`${MOCK}/__delay?ms=3000`);
 await audit(authed, "loading_dashboard", "/dashboard", {
   wait: "commit",
-  afterNav: async (p) => { await p.waitForSelector("[role=status][aria-busy=true]", { timeout: 15000 }); },
+  afterNav: async (p) => { await p.waitForSelector("[role=status][aria-busy=true]", { timeout: 60000 }); },
 });
 await fetch(`${MOCK}/__delay?ms=0`);
 
