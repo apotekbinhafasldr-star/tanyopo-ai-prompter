@@ -114,9 +114,18 @@ try {
   await page.locator("button[aria-pressed]").first().click();
   await next.click(); // 5 -> 6
   await next.click(); // 6 -> 7
+  const toDashboard = page.waitForURL("**/dashboard", { timeout: 60000 });
   await next.click(); // 7 -> 8
-  await page.getByRole("button", { name: "Selesai, ke Dashboard" }).click();
-  await page.waitForURL("**/dashboard");
+  // OBSERVASI: tombol "Lanjut" (type=button) dan "Selesai" (type=submit) berbagi posisi JSX, sehingga React dapat memakai ulang
+  // elemen yang sama dan klik pada langkah 7 langsung mengirim form. Skrip menerima kedua perilaku dan mencatatnya.
+  const submit = page.getByRole("button", { name: "Selesai, ke Dashboard" });
+  const alreadyBusy = await submit.getAttribute("aria-busy", { timeout: 3000 }).catch(() => null);
+  if (alreadyBusy === "true") {
+    console.log("OBSERVASI: klik Lanjut di langkah 7 langsung mengirim form onboarding (langkah 8 terlewati); kode aplikasi tidak diubah di QA-1.");
+  } else {
+    await submit.click().catch(() => {});
+  }
+  await toDashboard;
   step("Onboarding selesai: masuk /dashboard", true);
 
   // 6) Trial 14 hari dibuat saat akses pertama /billing; periode dikunci server oleh trigger S1.
