@@ -62,10 +62,12 @@ describe("OnboardingWizard: navigasi langkah 7 ke 8", () => {
     expect(finish).toHaveAttribute("type", "submit");
   });
 
-  it("fokus pindah ke tombol Selesai saat langkah 8 terbuka (tidak jatuh ke body)", async () => {
+  it("fokus pindah ke judul langkah 8 (bukan body, bukan tombol Selesai)", async () => {
     await goToStep7();
     await click(next());
-    expect(screen.getByRole("button", { name: "Selesai, ke Dashboard" })).toHaveFocus();
+    const heading = screen.getByRole("heading", { level: 2, name: STEP8 });
+    expect(heading).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Selesai, ke Dashboard" })).not.toHaveFocus();
   });
 
   it("tombol Lanjut tidak pernah bertipe submit pada langkah 1 sampai 7", async () => {
@@ -175,3 +177,53 @@ async function goToStep7Again() {
   await click(next());
   await click(next());
 }
+
+describe("OnboardingWizard: aksesibilitas dan fokus (mobile gate 360px)", () => {
+  it("setiap pindah langkah memfokuskan judul langkah, termasuk saat Lanjut menjadi nonaktif", async () => {
+    render(<OnboardingWizard />);
+    fireEvent.change(screen.getByLabelText("Nama bisnis"), { target: { value: "Kopi Nusantara" } });
+    await click(next()); // 1 -> 2
+    expect(screen.getByRole("heading", { level: 2, name: "Pasar & Preferensi Global" })).toHaveFocus();
+    await click(next()); // 2 -> 3 (Lanjut nonaktif sampai ada pilihan)
+    expect(next()).toBeDisabled();
+    expect(screen.getByRole("heading", { level: 2, name: "Apa jenis bisnis Anda?" })).toHaveFocus();
+    expect(document.body).not.toHaveFocus();
+    await click(screen.getByRole("button", { name: "Kembali" }));
+    expect(screen.getByRole("heading", { level: 2, name: "Pasar & Preferensi Global" })).toHaveFocus();
+  });
+
+  it("textarea langkah 4 dan select langkah 6 punya nama aksesibel dari label, bukan placeholder", async () => {
+    render(<OnboardingWizard />);
+    fireEvent.change(screen.getByLabelText("Nama bisnis"), { target: { value: "Kopi Nusantara" } });
+    await click(next());
+    await click(next());
+    await click(pickFirstOption());
+    await click(next()); // -> 4
+    const textarea = screen.getByRole("textbox", { name: "Apa yang Anda jual" });
+    expect(textarea).toHaveAttribute("id", "whatDoYouSellInput");
+    fireEvent.change(textarea, { target: { value: "Kopi kemasan" } });
+    await click(next()); // -> 5
+    await click(pickFirstOption());
+    await click(next()); // -> 6
+    expect(screen.getByRole("combobox", { name: "Target pasar campaign" })).toBeInTheDocument();
+  });
+
+  it("tombol navigasi, Selesai dan Lewati memiliki tinggi minimal 44px (kelas min-h-11) dan baris tombol boleh membungkus", async () => {
+    await goToStep7();
+    expect(screen.getByRole("button", { name: "Kembali" }).className).toContain("min-h-11");
+    expect(next().className).toContain("min-h-11");
+    expect(screen.getByRole("button", { name: /Lewati/ }).className).toContain("min-h-11");
+    await click(next());
+    const finish = screen.getByRole("button", { name: "Selesai, ke Dashboard" });
+    expect(finish.className).toContain("min-h-11");
+    expect(finish.className).toContain("whitespace-normal");
+    expect(finish.parentElement?.className).toContain("flex-wrap");
+  });
+
+  it("Enter tambahan setelah tiba di langkah 8 tidak mengirim form (fokus ada di judul)", async () => {
+    await goToStep7();
+    await click(next()); // 7 -> 8
+    fireEvent.keyDown(document.activeElement as Element, { key: "Enter" });
+    expect(completeMock).not.toHaveBeenCalled();
+  });
+});
