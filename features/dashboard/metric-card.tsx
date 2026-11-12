@@ -24,7 +24,7 @@ export function MetricCard({ label, icon: Icon, value, hint }: MetricCardProps) 
         {value ? (
           <p className="text-2xl font-semibold tracking-tight text-foreground">{value}</p>
         ) : (
-          <p className="text-2xl font-semibold tracking-tight text-muted-foreground" aria-label="Belum ada data">
+          <p role="img" className="text-2xl font-semibold tracking-tight text-muted-foreground" aria-label="Belum ada data">
             <span aria-hidden>—</span>
           </p>
         )}

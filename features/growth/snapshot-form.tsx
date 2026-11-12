@@ -10,7 +10,7 @@ import { logFollowerSnapshotAction, type GrowthActionState } from "@/features/gr
 const initialState: GrowthActionState = { error: null };
 
 const selectClass =
-  "h-10 rounded-[var(--radius-md)] border border-border-strong bg-surface px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40";
+  "h-11 sm:h-10 rounded-[var(--radius-md)] border border-border-strong bg-surface px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40";
 
 export function FollowerSnapshotForm() {
   const [state, formAction, pending] = useActionState(logFollowerSnapshotAction, initialState);

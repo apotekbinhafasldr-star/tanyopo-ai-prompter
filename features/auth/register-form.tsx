@@ -147,18 +147,16 @@ export function RegisterForm() {
             <PasswordInput id="password" name="password" autoComplete="new-password" minLength={8} required />
             <p className="text-xs text-muted-foreground">Minimal 8 karakter.</p>
           </div>
-          <div className="flex items-start gap-1">
-            <span className="-ml-3 -mt-2 flex size-11 shrink-0 items-center justify-center">
-              <input
-                id="acceptLegal"
-                name="acceptLegal"
-                type="checkbox"
-                required
-                defaultChecked={false}
-                className="size-5 shrink-0 rounded border-border accent-[var(--color-brand,currentColor)]"
-              />
-            </span>
-            <Label htmlFor="acceptLegal" className="text-xs font-normal leading-relaxed text-muted-foreground">
+          <label htmlFor="acceptLegal" className="flex min-h-11 cursor-pointer items-start gap-2.5 text-xs font-normal leading-relaxed text-muted-foreground">
+            <input
+              id="acceptLegal"
+              name="acceptLegal"
+              type="checkbox"
+              required
+              defaultChecked={false}
+              className="mt-0.5 size-5 shrink-0 rounded border-border accent-[var(--color-brand,currentColor)]"
+            />
+            <span>
               Saya telah membaca dan menyetujui{" "}
               <Link href="/terms" target="_blank" className="font-medium text-foreground hover:underline">
                 Syarat &amp; Ketentuan
@@ -168,8 +166,8 @@ export function RegisterForm() {
                 Kebijakan Privasi
               </Link>
               .
-            </Label>
-          </div>
+            </span>
+          </label>
           {state.error ? (
             <div role="alert" className="flex flex-col gap-2 text-sm text-danger">
               <p>{state.error}</p>

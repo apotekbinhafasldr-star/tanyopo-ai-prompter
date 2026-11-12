@@ -29,7 +29,7 @@ const STATUS_LABELS: Record<ComplianceStatus, string> = {
 };
 
 const selectClass =
-  "h-9 rounded-[var(--radius-md)] border border-border-strong bg-surface px-2 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40";
+  "h-11 sm:h-9 rounded-[var(--radius-md)] border border-border-strong bg-surface px-2 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40";
 
 export function ComplianceFlagsForm({
   flags,

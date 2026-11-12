@@ -22,10 +22,20 @@ describe("public pages at 360px: regression for the QA findings", () => {
     expect(parts.match(/inline-flex min-h-11 items-center/g)?.length).toBeGreaterThanOrEqual(2);
   });
 
-  it("register: the legal checkbox sits inside a 44px hit area", () => {
+  it("register: the legal checkbox row is one 44px label (tapping the text toggles the box)", () => {
     const form = src("features/auth/register-form.tsx");
-    expect(form).toMatch(/size-11[^"]*"[\s\S]{0,200}id="acceptLegal"/);
-    expect(form).not.toMatch(/id="acceptLegal"[\s\S]{0,200}size-4 /);
+    expect(form).toMatch(/<label htmlFor="acceptLegal" className="[^"]*min-h-11/);
+    expect(form).toMatch(/id="acceptLegal"[\s\S]{0,300}size-5/);
+  });
+
+  it("app screens: dropdowns are 44px on phones (h-11), compact only from sm", () => {
+    for (const f of ["features/billing/plan-form.tsx", "features/settings/global-preferences-form.tsx", "features/analytics/conversion-form.tsx"]) {
+      expect(src(f)).toMatch(/selectClass =\s*"h-11 sm:h-/);
+    }
+  });
+
+  it("dashboard metric card: the aria-label sits on an element with a role (axe aria-prohibited-attr)", () => {
+    expect(src("features/dashboard/metric-card.tsx")).toMatch(/role="img"[^>]*aria-label="Belum ada data"/);
   });
 
   it("marketing header menu button and logo links are >=44px", () => {
