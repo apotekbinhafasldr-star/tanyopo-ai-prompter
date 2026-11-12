@@ -1,6 +1,6 @@
 # Kesiapan SEO / GEO / AEO
 
-Tanggal audit: 2026-11-11. Branch: `feat/seo-geo-aeo-readiness`. Dua cakupan terpisah: (1) situs publik LINOE, (2) fitur SEO/GEO/AEO untuk pelanggan.
+Tanggal audit: 2026-11-11 (audit ulang atas `main` 6287160 ada di bagian 5). Dua cakupan terpisah: (1) situs publik LINOE, (2) fitur SEO/GEO/AEO untuk pelanggan.
 
 Aturan copy: tidak ada janji ranking Google, tidak ada janji sitasi otomatis oleh AI. LINOE hanya menyusun rencana dan data terstruktur dari data milik pelanggan.
 
@@ -66,3 +66,54 @@ Dokumentasi resmi Google menyatakan hasil kaya (rich result) FAQ tidak lagi dita
 - Pengiriman GSC bergantung pada env yang diisi Founder; tanpa itu tidak ada efek (aman).
 - Tes belum dijalankan lokal (node_modules tidak tersedia di lingkungan kerja); bukti hanya dari CI.
 - Nilai LCP/CWV nyata belum diukur.
+
+## 5. Audit ulang 2026-11-11 (main 6287160): kode dan dokumen, kesiapan Search Console dan Ads
+
+Metode: baca kode (`app/sitemap.ts`, `app/robots.ts`, `app/layout.tsx`, metadata halaman, `lib/seo/*`, `proxy.ts`, `netlify.toml`) dan dokumen resmi Google. **Tidak** ada pemeriksaan situs hidup: URL produksi tidak terjangkau dari lingkungan kerja (di luar daftar akses), jadi isi `robots.txt` dan `sitemap.xml` yang benar-benar tersaji **BELUM TERVERIFIKASI**; yang dinilai adalah kode yang menghasilkannya. `node_modules` kosong, sehingga dokumen Next.js di `node_modules/next/dist/docs/` tidak dapat dibaca dan tes tidak dijalankan lokal (bukti hanya dari CI).
+
+### 5.1 Hasil per butir
+
+| Butir | Hasil | Status |
+|---|---|---|
+| `app/sitemap.ts` | Memuat `/` dan 4 halaman legal dari `LEGAL_LINKS`, URL absolut https, tanpa `lastModified`/`priority`/`changefreq` (tidak ada tanggal ubah nyata; Google tidak memakai priority/changefreq). Origin `/` tanpa garis miring akhir, canonical landing `/` setara (root). Tidak ditemukan bug | OK, tidak diubah |
+| `app/robots.ts` | `allow: /`, `disallow: /api/ /auth/`, `sitemap` ke origin yang sama. `/login`, `/register`, `/onboarding`, `/demo`, `/admin`, `/ops` sengaja tidak di-disallow supaya `noindex` terbaca (dokumen Google: halaman yang diblokir robots.txt tidak membuat crawler melihat noindex, dan robots.txt bukan mekanisme menyembunyikan halaman). Tidak ditemukan bug | OK, tidak diubah |
+| Metadata halaman publik | Landing: title, description, canonical `/`, OG/Twitter, OG image statis 1200x630. 4 halaman legal: `legalMetadata()` (title, description, canonical sama dengan rute, `index: true`). Root: `metadataBase` dari `getSiteOrigin()` (tidak pernah localhost), `lang="id"` | OK |
+| noindex area terautentikasi | `(app)`, `(auth)`, `admin`, `demo`, `onboarding`, `ops/payments` semuanya `robots: { index: false, follow: false }`; kini dijaga tes baru | OK |
+| JSON-LD | Organization, WebSite, SoftwareApplication, FAQPage hanya di landing; tanpa offers/rating/logo/sosial | OK |
+| Halaman legal publik | Semua ada di `PUBLIC_PATHS` proxy (terbaca tanpa login), di sitemap, memuat operator, lokasi, email. `effectiveDate` belum diisi: tidak ada "Berlaku sejak". Retensi belum ditetapkan dan tenggat hak subjek tidak dijanjikan (lihat LEGAL_PSE_CHECKLIST) | Konsisten; isi hukum: butuh konsultan |
+| Aset crawl | `/robots.txt` dan `/sitemap.xml` exact-match di `isPublicAsset()`; `/llms.txt` belum (keputusan Founder, bagian 1) | OK |
+| Analitik/konversi | Tidak ada GA4/gtag/GTM/pixel di kode (pencarian 2026-11-11). Tanpa pengukuran, hasil Search Console tidak dapat dikaitkan ke konversi, dan Ads tidak dapat mengukur | Belum ada (sengaja; perlu keputusan dan persetujuan privasi) |
+| Domain | `PRODUCTION_ORIGIN` = `*.netlify.app`. Hanya properti URL-prefix yang realistis selama belum ada domain sendiri (properti Domain butuh DNS: kesimpulan dari dokumen Google di bawah, belum diuji) | PERLU KONFIRMASI |
+
+Perbaikan kode di sitemap/robots: **tidak ada**, karena tidak ada bug terverifikasi. Penambahan: `tests/unit/seo/seo-crawl-consistency.test.ts` (UNIT TEST PASS hanya setelah CI hijau) menjaga: setiap tautan legal ada di `PUBLIC_PATHS` proxy dan memakai `legalMetadata` dengan `path` yang sama; URL sitemap unik, satu origin dengan robots, dan tidak terkena disallow; semua area privat tetap noindex dan tidak ada `index: true` di sana.
+
+### 5.2 Temuan di file lain (hanya dilaporkan, tidak diubah)
+
+1. `app/(app)/layout.tsx` dan lainnya sudah benar. Tidak ada temuan metadata yang salah pada halaman publik.
+2. Judul halaman aplikasi bercampur bahasa (mis. "Products", "Content", "Pengaturan"). Tidak berdampak SEO (noindex), hanya konsistensi UI.
+3. Halaman legal tanpa tanggal berlaku: penilai platform (Meta/TikTok/Google) mungkin mencari tanggal; belum diverifikasi sebagai syarat. Keputusan Founder (F6 di LEGAL_PSE_CHECKLIST).
+4. Performa hero (LCP) belum diukur; lihat bagian 1.
+
+### 5.3 Search Console (resmi: [Verify your site ownership](https://support.google.com/webmasters/answer/9008080?hl=en), diakses 2026-11-11)
+
+- Metode Tag HTML, file HTML, GA, GTM hanya untuk properti URL-prefix; properti Domain hanya lewat catatan DNS. **TERVERIFIKASI (resmi)**.
+- Verifikasi bertahan selama token masih terbaca di situs: jangan hapus env/meta tag setelah berhasil. **TERVERIFIKASI (resmi)**.
+- `noindex` lewat meta robots atau header `X-Robots-Tag` didukung; aturan noindex di robots.txt tidak didukung; halaman yang diblokir robots.txt tidak menampilkan noindex ke crawler: [Block Search Indexing with noindex](https://developers.google.com/search/docs/crawling-indexing/block-indexing), diakses 2026-11-11. **TERVERIFIKASI (resmi)**.
+- robots.txt "bukan mekanisme untuk menjaga halaman dari Google": [Robots.txt Introduction](https://developers.google.com/search/docs/crawling-indexing/robots/intro), diakses 2026-11-11. **TERVERIFIKASI (resmi)**.
+- Aturan pembuatan sitemap (lastmod hanya bila akurat): dokumen [Build and Submit a Sitemap](https://developers.google.com/search/docs/crawling-indexing/sitemaps/build-sitemap) tidak terbuka (di luar daftar akses). **BELUM TERVERIFIKASI**; kode tidak menaruh `lastModified` sehingga tidak ada risiko tanggal palsu.
+
+### 5.4 Google Ads: BELUM TERVERIFIKASI
+
+Dokumen kebijakan dan persyaratan akun Google Ads tidak diperiksa (tidak ada sumber resmi yang dibuka pada sesi ini). Jangan menganggap halaman legal dan landing saat ini "lolos kebijakan Ads". Pemeriksaan ini dan pembuatan akun/penagihan adalah keputusan dan biaya Founder; tidak dilakukan di sini dan tidak ada iklan dipublikasikan.
+
+### 5.5 Yang benar-benar butuh Founder (semua dari HP)
+
+| # | Tindakan | Syarat/biaya | Kapan |
+|---|---|---|---|
+| S1 | Putuskan apakah situs publik boleh diindeks sekarang (soft launch undangan) atau menunggu domain sendiri dan keputusan legal (G9). Kode sudah siap untuk indeks (landing + legal) | Tanpa biaya | Sebelum S2 |
+| S2 | Buka Search Console di HP, tambah properti URL-prefix, pilih "Tag HTML", salin nilai `content`, isi `NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION` di pengaturan Netlify, deploy ulang (variabel `NEXT_PUBLIC_` dibaca saat build), tekan Verifikasi, kirim `/sitemap.xml`. Perubahan env di Netlify hanya oleh Founder | Akun Google, gratis | Setelah S1 |
+| S3 | Domain sendiri (bila ada): daftarkan di Netlify dan atur `NEXT_PUBLIC_APP_URL`; buat properti baru di Search Console | Biaya domain: keputusan Founder | Opsional |
+| S4 | Ukur LCP/CWV dari HP lewat PageSpeed Insights (alat web, gratis) dan kirim hasil | Gratis | Sebelum mengubah hero |
+| S5 | Google Ads, GA4, konversi: **tidak wajib untuk soft launch**; tunda sampai ada keputusan privasi (persetujuan, DPA) dan anggaran | Biaya iklan/penagihan: persetujuan Founder | Setelah soft launch |
+
+Tidak ada tindakan SEO lain yang wajib dari Founder untuk soft launch.
