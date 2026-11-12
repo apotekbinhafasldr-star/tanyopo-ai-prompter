@@ -65,4 +65,8 @@ describe("public pages at 360px: regression for the QA findings", () => {
   it("billing pricing cards: sub-text is dark enough on tinted card backgrounds (no muted-foreground on colour)", () => {
     expect(src("features/billing/pricing-cards.tsx")).not.toMatch(/subtext: "text-(muted-foreground|white\/80)"/);
   });
+
+  it("billing: white-on-orange CTA uses orange-700 (contrast), not orange-600", () => {
+    expect(src("features/billing/pricing-cards.tsx")).not.toMatch(/bg-orange-600 text-white/);
+  });
 });
