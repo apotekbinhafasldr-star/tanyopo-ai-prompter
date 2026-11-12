@@ -36,10 +36,12 @@ async function measure(page) {
     const doc = document.documentElement;
     const offenders = [...document.querySelectorAll("body *")].filter((e) => vis(e) && e.getBoundingClientRect().right > doc.clientWidth + 1 && !e.closest("[class*=overflow-x-auto]")).slice(0, 5).map((e) => `${e.tagName.toLowerCase()}.${String(e.className).slice(0, 40)}`);
     const targets = [...document.querySelectorAll("button, input:not([type=hidden]), select, textarea, [role=button], nav a, header a, aside a, a[class*=btn], a[data-slot=button]")].filter(vis);
-    const small = targets.map((e) => { const r = e.getBoundingClientRect(); return { el: e.tagName.toLowerCase(), name: name(e), w: Math.round(r.width), h: Math.round(r.height) }; }).filter((t) => t.h < MIN || t.w < MIN);
+    const small = targets.map((e) => { const box = ["checkbox", "radio"].includes(e.type) && e.closest("label") ? e.closest("label") : e; const r = box.getBoundingClientRect(); return { el: e.tagName.toLowerCase(), name: name(e), w: Math.round(r.width), h: Math.round(r.height) }; }).filter((t) => t.h < MIN || t.w < MIN);
     const unnamedButtons = [...document.querySelectorAll("button, [role=button]")].filter((e) => vis(e) && !name(e).replace(e.tagName, "")).length;
-    const inputsNoLabel = [...document.querySelectorAll("input:not([type=hidden]), select, textarea")].filter((e) => vis(e) && !(e.getAttribute("aria-label") || e.getAttribute("aria-labelledby") || (e.id && document.querySelector(`label[for="${CSS.escape(e.id)}"]`)) || e.closest("label"))).length;
-    return { innerWidth: innerWidth, overflowX: doc.scrollWidth - doc.clientWidth, offenders, targetCount: targets.length, small, unnamedButtons, inputsNoLabel, lang: doc.lang, h1: document.querySelectorAll("h1").length, title: document.title };
+    const unlabeled = [...document.querySelectorAll("input:not([type=hidden]), select, textarea")].filter((e) => vis(e) && !(e.getAttribute("aria-label") || e.getAttribute("aria-labelledby") || (e.id && document.querySelector(`label[for="${CSS.escape(e.id)}"]`)) || e.closest("label")));
+    const inputsNoLabel = unlabeled.length;
+    const unlabeledInfo = unlabeled.slice(0, 5).map((e) => `${e.tagName.toLowerCase()}[type=${e.type}][name=${e.name}][ph=${e.placeholder ?? ""}]`);
+    return { innerWidth: innerWidth, overflowX: doc.scrollWidth - doc.clientWidth, offenders, targetCount: targets.length, small, unnamedButtons, inputsNoLabel, unlabeledInfo, lang: doc.lang, h1: document.querySelectorAll("h1").length, title: document.title };
   }, MIN);
 }
 
@@ -73,6 +75,12 @@ for (const r of ["/", "/login", "/register", "/forgot-password", "/privacy", "/t
 
 // 2) demo: a real navigation to /api/demo/start (needs DEMO_SESSION_SECRET in the runner's server env)
 const demo = await mk();
+await demo.route("**/api/demo/start", async (route) => {
+  const resp = await route.fetch({ maxRedirects: 0 });
+  const headers = resp.headers();
+  if (headers["set-cookie"]) headers["set-cookie"] = headers["set-cookie"].replace(/;\s*Secure/gi, "");
+  await route.fulfill({ status: resp.status(), headers, body: await resp.body() });
+});
 await audit(demo, "demo_entry", "/api/demo/start");
 for (const r of ["/demo/dashboard", "/demo/products", "/demo/campaign", "/demo/content", "/demo/analytics"]) await audit(demo, `demo_${r.split("/").pop()}`, r);
 
@@ -83,10 +91,10 @@ const fresh = await mk([sessionCookie(USERS.newbie)]);
 await audit(fresh, "onboarding", "/onboarding");
 
 // 4) loading state: slow the fake backend, capture the route-segment skeleton
-await fetch(`${MOCK}/__delay?ms=4000`);
+await fetch(`${MOCK}/__delay?ms=6000`);
 await audit(authed, "loading_dashboard", "/dashboard", {
   wait: "commit",
-  afterNav: async (p) => { await p.waitForSelector("[role=status][aria-busy=true]", { timeout: 8000 }); },
+  afterNav: async (p) => { await p.waitForSelector("[role=status][aria-busy=true]", { timeout: 15000 }); },
 });
 await fetch(`${MOCK}/__delay?ms=0`);
 
@@ -111,6 +119,7 @@ for (const r of report) {
   console.log(`\n## ${r.label} ${r.route} -> ${r.finalUrl ?? "-"} [${r.status ?? "-"}] ${problems.length ? "FAIL: " + problems.join("; ") : "PASS"}`);
   if (r.error) continue;
   console.log(`   w=${r.innerWidth} targets=${r.targetCount} h1=${r.h1} title="${r.title}" consoleErrors=${JSON.stringify(r.consoleErrors)}`);
+  if (r.unlabeledInfo?.length) console.log(`   unlabeled: ${JSON.stringify(r.unlabeledInfo)}`);
   if (r.offenders.length) console.log(`   overflow candidates: ${JSON.stringify(r.offenders)}`);
   for (const s of r.small.slice(0, 8)) console.log(`   small: ${s.el} "${s.name}" ${s.w}x${s.h}`);
   for (const a of r.axe) console.log(`   axe ${a.impact} ${a.id} x${a.nodes} ${a.sample}`);

@@ -39,7 +39,7 @@ const server = http.createServer((req, res) => {
     log.push(`${req.method} ${url.pathname}${url.search.slice(0, 80)}`);
     if (url.pathname === "/__log") return send(200, log.slice(-200));
     if (url.pathname === "/__delay") { delayMs = Number(url.searchParams.get("ms") ?? 0); return send(200, { delayMs }); }
-    if (delayMs && url.pathname.startsWith("/rest/v1/")) return void setTimeout(() => handle(), delayMs);
+    if (delayMs && url.pathname.startsWith("/rest/v1/") && !["user_profiles", "tenants", "prompter_brand_profiles"].includes(url.pathname.slice(9))) return void setTimeout(() => handle(), delayMs);
     handle();
     function handle() {
     if (url.pathname === "/auth/v1/user") {
