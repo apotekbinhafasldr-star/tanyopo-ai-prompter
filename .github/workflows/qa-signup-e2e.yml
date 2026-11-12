@@ -6,8 +6,6 @@ name: QA signup E2E (local Supabase)
 #  * Email ditangkap Mailpit lokal: ini BUKAN bukti pengiriman email nyata (Resend). Itu jalur B (REAL E2E), terpisah dan manual.
 #  * Reset = stack baru tiap run; tidak ada data yang bertahan.
 on:
-  push:
-    branches: ["tmp/verify-onboarding-e2e"]
   pull_request:
     paths:
       - ".github/workflows/qa-signup-e2e.yml"
