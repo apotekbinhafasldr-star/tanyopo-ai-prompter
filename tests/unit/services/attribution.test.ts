@@ -5,13 +5,15 @@ import type { Database } from "@/types/database";
 
 function mockSupabase() {
   const deleteEq = vi.fn(async () => ({ data: null, error: null }));
+  const tenantEq = vi.fn(() => ({ eq: deleteEq }));
   const insert = vi.fn(async () => ({ data: null, error: null }));
   const from = vi.fn(() => ({
-    delete: () => ({ eq: deleteEq }),
+    delete: () => ({ eq: tenantEq }),
     insert,
   }));
-  return { from, deleteEq, insert } as unknown as SupabaseClient<Database> & {
+  return { from, deleteEq, tenantEq, insert } as unknown as SupabaseClient<Database> & {
     deleteEq: typeof deleteEq;
+    tenantEq: typeof tenantEq;
     insert: typeof insert;
     from: typeof from;
   };
@@ -45,6 +47,7 @@ describe("recordSingleTouchAttribution", () => {
       model: "UMKMPRO_VERIFIED",
     });
 
+    expect(supabase.tenantEq).toHaveBeenCalledWith("tenant_id", "t1");
     expect(supabase.deleteEq).toHaveBeenCalledWith("conversion_id", "c1");
     expect(supabase.insert).toHaveBeenCalledWith(
       expect.objectContaining({
