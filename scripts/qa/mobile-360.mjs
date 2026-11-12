@@ -95,12 +95,27 @@ const fresh = await mk([sessionCookie(USERS.newbie)]);
 await audit(fresh, "onboarding", "/onboarding");
 
 // 4) loading state: slow the fake backend, capture the route-segment skeleton
-await fetch(`${MOCK}/__delay?ms=3000`);
-await audit(authed, "loading_dashboard", "/dashboard", {
-  wait: "commit",
-  afterNav: async (p) => { await p.waitForSelector("[role=status][aria-busy=true]", { timeout: 60000 }); },
-});
-await fetch(`${MOCK}/__delay?ms=0`);
+// Soft navigation with a slow data source: the route-segment skeleton (app/(app)/loading.tsx) must appear at once.
+{
+  const page = await authed.newPage();
+  const entry = { label: "loading_state", route: "/connections -> /campaigns (slow data)" };
+  try {
+    await fetch(`${MOCK}/__delay?ms=0`);
+    await page.goto(BASE + "/connections", { waitUntil: "networkidle", timeout: 45000 });
+    await fetch(`${MOCK}/__delay?ms=4000`);
+    await page.evaluate(() => document.querySelector('a[href="/campaigns"]')?.click());
+    await page.waitForSelector("[role=status][aria-busy=true]", { timeout: 12000 });
+    entry.status = 200; entry.finalUrl = "(skeleton shown)";
+    Object.assign(entry, await measure(page));
+    const axe = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze();
+    entry.axe = axe.violations.map((v) => ({ id: v.id, impact: v.impact, nodes: v.nodes.length, sample: v.nodes[0]?.target?.join(" ") }));
+    entry.consoleErrors = [];
+    await page.screenshot({ path: `${OUT}/loading_state.png`, fullPage: true });
+  } catch (e) { entry.error = String(e).split("\n")[0]; }
+  await fetch(`${MOCK}/__delay?ms=0`);
+  report.push(entry);
+  await page.close();
+}
 
 await browser.close();
 writeFileSync(`${OUT}/report.json`, JSON.stringify(report, null, 2));
