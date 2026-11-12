@@ -987,6 +987,57 @@ describe("launchChannelCampaignAction — approval threshold (require_approval_a
   });
 });
 
+describe("launchChannelCampaignAction — campaign_limit for a campaign without total_budget", () => {
+  const policyWithLimit = (campaignLimit: number | null) => ({
+    tenant_id: "t1",
+    daily_limit: null,
+    monthly_limit: null,
+    campaign_limit: campaignLimit,
+    currency: "IDR",
+    require_approval_above: null,
+    autopilot_limit: null,
+    created_at: "",
+    updated_at: "",
+  });
+
+  beforeEach(() => {
+    requireSessionContextMock.mockClear();
+    connectorMock.createCampaign.mockClear();
+    connectorMock.createAdSet.mockClear();
+  });
+
+  function expectRefusedBeforeClaim(result: { error: string | null }, pattern: RegExp) {
+    expect(result.error).toMatch(pattern);
+    expect(harness.claimUpdate).not.toHaveBeenCalled();
+    expect(harness.auditInsert).not.toHaveBeenCalled();
+    expect(connectorMock.createCampaign).not.toHaveBeenCalled();
+    expect(connectorMock.createAdSet).not.toHaveBeenCalled();
+  }
+
+  it("limit set, daily-only campaign (no total, no duration): refused BEFORE the claim (spend unbounded)", async () => {
+    harness = buildHarness({ policy: policyWithLimit(1_000_000), master: { daily_budget: 100_000, total_budget: null, duration_days: null } });
+    expectRefusedBeforeClaim(await launchChannelCampaignAction("cc1"), /tidak terbatas/);
+  });
+
+  it("limit set, no total: daily x duration above the limit is refused BEFORE the claim", async () => {
+    harness = buildHarness({ policy: policyWithLimit(499_999), master: { daily_budget: 100_000, total_budget: null, duration_days: 5 } });
+    expectRefusedBeforeClaim(await launchChannelCampaignAction("cc1"), /melebihi batas budget per campaign/);
+  });
+
+  it("limit set, no total: daily x duration exactly at the limit launches as before", async () => {
+    harness = buildHarness({ policy: policyWithLimit(500_000), master: { daily_budget: 100_000, total_budget: null, duration_days: 5 } });
+    const result = await launchChannelCampaignAction("cc1");
+    expect(result.error).toBeNull();
+    expect(connectorMock.createCampaign).toHaveBeenCalledTimes(1);
+  });
+
+  it("no limit set: a daily-only campaign behaves as before", async () => {
+    harness = buildHarness({ policy: policyWithLimit(null), master: { daily_budget: 100_000, total_budget: null, duration_days: null } });
+    const result = await launchChannelCampaignAction("cc1");
+    expect(result.error).toBeNull();
+  });
+});
+
 describe("launchChannelCampaignAction — Meta flight end_time (launch time + duration, start_date ignored)", () => {
   beforeEach(() => {
     requireSessionContextMock.mockClear();

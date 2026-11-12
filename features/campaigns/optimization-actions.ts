@@ -264,6 +264,20 @@ async function submitRecommendationCore(
     return { error: "Rekomendasi ini tidak memerlukan tindakan." };
   }
 
+  // The arguments of a server action come from the client and the AI, so they are re-validated here.
+  // A budget action needs a whole-rupiah budget of at least 1: the External Budget Safety Gate refuses
+  // anything else at execution time, which would consume the Owner's approval for a change that can
+  // never run. Refused BEFORE any approval row exists.
+  if (
+    (actionType === "INCREASE_BUDGET" || actionType === "DECREASE_BUDGET") &&
+    !(typeof suggestedDailyBudget === "number" && Number.isSafeInteger(suggestedDailyBudget) && suggestedDailyBudget >= 1)
+  ) {
+    return { error: "Nilai budget harian pada rekomendasi tidak valid (harus bilangan bulat minimal 1). Tidak ada yang diajukan." };
+  }
+  if (actionType !== "INCREASE_BUDGET" && actionType !== "DECREASE_BUDGET" && actionType !== "PAUSE_CHANNEL") {
+    return { error: "Jenis tindakan rekomendasi tidak dikenali. Tidak ada yang diajukan." };
+  }
+
   const { data: channelCampaign, error: channelError } = await supabase
     .from("prompter_channel_campaigns")
     .select("id, channel, status")
