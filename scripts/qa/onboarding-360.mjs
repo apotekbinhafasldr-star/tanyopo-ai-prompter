@@ -43,6 +43,12 @@ const next = () => page.getByRole("button", { name: /Lanjut/ });
 const back = () => page.getByRole("button", { name: /Kembali/ });
 const heading = async () => (await page.locator("h2:visible").first().textContent())?.trim() ?? "";
 const focusInfo = () => page.evaluate(() => { const e = document.activeElement; return e ? `${e.tagName}${(e.textContent || e.getAttribute("aria-label") || "").trim() ? ` "${(e.textContent || e.getAttribute("aria-label")).trim().slice(0, 30)}"` : ""}` : "none"; });
+async function expectHeadingFocus(n) {
+  try {
+    await page.waitForFunction((t) => document.activeElement && document.activeElement.tagName === "H2" && document.activeElement.textContent.trim() === t, HEADINGS[n], { timeout: 3000 });
+    return null;
+  } catch { return `fokus bukan judul langkah (sekarang: ${await focusInfo()})`; }
+}
 async function expectStep(n) {
   await page.waitForFunction((t) => [...document.querySelectorAll("h2")].some((h) => h.textContent.trim() === t), HEADINGS[n]);
 }
@@ -55,8 +61,11 @@ async function measure() {
     const targets = [...document.querySelectorAll("button, input:not([type=hidden]), select, textarea, a[href]")].filter(vis).map((e) => { const r = e.getBoundingClientRect(); return { el: e.tagName.toLowerCase(), name: name(e), w: Math.round(r.width), h: Math.round(r.height) }; });
     const unlabeled = [...document.querySelectorAll("input:not([type=hidden]), select, textarea")].filter(vis).filter((e) => !(e.getAttribute("aria-label") || e.getAttribute("aria-labelledby") || (e.id && document.querySelector(`label[for="${e.id}"]`)) || e.closest("label"))).map((e) => `${e.tagName.toLowerCase()}#${e.id}`);
     const unnamed = [...document.querySelectorAll("button")].filter(vis).filter((e) => !(e.textContent || e.getAttribute("aria-label") || "").trim()).length;
+    const form = document.querySelector("form");
+    const fr = form ? form.getBoundingClientRect() : null;
+    const outOfForm = fr ? [...form.querySelectorAll("button, input:not([type=hidden]), select, textarea")].filter(vis).filter((e) => { const r = e.getBoundingClientRect(); return r.right > fr.right + 1 || r.left < fr.left - 1; }).map((e) => `${e.tagName.toLowerCase()} "${(e.textContent || e.id).trim().slice(0, 24)}" right=${Math.round(e.getBoundingClientRect().right)} formRight=${Math.round(fr.right)}`) : [];
     const offenders = [...document.querySelectorAll("body *")].filter((e) => vis(e) && e.getBoundingClientRect().right > doc.clientWidth + 1 && !e.closest("[class*=overflow]")).slice(0, 4).map((e) => e.tagName.toLowerCase() + "." + String(e.className).slice(0, 40));
-    return { innerWidth, overflowX: doc.scrollWidth - doc.clientWidth, offenders, targets, unlabeled, unnamed, lewati: !!([...document.querySelectorAll("button")].find((b) => /Lewati/.test(b.textContent))) };
+    return { outOfForm, innerWidth, overflowX: doc.scrollWidth - doc.clientWidth, offenders, targets, unlabeled, unnamed, lewati: !!([...document.querySelectorAll("button")].find((b) => /Lewati/.test(b.textContent))) };
   });
 }
 
@@ -69,6 +78,7 @@ const results = [];
 let lastBackForward = "";
 async function auditStep(n) {
   await expectStep(n);
+  await page.waitForTimeout(500); // beri waktu POST tertunda muncul sebelum menyimpulkan
   const m = await measure();
   const axe = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze();
   const hi = axe.violations.filter((v) => v.impact === "serious" || v.impact === "critical");
@@ -85,7 +95,11 @@ async function auditStep(n) {
   if (m.unnamed) problems.push(`${m.unnamed} tombol tanpa nama`);
   if (n >= 7 && !m.lewati) problems.push("'Lewati' tidak tampil di langkah >=7");
   if (n < 7 && m.lewati) problems.push("'Lewati' tampil sebelum langkah 7");
-  if (posts.length !== (n === 8 ? 0 : 0)) problems.push(`POST sebelum langkah 8 selesai: ${posts.join(",")}`);
+  if (posts.length) problems.push(`POST sebelum Selesai diklik: ${posts.join(",")}`);
+  if (m.outOfForm.length) problems.push(`kontrol keluar dari kartu/form: ${m.outOfForm.join("; ")}`);
+  const nav = m.targets.filter((t) => /^(Kembali|Lanjut|Selesai|Lewati)/.test(t.name) && t.h < 44);
+  if (nav.length) problems.push(`target navigasi <44px: ${nav.map((t) => `${t.name} ${t.w}x${t.h}`).join("; ")}`);
+  if (n > 1) { const f = await expectHeadingFocus(n); if (f) problems.push(f); }
   await shot(`step${n}`);
   results.push({ n, problems, axeLow: lo.map((v) => `${v.impact}:${v.id}`), small44: t44.map((t) => `${t.name} ${t.w}x${t.h}`), targets: m.targets.length });
 }
@@ -147,8 +161,22 @@ for (let n = 2; n <= 7; n++) {
 await auditStep(8);
 const r8 = results[7];
 r8.focusAfterNext = await focusInfo();
-if (!/Selesai/.test(r8.focusAfterNext)) r8.problems.push(`fokus di langkah 8 bukan Selesai: ${r8.focusAfterNext}`);
+// Tunggu lama: submit dini (tertunda) harus tetap muncul sebagai POST sebelum Selesai diklik.
+await page.waitForTimeout(2500);
 if (posts.length) r8.problems.push(`form terkirim sebelum Selesai diklik: ${posts.join(",")}`);
+// Enter tambahan (fokus ada di judul) tidak boleh mengirim form.
+await page.keyboard.press("Enter");
+await page.waitForTimeout(800);
+if (posts.length) r8.problems.push(`Enter tambahan di langkah 8 memicu POST: ${posts.join(",")}`);
+keyboard.push("Enter tambahan di langkah 8 (fokus di judul) -> 0 POST");
+// Teks diperbesar (150%): tidak boleh ada kontrol keluar dari kartu/form.
+await page.evaluate(() => { document.documentElement.style.fontSize = "24px"; });
+await page.waitForTimeout(300);
+const big = await measure();
+if (big.outOfForm.length) r8.problems.push(`teks 150%: kontrol keluar dari kartu: ${big.outOfForm.join("; ")}`);
+if (big.overflowX > 0) r8.problems.push(`teks 150%: overflowX ${big.overflowX}px`);
+await shot("step8_text150");
+await page.evaluate(() => { document.documentElement.style.fontSize = ""; });
 if (await page.getByRole("button", { name: /Lanjut/ }).count()) r8.problems.push("Lanjut masih tampil di langkah 8");
 const finish = page.getByRole("button", { name: "Selesai, ke Dashboard" });
 if ((await finish.getAttribute("type")) !== "submit") r8.problems.push("tombol Selesai bukan submit");
