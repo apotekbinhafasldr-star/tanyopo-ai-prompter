@@ -3,9 +3,10 @@
 # lalu SEMUA migrasi repo berurutan. Menolak host non-lokal dan kredensial produksi (scripts/qa/local-stack-guard.mjs).
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"; root="$(cd "$here/../.." && pwd)"
-export PGHOST="${PGHOST:-127.0.0.1}" PGPORT="${PGPORT:-54322}" PGUSER="${PGUSER:-postgres}" PGPASSWORD="${PGPASSWORD:-postgres}" PGDATABASE=postgres
+# Struktural lokal-saja: target DB DITETAPKAN di sini (tidak mengikuti variabel luar) dan variabel libpq yang bisa menimpanya dihapus.
+unset PGSERVICE PGSERVICEFILE PGHOSTADDR PGPASSFILE PGOPTIONS PGSSLMODE
 node "$here/local-stack-guard.mjs"
-case "$PGHOST" in 127.0.0.1|localhost) ;; *) echo "REFUSED: PGHOST=$PGHOST" >&2; exit 2;; esac
+export PGHOST=127.0.0.1 PGPORT=54322 PGUSER=postgres PGPASSWORD=postgres PGDATABASE=postgres
 P() { psql -X -q -v ON_ERROR_STOP=1 "$@"; }
 echo "== shim objek bersama (tenants, user_profiles, fungsi tenant) -- disimulasikan, bukan salinan produksi"
 P -f "$root/supabase/sandbox/doku/01_shim_shared_objects.sql" >/dev/null

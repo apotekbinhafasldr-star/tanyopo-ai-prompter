@@ -21,6 +21,14 @@ const FORBIDDEN_VARS = [
   "NETLIFY_AUTH_TOKEN",
   "NETLIFY_SITE_ID",
   "DEMO_SESSION_SECRET",
+  "SUPABASE_DB_URL",
+  "POSTGRES_PRISMA_URL",
+  // libpq bisa menimpa PGHOST lewat variabel-variabel ini: tidak boleh ada.
+  "PGSERVICE",
+  "PGSERVICEFILE",
+  "PGHOSTADDR",
+  "PGPASSFILE",
+  "PGOPTIONS",
 ];
 
 // Referensi proyek Supabase nyata milik Founder dan host layanan produksi: tidak boleh muncul di nilai env mana pun.
@@ -45,8 +53,13 @@ function hostOf(value) {
   }
 }
 
-/** Mengembalikan daftar pelanggaran (array kosong = aman). Murni, tanpa efek samping. */
+/**
+ * Mengembalikan daftar pelanggaran (array kosong = aman). Murni, tanpa efek samping.
+ * @param {Record<string, string | undefined>} env
+ * @returns {string[]}
+ */
 export function findViolations(env) {
+  /** @type {string[]} */
   const out = [];
   for (const name of FORBIDDEN_VARS) {
     if (env[name]) out.push(`variabel terlarang terisi: ${name}`);
@@ -57,6 +70,13 @@ export function findViolations(env) {
     const host = hostOf(v);
     if (host === null || !LOCAL_HOSTS.has(host)) out.push(`${name} bukan localhost (host=${host ?? "tidak valid"})`);
   }
+  // Variabel SUPABASE_* lain yang berisi URL harus lokal juga.
+  for (const [name, value] of Object.entries(env)) {
+    if (!/^(NEXT_PUBLIC_)?SUPABASE_.*URL$/.test(name) || typeof value !== "string" || value === "") continue;
+    const host = hostOf(value);
+    if (host === null || !LOCAL_HOSTS.has(host)) out.push(`${name} bukan localhost (host=${host ?? "tidak valid"})`);
+  }
+  if (env.PGPORT && env.PGPORT !== "54322") out.push(`PGPORT harus 54322 (stack lokal), ditemukan ${env.PGPORT}`);
   const pgHost = env.PGHOST;
   if (pgHost && !pgHost.startsWith("/") && !LOCAL_HOSTS.has(pgHost)) out.push(`PGHOST bukan localhost (${pgHost})`);
   for (const [name, value] of Object.entries(env)) {
@@ -68,8 +88,13 @@ export function findViolations(env) {
   return out;
 }
 
-/** Fail-closed: melempar error (dan CLI keluar dengan kode 2) bila ada pelanggaran atau target wajib tidak ada. */
-export function assertLocalOnly(env, { requireUrls = [] } = {}) {
+/**
+ * Fail-closed: melempar error (dan CLI keluar dengan kode 2) bila ada pelanggaran atau target wajib tidak ada.
+ * @param {Record<string, string | undefined>} env
+ * @param {{ requireUrls?: string[] }} [options]
+ */
+export function assertLocalOnly(env, options = {}) {
+  const requireUrls = options.requireUrls ?? [];
   const violations = findViolations(env);
   for (const name of requireUrls) {
     if (!env[name]) violations.push(`${name} wajib diisi (target lokal)`);
@@ -79,7 +104,10 @@ export function assertLocalOnly(env, { requireUrls = [] } = {}) {
   }
 }
 
-/** Identitas QA hanya boleh domain .test (tidak pernah bisa menjadi alamat nyata). */
+/**
+ * Identitas QA hanya boleh domain .test (tidak pernah bisa menjadi alamat nyata).
+ * @param {string} email
+ */
 export function assertQaEmail(email) {
   if (email !== QA_EMAIL) throw new Error(`QA GUARD REFUSED: email harus ${QA_EMAIL}`);
 }

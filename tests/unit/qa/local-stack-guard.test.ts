@@ -37,6 +37,19 @@ describe("QA-1 guard fail-closed", () => {
     },
   );
 
+  it("menolak variabel libpq yang bisa menimpa PGHOST dan port non-lokal", () => {
+    for (const name of ["PGHOSTADDR", "PGSERVICE", "PGSERVICEFILE", "PGPASSFILE", "PGOPTIONS", "SUPABASE_DB_URL"]) {
+      expect(() => assertLocalOnly({ ...LOCAL_OK, [name]: "x" })).toThrow(new RegExp(name));
+    }
+    expect(() => assertLocalOnly({ ...LOCAL_OK, PGPORT: "5432" })).toThrow(/PGPORT/);
+    expect(() => assertLocalOnly({ ...LOCAL_OK, PGPORT: "54322" })).not.toThrow();
+  });
+
+  it("menolak trik URL (userinfo, subdomain menyerupai localhost)", () => {
+    expect(() => assertLocalOnly({ ...LOCAL_OK, NEXT_PUBLIC_SUPABASE_URL: "http://localhost@evil.example" })).toThrow(/REFUSED/);
+    expect(() => assertLocalOnly({ ...LOCAL_OK, NEXT_PUBLIC_SUPABASE_URL: "http://127.0.0.1.evil.example" })).toThrow(/REFUSED/);
+  });
+
   it("wajib memiliki target lokal yang diminta (fail-closed saat kosong)", () => {
     expect(() => assertLocalOnly({}, { requireUrls: ["NEXT_PUBLIC_SUPABASE_URL"] })).toThrow(/wajib diisi/);
   });

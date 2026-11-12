@@ -25,7 +25,7 @@ const step = (name, ok, detail = "") => {
 
 function psql(sql) {
   return execFileSync("psql", ["-X", "-At", "-v", "ON_ERROR_STOP=1", "-c", sql], {
-    env: { ...process.env, PGHOST: "127.0.0.1", PGPORT: "54322", PGUSER: "postgres", PGPASSWORD: "postgres", PGDATABASE: "postgres" },
+    env: { ...process.env, PGSERVICE: "", PGSERVICEFILE: "", PGHOSTADDR: "", PGPASSFILE: "", PGOPTIONS: "", PGHOST: "127.0.0.1", PGPORT: "54322", PGUSER: "postgres", PGPASSWORD: "postgres", PGDATABASE: "postgres" },
     encoding: "utf8",
   }).trim();
 }
@@ -119,7 +119,7 @@ try {
   step("Halaman /billing terbuka untuk pengguna baru", billing?.status() === 200, `status=${billing?.status()}`);
   const tenantSql = `(select tenant_id from public.user_profiles where id = (select id from auth.users where email = '${QA_EMAIL}'))`;
   const row = psql(
-    `select status || '|' || plan || '|' || extract(epoch from (current_period_end - current_period_start))/86400 from public.prompter_subscriptions where tenant_id = ${tenantSql}`,
+    `select status || '|' || plan || '|' || round(extract(epoch from (current_period_end - current_period_start))/86400)::int from public.prompter_subscriptions where tenant_id = ${tenantSql}`,
   );
   step("Trial: status TRIALING, plan FREE, periode tepat 14 hari", row === "TRIALING|FREE|14", row);
   const brand = psql(`select count(*) from public.prompter_brand_profiles where tenant_id = ${tenantSql}`);

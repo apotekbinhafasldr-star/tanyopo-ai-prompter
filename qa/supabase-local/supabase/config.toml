@@ -22,8 +22,9 @@ enabled = false
 [studio]
 enabled = false
 
+# Skema `storage` dibutuhkan migrasi repo (bucket); layanan ringan, hanya untuk memenuhi skema.
 [storage]
-enabled = false
+enabled = true
 
 [edge_runtime]
 enabled = false
