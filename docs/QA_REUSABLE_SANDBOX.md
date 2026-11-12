@@ -30,3 +30,6 @@ Satu identitas QA tetap, `qa-linoe@example.test`, dipakai berulang pada setiap r
 - Pembatas laju pendaftaran produksi (5/jam/IP) tidak diuji di sini (memori proses, satu run).
 - Versi Supabase CLI memakai rilis mayor 2 terbaru (`supabase@2`); bila konfigurasi lokal berubah antar rilis, pin versi.
 - Jalur B (REAL E2E Resend, satu inbox tetap, proyek sandbox terisolasi, reset hanya pada allowlist) belum dibuat (QA-2).
+
+## Jalur B (QA-2, email nyata)
+Rancangan jalur B (Supabase QA terpisah, Resend sub-domain, satu inbox tetap, manual) ada di [docs/QA2_REAL_EMAIL_E2E.md](QA2_REAL_EMAIL_E2E.md). Status: **NOT ACTIVATED** (desain saja).

@@ -1,0 +1,55 @@
+name: QA-2 real email E2E (inert)
+
+# QA-2 / jalur B (REAL email). INERT sampai Founder menyetujui tiap tahap aktivasi
+# (APPROVE QA-2-SUPABASE-PROJECT, QA-2-RESEND-DOMAIN, QA-2-INBOX, QA-2-SECRETS, QA-2-ENABLE; lihat docs/QA2_REAL_EMAIL_E2E.md).
+#  * Hanya workflow_dispatch manual. Tanpa push / pull_request / schedule.
+#  * Job baru jalan bila variabel repo QA2_ENABLED == 'true' DAN frasa konfirmasi benar.
+#  * Secret QA_* hidup HANYA di GitHub Environment `qa-real-email`, bukan secret repo, bukan secret produksi.
+#  * Tanpa hosting produksi dan tanpa rilis. Hanya proyek Supabase QA terpisah.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Ketik RUN-QA-2-REAL-EMAIL untuk menjalankan"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qa-real-e2e
+  cancel-in-progress: false
+
+jobs:
+  real-email-e2e:
+    if: ${{ vars.QA2_ENABLED == 'true' && inputs.confirm == 'RUN-QA-2-REAL-EMAIL' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: qa-real-email
+    env:
+      QA2_CONFIRM: ${{ inputs.confirm }}
+      QA2_ACTIVATED: ${{ vars.QA2_ENABLED }}
+      QA_SUPABASE_URL: ${{ secrets.QA_SUPABASE_URL }}
+      QA_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.QA_SUPABASE_PUBLISHABLE_KEY }}
+      QA_SUPABASE_SECRET_KEY: ${{ secrets.QA_SUPABASE_SECRET_KEY }}
+      QA_RESEND_SMTP_PASSWORD: ${{ secrets.QA_RESEND_SMTP_PASSWORD }}
+      QA_INBOX_READ_TOKEN: ${{ secrets.QA_INBOX_READ_TOKEN }}
+      QA_INBOX_ADDRESS: ${{ secrets.QA_INBOX_ADDRESS }}
+      QA_SENDER_EMAIL: ${{ secrets.QA_SENDER_EMAIL }}
+      QA_PROJECT_REF_EXPECTED: ${{ secrets.QA_PROJECT_REF_EXPECTED }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - run: npm ci
+
+      - name: Guard (hanya proyek QA, tanpa kredensial produksi)
+        run: node scripts/qa/real-e2e.mjs --guard-only
+
+      - name: QA-2 real email E2E
+        run: node scripts/qa/real-e2e.mjs
