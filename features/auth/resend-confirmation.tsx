@@ -47,6 +47,8 @@ function ResendButton({ pending, cooling }: { pending: boolean; cooling: boolean
 export function ResendConfirmation({ defaultEmail = "" }: { defaultEmail?: string }) {
   const [state, formAction, pending] = useActionState(resendConfirmationAction, initialState);
   const cooling = state.outcome === "sent" || state.outcome === "uncertain";
+  // Controlled so the address stays visible after the action (React resets uncontrolled forms after a submit).
+  const [email, setEmail] = useState(defaultEmail);
 
   return (
     <form action={formAction} className="mt-6 flex flex-col gap-3 border-t border-border pt-6" noValidate>
@@ -60,17 +62,18 @@ export function ResendConfirmation({ defaultEmail = "" }: { defaultEmail?: strin
           autoComplete="email"
           inputMode="email"
           placeholder="nama@usaha.com"
-          defaultValue={defaultEmail}
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
           className="h-11"
           required
         />
       </div>
       <ResendButton key={state.sentAt ?? "initial"} pending={pending} cooling={cooling} />
-      <p
-        role={state.outcome === "error" ? "alert" : "status"}
-        className={state.outcome === "error" ? "text-sm text-danger" : "text-sm text-muted-foreground"}
-      >
-        {state.message}
+      <p role="status" className="text-sm text-muted-foreground">
+        {state.outcome === "error" ? null : state.message}
+      </p>
+      <p role="alert" className="text-sm text-danger">
+        {state.outcome === "error" ? state.message : null}
       </p>
     </form>
   );

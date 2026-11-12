@@ -107,6 +107,9 @@ describe("resendConfirmationAction", () => {
     await resendConfirmationAction({ outcome: "idle", message: null }, form({ email: "d@example.com" }));
     const second = await resendConfirmationAction({ outcome: "idle", message: null }, form({ email: "D@example.com" }));
     expect(second.outcome).toBe("wait");
+    // alamat plus (d+1@...) memakai kunci cooldown yang sama dengan alamat dasarnya
+    const plus = await resendConfirmationAction({ outcome: "idle", message: null }, form({ email: "d+1@example.com" }));
+    expect(plus.outcome).toBe("wait");
     expect(resendMock).toHaveBeenCalledTimes(1);
   });
 
@@ -146,7 +149,7 @@ describe("resendConfirmationAction", () => {
 describe("UI: LoginForm dan ResendConfirmation", () => {
   it("menampilkan pemberitahuan tautan kedaluwarsa/tidak berlaku dengan form kirim ulang berlabel dan target 44px", () => {
     render(<LoginForm notice="link_expired" />);
-    expect(screen.getByRole("status")).toHaveTextContent(CONFIRM_NOTICE_MESSAGES.link_expired);
+    expect(screen.getByText(CONFIRM_NOTICE_MESSAGES.link_expired)).toBeInTheDocument();
     const email = screen.getByLabelText("Email pendaftaran");
     expect(email.className).toContain("h-11");
     expect(screen.getByRole("button", { name: "Kirim ulang tautan konfirmasi" }).className).toContain("min-h-11");
@@ -158,7 +161,7 @@ describe("UI: LoginForm dan ResendConfirmation", () => {
   });
 
   it("setelah permintaan diterima, tombol memulai hitung mundur dan pesan seragam muncul di region status", async () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       render(<ResendConfirmation defaultEmail="h@example.com" />);
       await act(async () => {

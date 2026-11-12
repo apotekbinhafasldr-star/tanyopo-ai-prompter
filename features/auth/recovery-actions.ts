@@ -49,10 +49,12 @@ export async function resendConfirmationAction(
     return { outcome: "error", message: RESEND_CONFIRMATION_MESSAGES.invalidEmail };
   }
   const email = parsed.data.toLowerCase();
+  // Cooldown key ignores "+tag" so a+1@x and a+2@x cannot be used to sidestep the per-address limit.
+  const cooldownKey = email.replace(/\+[^@]*(?=@)/, "");
 
   const ip = getClientIp(await headers());
   if (
-    !checkRateLimit(`confirm-resend-email:${email}`, 1, RESEND_CONFIRMATION_COOLDOWN_SECONDS * 1000).allowed ||
+    !checkRateLimit(`confirm-resend-email:${cooldownKey}`, 1, RESEND_CONFIRMATION_COOLDOWN_SECONDS * 1000).allowed ||
     !checkRateLimit(`confirm-resend-ip:${ip}`, IP_LIMIT, IP_WINDOW_MS).allowed
   ) {
     return { outcome: "wait", message: RESEND_CONFIRMATION_MESSAGES.wait };

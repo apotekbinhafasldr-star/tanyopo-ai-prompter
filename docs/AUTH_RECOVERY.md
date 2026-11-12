@@ -11,7 +11,8 @@ Status: perubahan kode di PR ini hanya UI/pesan auth. Tidak mengubah Supabase (d
 
 ## Tidak membocorkan keberadaan akun
 - Pesan "belum dikonfirmasi" hanya muncul bila password BENAR (Supabase memeriksa password lebih dulu).
-- Kirim ulang selalu menjawab sama: berhasil, alamat tidak dikenal, atau sudah terkonfirmasi. Hanya pembatasan laju dan kegagalan jaringan yang berbeda, dan itu bergantung pada frekuensi permintaan, bukan akun.
+- Kirim ulang menjawab sama untuk alamat berhasil, tidak dikenal, atau sudah terkonfirmasi. Batasan yang diketahui: bila Supabase menolak dengan 429 per-pengguna (email baru saja dikirim), jawabannya "tunggu"; selisih waktu respons SMTP untuk alamat nyata juga mungkin terukur. Batas 6/jam/IP membatasi penyalahgunaan keduanya. Jawaban TIDAK diklaim identik secara mutlak.
+- Kunci cooldown per alamat mengabaikan "+tag".
 - Kode `notice` hanya dua konstanta, tidak pernah memantulkan input.
 
 ## Batas laju
@@ -27,7 +28,10 @@ Status: perubahan kode di PR ini hanya UI/pesan auth. Tidak mengubah Supabase (d
 | B | Template email menunjuk ke halaman perantara berbeda | Kode + template dashboard Supabase | Butuh akses dashboard |
 | C | Biarkan, andalkan pesan + kirim ulang | Tidak ada | Risiko tetap ada |
 
-Butuh persetujuan khusus Founder sebelum A atau B. Status: USULAN.
+Butuh persetujuan khusus Founder sebelum A atau B. Status: USULAN. Jika A dipilih, kirim juga `Referrer-Policy: no-referrer` pada halaman konfirmasi.
+
+## Perlu dicek Founder (UNKNOWN)
+`/auth/confirm` kini hanya menerima `type=signup` (sudah demikian di main). Proyek Supabase dipakai bersama umkmpro-ai: pastikan tidak ada template email lain (invite/magiclink/email_change) yang menunjuk ke rute ini.
 
 ## Bukti
 Tes unit (jsdom/mocks, kelas UNIT/MOCK) untuk pemetaan error, kirim ulang (seragam, cooldown, batas IP, 429, transport), notice, dan UI. Pengiriman email nyata TIDAK diuji di sini (lihat QA-2).
