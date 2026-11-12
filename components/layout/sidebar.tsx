@@ -41,7 +41,7 @@ export function Sidebar({ businessName, userName, userRole, showAdminLink = fals
                   href={item.href}
                   onClick={onNavigate}
                   className={cn(
-                    "flex items-center gap-3 rounded-[var(--radius-md)] px-3 py-2 text-sm font-medium transition-colors",
+                    "flex min-h-11 items-center gap-3 rounded-[var(--radius-md)] px-3 py-2 text-sm font-medium transition-colors",
                     active
                       ? "bg-brand-muted text-brand"
                       : "text-muted-foreground hover:bg-surface-muted hover:text-foreground",
@@ -60,7 +60,7 @@ export function Sidebar({ businessName, userName, userRole, showAdminLink = fals
       <div className="flex flex-col gap-1 border-t border-border p-3">
         <button
           type="button"
-          className="flex items-center justify-between gap-2 rounded-[var(--radius-md)] px-3 py-2 text-left text-sm hover:bg-surface-muted"
+          className="flex min-h-11 items-center justify-between gap-2 rounded-[var(--radius-md)] px-3 py-2 text-left text-sm hover:bg-surface-muted"
         >
           <span className="truncate font-medium text-foreground">{businessName}</span>
           <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" aria-hidden />
@@ -80,7 +80,7 @@ export function Sidebar({ businessName, userName, userRole, showAdminLink = fals
         <Link
           href="/settings#bantuan"
           onClick={onNavigate}
-          className="flex items-center gap-2 rounded-[var(--radius-md)] px-3 py-2 text-sm text-muted-foreground hover:bg-surface-muted hover:text-foreground"
+          className="flex min-h-11 items-center gap-2 rounded-[var(--radius-md)] px-3 py-2 text-sm text-muted-foreground hover:bg-surface-muted hover:text-foreground"
         >
           <HelpCircle className="size-4" aria-hidden />
           Bantuan
