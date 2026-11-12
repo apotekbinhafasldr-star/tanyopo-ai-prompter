@@ -78,7 +78,7 @@ const TIER_VISUALS: Record<PlanTierId, TierVisual> = {
     subtext: "text-slate-600",
     price: "text-foreground",
     actionBar: "bg-sky-100 text-sky-700",
-    primaryCta: "bg-sky-600 text-white hover:bg-sky-700",
+    primaryCta: "bg-sky-700 text-white hover:bg-sky-800",
     divider: "border-black/10",
   },
   STARTER: {
@@ -123,7 +123,7 @@ const TIER_VISUALS: Record<PlanTierId, TierVisual> = {
     subtext: "text-slate-600",
     price: "text-foreground",
     actionBar: "bg-emerald-100 text-emerald-700",
-    primaryCta: "bg-emerald-600 text-white hover:bg-emerald-700",
+    primaryCta: "bg-emerald-700 text-white hover:bg-emerald-800",
     divider: "border-black/10",
   },
   AGENCY: {

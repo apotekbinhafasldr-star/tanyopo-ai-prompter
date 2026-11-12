@@ -67,6 +67,11 @@ describe("public pages at 360px: regression for the QA findings", () => {
   });
 
   it("billing: white-on-orange CTA uses orange-700 (contrast), not orange-600", () => {
-    expect(src("features/billing/pricing-cards.tsx")).not.toMatch(/bg-orange-600 text-white/);
+    expect(src("features/billing/pricing-cards.tsx")).not.toMatch(/bg-(orange|emerald|sky)-600 text-white/);
+  });
+
+  it("demo: banner text is not muted-on-tint, and the long analytics CTA can wrap at 360px", () => {
+    expect(src("app/demo/layout.tsx")).toMatch(/<p className="text-xs text-foreground">/);
+    expect(src("app/demo/analytics/page.tsx")).toMatch(/max-w-full[^"]*whitespace-normal/);
   });
 });
