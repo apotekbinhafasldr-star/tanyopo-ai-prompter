@@ -26,6 +26,7 @@ import {
 import { getTenantChannelPerformance } from "@/services/channel-performance";
 import { getOrCreateBudgetPolicy, getMonthToDateSpend, checkBudgetGuard } from "@/services/budget-guard";
 import { evaluateApprovalThreshold } from "@/lib/campaigns/approval-threshold";
+import { checkCampaignLimitCoverage } from "@/lib/campaigns/campaign-limit";
 import { parseLocalDateTimeInZone } from "@/lib/scheduling/recommend-time";
 import type { ApprovalStatus, Json } from "@/types/database";
 import { campaignHasManualAdMetrics } from "@/features/campaigns/manual-metrics-actions";
@@ -461,7 +462,7 @@ export async function submitForApprovalAction(campaignId: string): Promise<Campa
 
   const { data: campaign, error: campaignError } = await supabase
     .from("prompter_master_campaigns")
-    .select("id, status, daily_budget, total_budget, currency, ai_proposal, product_id")
+    .select("id, status, daily_budget, total_budget, duration_days, currency, ai_proposal, product_id")
     .eq("id", campaignId)
     .eq("tenant_id", session.tenantId)
     .single();
@@ -505,6 +506,18 @@ export async function submitForApprovalAction(campaignId: string): Promise<Campa
 
   if (!guardResult.allowed) {
     return { error: guardResult.reason };
+  }
+
+  // Same per-campaign cap rule the launch re-checks: a campaign without a total budget
+  // is never asked of the Owner when its spend could not be bounded by the cap.
+  const campaignLimit = checkCampaignLimitCoverage({
+    campaignLimit: policy.campaign_limit,
+    dailyBudget: campaign.daily_budget,
+    totalBudget: campaign.total_budget,
+    durationDays: campaign.duration_days,
+  });
+  if (!campaignLimit.ok) {
+    return { error: campaignLimit.message };
   }
 
   const { error: approvalError } = await supabase.from("prompter_approvals").insert({
