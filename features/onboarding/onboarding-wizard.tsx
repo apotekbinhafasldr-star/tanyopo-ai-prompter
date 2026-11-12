@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useRef, useState, type FormEvent } from "react";
 import { Package, Radio, ArrowRight, ArrowLeft, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -75,6 +75,15 @@ export function OnboardingWizard() {
   const [primaryGoal, setPrimaryGoal] = useState("");
   const [targetMarketCountryCode, setTargetMarketCountryCode] = useState("");
   const [state, formAction, pending] = useActionState(completeOnboardingAction, initialState);
+  const finishRef = useRef<HTMLButtonElement>(null);
+
+  // "Lanjut" and "Selesai" are separate elements (distinct keys below), so the focused "Lanjut" is removed when step 8
+  // opens; move focus to the new primary action instead of dropping it to <body> (keyboard / screen reader users).
+  useEffect(() => {
+    if (step === TOTAL_STEPS) {
+      finishRef.current?.focus();
+    }
+  }, [step]);
   const timezones = listTimezones();
   const isEn = language === "en";
 
@@ -88,6 +97,17 @@ export function OnboardingWizard() {
     7: true,
     8: true,
   };
+
+  // Only the LAST step may submit. Before that, any submit (Enter inside the single text field of step 1, or a stray
+  // activation) is cancelled — React then does not run the server action — and acts like "Lanjut" when the step is valid.
+  function handleFormSubmit(event: FormEvent<HTMLFormElement>) {
+    if (step < TOTAL_STEPS) {
+      event.preventDefault();
+      if (canAdvanceFrom[step]) {
+        setStep((s) => s + 1);
+      }
+    }
+  }
 
   const incompleteHints: Record<number, string> = {
     1: "Isi nama bisnis (minimal 2 karakter) untuk melanjutkan.",
@@ -111,7 +131,7 @@ export function OnboardingWizard() {
           ))}
         </div>
 
-        <form action={formAction} className="flex flex-col gap-6">
+        <form action={formAction} onSubmit={handleFormSubmit} className="flex flex-col gap-6">
           <input type="hidden" name="brandName" value={brandName} />
           <input type="hidden" name="countryCode" value={countryCode} />
           <input type="hidden" name="language" value={language} />
@@ -338,6 +358,7 @@ export function OnboardingWizard() {
 
             {step < TOTAL_STEPS ? (
               <Button
+                key="onboarding-next"
                 type="button"
                 disabled={!canAdvanceFrom[step]}
                 onClick={() => setStep((s) => s + 1)}
@@ -346,7 +367,7 @@ export function OnboardingWizard() {
                 <ArrowRight />
               </Button>
             ) : (
-              <Button type="submit" loading={pending}>
+              <Button key="onboarding-finish" ref={finishRef} type="submit" loading={pending}>
                 Selesai, ke Dashboard
               </Button>
             )}

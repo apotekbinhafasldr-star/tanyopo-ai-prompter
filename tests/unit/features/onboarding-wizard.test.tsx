@@ -46,15 +46,26 @@ async function goToStep7() {
 describe("OnboardingWizard: navigasi langkah 7 ke 8", () => {
   it("Lanjut di langkah 7 hanya membuka langkah 8 dan TIDAK mengirim form", async () => {
     await goToStep7();
-    await click(next()); // 7 -> 8
+    const nextButton = next();
+    await click(nextButton); // 7 -> 8
 
     expect(screen.getByText(STEP8)).toBeInTheDocument();
     expect(completeMock).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: /Lanjut/ })).toBeNull();
     const finish = screen.getByRole("button", { name: "Selesai, ke Dashboard" });
+    // AKAR MASALAH: tombol yang diklik (type=button) tidak boleh menjadi elemen yang sama dengan tombol submit. Bila React
+    // memakai ulang elemen itu, browser nyata memperlakukan klik yang sama sebagai submit (langkah 8 terlewati).
+    expect(finish).not.toBe(nextButton);
+    expect(nextButton.isConnected).toBe(false);
     expect(finish).toBeEnabled();
     expect(finish).not.toHaveAttribute("aria-busy");
     expect(finish).toHaveAttribute("type", "submit");
+  });
+
+  it("fokus pindah ke tombol Selesai saat langkah 8 terbuka (tidak jatuh ke body)", async () => {
+    await goToStep7();
+    await click(next());
+    expect(screen.getByRole("button", { name: "Selesai, ke Dashboard" })).toHaveFocus();
   });
 
   it("tombol Lanjut tidak pernah bertipe submit pada langkah 1 sampai 7", async () => {
