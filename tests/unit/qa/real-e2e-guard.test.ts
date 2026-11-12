@@ -143,7 +143,7 @@ describe("QA-2 adapter, entry, dan workflow statis", () => {
 
   it("entry menjalankan guard lebih dulu dan keluar 3 bila belum aktif", () => {
     const src = read("scripts/qa/real-e2e.mjs");
-    expect(src.indexOf("assertRealQaEnv(env)")).toBeLessThan(src.indexOf("QA2_ACTIVATED"));
+    expect(src.indexOf("assertRealQaEnv(env)")).toBeLessThan(src.indexOf("env.QA2_ACTIVATED"));
     expect(src).toContain("QA-2 NOT ACTIVATED: inbox adapter / infrastructure not provisioned");
     expect(src).toContain("process.exit(3)");
     expect(src).toContain("--guard-only");

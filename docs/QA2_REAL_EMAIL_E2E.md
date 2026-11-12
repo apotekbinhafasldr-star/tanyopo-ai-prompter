@@ -66,3 +66,10 @@ Tiap langkah menunggu frasa persetujuan.
 - [ ] Jalankan: Actions, QA-2 real email E2E, Run workflow, ketik `RUN-QA-2-REAL-EMAIL`.
 
 Semua bisa dikerjakan dari HP Android.
+
+## Checklist hardening sebelum APPROVE QA-2-ENABLE (hasil review keamanan)
+- Batasi Environment `qa-real-email` ke cabang `main` dan wajibkan reviewer; tanpa itu siapa pun dengan akses tulis bisa menjalankan workflow dari cabang lain.
+- Kunci ref proyek QA yang diizinkan di kode atau variabel non-rahasia (bukan hanya `QA_PROJECT_REF_EXPECTED` dari secret yang sama).
+- Wajibkan `NEXT_PUBLIC_SUPABASE_URL` sama dengan `QA_SUPABASE_URL` (jangan terima kosong) dan periksa `SUPABASE_URL`.
+- Pindahkan secret dari `env` tingkat job ke `env` tingkat langkah, dan pin action dengan SHA.
+- Perluas pemeriksaan pengirim (blokir semua alamat noreply@tanyopo.com) dan alamat inbox.
