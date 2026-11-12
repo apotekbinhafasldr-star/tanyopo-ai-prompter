@@ -24,8 +24,11 @@ const step = (name, ok, detail = "") => {
 };
 
 function psql(sql) {
+  // Variabel libpq yang bisa menimpa host dihapus (bukan dikosongkan; nilai kosong membuat libpq error).
+  const env = { ...process.env };
+  for (const k of ["PGSERVICE", "PGSERVICEFILE", "PGHOSTADDR", "PGPASSFILE", "PGOPTIONS"]) delete env[k];
   return execFileSync("psql", ["-X", "-At", "-v", "ON_ERROR_STOP=1", "-c", sql], {
-    env: { ...process.env, PGSERVICE: "", PGSERVICEFILE: "", PGHOSTADDR: "", PGPASSFILE: "", PGOPTIONS: "", PGHOST: "127.0.0.1", PGPORT: "54322", PGUSER: "postgres", PGPASSWORD: "postgres", PGDATABASE: "postgres" },
+    env: { ...env, PGHOST: "127.0.0.1", PGPORT: "54322", PGUSER: "postgres", PGPASSWORD: "postgres", PGDATABASE: "postgres" },
     encoding: "utf8",
   }).trim();
 }
