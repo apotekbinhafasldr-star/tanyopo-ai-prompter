@@ -1,0 +1,34 @@
+name: QA mobile 360px
+
+# QA only: builds the app locally on the runner with placeholder env (no Supabase/Netlify call, no deploy).
+on:
+  pull_request:
+
+jobs:
+  mobile-360:
+    runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_placeholder
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run build
+      - run: npm i --no-save playwright@1.49.1 @axe-core/playwright@4.10.1
+      - run: npx playwright install --with-deps chromium
+      - name: Start app
+        run: |
+          nohup npm run start > server.log 2>&1 &
+          for i in $(seq 1 40); do curl -sf http://localhost:3000/login >/dev/null && break; sleep 2; done
+      - name: QA 360px
+        run: node scripts/qa/mobile-360.mjs
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-mobile-360
+          path: qa-output
