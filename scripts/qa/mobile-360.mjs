@@ -50,8 +50,11 @@ async function measure(page) {
 async function jpeg(page, label) {
   try {
     mkdirSync(`${OUT}/jpg`, { recursive: true });
+    // Scroll through the page so scroll-triggered reveal animations run before the picture is taken.
+    await page.evaluate(async () => { for (let y = 0; y < document.documentElement.scrollHeight; y += 500) { window.scrollTo(0, y); await new Promise((r) => setTimeout(r, 120)); } window.scrollTo(0, 0); await new Promise((r) => setTimeout(r, 400)); });
     const h = await page.evaluate(() => document.documentElement.scrollHeight);
-    await page.screenshot({ path: `${OUT}/jpg/${label}.jpg`, type: "jpeg", quality: 55, scale: "css", fullPage: true, clip: { x: 0, y: 0, width: 360, height: Math.min(h, 2600) } });
+    const cap = label === "public_root" ? 5200 : 2600;
+    await page.screenshot({ path: `${OUT}/jpg/${label}.jpg`, type: "jpeg", quality: 50, scale: "css", fullPage: true, clip: { x: 0, y: 0, width: 360, height: Math.min(h, cap) } });
   } catch (e) { console.log("jpeg failed", label, String(e).split("\n")[0]); }
 }
 const report = [];
