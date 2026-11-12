@@ -45,6 +45,15 @@ async function measure(page) {
   }, MIN);
 }
 
+
+// Small JPEG (CSS-pixel scale) so the picture can be read back from the CI log when artifacts cannot be downloaded.
+async function jpeg(page, label) {
+  try {
+    mkdirSync(`${OUT}/jpg`, { recursive: true });
+    const h = await page.evaluate(() => document.documentElement.scrollHeight);
+    await page.screenshot({ path: `${OUT}/jpg/${label}.jpg`, type: "jpeg", quality: 55, scale: "css", fullPage: true, clip: { x: 0, y: 0, width: 360, height: Math.min(h, 2600) } });
+  } catch (e) { console.log("jpeg failed", label, String(e).split("\n")[0]); }
+}
 const report = [];
 async function audit(ctx, label, route, { wait = "networkidle", before, afterNav } = {}) {
   const page = await ctx.newPage();
@@ -63,6 +72,7 @@ async function audit(ctx, label, route, { wait = "networkidle", before, afterNav
     entry.axe = axe.violations.map((v) => ({ id: v.id, impact: v.impact, nodes: v.nodes.length, sample: v.nodes[0]?.target?.join(" ") }));
     entry.consoleErrors = consoleErrors.slice(0, 3);
     await page.screenshot({ path: `${OUT}/${label}.png`, fullPage: true });
+    await jpeg(page, label);
   } catch (e) { entry.error = String(e).split("\n")[0]; }
   report.push(entry);
   await page.close();
@@ -111,6 +121,7 @@ await audit(fresh, "onboarding", "/onboarding");
     entry.axe = axe.violations.map((v) => ({ id: v.id, impact: v.impact, nodes: v.nodes.length, sample: v.nodes[0]?.target?.join(" ") }));
     entry.consoleErrors = [];
     await page.screenshot({ path: `${OUT}/loading_state.png`, fullPage: true });
+    await jpeg(page, "loading_state");
   } catch (e) { entry.error = String(e).split("\n")[0]; }
   await fetch(`${MOCK}/__delay?ms=0`);
   report.push(entry);

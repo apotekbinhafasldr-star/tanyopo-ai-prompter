@@ -31,6 +31,10 @@ jobs:
           for i in $(seq 1 40); do curl -sf http://localhost:3000/login >/dev/null && break; sleep 2; done
       - name: QA 360px
         run: node scripts/qa/mobile-360.mjs
+      - name: Emit screenshots into the log (artifact download is not possible from some environments)
+        if: always()
+        run: |
+          for f in qa-output/jpg/*.jpg; do echo "SHOT_BEGIN $(basename "$f" .jpg)"; base64 -w 100 "$f"; echo "SHOT_END"; done
       - if: always()
         uses: actions/upload-artifact@v4
         with:
