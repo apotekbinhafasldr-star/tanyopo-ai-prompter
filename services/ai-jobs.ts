@@ -4,7 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { z } from "zod";
 import { routeStructuredGeneration, isAiRoutingConfigured, AIRoutingNotConfiguredError } from "@/lib/ai/router";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { AIProviderError } from "@/lib/ai/provider";
+import { AIProviderError, type AIErrorCategory } from "@/lib/ai/provider";
 import { estimateCostUsd } from "@/lib/ai/pricing";
 import { TASK_CLASS_BY_JOB_TYPE } from "@/lib/ai/task-classes";
 import { getOrCreateSubscription } from "@/services/billing";
@@ -83,6 +83,66 @@ async function recordEstimatedCost(
   } catch {
     // Observability only; must never affect the generation result.
   }
+}
+
+const AI_GENERIC_ERROR_MESSAGE = "AI gagal memproses permintaan. Silakan coba lagi.";
+const AI_UNAVAILABLE_MESSAGE = "Layanan AI sedang tidak tersedia. Silakan coba lagi nanti.";
+
+/**
+ * Text that is safe to show to a tenant AND to store in prompter_ai_jobs.error
+ * (tenants can read their own jobs). Only AIProviderError messages are curated
+ * Indonesian text; anything else (Zod/JSON parse errors, SDK or runtime errors,
+ * which can echo model output, prompt content or internals) is replaced by a
+ * generic message. AUTH/CONFIG are operator problems (bad key / model setup):
+ * their adapter text names environment variables, so tenants get a neutral one.
+ */
+function toUserFacingAiError(err: unknown): { message: string; category: AIErrorCategory } {
+  if (!(err instanceof AIProviderError)) return { message: AI_GENERIC_ERROR_MESSAGE, category: "UNKNOWN" };
+  if (err.category === "AUTH" || err.category === "CONFIG") {
+    return { message: AI_UNAVAILABLE_MESSAGE, category: err.category };
+  }
+  return { message: err.message, category: err.category };
+}
+
+type AiJobPatch = Database["public"]["Tables"]["prompter_ai_jobs"]["Update"];
+
+/**
+ * Closes a PROCESSING job (COMPLETED or FAILED). Tries the caller's client
+ * first and, if that write errors or throws, retries once through the
+ * server-only admin client scoped to tenant + id + PROCESSING, so a transient
+ * DB/session problem cannot leave a paid-for job stuck in PROCESSING. Never
+ * throws; returns whether either write succeeded.
+ */
+async function closeAiJob(
+  supabase: SupabaseClient<Database>,
+  tenantId: string,
+  jobId: string,
+  patch: AiJobPatch,
+): Promise<boolean> {
+  try {
+    const { error } = await supabase.from("prompter_ai_jobs").update(patch).eq("id", jobId);
+    if (!error) return true;
+  } catch {
+    // fall through to the admin retry
+  }
+
+  try {
+    const admin = createAdminClient();
+    if (admin) {
+      const { error } = await admin
+        .from("prompter_ai_jobs")
+        .update(patch)
+        .eq("id", jobId)
+        .eq("tenant_id", tenantId)
+        .eq("status", "PROCESSING");
+      if (!error) return true;
+    }
+  } catch {
+    // reported below
+  }
+
+  console.error("[ai-jobs] could not close job", { jobId, status: patch.status });
+  return false;
 }
 
 /** User-facing Indonesian text for each `reason` code
@@ -204,19 +264,16 @@ export async function runAiJob<T>(params: RunAiJobParams<T>): Promise<RunAiJobRe
   try {
     const result = await routeStructuredGeneration(taskClass, schema, { system, prompt });
 
-    await supabase
-      .from("prompter_ai_jobs")
-      .update({
-        status: "COMPLETED",
-        provider: result.provider,
-        model: result.model,
-        tokens_input: result.tokensInput,
-        tokens_output: result.tokensOutput,
-        fallback_provider: result.fallbackUsed ? result.fallbackFrom : null,
-        output_reference: result.data as unknown as Json,
-        completed_at: new Date().toISOString(),
-      })
-      .eq("id", jobId);
+    await closeAiJob(supabase, tenantId, jobId, {
+      status: "COMPLETED",
+      provider: result.provider,
+      model: result.model,
+      tokens_input: result.tokensInput,
+      tokens_output: result.tokensOutput,
+      fallback_provider: result.fallbackUsed ? result.fallbackFrom : null,
+      output_reference: result.data as unknown as Json,
+      completed_at: new Date().toISOString(),
+    });
 
     await recordEstimatedCost(
       tenantId,
@@ -247,13 +304,21 @@ export async function runAiJob<T>(params: RunAiJobParams<T>): Promise<RunAiJobRe
       return { ok: false, error: AI_NOT_CONFIGURED_MESSAGE, jobId: null };
     }
 
-    const message = err instanceof Error ? err.message : "AI gagal memproses permintaan.";
-    const category = err instanceof AIProviderError ? err.category : "UNKNOWN";
+    const { message, category } = toUserFacingAiError(err);
+    // Server log only: name + category, never the raw message (may echo model output or prompt content).
+    console.error("[ai-jobs] generation failed", {
+      jobId,
+      jobType,
+      category,
+      name: err instanceof Error ? err.name : typeof err,
+    });
 
-    await supabase
-      .from("prompter_ai_jobs")
-      .update({ status: "FAILED", error: message, error_category: category, completed_at: new Date().toISOString() })
-      .eq("id", jobId);
+    await closeAiJob(supabase, tenantId, jobId, {
+      status: "FAILED",
+      error: message,
+      error_category: category,
+      completed_at: new Date().toISOString(),
+    });
 
     return { ok: false, error: message, jobId };
   }
