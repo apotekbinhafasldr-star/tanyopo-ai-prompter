@@ -1,0 +1,75 @@
+name: QA-2 real email E2E (inert)
+
+# QA-2 / jalur B (REAL email). INERT sampai Founder menyetujui tiap tahap aktivasi
+# (APPROVE QA-2-SUPABASE-PROJECT, QA-2-RESEND-DOMAIN, QA-2-INBOX, QA-2-SECRETS, QA-2-ENABLE; lihat docs/QA2_REAL_EMAIL_E2E.md).
+#  * Hanya workflow_dispatch manual. Tanpa push / pull_request / schedule.
+#  * Job baru jalan bila variabel repo QA2_ENABLED == 'true' DAN frasa konfirmasi benar.
+#  * Secret QA_* hidup HANYA di GitHub Environment `qa-real-email`, bukan secret repo, bukan secret produksi.
+#  * Tanpa hosting produksi dan tanpa rilis. Hanya proyek Supabase QA terpisah.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Ketik RUN-QA-2-REAL-EMAIL untuk menjalankan"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qa-real-e2e
+  cancel-in-progress: false
+
+jobs:
+  real-email-e2e:
+    # Lapis kedua di samping pembatasan Environment (H1): hanya jalan dari main.
+    if: ${{ github.ref == 'refs/heads/main' && vars.QA2_ENABLED == 'true' && inputs.confirm == 'RUN-QA-2-REAL-EMAIL' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: qa-real-email
+    # Hardening H2: TIDAK ada secret pada env tingkat job. Hanya dua langkah di bawah yang menerimanya; checkout,
+    # setup-node, dan npm ci tidak menerima secret apa pun.
+    steps:
+      # Hardening H3: action dipin ke SHA commit penuh (tag di komentar). persist-credentials: false agar token repo
+      # tidak tertinggal di .git selama npm ci berjalan.
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - run: npm ci
+
+      - name: Guard (hanya proyek QA, tanpa kredensial produksi)
+        env:
+          QA2_CONFIRM: ${{ inputs.confirm }}
+          QA2_ACTIVATED: ${{ vars.QA2_ENABLED }}
+          QA_SUPABASE_URL: ${{ secrets.QA_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.QA_SUPABASE_URL }}
+          QA_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.QA_SUPABASE_PUBLISHABLE_KEY }}
+          QA_SUPABASE_SECRET_KEY: ${{ secrets.QA_SUPABASE_SECRET_KEY }}
+          QA_RESEND_SMTP_PASSWORD: ${{ secrets.QA_RESEND_SMTP_PASSWORD }}
+          QA_INBOX_READ_TOKEN: ${{ secrets.QA_INBOX_READ_TOKEN }}
+          QA_INBOX_ADDRESS: ${{ secrets.QA_INBOX_ADDRESS }}
+          QA_SENDER_EMAIL: ${{ secrets.QA_SENDER_EMAIL }}
+          QA_PROJECT_REF_EXPECTED: ${{ secrets.QA_PROJECT_REF_EXPECTED }}
+        run: node scripts/qa/real-e2e.mjs --guard-only
+
+      - name: QA-2 real email E2E
+        env:
+          QA2_CONFIRM: ${{ inputs.confirm }}
+          QA2_ACTIVATED: ${{ vars.QA2_ENABLED }}
+          QA_SUPABASE_URL: ${{ secrets.QA_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.QA_SUPABASE_URL }}
+          QA_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.QA_SUPABASE_PUBLISHABLE_KEY }}
+          QA_SUPABASE_SECRET_KEY: ${{ secrets.QA_SUPABASE_SECRET_KEY }}
+          QA_RESEND_SMTP_PASSWORD: ${{ secrets.QA_RESEND_SMTP_PASSWORD }}
+          QA_INBOX_READ_TOKEN: ${{ secrets.QA_INBOX_READ_TOKEN }}
+          QA_INBOX_ADDRESS: ${{ secrets.QA_INBOX_ADDRESS }}
+          QA_SENDER_EMAIL: ${{ secrets.QA_SENDER_EMAIL }}
+          QA_PROJECT_REF_EXPECTED: ${{ secrets.QA_PROJECT_REF_EXPECTED }}
+        run: node scripts/qa/real-e2e.mjs
