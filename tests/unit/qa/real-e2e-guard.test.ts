@@ -15,7 +15,7 @@ const FAKE_REF = "abcdefghij0123456789";
 const SECRET_PUB = "FAKE-PUBLISHABLE-VALUE-111";
 const SECRET_SRV = "FAKE-SECRET-VALUE-222";
 
-// Tes memakai allowlist suntikan berisi ref PALSU; allowlist nyata di repo sengaja kosong (lihat blok khusus di bawah).
+// Tes memakai allowlist suntikan berisi ref PALSU; allowlist nyata di repo berisi satu ref proyek QA (lihat blok khusus di bawah).
 const assertRealQaEnv = (env: Record<string, string | undefined>, options: { allowedRefs?: readonly string[] } = { allowedRefs: [FAKE_REF] }) =>
   realAssertRealQaEnv(env, options);
 
@@ -193,10 +193,44 @@ describe("QA-2 adapter, entry, dan workflow statis", () => {
 });
 
 describe("QA-2 H5: allowlist proyek QA terkunci, independen dari URL runner", () => {
-  it("allowlist di repo KOSONG (belum ada proyek QA, ref tidak dikarang) sehingga guard bawaan selalu menolak", () => {
-    expect(ALLOWED_QA_PROJECT_REFS).toEqual([]);
-    expect(() => realAssertRealQaEnv(OK)).toThrow(/allowlist proyek QA kosong/);
-    expect(() => realAssertRealQaEnv(OK, { allowedRefs: [] })).toThrow(/allowlist/);
+  const QA_REF = "gasdqsadnjoknisloaec";
+  const PRODUCTION_REFS = ["wjjyqovhmwenbcvbnkgx", "bmwpykwoylmzrbmbdeqw", "kczslidqkhssdwefkais", "eskqngzhtndkfqjoxxou"];
+  const qaEnv = {
+    ...OK,
+    QA_SUPABASE_URL: `https://${QA_REF}.supabase.co`,
+    NEXT_PUBLIC_SUPABASE_URL: `https://${QA_REF}.supabase.co`,
+    QA_PROJECT_REF_EXPECTED: QA_REF,
+  };
+
+  it("allowlist di repo berisi tepat satu ref proyek QA yang valid dan bukan ref produksi/bersama", () => {
+    expect(ALLOWED_QA_PROJECT_REFS).toEqual([QA_REF]);
+    expect(QA_REF).toMatch(/^[a-z0-9]{20}$/);
+    for (const ref of PRODUCTION_REFS) expect(ALLOWED_QA_PROJECT_REFS).not.toContain(ref);
+  });
+
+  it("guard bawaan (tanpa suntikan) menerima ref QA yang terdaftar bila semua variabel lain benar", () => {
+    expect(() => realAssertRealQaEnv(qaEnv)).not.toThrow();
+  });
+
+  it("guard bawaan menolak ref palsu atau ref yang tidak terdaftar", () => {
+    expect(() => realAssertRealQaEnv(OK)).toThrow(/tidak ada di allowlist/);
+  });
+
+  it.each(PRODUCTION_REFS)("guard bawaan menolak ref produksi/bersama %s walau variabel lain cocok", (ref) => {
+    const url = `https://${ref}.supabase.co`;
+    const env = { ...qaEnv, QA_SUPABASE_URL: url, NEXT_PUBLIC_SUPABASE_URL: url, QA_PROJECT_REF_EXPECTED: ref };
+    expect(() => realAssertRealQaEnv(env)).toThrow(/allowlist|produksi\/bersama/);
+  });
+
+  it("ref QA terdaftar tetap ditolak bila URL runner atau NEXT_PUBLIC menunjuk proyek lain", () => {
+    const other = `https://${PRODUCTION_REFS[0]}.supabase.co`;
+    expect(() => realAssertRealQaEnv({ ...qaEnv, NEXT_PUBLIC_SUPABASE_URL: other })).toThrow(/NEXT_PUBLIC_SUPABASE_URL/);
+    expect(() => realAssertRealQaEnv({ ...qaEnv, QA_SUPABASE_URL: other })).toThrow();
+    expect(() => realAssertRealQaEnv({ ...qaEnv, QA_PROJECT_REF_EXPECTED: PRODUCTION_REFS[0] })).toThrow(/QA_PROJECT_REF_EXPECTED/);
+  });
+
+  it("allowlist kosong (suntikan) tetap fail-closed", () => {
+    expect(() => realAssertRealQaEnv(qaEnv, { allowedRefs: [] })).toThrow(/allowlist proyek QA kosong/);
   });
 
   it("ref yang tidak ada di allowlist ditolak walau URL, ref harapan, dan NEXT_PUBLIC cocok satu sama lain", () => {
