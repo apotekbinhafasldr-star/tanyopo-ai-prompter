@@ -8,7 +8,6 @@ import { Input } from "@/components/ui/input";
 import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { ResendConfirmation } from "@/features/auth/resend-confirmation";
 import { CONFIRM_NOTICE_MESSAGES, type ConfirmNoticeCode } from "@/lib/auth/confirm-notice";
 
 const initialState: AuthActionState = { error: null };
@@ -37,12 +36,15 @@ export function LoginForm({
           </p>
         ) : null}
         {notice ? (
-          <p
-            role="status"
-            className="mb-4 rounded-[var(--radius-md)] border border-border bg-surface-muted p-3 text-sm text-foreground"
-          >
-            {CONFIRM_NOTICE_MESSAGES[notice]}
-          </p>
+          <div className="mb-4 rounded-[var(--radius-md)] border border-border bg-surface-muted p-3 text-sm text-foreground">
+            <p>{CONFIRM_NOTICE_MESSAGES[notice]}</p>
+            <Link
+              href="/forgot-password"
+              className="mt-2 inline-flex min-h-11 items-center font-medium text-brand underline-offset-4 hover:underline"
+            >
+              Lupa kata sandi? Atur ulang di sini
+            </Link>
+          </div>
         ) : null}
         <form action={formAction} className="flex flex-col gap-4" noValidate>
           {next ? <input type="hidden" name="next" value={next} /> : null}
@@ -71,13 +73,14 @@ export function LoginForm({
               {state.error}
             </p>
           ) : null}
+          {/* Always in the DOM so the polite announcement works; emptied while pending so an identical answer is read again. */}
+          <p role="status" className="text-sm text-foreground empty:hidden">
+            {pending ? null : state.info}
+          </p>
           <Button type="submit" loading={pending} className="w-full">
             Masuk
           </Button>
         </form>
-        {notice || state.unconfirmedEmail ? (
-          <ResendConfirmation key={state.unconfirmedEmail ?? "notice"} defaultEmail={state.unconfirmedEmail ?? ""} />
-        ) : null}
         <p className="mt-6 text-center text-sm text-muted-foreground">
           Belum punya akun?{" "}
           <Link href="/register" className="font-medium text-brand hover:underline">
