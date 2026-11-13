@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
+import Link from "next/link";
 import { resetPasswordAction, type AuthActionState } from "@/features/auth/actions";
 import { Button } from "@/components/ui/button";
 import { PasswordInput } from "@/components/ui/password-input";
@@ -44,6 +45,15 @@ export function ResetPasswordForm() {
             Simpan Kata Sandi Baru
           </Button>
         </form>
+        {/* No dead end on a phone: an expired recovery session needs a new link; otherwise go back to sign in. */}
+        <div className="mt-4 flex flex-col items-center text-sm">
+          <Link href="/forgot-password" className="inline-flex min-h-11 items-center font-medium text-brand hover:underline">
+            Minta tautan baru
+          </Link>
+          <Link href="/login" className="inline-flex min-h-11 items-center text-muted-foreground hover:underline">
+            Kembali ke halaman masuk
+          </Link>
+        </div>
       </CardContent>
     </Card>
   );

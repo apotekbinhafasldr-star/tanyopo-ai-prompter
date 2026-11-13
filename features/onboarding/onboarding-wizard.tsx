@@ -326,7 +326,7 @@ export function OnboardingWizard() {
                 Tambahkan produk pertama Anda
               </h2>
               <p className="text-sm text-muted-foreground">
-                Anda bisa menambahkan produk sekarang atau nanti dari halaman Products.
+                Anda bisa menambahkan produk nanti dari halaman Products.
               </p>
             </div>
           )}
