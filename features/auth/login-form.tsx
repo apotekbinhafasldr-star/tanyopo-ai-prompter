@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import Link from "next/link";
 import { loginAction, type AuthActionState } from "@/features/auth/actions";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,9 @@ export function LoginForm({
   notice?: ConfirmNoticeCode | null;
 }) {
   const [state, formAction, pending] = useActionState(loginAction, initialState);
+  // Controlled so React 19's automatic form reset after a failed attempt does not clear the email on a phone.
+  // Client-only: the server answer stays identical for every address. The password is never kept.
+  const [email, setEmail] = useState("");
 
   return (
     <Card>
@@ -56,13 +59,15 @@ export function LoginForm({
               type="email"
               autoComplete="email"
               placeholder="nama@usaha.com"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
               required
             />
           </div>
           <div className="flex flex-col gap-1.5">
             <div className="flex items-center justify-between">
               <Label htmlFor="password">Kata Sandi</Label>
-              <Link href="/forgot-password" className="text-xs font-medium text-brand hover:underline">
+              <Link href="/forgot-password" className="inline-flex min-h-11 items-center text-xs font-medium text-brand hover:underline">
                 Lupa kata sandi?
               </Link>
             </div>
