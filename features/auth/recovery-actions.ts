@@ -3,7 +3,13 @@
 import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { loginSchema } from "@/schemas/auth";
-import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
+import { checkRateLimit } from "@/lib/rate-limit";
+import {
+  RECOVERY_IP_LIMIT,
+  RECOVERY_UNIDENTIFIED_KEY,
+  RECOVERY_UNIDENTIFIED_LIMIT,
+  recoveryClientKey,
+} from "@/lib/auth/recovery-ip";
 import { RESEND_CONFIRMATION_COOLDOWN_SECONDS, RESEND_CONFIRMATION_MESSAGES } from "@/lib/auth/confirm-notice";
 
 export interface ResendConfirmationState {
@@ -13,7 +19,6 @@ export interface ResendConfirmationState {
   sentAt?: number;
 }
 
-const IP_LIMIT = 6;
 const IP_WINDOW_MS = 60 * 60 * 1000;
 
 function isTransportFailure(error: { name?: string; status?: number }): boolean {
@@ -31,17 +36,24 @@ function isTransportFailure(error: { name?: string; status?: number }): boolean 
  *
  * The answer never reveals whether the address exists, is unconfirmed or is already confirmed: success, "no such user"
  * and "already confirmed" all return the same message. Only throttling and transport failures differ, and those depend
- * on how often the caller asks, not on the account. Cooldown: 60 s per address and 6 per hour per client IP (in-memory,
- * best effort per server instance; Supabase enforces its own per-user interval and email rate limit as well).
+ * on how often the caller asks, not on the account. Cooldown: 60 s per address and 6 per hour per trusted client IP.
+ * The counters live in memory of ONE server instance: best effort, NOT a global limit (other instances and cold starts
+ * count separately). The client IP comes only from Netlify's `x-nf-client-connection-ip` (never `x-forwarded-for`); with
+ * no valid value, requests share one "unidentified" bucket. Supabase enforces its own per-user interval and email rate
+ * limit on top (values UNKNOWN until checked in the dashboard).
  */
 export async function resendConfirmationAction(
   _prev: ResendConfirmationState,
   formData: FormData,
 ): Promise<ResendConfirmationState> {
   const supabase = await createClient();
-  const activeSession = await supabase.auth.getUser();
-  if (activeSession?.data?.user) {
-    return { outcome: "error", message: RESEND_CONFIRMATION_MESSAGES.signedIn };
+  try {
+    const activeSession = await supabase.auth.getUser();
+    if (activeSession?.data?.user) {
+      return { outcome: "error", message: RESEND_CONFIRMATION_MESSAGES.signedIn };
+    }
+  } catch {
+    // Session lookup failed (auth service unreachable): carry on as signed out; the resend call below reports "uncertain".
   }
 
   const parsed = loginSchema.shape.email.safeParse(formData.get("email"));
@@ -52,10 +64,13 @@ export async function resendConfirmationAction(
   // Cooldown key ignores "+tag" so a+1@x and a+2@x cannot be used to sidestep the per-address limit.
   const cooldownKey = email.replace(/\+[^@]*(?=@)/, "");
 
-  const ip = getClientIp(await headers());
+  const client = recoveryClientKey(await headers());
+  const ipLimit = client === RECOVERY_UNIDENTIFIED_KEY ? RECOVERY_UNIDENTIFIED_LIMIT : RECOVERY_IP_LIMIT;
+  // IP first: a caller that is already over its IP budget must not be able to put other addresses in cooldown or grow
+  // the in-memory table with new per-address keys. (Short-circuit: the per-address counter only runs when the IP allows.)
   if (
-    !checkRateLimit(`confirm-resend-email:${cooldownKey}`, 1, RESEND_CONFIRMATION_COOLDOWN_SECONDS * 1000).allowed ||
-    !checkRateLimit(`confirm-resend-ip:${ip}`, IP_LIMIT, IP_WINDOW_MS).allowed
+    !checkRateLimit(`confirm-resend-ip:${client}`, ipLimit, IP_WINDOW_MS).allowed ||
+    !checkRateLimit(`confirm-resend-email:${cooldownKey}`, 1, RESEND_CONFIRMATION_COOLDOWN_SECONDS * 1000).allowed
   ) {
     return { outcome: "wait", message: RESEND_CONFIRMATION_MESSAGES.wait };
   }

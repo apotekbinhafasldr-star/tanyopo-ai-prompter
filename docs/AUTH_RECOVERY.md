@@ -15,9 +15,21 @@ Status: perubahan kode di PR ini hanya UI/pesan auth. Tidak mengubah Supabase (d
 - Kunci cooldown per alamat mengabaikan "+tag".
 - Kode `notice` hanya dua konstanta, tidak pernah memantulkan input.
 
-## Batas laju
-- 60 detik per alamat dan 6 per jam per IP (in-memory, per instance: usaha terbaik). Supabase punya batas sendiri (interval per pengguna dan batas email per jam).
-- Setelah #141 (SEC-01) di-merge, ganti `getClientIp` pada `features/auth/recovery-actions.ts` dengan `getAuthClientBucket` agar konsisten dengan perbaikan IP tepercaya.
+## Batas laju (BUKAN batas global)
+- 60 detik per alamat dan 6 per jam per IP tepercaya. Penghitung disimpan di memori SATU instance server (`lib/rate-limit.ts`): usaha terbaik. Instance lain dan cold start menghitung sendiri, jadi jumlah total permintaan yang lolos bisa beberapa kali lipat. Batas global TIDAK terbukti dan tidak diklaim.
+- IP klien hanya dari header Netlify `x-nf-client-connection-ip` setelah divalidasi `isIP` (`lib/auth/recovery-ip.ts`). `x-forwarded-for` TIDAK pernah dibaca karena hop pertamanya bisa dipalsukan penelepon (bypass batas atau menghabiskan jatah korban). IPv6 dikelompokkan per /64. Header kosong atau tidak valid masuk satu bucket bersama `unidentified` (30 per jam, lebih longgar agar pengguna sah tidak saling memblokir; cooldown 60 detik per alamat tetap berlaku). `getClientIp` global tidak diubah.
+- UNKNOWN: apakah Netlify menimpa `x-nf-client-connection-ip` yang dikirim klien. Uji di deploy nyata sebelum menganggapnya kontrol keras.
+- Supabase punya batas sendiri (interval per pengguna, email per jam). Nilainya UNKNOWN sampai dicek di dashboard; Resend punya kuota sendiri.
+- Setelah #141 (SEC-01) di-merge, satukan `lib/auth/recovery-ip.ts` ke `getAuthClientBucket` agar satu sumber kebenaran.
+
+## Risiko abuse yang tersisa
+- Email-bombing ke satu alamat: dibatasi cooldown per alamat per instance; dengan N instance hangat, hingga sekitar 60 x N per jam sebelum batas Supabase/Resend. Banyak alamat: dibatasi 6/jam per IP tepercaya per instance, atau 30/jam untuk bucket `unidentified` per instance.
+- Penyerang tanpa IP teridentifikasi bisa menghabiskan bucket `unidentified` di satu instance sehingga pengguna sah di instance itu mendapat "tunggu" sampai jam berikutnya.
+- Resend bisa dipicu untuk alamat mana pun di `auth.users` bersama (termasuk pengguna produk lain); template "Confirm signup" berlaku untuk seluruh proyek. Cek template dan Site URL di dashboard (UNKNOWN).
+- Sebelum skala lebih luas diperlukan perlindungan global (penyimpanan bersama atau batas di tepi/WAF, atau captcha). Itu perubahan DB/dependensi/infra dan butuh persetujuan terpisah.
+
+## Aksesibilitas tombol kirim ulang
+Tombol tidak pernah `disabled` native (fokus tidak hilang); saat pending atau cooldown memakai `aria-disabled` dan klik dibatalkan. Nama tombol statis; hitung mundur hanya visual, dan satu catatan sopan dibacakan saat cooldown berakhir. Error dihubungkan ke kolom lewat `aria-invalid` dan `aria-describedby`. Tombol membungkus teks dengan tinggi minimum 44px.
 
 ## RISIKO: scanner / prefetch mengonsumsi token (USULAN, belum diterapkan)
 `GET /auth/confirm` langsung memanggil `verifyOtp`. Pemindai email atau prefetch dapat membuka tautan dan menghanguskan token, sehingga pengguna melihat tautan "tidak berlaku" padahal akunnya sudah aktif. PR ini hanya memitigasi dampaknya lewat pesan ("jika akun sudah aktif, silakan masuk") dan kirim ulang. Mitigasi penyebabnya mengubah alur, jadi TIDAK dilakukan diam-diam:
