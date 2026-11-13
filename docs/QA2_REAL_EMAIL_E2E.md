@@ -1,6 +1,6 @@
 # QA-2: E2E email nyata (jalur B)
 
-**Status: NOT ACTIVATED.** Hanya desain. Belum ada proyek, domain, DNS, secret, atau akun. PR ini tidak mengirim email apa pun.
+**Status: NOT ACTIVATED.** Hanya desain. Proyek Supabase QA sudah dibuat Founder dan refnya ada di allowlist, tetapi belum ada skema, domain pengirim, DNS, inbox, secret, atau Environment yang aktif. Tidak ada email yang dikirim.
 
 ## Tujuan
 Membuktikan alur signup LINOE dengan email NYATA: Supabase Auth nyata, SMTP Resend nyata, satu kotak masuk tetap. Bisa diulang tanpa membuat email baru tiap tes.
@@ -46,7 +46,7 @@ ESTIMASI: Rp0 bila cukup tier gratis (Supabase, Resend, inbox). Sekitar USD 25/b
 ## Langkah aktivasi bertahap
 Tiap langkah menunggu frasa persetujuan.
 0. Founder menyiapkan Environment `qa-real-email` yang terkunci (H1) sebelum tahap mana pun yang memasang secret.
-1. `APPROVE QA-2-SUPABASE-PROJECT`: buat proyek Supabase QA terpisah, lalu tambahkan ref-nya ke allowlist lewat PR terpisah (H5).
+1. Proyek Supabase QA: SELESAI dibuat Founder (`linoe-qa-real-email`, organisasi terpisah, Free); ref ada di allowlist (H5). Skema/migrasi di proyek itu BELUM diterapkan dan butuh persetujuan terpisah.
 2. `APPROVE QA-2-RESEND-DOMAIN`: sub-domain pengirim + DNS SPF/DKIM.
 3. `APPROVE QA-2-INBOX`: pilih penyedia inbox tetap, lalu implementasi adapter.
 4. `APPROVE QA-2-SECRETS`: isi secret di Environment `qa-real-email`.
@@ -75,7 +75,7 @@ Semua bisa dikerjakan dari HP Android.
 | H2 | Secret hanya di langkah yang membutuhkan | Selesai: tidak ada secret di env tingkat job; checkout, setup-node, dan `npm ci` tidak menerima secret. Hanya langkah Guard dan E2E. Dijaga tes statis. |
 | H3 | Pin action ke SHA | Selesai: `actions/checkout@11bd719…` (v4.2.2) dan `actions/setup-node@49933ea…` (v4.4.0), plus `persist-credentials: false`. Dijaga tes statis. |
 | H4 | `NEXT_PUBLIC_SUPABASE_URL` wajib dan identik | Selesai di guard: wajib terisi dan identik dengan `QA_SUPABASE_URL`; `SUPABASE_URL`, bila ada, juga. Workflow mengisinya dari secret QA yang sama. |
-| H5 | Allowlist proyek QA terkunci | Selesai sebagai mekanisme: `scripts/qa/qa-project-allowlist.mjs`, **sengaja KOSONG** (belum ada proyek QA, ref tidak dikarang). Selama kosong guard selalu menolak (fail-closed). |
+| H5 | Allowlist proyek QA terkunci | Selesai: `scripts/qa/qa-project-allowlist.mjs` berisi tepat satu ref, `gasdqsadnjoknisloaec` (proyek `linoe-qa-real-email`, organisasi terpisah dari umkmpro-ai). Ref lain, termasuk semua ref produksi/bersama, ditolak. Allowlist kosong tetap fail-closed. |
 
 ### H1: langkah Founder dari HP (sebelum secret apa pun)
 Penting: bila workflow merujuk Environment yang belum ada, GitHub membuatnya otomatis TANPA proteksi. Karena itu buat dan kunci dulu.
@@ -86,10 +86,15 @@ Penting: bila workflow merujuk Environment yang belum ada, GitHub membuatnya oto
 5. Pastikan tidak ada secret atau variabel repo berawalan `QA_` (nama yang sama di repo bisa terbaca oleh job).
 Catatan: repo ini publik, jadi proteksi Environment tersedia di semua paket. Bila antarmuka tidak menampilkan opsi itu, STOP dan laporkan; jangan lanjut ke tahap secret.
 
-### H5: cara mengisi allowlist (setelah proyek QA ada)
-Setelah `APPROVE QA-2-SUPABASE-PROJECT` dan proyeknya benar-benar dibuat, ref 20 karakter ditambahkan ke `ALLOWED_QA_PROJECT_REFS` lewat PR kecil terpisah yang ditinjau. Ref tidak boleh proyek produksi/bersama (guard dan tes menolaknya). Tanpa entri di sana, URL dan secret apa pun yang disuplai runner ditolak.
+### H5: allowlist proyek QA
+Isi saat ini: satu ref QA, `gasdqsadnjoknisloaec` (Supabase `linoe-qa-real-email`, organisasi "TANYOPO LINOE QA", paket Free, wilayah Seoul). Ref bukan rahasia. Menambah atau mengganti ref lewat PR kecil terpisah yang ditinjau. Ref tidak boleh proyek produksi/bersama (`umkmpro-ai`, `apotek-binhafas`, `linoe-otp-test`, `linoe-doku-sandbox`): guard dan tes menolaknya walau dimasukkan ke allowlist. URL dan secret yang disuplai runner tidak menentukan target; hanya allowlist di repo.
+
+Memasukkan ref TIDAK mengaktifkan QA-2. Yang masih menahan: `QA2_ENABLED` tidak true, Environment `qa-real-email` (H1) belum dipastikan, secret belum ada, dan adapter inbox/E2E belum dibangun (`real-e2e.mjs` keluar dengan kode 3 NOT ACTIVATED).
+
+Catatan keterbatasan proyek QA: skema LINOE belum diterapkan, dan objek bersama UMKMpro (`tenants`, `user_profiles`, `handle_new_user`) tidak ada di repo sehingga di QA akan berupa SIMULASI. Hasil QA-2 kelak bukan bukti bahwa jalur produksi identik.
 
 ### Residual (belum diselesaikan oleh PR ini)
 - Pengirim: hanya `@tanyopo.com` persis yang ditolak; sub-domain QA sengaja diizinkan.
 - `QA_PROJECT_REF_EXPECTED` tetap secret; kini hanya cek silang tambahan, bukan penentu (penentunya allowlist di repo).
+- Dengan allowlist terisi, langkah Guard di workflow bisa lulus bila semua variabel benar; langkah E2E tetap keluar kode 3 (NOT ACTIVATED).
 - Adapter inbox dan alur E2E belum ada; status tetap NOT ACTIVATED.
