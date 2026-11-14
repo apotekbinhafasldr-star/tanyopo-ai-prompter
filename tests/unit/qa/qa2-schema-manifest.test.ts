@@ -10,6 +10,9 @@ import {
   buildBundle,
   loadManifest,
 } from "../../../scripts/qa/build-schema-bundle.mjs";
+import { QA_IDENTITY_EMAIL, buildResetSql } from "../../../scripts/qa/print-qa-reset-sql.mjs";
+import { QA_EMAIL } from "../../../scripts/qa/local-stack-guard.mjs";
+import { ALLOWED_QA_PROJECT_REFS } from "../../../scripts/qa/qa-project-allowlist.mjs";
 
 // QA-2: manifest skema minimum + pembangun bundel. Tidak ada koneksi DB/jaringan; hanya membaca berkas repo.
 const root = path.resolve(__dirname, "../../..");
@@ -350,5 +353,277 @@ describe("QA-2 dokumen", () => {
     for (const m of manifest.migrations) expect(doc, m).toContain(m.slice(0, 14));
     expect(doc).toMatch(/fidelitas/i);
     expect(doc).toMatch(/UNKNOWN/);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Revisi: role default, perilaku handle_new_user, reset QA, RLS lintas tenant, pemakaian --parts dari HP.
+// ---------------------------------------------------------------------------------------------------------------------
+const stripComments = (sql: string) => sql.replace(/--[^\n]*/g, "");
+
+function tableColumns(sql: string, table: string) {
+  const m = stripComments(sql).match(new RegExp(`create table (?:if not exists )?public\\.${table} \\(([\\s\\S]*?)\\n\\);`));
+  if (!m) throw new Error(`tabel ${table} tidak ditemukan`);
+  const cols: { name: string; required: boolean }[] = [];
+  for (const raw of m[1].split("\n")) {
+    const line = raw.trim().replace(/,$/, "");
+    const c = line.match(/^([a-z_]+)\s+(?:uuid|text|int|integer|timestamptz|boolean|jsonb)\b(.*)$/);
+    if (!c || /^(primary|check|constraint|unique|foreign)$/.test(c[1])) continue;
+    const rest = c[2].toLowerCase();
+    cols.push({ name: c[1], required: (/not null|primary key/.test(rest)) && !/\bdefault\b/.test(rest) });
+  }
+  return cols;
+}
+
+describe("QA-2 role default pendaftar (revisi 1)", () => {
+  const shim = read("qa/qa2-shim.sql");
+
+  it("kode meminta owner untuk fitur lanjutan, tetapi alur trial hari-0 hanya butuh anggota tenant", () => {
+    expect(read("app/(app)/billing/page.tsx")).toContain('const isOwner = session.role === "owner"');
+    expect(read("supabase/migrations/20261029220000_prompter_p0_subscription_plan_tampering_lockdown.sql")).toMatch(
+      /fn_current_role\(\) is distinct from 'owner'/,
+    );
+    // INSERT pertama brand profile / audit log / langganan: hanya predikat tenant, tanpa role.
+    const policies = finalPolicies();
+    for (const [key, name] of [["prompter_brand_profiles", "Buat brand profile tenant sendiri"], ["prompter_audit_logs", "Tulis audit log sebagai diri sendiri"], ["prompter_subscriptions", "Buat subscription tenant sendiri"]]) {
+      const pol = policies.get(`${key}:${name}`);
+      expect(pol, key).toBeDefined();
+      expect(pol!.body).not.toMatch(/fn_current_role\(\)/);
+    }
+    expect(policies.get("prompter_brand_profiles:Owner atau marketing bisa edit brand profile")!.body).toMatch(/'owner'/);
+  });
+
+  it("shim memberi 'owner' pada pendaftar (asumsi UNKNOWN, dipertahankan) dan tidak ada role lain di jalur signup", () => {
+    const body = shim.match(/create or replace function public\.handle_new_user\(\)[\s\S]*?end \$\$;/)![0];
+    const roles = [...body.matchAll(/insert into public\.user_profiles[\s\S]*?values \(([\s\S]*?)\);/g)].map((m) => m[1]);
+    expect(roles.length).toBe(1);
+    expect(roles[0]).toMatch(/'owner'\s*$/);
+    expect(body.match(/'(owner|marketing|apoteker|kasir|admin_gudang|hr)'/g)).toEqual(["'owner'"]);
+  });
+
+  it("dokumen menandai role UNKNOWN dan memuat kueri baca-saja (hanya select/pg_get)", () => {
+    const doc = read("docs/QA2_SCHEMA_MINIMUM.md");
+    expect(doc).toMatch(/kode tidak membuktikan `owner`/);
+    const block = doc.slice(doc.indexOf("BACA-SAJA**, dijalankan Founder"));
+    const sql = block.slice(block.indexOf("```sql") + 6, block.indexOf("```", block.indexOf("```sql") + 6));
+    expect(sql).toMatch(/pg_get_functiondef/);
+    expect(sql).toMatch(/pg_policies/);
+    expect(/\b(insert|update|delete|drop|alter|create|truncate|grant|revoke)\b/i.test(sql.replace(/--[^\n]*/g, ""))).toBe(false);
+  });
+});
+
+describe("QA-2 handle_new_user vs jalur signup/onboarding (revisi 2)", () => {
+  const shim = read("qa/qa2-shim.sql");
+
+  it("semua kolom yang dibaca jalur signup/onboarding ada di shim", () => {
+    const session = read("services/session.ts");
+    const profileCols = session.match(/from\("user_profiles"\)\s*\.select\("([^"]+)"\)/)![1].split(",").map((c) => c.trim());
+    const tenantCols = session.match(/from\("tenants"\)\s*\.select\("([^"]+)"\)/)![1].split(",").map((c) => c.trim());
+    const approvals = read("app/(app)/approvals/page.tsx").match(/from\("user_profiles"\)\.select\("([^"]+)"\)/)![1].split(",").map((c) => c.trim());
+    const have = (t: string) => tableColumns(shim, t).map((c) => c.name);
+    for (const c of [...profileCols, ...approvals]) expect(have("user_profiles"), `user_profiles.${c}`).toContain(c);
+    for (const c of tenantCols) expect(have("tenants"), `tenants.${c}`).toContain(c);
+    expect(shim).toMatch(/create function public\.fn_current_tenant_id\(\)/);
+    expect(read("features/onboarding/actions.ts")).toContain('rpc("fn_current_tenant_id")');
+  });
+
+  it("handle_new_user mengisi semua kolom NOT NULL tanpa default di tenants dan user_profiles", () => {
+    const body = shim.match(/create or replace function public\.handle_new_user\(\)[\s\S]*?end \$\$;/)![0];
+    for (const table of ["tenants", "user_profiles"]) {
+      const m = body.match(new RegExp(`insert into public\\.${table} \\(([^)]*)\\)`));
+      expect(m, table).not.toBeNull();
+      const inserted = m![1].split(",").map((c) => c.trim());
+      const required = tableColumns(shim, table).filter((c) => c.required).map((c) => c.name);
+      expect(required.length).toBeGreaterThan(0);
+      for (const c of required) expect(inserted, `${table}.${c}`).toContain(c);
+    }
+  });
+
+  it("kunci metadata yang dikirim signUp dibaca fungsi; trial dan tabel LINOE TIDAK dibuat trigger", () => {
+    const actions = read("features/auth/actions.ts");
+    for (const key of ["nama", "nama_usaha", "jenis_usaha"]) {
+      expect(actions).toMatch(new RegExp(`\\b${key}\\b`));
+      expect(shim).toContain(`->> '${key}'`);
+    }
+    const body = shim.match(/create or replace function public\.handle_new_user\(\)[\s\S]*?end \$\$;/)![0];
+    expect(body).not.toMatch(/prompter_|subscription|business_template/);
+    expect(read("supabase/migrations/20261019100100_prompter_p0_subscription_trial_insert_guard.sql")).toMatch(/handle_new_user\(\) does not create the subscription row/);
+  });
+
+  it("business_template hanya disebut sebagai komentar: tidak ada kode alur yang membacanya (UNKNOWN, tidak di shim)", () => {
+    for (const f of ["services/session.ts", "services/billing.ts", "features/onboarding/actions.ts", "app/auth/confirm/route.ts", "proxy.ts"]) {
+      expect(read(f).includes("business_template"), f).toBe(false);
+    }
+    expect(shim.includes("business_template") && !/--[^\n]*business_template/.test(shim)).toBe(false);
+  });
+});
+
+type Policy = { table: string; name: string; body: string };
+function finalPolicies() {
+  const files = [read("qa/qa2-shim.sql"), ...manifest.migrations.map((m) => read(`supabase/migrations/${m}`))];
+  const map = new Map<string, Policy>();
+  for (const text of files) {
+    const code = stripComments(text);
+    const events: { at: number; kind: "drop" | "create"; table: string; name: string; body: string }[] = [];
+    for (const m of code.matchAll(/drop\s+policy\s+(?:if\s+exists\s+)?"([^"]+)"\s+on\s+public\.([a-z_0-9]+)/gi)) events.push({ at: m.index!, kind: "drop", table: m[2], name: m[1], body: "" });
+    for (const m of code.matchAll(/create\s+policy\s+"([^"]+)"\s+on\s+public\.([a-z_0-9]+)([\s\S]*?);/gi)) events.push({ at: m.index!, kind: "create", table: m[2], name: m[1], body: m[3] });
+    events.sort((a, b) => a.at - b.at);
+    for (const e of events) {
+      const key = `${e.table}:${e.name}`;
+      if (e.kind === "drop") map.delete(key);
+      else map.set(key, { table: e.table, name: e.name, body: e.body });
+    }
+  }
+  return map;
+}
+
+describe("QA-2 RLS lintas tenant, statis (revisi 4)", () => {
+  const CORE = ["tenants", "user_profiles", "prompter_brand_profiles", "prompter_audit_logs", "prompter_subscriptions", "prompter_invoices", "prompter_ai_jobs", "prompter_attributions", "prompter_analytics_insights"];
+  const allSql = [read("qa/qa2-shim.sql"), ...manifest.migrations.map((m) => read(`supabase/migrations/${m}`))].map(stripComments).join("\n");
+  const policies = finalPolicies();
+
+  it("RLS aktif pada semua tabel inti", () => {
+    for (const t of CORE) expect(new RegExp(`alter\\s+table\\s+public\\.${t}\\s+enable\\s+row\\s+level\\s+security`, "i").test(allSql), t).toBe(true);
+  });
+
+  it("setiap kebijakan akhir pada tabel inti terikat tenant (fn_current_tenant_id) dan tidak terbuka (using true)", () => {
+    for (const t of CORE) {
+      const own = [...policies.values()].filter((p) => p.table === t);
+      expect(own.length, `${t}: punya kebijakan`).toBeGreaterThan(0);
+      expect(own.some((p) => /\bfor\s+select\b/i.test(p.body) || /\bfor\s+all\b/i.test(p.body)), `${t}: ada kebijakan SELECT`).toBe(true);
+      for (const p of own) {
+        expect(p.body, `${t}/${p.name}`).toMatch(/fn_current_tenant_id\(\)/);
+        expect(/\b(using|with check)\s*\(\s*true\s*\)/i.test(p.body), `${t}/${p.name}: terbuka`).toBe(false);
+      }
+    }
+  });
+
+  it("tenants/user_profiles: SELECT hanya tenant sendiri; UPDATE tenants hanya owner; tanpa INSERT/DELETE klien", () => {
+    const sel = policies.get("tenants:Lihat tenant sendiri")!.body;
+    expect(sel).toMatch(/id = public\.fn_current_tenant_id\(\)/);
+    expect(policies.get("tenants:Owner bisa edit data usaha sendiri")!.body).toMatch(/fn_current_role\(\) = 'owner'/);
+    expect(policies.get("user_profiles:sandbox: lihat profil satu tenant")!.body).toMatch(/tenant_id = public\.fn_current_tenant_id\(\)/);
+    for (const p of policies.values()) if (p.table === "tenants" || p.table === "user_profiles") expect(/\bfor\s+(insert|delete|all)\b/i.test(p.body), p.name).toBe(false);
+  });
+
+  it("langganan: tanpa kebijakan UPDATE/DELETE klien; INSERT dipaksa TRIALING + FREE di tenant sendiri", () => {
+    const subs = [...policies.values()].filter((p) => p.table === "prompter_subscriptions");
+    expect(subs.some((p) => /\bfor\s+(update|delete|all)\b/i.test(p.body))).toBe(false);
+    const ins = policies.get("prompter_subscriptions:Buat subscription tenant sendiri")!.body;
+    expect(ins).toMatch(/status = 'TRIALING'/);
+    expect(ins).toMatch(/plan = 'FREE'/);
+  });
+
+  it("fn_current_tenant_id diturunkan dari auth.uid() (bukan parameter) di shim", () => {
+    const fn = read("qa/qa2-shim.sql").match(/create function public\.fn_current_tenant_id\(\)[\s\S]*?\$\$;/)![0];
+    expect(fn).toMatch(/where id = auth\.uid\(\)/);
+    expect(fn).not.toMatch(/\(\s*\w+\s+\w+/);
+  });
+});
+
+describe("QA-2 skrip SQL uji RLS lintas tenant (tidak dijalankan di sini)", () => {
+  const sql = read("qa/qa2-rls-cross-tenant.sql");
+  const code = stripComments(sql);
+
+  it("berlabel QA, guard penanda, tanpa COMMIT/DDL, dibatalkan sendiri lewat galat, tanpa ref nyata", () => {
+    expect(sql.split("\n")[1]).toContain(WARNING_LINE);
+    expect(code).toContain("QA2_SANDBOX_ONLY");
+    expect(code).toMatch(/raise exception 'QA2_RLS_RESULT/);
+    expect(/\b(commit|create\s+table|drop\s|truncate|alter\s+table|grant\s|revoke\s)\b/i.test(code)).toBe(false);
+    for (const r of REAL_REFS) expect(sql.includes(r)).toBe(false);
+  });
+
+  it("memeriksa kontrol positif dan lintas tenant untuk semua tabel inti + tulis lintas tenant + anon", () => {
+    for (const t of ["tenants", "user_profiles", "prompter_brand_profiles", "prompter_subscriptions", "prompter_audit_logs", "prompter_invoices", "prompter_analytics_insights"]) {
+      expect(code, t).toContain(`public.${t}`);
+    }
+    for (const label of ["A_baca_tenant_sendiri", "A_baca_tenant_B", "A_tulis_brand_B", "A_tulis_langganan_B", "A_tulis_audit_B", "A_ubah_tenant_B", "anon_baca_tenants"]) {
+      expect(code, label).toContain(label);
+    }
+    expect(code).toMatch(/set local role authenticated/);
+    expect(code).toMatch(/request\.jwt\.claim\.sub/);
+    expect(code).toMatch(/sqlstate '42501'/);
+  });
+});
+
+describe("QA-2 alat QA terdaftar di manifest", () => {
+  it("setiap qaTools ada di repo dan bukan bagian bundel skema", () => {
+    const tools = (manifest as unknown as { qaTools: { file: string }[] }).qaTools;
+    expect(tools.map((t) => t.file).sort()).toEqual(["qa/qa2-rls-cross-tenant.sql", "scripts/qa/print-qa-reset-sql.mjs"]);
+    for (const t of tools) expect(existsSync(path.join(root, t.file)), t.file).toBe(true);
+    expect(buildBundle({ root }).sql.includes("QA2_RLS_RESULT")).toBe(false);
+  });
+});
+
+describe("QA-2 reset QA: pencetak SQL tanpa koneksi (revisi 3)", () => {
+  const ref = ALLOWED_QA_PROJECT_REFS[0];
+
+  it("identitas reset sama dengan identitas QA tetap QA-1", () => {
+    expect(QA_IDENTITY_EMAIL).toBe(QA_EMAIL);
+    expect(ref).toBe(QA_REF);
+  });
+
+  it("menolak ref kosong, ref di luar allowlist, dan semua ref proyek nyata", () => {
+    expect(() => buildResetSql({ ref: "" })).toThrow(/REFUSED/);
+    expect(() => buildResetSql({ ref: "abcdefghij0123456789" })).toThrow(/allowlist/);
+    for (const r of REAL_REFS) expect(() => buildResetSql({ ref: r })).toThrow(/REFUSED/);
+  });
+
+  it("SQL: header QA, guard penanda, tenant dulu lalu sapu yatim, satu transaksi, tanpa ref nyata", () => {
+    const sql = buildResetSql({ ref });
+    expect(sql.split("\n")[1]).toContain(WARNING_LINE);
+    expect(sql).toContain("QA2_SANDBOX_ONLY");
+    const code = stripComments(sql);
+    expect(code.indexOf("begin;")).toBeLessThan(code.indexOf("delete from public.tenants"));
+    expect(code.indexOf("QA2_SANDBOX_ONLY")).toBeLessThan(code.indexOf("delete from public.tenants"));
+    expect(code).toContain(`u.email = '${QA_EMAIL}'`);
+    expect(code).toMatch(/not exists \(select 1 from public\.user_profiles up where up\.tenant_id = t\.id\)/);
+    expect(code).not.toMatch(/delete from auth\.users/); // default: user Auth tidak dihapus lewat SQL
+    expect(code).not.toMatch(/\b(drop|truncate|alter)\b/i);
+    for (const r of REAL_REFS) expect(sql.includes(r)).toBe(false);
+    expect(buildResetSql({ ref, withAuthUser: true })).toMatch(/delete from auth\.users where email = '/);
+  });
+
+  it("skrip murni: hanya impor node:fs/path/url + allowlist lokal; tanpa jaringan/DB/env", () => {
+    const src = read("scripts/qa/print-qa-reset-sql.mjs");
+    const specs = [...src.matchAll(/(?:^|\n)\s*import[^"'\n]*?from\s+["']([^"']+)["']/g)].map((m) => m[1]).sort();
+    expect(specs).toEqual(["./qa-project-allowlist.mjs", "node:fs", "node:path", "node:url"]);
+    for (const w of ["fetch(", "require(", "import(", "process.env", "child_process", "psql", "@supabase", "node:http", "node:net"]) expect(src.includes(w), w).toBe(false);
+  });
+
+  it("dokumen menjelaskan reset QA (urutan tenant dulu, hanya proyek QA, tanpa koneksi)", () => {
+    const doc = read("docs/QA2_SCHEMA_MINIMUM.md");
+    expect(doc).toMatch(/## \d+\. Rollback dan reset QA/);
+    expect(doc).toContain("print-qa-reset-sql.mjs");
+    expect(doc).toMatch(/tenant dulu, user kemudian/);
+  });
+});
+
+describe("QA-2 --parts 3 dari HP: dokumen sesuai hasil bangun (revisi 5)", () => {
+  const doc = read("docs/QA2_SCHEMA_MINIMUM.md");
+  const split = buildBundle({ root, parts: 3 });
+
+  it("ukuran per potongan di dokumen = ukuran sebenarnya (KB dibulatkan) dan semua < 100 KB", () => {
+    const kb = split.partBytes.map((b: number) => Math.round(b / 1024));
+    kb.forEach((k: number, i: number) => {
+      expect(k).toBeLessThan(100);
+      expect(doc, `bagian ${i + 1}`).toContain(`part${i + 1}of3.sql\` | ${k} KB`);
+    });
+    expect(doc).toContain(`${Math.round(buildBundle({ root }).bytes / 1024)} KB`);
+  });
+
+  it("versi terakhir tiap potongan di dokumen = versi terakhir sebenarnya, dan guard antar-bagian merujuknya", () => {
+    const lastVersions = split.parts.map((t: string) => [...t.matchAll(/^\s+\('(\d{14})', '[0-9a-f]{64}'\)/gm)].map((m) => m[1]).pop()!);
+    for (const [i, v] of lastVersions.entries()) {
+      expect(doc, `versi bagian ${i + 1}`).toContain(`\`${v}\``);
+      if (i + 1 < lastVersions.length) expect(split.parts[i + 1]).toContain(`version = '${v}'`);
+    }
+    expect(doc).toContain("select max(version) from public._linoe_sandbox_applied");
+    expect(doc).toContain("ABORT: bagian sebelumnya belum diterapkan");
+  });
+
+  it("CLI tertulis di dokumen dan dukungan --parts ada di skrip", () => {
+    expect(doc).toContain("--parts 3");
+    expect(read("scripts/qa/build-schema-bundle.mjs")).toContain('"--parts"');
   });
 });

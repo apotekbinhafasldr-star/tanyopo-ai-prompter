@@ -279,8 +279,19 @@
     "note": "Referensi proyek produksi/nyata (ref) tidak boleh ada di manifest, dokumen, maupun bundel; builder menyamarkan ref yang ada di KOMENTAR migrasi dan menolak bila muncul di luar komentar."
   },
   "splitAdvice": {
-    "singleFileKB": 166,
+    "singleFileKB": 162,
     "recommendedParts": 3,
-    "note": "Satu berkas > 100 KB: pakai --parts 3 (sekitar 61/45/65 KB), jalankan berurutan; urutan migrasi tidak berubah."
-  }
+    "note": "Satu berkas > 100 KB: pakai --parts 3 (sekitar 60/44/63 KB), jalankan berurutan; urutan migrasi tidak berubah.",
+    "parts": 3
+  },
+  "qaTools": [
+    {
+      "file": "scripts/qa/print-qa-reset-sql.mjs",
+      "purpose": "Mencetak SQL reset QA (tanpa koneksi DB), guard ref allowlist QA"
+    },
+    {
+      "file": "qa/qa2-rls-cross-tenant.sql",
+      "purpose": "Uji RLS lintas tenant untuk dijalankan Founder nanti di proyek QA (BELUM dijalankan; membatalkan diri lewat galat)"
+    }
+  ]
 }
