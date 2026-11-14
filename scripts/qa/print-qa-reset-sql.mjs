@@ -30,7 +30,10 @@ function refuse(msg) {
   return new Error(`REFUSED: ${msg}`);
 }
 
-/** @returns {string} teks SQL reset. Murni (tanpa I/O). */
+/**
+ * @param {{ ref?: string, withAuthUser?: boolean }} [options]
+ * @returns {string} teks SQL reset. Murni (tanpa I/O).
+ */
 export function buildResetSql({ ref, withAuthUser = false } = {}) {
   if (typeof ref !== "string" || ref === "") throw refuse("--ref wajib diisi (ref proyek QA)");
   if (REAL_REFS.includes(ref)) throw refuse("ref proyek nyata/produksi ditolak");
