@@ -3,8 +3,11 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { createInboxAdapter } from "../../../scripts/qa/inbox-adapter.mjs";
 import {
+  QA_SENDER_DOMAIN,
+  QA_SENDER_LOCK,
   REQUIRED_VARS,
   SECRET_VARS,
+  isLockedQaAddress,
   assertRealQaEnv as realAssertRealQaEnv,
   redact,
 } from "../../../scripts/qa/real-e2e-guard.mjs";
@@ -26,7 +29,7 @@ const OK: Record<string, string | undefined> = {
   QA_PROJECT_REF_EXPECTED: FAKE_REF,
   QA_SUPABASE_PUBLISHABLE_KEY: SECRET_PUB,
   QA_SUPABASE_SECRET_KEY: SECRET_SRV,
-  QA_INBOX_ADDRESS: "qa-inbox@fake-inbox.invalid",
+  QA_INBOX_ADDRESS: "qa-inbox@qa.tanyopo.com",
   QA_SENDER_EMAIL: "noreply@qa.tanyopo.com",
 };
 
@@ -85,18 +88,86 @@ describe("QA-2 guard fail-closed", () => {
     },
   );
 
-  it("menolak inbox tidak valid atau di example.test", () => {
-    expect(() => assertRealQaEnv({ ...OK, QA_INBOX_ADDRESS: "bukan-email" })).toThrow(/QA_INBOX_ADDRESS/);
-    expect(() => assertRealQaEnv({ ...OK, QA_INBOX_ADDRESS: "qa-linoe@example.test" })).toThrow(/example\.test/);
-    expect(() => assertRealQaEnv({ ...OK, QA_INBOX_ADDRESS: "a@sub.example.test" })).toThrow(/example\.test/);
+  it("QA_SENDER_DOMAIN dibekukan dan persis qa.tanyopo.com", () => {
+    expect(QA_SENDER_DOMAIN).toBe("qa.tanyopo.com");
+    expect(Object.isFrozen(QA_SENDER_LOCK)).toBe(true);
+    expect(QA_SENDER_LOCK).toEqual({ domain: "qa.tanyopo.com", maxEmailsPerRun: 1 });
   });
 
-  it("menolak pengirim produksi tanyopo.com tetapi menerima sub-domain QA atau domain lain", () => {
-    expect(() => assertRealQaEnv({ ...OK, QA_SENDER_EMAIL: "noreply@tanyopo.com" })).toThrow(/QA_SENDER_EMAIL/);
-    expect(() => assertRealQaEnv({ ...OK, QA_SENDER_EMAIL: "tanyopo.com" })).toThrow(/QA_SENDER_EMAIL/);
-    expect(() => assertRealQaEnv({ ...OK, QA_SENDER_EMAIL: "x@TANYOPO.COM" })).toThrow(/QA_SENDER_EMAIL/);
-    expect(() => assertRealQaEnv({ ...OK, QA_SENDER_EMAIL: "x@qa.tanyopo.com" })).not.toThrow();
-    expect(() => assertRealQaEnv({ ...OK, QA_SENDER_EMAIL: "x@other-qa-domain.invalid" })).not.toThrow();
+  // SENDER-LOCK: alamat tunggal di domain persis qa.tanyopo.com, tanpa plus-address.
+  const BAD_ADDRESSES: Array<[string, string]> = [
+    ["bukan-email", "tanpa @"],
+    ["noreply@tanyopo.com", "domain produksi"],
+    ["x@TANYOPO.COM", "domain produksi huruf besar"],
+    ["tanyopo.com", "tanpa local-part"],
+    ["noreply@x.qa.tanyopo.com", "subdomain lain"],
+    ["noreply@qa.tanyopo.com.evil.com", "akhiran domain jahat"],
+    ["noreply@evilqa.tanyopo.com", "awalan domain jahat"],
+    ["noreply@qa.tanyopo.com.", "titik di akhir"],
+    ["noreply@qa-tanyopo.com", "bukan titik"],
+    ["noreply@qa.tanyopo.co", "TLD lain"],
+    ["noreply+run1@qa.tanyopo.com", "plus-address"],
+    ["+x@qa.tanyopo.com", "plus di awal"],
+    ["QA Bot <noreply@qa.tanyopo.com>", "display-name"],
+    ["<noreply@qa.tanyopo.com>", "kurung sudut"],
+    ["noreply@qa.tanyopo.com, other@evil.com", "koma"],
+    ["noreply@qa.tanyopo.com;other@evil.com", "titik koma"],
+    ["noreply@qa.tanyopo.com other@evil.com", "spasi"],
+    [" noreply@qa.tanyopo.com", "spasi di awal"],
+    ["noreply@qa.tanyopo.com ", "spasi di akhir"],
+    ["noreply@qa.tanyopo.com\r\nBcc: a@evil.com", "CRLF"],
+    ["noreply@qa.tanyopo.com\n", "newline akhir"],
+    ["a@evil.com\n@qa.tanyopo.com", "newline tengah"],
+    ["a@evil.com@qa.tanyopo.com", "dua @"],
+    ["noreply@qa.tanyopo.com\u0000", "null byte"],
+    ["noreply@qа.tanyopo.com", "homoglyph Cyrillic a"],
+    ["noreply@qa.tanyoро.com", "homoglyph Cyrillic o dan p"],
+    ["noreply@qa.tanyopo.cοm", "homoglyph Greek omicron"],
+    ["noreply@qa.tanyopo.\u212Aom", "Kelvin sign"],
+    ["noreply@qa.tanyopo.com\u200b", "zero-width space"],
+    ["noreply\uFF20qa.tanyopo.com", "fullwidth at"],
+    ["norepſy@qa.tanyopo.com", "long s homoglyph"],
+    ["noreply@xn--qa-9ja.tanyopo.com", "punycode"],
+    ["a..b@qa.tanyopo.com", "titik ganda"],
+    [".a@qa.tanyopo.com", "titik di awal"],
+    ["\"a b\"@qa.tanyopo.com", "quoted local-part"],
+    ["a%evil.com@qa.tanyopo.com", "percent hack"],
+    ["a!b@qa.tanyopo.com", "karakter khusus"],
+    ["@qa.tanyopo.com", "local-part kosong"],
+    [`${"a".repeat(65)}@qa.tanyopo.com`, "local-part terlalu panjang"],
+  ];
+
+  it.each(BAD_ADDRESSES)("sender-lock menolak QA_SENDER_EMAIL %j (%s)", (addr) => {
+    expect(isLockedQaAddress(addr)).toBe(false);
+    expect(() => assertRealQaEnv({ ...OK, QA_SENDER_EMAIL: addr })).toThrow(/QA_SENDER_EMAIL/);
+  });
+
+  it.each(BAD_ADDRESSES)("sender-lock menolak QA_INBOX_ADDRESS %j (%s)", (addr) => {
+    expect(() => assertRealQaEnv({ ...OK, QA_INBOX_ADDRESS: addr })).toThrow(/QA_INBOX_ADDRESS/);
+  });
+
+  it.each(["qa-inbox@example.test", "a@sub.example.test", "qa-inbox@fake-inbox.invalid", "x@other-qa-domain.invalid"])(
+    "menolak domain lain untuk pengirim dan inbox (%s)",
+    (addr) => {
+      expect(() => assertRealQaEnv({ ...OK, QA_SENDER_EMAIL: addr })).toThrow(/QA_SENDER_EMAIL/);
+      expect(() => assertRealQaEnv({ ...OK, QA_INBOX_ADDRESS: addr })).toThrow(/QA_INBOX_ADDRESS/);
+    },
+  );
+
+  it.each(["noreply@qa.tanyopo.com", "NoReply@QA.Tanyopo.COM", "qa-sender_1@qa.tanyopo.com", "a.b@qa.tanyopo.com", "x@qa.tanyopo.com"])(
+    "sender-lock menerima alamat sah %s",
+    (addr) => {
+      expect(isLockedQaAddress(addr)).toBe(true);
+      expect(() => assertRealQaEnv({ ...OK, QA_SENDER_EMAIL: addr, QA_INBOX_ADDRESS: addr })).not.toThrow();
+    },
+  );
+
+  it("QA_MAX_EMAILS_PER_RUN: tidak diset atau 1 lolos; selainnya ditolak", () => {
+    expect(() => assertRealQaEnv(OK)).not.toThrow();
+    expect(() => assertRealQaEnv({ ...OK, QA_MAX_EMAILS_PER_RUN: "1" })).not.toThrow();
+    for (const v of ["2", "3", "100", "0", "-1", "1.5", "01", "1 ", "", " ", "abc", "1e3", "Infinity"]) {
+      expect(() => assertRealQaEnv({ ...OK, QA_MAX_EMAILS_PER_RUN: v })).toThrow(/QA_MAX_EMAILS_PER_RUN/);
+    }
   });
 
   it.each([
@@ -153,6 +224,21 @@ describe("QA-2 guard fail-closed", () => {
     for (const v of [SECRET_PUB, SECRET_SRV, "FAKE-DB-VALUE-333", FAKE_REF, "noreply@tanyopo.com", "qa-inbox@fake-inbox.invalid"]) {
       expect(message).not.toContain(v);
     }
+  });
+
+  it("pesan penolakan sender-lock dan batas email hanya memuat NAMA variabel, bukan nilai", () => {
+    const evil = "evil-sender+1@bad-domain.invalid";
+    const evilInbox = "evil-inbox+1@bad-domain.invalid";
+    let message = "";
+    try {
+      assertRealQaEnv({ ...OK, QA_SENDER_EMAIL: evil, QA_INBOX_ADDRESS: evilInbox, QA_MAX_EMAILS_PER_RUN: "987654" });
+    } catch (err) {
+      message = String((err as Error).message);
+    }
+    expect(message).toMatch(/QA_SENDER_EMAIL/);
+    expect(message).toMatch(/QA_INBOX_ADDRESS/);
+    expect(message).toMatch(/QA_MAX_EMAILS_PER_RUN/);
+    for (const v of [evil, evilInbox, "bad-domain", "987654"]) expect(message).not.toContain(v);
   });
 
   it("redact menyamarkan nilai rahasia dan mengekspor daftar nama", () => {
