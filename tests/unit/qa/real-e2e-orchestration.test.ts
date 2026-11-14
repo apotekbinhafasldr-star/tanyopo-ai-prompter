@@ -1,8 +1,14 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   PLAN,
   assertFixedIdentity,
   extractConfirmationLinks,
+  MAX_REDIRECTS,
+  assertMaxEmailsPerRun,
+  createEmailBudget,
+  resolveRedirect,
   parseAuthenticationResults,
   runRealE2E as runRealE2EUntyped,
   validateConfirmationLink,
@@ -25,6 +31,7 @@ const DAY = 86_400_000;
 const ENV: Record<string, string | undefined> = {
   QA2_CONFIRM: "RUN-QA-2-REAL-EMAIL",
   QA2_ACTIVATED: "true",
+  QA_MAX_EMAILS_PER_RUN: "1",
   QA_SUPABASE_URL: SUPA,
   NEXT_PUBLIC_SUPABASE_URL: SUPA,
   QA_PROJECT_REF_EXPECTED: FAKE_REF,
@@ -42,8 +49,8 @@ type Overrides = {
   html?: string;
   authResults?: string | null;
   trial?: { status: string; trial_ends_at: string } | null;
-  followLink?: (url: string) => Promise<{ finalUrl: string; redirectChain?: string[] }>;
-  signupOutcomes?: string[];
+  hop?: (url: string, n: number) => { status: number; location?: string };
+  duplicateOutcome?: string;
   extraMessage?: boolean;
   failOn?: string;
 };
@@ -52,13 +59,13 @@ function build(o: Overrides = {}) {
   const calls: string[] = [];
   const log = (name: string) => calls.push(name);
   let userExists = true;
-  const outcomes = [...(o.signupOutcomes ?? ["check-email", "duplicate"])];
   const message = {
     subject: "Konfirmasi",
     html: o.html ?? `<a href="${GOOD_LINK.replaceAll("&", "&amp;")}">Konfirmasi</a>`,
     headers: o.authResults === null ? {} : { "Authentication-Results": o.authResults ?? AUTH_PASS },
   };
   let waits = 0;
+  let hops = 0;
   const maybeFail = (name: string) => {
     if (o.failOn === name) throw new Error(`gagal-${name}`);
   };
@@ -104,12 +111,17 @@ function build(o: Overrides = {}) {
       signup: vi.fn(async () => {
         log("driver.signup");
         maybeFail("signup");
-        return { outcome: outcomes.shift() ?? "check-email" };
+        return { outcome: "check-email" };
       }),
-      followLink: vi.fn(async (url: string) => {
-        log("driver.followLink");
-        if (o.followLink) return o.followLink(url);
-        return { finalUrl: `${APP}/onboarding`, redirectChain: [url] };
+      signupDuplicate: vi.fn(async () => {
+        log("driver.signupDuplicate");
+        return { outcome: o.duplicateOutcome ?? "duplicate" };
+      }),
+      fetchHop: vi.fn(async (url: string) => {
+        log("driver.fetchHop");
+        const n = hops++;
+        if (o.hop) return o.hop(url, n);
+        return n === 0 ? { status: 302, location: "/onboarding" } : { status: 200 };
       }),
       completeOnboarding: vi.fn(async () => {
         log("driver.onboarding");
@@ -141,11 +153,14 @@ describe("runRealE2E: alur sukses dengan dependensi palsu", () => {
     expect(PLAN).toHaveLength(11);
     expect(r.report.emailsExpected).toBe(1);
     expect(calls.slice(0, 5)).toEqual(["admin.find", "admin.delete", "admin.find", "inbox.clear", "driver.signup"]);
-    const order = ["inbox.clear", "driver.signup", "inbox.wait", "driver.followLink", "driver.onboarding", "driver.dashboard", "driver.billing", "admin.getTrial"];
+    const order = ["inbox.clear", "driver.signup", "inbox.wait", "driver.fetchHop", "driver.onboarding", "driver.dashboard", "driver.billing", "admin.getTrial"];
     const idx = order.map((n) => firstIndex(calls, n));
     expect([...idx].sort((a, b) => a - b)).toEqual(idx);
     expect(calls[calls.length - 1]).toBe("admin.find");
-    expect(deps.driver.signup).toHaveBeenCalledTimes(2); // daftar + duplikat
+    expect(deps.driver.signup).toHaveBeenCalledTimes(1); // satu-satunya signup yang boleh mengirim email
+    expect(deps.driver.signupDuplicate).toHaveBeenCalledTimes(1);
+    expect(deps.driver.fetchHop).toHaveBeenCalledTimes(2);
+    expect(r.report.emailsRequested).toBe(1);
     expect(deps.inbox.waitForMessage).toHaveBeenCalledTimes(2); // 1 menunggu + 1 probe
   });
 
@@ -239,7 +254,7 @@ describe("identitas QA tetap", () => {
   it("email yang dipakai di semua pemanggilan adalah QA_INBOX_ADDRESS", async () => {
     const { deps } = build();
     await runRealE2E(deps);
-    for (const c of deps.driver.signup.mock.calls) expect((c as unknown as [{ email: string }])[0].email).toBe("qa-inbox@fake-inbox.invalid");
+    for (const c of [...deps.driver.signup.mock.calls, ...deps.driver.signupDuplicate.mock.calls]) expect((c as unknown as [{ email: string }])[0].email).toBe("qa-inbox@fake-inbox.invalid");
     expect(deps.adminClient.findUserByEmail).toHaveBeenCalledWith("qa-inbox@fake-inbox.invalid");
   });
 });
@@ -270,7 +285,7 @@ describe("validasi tautan konfirmasi", () => {
     const { deps, calls } = build({ html: `<a href="https://evil.example/auth/confirm?token_hash=x&type=signup">k</a>` });
     const r = await runRealE2E(deps);
     expect(r.exitCode).toBe(1);
-    expect(deps.driver.followLink).not.toHaveBeenCalled();
+    expect(deps.driver.fetchHop).not.toHaveBeenCalled();
     expect(r.report.steps.find((s: { n: number }) => s.n === 6).ok).toBe(false);
     expect(calls[calls.length - 1]).toBe("admin.find");
     expect(r.report.steps[r.report.steps.length - 1].n).toBe(11);
@@ -283,13 +298,100 @@ describe("validasi tautan konfirmasi", () => {
   });
 
   it("run: redirect yang berakhir di produksi ditolak", async () => {
-    const { deps } = build({ followLink: async (url) => ({ finalUrl: "https://app.tanyopo.com/onboarding", redirectChain: [url] }) });
+    const { deps } = build({ hop: () => ({ status: 302, location: "https://app.tanyopo.com/onboarding" }) });
     const r = await runRealE2E(deps);
     expect(r.exitCode).toBe(1);
     expect(r.report.error).toContain("redirect ditolak");
+    expect(deps.driver.fetchHop).toHaveBeenCalledTimes(1); // berhenti SEBELUM request kedua
     expect(deps.driver.openDashboard).not.toHaveBeenCalled();
   });
+
+  it("run: redirect relatif ke /onboarding diterima (2 hop)", async () => {
+    const { deps } = build();
+    const r = await runRealE2E(deps);
+    expect(r.exitCode).toBe(0);
+    expect(r.report.redirectHops).toBe(1);
+  });
+
+  it("run: redirect lintas asal yang diizinkan (Supabase QA -> app) diterima", async () => {
+    const { deps } = build({ hop: (_u, n) => (n === 0 ? { status: 303, location: `${APP}/onboarding?x=1` } : { status: 200 }) });
+    expect((await runRealE2E(deps)).exitCode).toBe(0);
+  });
+
+  for (const [label, location] of [
+    ["host asing", "https://evil.example/x"],
+    ["host hosting produksi", "https://linoe.netlify.app/x"],
+    ["userinfo", "http://localhost:3000@evil.example/x"],
+    ["userinfo di host yang diizinkan", "http://user:pw@localhost:3000/onboarding"],
+    ["skema javascript:", "javascript:alert(1)"],
+    ["skema data:", "data:text/html,hi"],
+    ["protokol-relatif ke host asing", "//evil.example/x"],
+  ] as const) {
+    it(`run: redirect ${label} dihentikan sebelum request kedua`, async () => {
+      const { deps, calls } = build({ hop: () => ({ status: 302, location }) });
+      const r = await runRealE2E(deps);
+      expect(r.exitCode).toBe(1);
+      expect(deps.driver.fetchHop).toHaveBeenCalledTimes(1);
+      expect(r.report.error).toContain("redirect ditolak");
+      expect(calls[calls.length - 1]).toBe("admin.find"); // cleanup tetap
+    });
+  }
+
+  it("run: batas MAX_REDIRECTS terlampaui -> gagal", async () => {
+    const { deps } = build({ hop: (_u, n) => ({ status: 302, location: `/step-${n}` }) });
+    const r = await runRealE2E(deps);
+    expect(r.exitCode).toBe(1);
+    expect(r.report.error).toContain("melebihi batas");
+    expect(deps.driver.fetchHop).toHaveBeenCalledTimes(MAX_REDIRECTS + 1);
+  });
+
+  it("run: loop redirect ditolak", async () => {
+    const { deps } = build({ hop: (_u, n) => ({ status: 302, location: n % 2 === 0 ? "/a" : "/b" }) });
+    const r = await runRealE2E(deps);
+    expect(r.exitCode).toBe(1);
+    expect(r.report.error).toContain("loop");
+    expect(deps.driver.fetchHop).toHaveBeenCalledTimes(3);
+  });
+
+  it("run: 3xx tanpa Location atau status 4xx -> gagal", async () => {
+    expect((await runRealE2E(build({ hop: () => ({ status: 302 }) }).deps)).exitCode).toBe(1);
+    expect((await runRealE2E(build({ hop: () => ({ status: 403 }) }).deps)).exitCode).toBe(1);
+  });
 });
+
+describe("resolveRedirect dan QA_MAX_EMAILS_PER_RUN", () => {
+  it("resolveRedirect: relatif diselesaikan terhadap URL saat ini", () => {
+    expect(resolveRedirect("/onboarding", `${APP}/auth/confirm?a=1`, [APP])).toBe(`${APP}/onboarding`);
+    expect(() => resolveRedirect("https://evil.example", APP, [APP])).toThrow(/ditolak/);
+  });
+
+  it("assertMaxEmailsPerRun hanya menerima persis \"1\"", () => {
+    expect(assertMaxEmailsPerRun({ QA_MAX_EMAILS_PER_RUN: "1" })).toBe(1);
+    for (const v of [undefined, "", "0", "2", " 1", "1 ", "01", "true"]) expect(() => assertMaxEmailsPerRun({ QA_MAX_EMAILS_PER_RUN: v })).toThrow(/QA_MAX_EMAILS_PER_RUN/);
+  });
+
+  it("run: variabel hilang/kosong/bukan 1 -> REFUSED sebelum langkah apa pun (termasuk saat tidak aktif)", async () => {
+    for (const v of [undefined, "", "2", "0"]) {
+      for (const activated of ["true", undefined]) {
+        const { deps, calls } = build({ env: { ...ENV, QA_MAX_EMAILS_PER_RUN: v, QA2_ACTIVATED: activated } });
+        const r = await runRealE2E(deps);
+        expect(r.exitCode).toBe(2);
+        expect(r.report.error).toContain("QA_MAX_EMAILS_PER_RUN");
+        expect(calls).toEqual([]);
+      }
+    }
+  });
+
+  it("anggaran email: pemanggilan signup kedua gagal dan tidak diteruskan ke driver", async () => {
+    const budget = createEmailBudget(1);
+    const send = vi.fn(async () => "sent");
+    await budget.spend(send);
+    await expect(budget.spend(send)).rejects.toThrow(/batas email/);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(budget.used).toBe(1);
+  });
+});
+
 
 describe("parseAuthenticationResults", () => {
   it("membaca SPF/DKIM/DMARC pass", () => {
@@ -320,7 +422,7 @@ describe("parseAuthenticationResults", () => {
       const r = await runRealE2E(deps);
       expect(r.exitCode).toBe(1);
       expect(r.report.steps.find((s: { n: number }) => s.n === 5).ok).toBe(false);
-      expect(deps.driver.followLink).not.toHaveBeenCalled();
+      expect(deps.driver.fetchHop).not.toHaveBeenCalled();
       expect(calls[calls.length - 1]).toBe("admin.find");
     });
   }
@@ -339,7 +441,7 @@ describe("trial dan duplikat", () => {
     const r = await runRealE2E(deps);
     expect(r.exitCode).toBe(1);
     expect(r.report.error).toContain("trial bukan 14 hari");
-    expect(deps.driver.signup).toHaveBeenCalledTimes(1); // langkah 10 tidak jalan
+    expect(deps.driver.signupDuplicate).not.toHaveBeenCalled(); // langkah 10 tidak jalan
   });
 
   it("status trial bukan TRIALING atau langganan tidak ada -> gagal", async () => {
@@ -353,7 +455,7 @@ describe("trial dan duplikat", () => {
   });
 
   it("pendaftaran duplikat yang tidak ditolak -> gagal", async () => {
-    const { deps } = build({ signupOutcomes: ["check-email", "check-email"] });
+    const { deps } = build({ duplicateOutcome: "check-email" });
     const r = await runRealE2E(deps);
     expect(r.exitCode).toBe(1);
     expect(r.report.error).toContain("duplikat");
@@ -407,5 +509,17 @@ describe("batas biaya dan cleanup", () => {
     const r = await runRealE2E(deps);
     expect(r.report.steps[0].detail).toContain("tidak ada");
     expect(deps.adminClient.deleteUser).not.toHaveBeenCalled();
+  });
+});
+
+describe("workflow statis: QA_MAX_EMAILS_PER_RUN", () => {
+  const wf = readFileSync(path.join(process.cwd(), ".github/workflows/qa-real-e2e.yml"), "utf8");
+  const steps = wf.slice(wf.indexOf("\n    steps:\n")).split(/\n      - /).filter((x) => /^name: (Guard|QA-2 real email E2E)/.test(x));
+
+  it('literal "1" pada langkah Guard dan E2E, bukan secret dan bukan var', () => {
+    expect(steps).toHaveLength(2);
+    for (const s of steps) expect(s).toMatch(/^\s+QA_MAX_EMAILS_PER_RUN: "1"$/m);
+    expect([...wf.matchAll(/QA_MAX_EMAILS_PER_RUN:\s*(.*)$/gm)].map((m) => m[1].trim())).toEqual(['"1"', '"1"']);
+    expect(wf).not.toMatch(/(secrets|vars)\.QA_MAX_EMAILS_PER_RUN/);
   });
 });

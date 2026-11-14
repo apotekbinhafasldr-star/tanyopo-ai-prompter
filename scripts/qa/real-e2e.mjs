@@ -39,6 +39,7 @@ async function main(argv) {
   try {
     assertNotProduction(env);
     assertRealQaEnv(env);
+    assertMaxEmailsPerRun(env);
   } catch (err) {
     console.error(redact(String(err instanceof Error ? err.message : err), env));
     process.exit(2);
@@ -71,9 +72,89 @@ async function main(argv) {
 
 export const EXIT = Object.freeze({ PASS: 0, FAIL: 1, REFUSED: 2, NOT_ACTIVATED: 3 });
 export const TRIAL_DAYS = 14;
+export const MAX_REDIRECTS = 5;
 const DAY_MS = 86_400_000;
 const PRODUCTION_HOST_MARKERS = ["tanyopo.com", "netlify.app", "netlify.com", "vercel.app", "vercel.com"];
 const CONFIRM_PATHS = ["/auth/confirm", "/auth/v1/verify"];
+
+/**
+ * Batas biaya fail-closed: QA_MAX_EMAILS_PER_RUN WAJIB ada dan persis "1" (tanpa default diam-diam). Murni.
+ * @param {Record<string, string | undefined>} env
+ * @returns {number}
+ */
+export function assertMaxEmailsPerRun(env) {
+  if (env.QA_MAX_EMAILS_PER_RUN !== "1") throw new Error('QA_MAX_EMAILS_PER_RUN wajib ada dan persis "1"');
+  return 1;
+}
+
+/**
+ * Anggaran email: setiap pemanggilan signup dihitung; pemanggilan melebihi batas = gagal (fail-closed).
+ * @param {number} max
+ */
+export function createEmailBudget(max) {
+  let used = 0;
+  return {
+    get used() {
+      return used;
+    },
+    /** @template T @param {() => Promise<T>} fn @returns {Promise<T>} */
+    async spend(fn) {
+      if (used + 1 > max) throw new Error(`batas email per run terlampaui (maks ${max})`);
+      used += 1;
+      return fn();
+    },
+  };
+}
+
+/**
+ * Menyelesaikan dan memvalidasi satu header Location terhadap URL saat ini. Murni; melempar bila ditolak.
+ * @param {string} location
+ * @param {string} currentUrl
+ * @param {readonly string[]} allowedOrigins
+ * @returns {string} URL absolut berikutnya
+ */
+export function resolveRedirect(location, currentUrl, allowedOrigins) {
+  let u;
+  try {
+    u = new URL(location, currentUrl); // relatif diselesaikan terhadap URL saat ini
+  } catch {
+    throw new Error("redirect ditolak: Location tidak valid");
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") throw new Error(`redirect ditolak: skema ${u.protocol} tidak diizinkan`);
+  if (u.username !== "" || u.password !== "") throw new Error("redirect ditolak: memuat userinfo");
+  if (PRODUCTION_HOST_MARKERS.some((m) => u.hostname === m || u.hostname.endsWith(`.${m}`))) {
+    throw new Error(`redirect ditolak: host produksi/hosting ${u.hostname}`);
+  }
+  if (!allowedOrigins.includes(u.origin)) throw new Error(`redirect ditolak: host ${u.hostname} di luar aplikasi uji/Supabase QA`);
+  return u.href;
+}
+
+/**
+ * Mengikuti tautan per-hop: validasi SEBELUM setiap request; driver hanya melakukan satu request tanpa auto-redirect.
+ * @param {string} startUrl sudah divalidasi
+ * @param {(url: string) => Promise<{status: number, location?: string}>} fetchHop
+ * @param {readonly string[]} allowedOrigins
+ * @returns {Promise<{finalUrl: string, hops: number}>}
+ */
+export async function followRedirects(startUrl, fetchHop, allowedOrigins) {
+  let current = resolveRedirect(startUrl, startUrl, allowedOrigins);
+  const visited = new Set([current.split("#")[0]]);
+  for (let redirects = 0; ; redirects += 1) {
+    const r = await fetchHop(current);
+    if (r.status >= 300 && r.status < 400) {
+      if (!r.location) throw new Error(`redirect ditolak: status ${r.status} tanpa Location`);
+      if (redirects >= MAX_REDIRECTS) throw new Error(`redirect melebihi batas (${MAX_REDIRECTS})`);
+      const next = resolveRedirect(r.location, current, allowedOrigins); // validasi sebelum hop berikutnya
+      const key = next.split("#")[0];
+      if (visited.has(key)) throw new Error("redirect ditolak: loop terdeteksi");
+      visited.add(key);
+      current = next;
+      continue;
+    }
+    if (r.status < 200 || r.status >= 300) throw new Error(`hop berakhir dengan status ${r.status}`);
+    return { finalUrl: current, hops: redirects };
+  }
+}
 
 /**
  * Identitas QA tetap: dari QA_INBOX_ADDRESS, tanpa plus-addressing. Murni.
@@ -213,7 +294,7 @@ function scrub(text, env, extraSecrets) {
  * @property {string} appUrl URL aplikasi uji (lokal) yang menunjuk proyek QA
  * @property {{ url: string, findUserByEmail: (email: string) => Promise<{id: string} | null>, deleteUser: (id: string) => Promise<void>, getTrial: (email: string) => Promise<{status: string, plan?: string, trial_ends_at: string} | null> }} adminClient hanya proyek QA
  * @property {import("./inbox-adapter.mjs").InboxAdapter} inbox
- * @property {{ signup: (o: object) => Promise<{outcome: string}>, followLink: (url: string, o: {allowedOrigins: string[]}) => Promise<{finalUrl: string, redirectChain?: string[]}>, completeOnboarding: () => Promise<{completed: boolean}>, openDashboard: () => Promise<{status: number, url: string}>, openBilling: () => Promise<{status: number}> }} driver
+ * @property {{ signup: (o: object) => Promise<{outcome: string}>, fetchHop: (url: string) => Promise<{status: number, location?: string}>, signupDuplicate: (o: object) => Promise<{outcome: string}>, completeOnboarding: () => Promise<{completed: boolean}>, openDashboard: () => Promise<{status: number, url: string}>, openBilling: () => Promise<{status: number}> }} driver
  * @property {{ now: () => number }} clock
  * @property {{ allowedRefs?: readonly string[] }} [guardOptions]
  * @property {string} [password] bawaan: acak per run
@@ -237,10 +318,13 @@ export async function runRealE2E(deps) {
   };
   let email;
   let allowedOrigins;
+  /** @type {number} */
+  let maxEmails = 0;
   try {
     assertNotProduction(env);
     assertRealQaEnv(env, deps.guardOptions);
     email = assertFixedIdentity(env.QA_INBOX_ADDRESS);
+    maxEmails = assertMaxEmailsPerRun(env);
     allowedOrigins = buildAllowedOrigins(deps.appUrl, String(env.QA_SUPABASE_URL));
   } catch (err) {
     return early("REFUSED", EXIT.REFUSED, { error: scrub(String(err instanceof Error ? err.message : err), env, []) });
@@ -255,11 +339,12 @@ export async function runRealE2E(deps) {
   const { adminClient, inbox, driver, clock } = deps;
   const password = deps.password ?? `Qa-${randomBytes(9).toString("hex")}!`;
   const secretsSeen = [password];
+  const budget = createEmailBudget(maxEmails);
   const startedAt = clock.now();
   /** @type {{n: number, name: string, ok: boolean, detail?: string}[]} */
   const steps = [];
   /** @type {Record<string, unknown>} */
-  const facts = { identity: email, emailsExpected: 1, emailsRequested: 0 };
+  const facts = { identity: email, emailsExpected: maxEmails, emailsRequested: 0 };
   let failure = null;
 
   /** @param {number} n @param {() => Promise<string | void>} fn */
@@ -286,8 +371,9 @@ export async function runRealE2E(deps) {
       await inbox.clear();
     });
     await step(3, async () => {
-      facts.emailsRequested = 1; // batas biaya: tepat satu permintaan email per run, tanpa retry
-      const r = await driver.signup({ email, password, nama: "QA Linoe", namaUsaha: "QA Linoe Sandbox", fresh: false });
+      // batas biaya: signup dihitung di orkestrator; panggilan kedua = gagal; tanpa retry
+      const r = await budget.spend(() => driver.signup({ email, password, nama: "QA Linoe", namaUsaha: "QA Linoe Sandbox", fresh: false }));
+      facts.emailsRequested = budget.used;
       if (r.outcome !== "check-email") throw new Error(`signup tidak menghasilkan pesan cek-email (outcome=${r.outcome})`);
     });
     /** @type {{subject?: string, html?: string, headers?: Record<string,string>}} */
@@ -315,14 +401,10 @@ export async function runRealE2E(deps) {
         const th = new URL(l).searchParams.get("token_hash") ?? new URL(l).searchParams.get("token");
         if (th) secretsSeen.push(th);
       }
-      const r = await driver.followLink(links[0], { allowedOrigins });
-      const chain = [...(r.redirectChain ?? []), r.finalUrl];
-      for (const hop of chain) {
-        const h = parseUrl(hop);
-        if (!allowedOrigins.includes(h.origin)) throw new Error(`redirect ditolak: host ${h.hostname} di luar aplikasi uji/Supabase QA`);
-      }
+      const r = await followRedirects(links[0], (u) => driver.fetchHop(u), allowedOrigins);
       if (parseUrl(r.finalUrl).pathname !== "/onboarding") throw new Error("konfirmasi tidak berakhir di /onboarding");
-      return `host=${new URL(links[0]).hostname}`;
+      facts.redirectHops = r.hops;
+      return `host=${new URL(links[0]).hostname} hops=${r.hops}`;
     });
     await step(7, async () => {
       const r = await driver.completeOnboarding();
@@ -349,7 +431,8 @@ export async function runRealE2E(deps) {
       return `trial ${TRIAL_DAYS} hari (selisih ${Math.round(diff / 60_000)} menit)`;
     });
     await step(10, async () => {
-      const r = await driver.signup({ email, password, nama: "QA Linoe", namaUsaha: "QA Linoe Sandbox", fresh: true });
+      // Bukan signup yang mengirim email: kontrak signupDuplicate = tanpa email; probe inbox di bawah memverifikasinya.
+      const r = await driver.signupDuplicate({ email, password, nama: "QA Linoe", namaUsaha: "QA Linoe Sandbox" });
       if (r.outcome !== "duplicate") throw new Error(`pendaftaran duplikat tidak ditolak (outcome=${r.outcome})`);
       // Batas biaya: tidak boleh ada email tak terduga. Antarmuka inbox tidak punya hitungan; probe singkat dan bandingkan sidik jari.
       let extra = null;

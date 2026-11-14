@@ -57,6 +57,7 @@ jobs:
           QA_INBOX_ADDRESS: ${{ secrets.QA_INBOX_ADDRESS }}
           QA_SENDER_EMAIL: ${{ secrets.QA_SENDER_EMAIL }}
           QA_PROJECT_REF_EXPECTED: ${{ secrets.QA_PROJECT_REF_EXPECTED }}
+          QA_MAX_EMAILS_PER_RUN: "1"
         run: node scripts/qa/real-e2e.mjs --guard-only
 
       - name: QA-2 real email E2E
@@ -72,4 +73,5 @@ jobs:
           QA_INBOX_ADDRESS: ${{ secrets.QA_INBOX_ADDRESS }}
           QA_SENDER_EMAIL: ${{ secrets.QA_SENDER_EMAIL }}
           QA_PROJECT_REF_EXPECTED: ${{ secrets.QA_PROJECT_REF_EXPECTED }}
+          QA_MAX_EMAILS_PER_RUN: "1"
         run: node scripts/qa/real-e2e.mjs
