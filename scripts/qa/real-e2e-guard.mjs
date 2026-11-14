@@ -7,6 +7,9 @@ import { ALLOWED_QA_PROJECT_REFS } from "./qa-project-allowlist.mjs";
 
 export const CONFIRM_PHRASE = "RUN-QA-2-REAL-EMAIL";
 export const PRODUCTION_SENDER_DOMAIN = "tanyopo.com";
+// SENDER-LOCK: satu-satunya domain yang boleh dipakai pengirim dan inbox QA-2. Konstanta string tak dapat diubah; objek dibekukan.
+export const QA_SENDER_DOMAIN = "qa.tanyopo.com";
+export const QA_SENDER_LOCK = Object.freeze({ domain: QA_SENDER_DOMAIN, maxEmailsPerRun: 1 });
 
 // Variabel wajib (nama saja).
 export const REQUIRED_VARS = [
@@ -44,7 +47,9 @@ const FORBIDDEN_PREFIXES = ["DOKU_", "MIDTRANS_", "META_", "TIKTOK_", "X_CLIENT_
 
 const QA_URL_RE = /^https:\/\/([a-z0-9]{20})\.supabase\.co$/;
 const REF_RE = /^[a-z0-9]{20}$/;
-const EMAIL_RE = /^[A-Za-z0-9._%+-]+@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)$/;
+// Alamat tunggal ketat: hanya ASCII, tanpa '+', '%', spasi, koma, titik koma, CRLF, display-name. Domain persis qa.tanyopo.com.
+// Sengaja TIDAK memakai toLowerCase()/flag u: "K" (Kelvin) akan menjadi "k" dan lolos sebagai homoglyph.
+const LOCKED_ADDRESS_RE = /^[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*@qa\.tanyopo\.com$/i;
 
 /**
  * Menyamarkan nilai rahasia pada teks. Murni.
@@ -62,12 +67,14 @@ export function redact(text, env) {
 }
 
 /**
- * @param {string} value
- * @returns {string | null} domain huruf kecil bila alamat email valid, selain itu null
+ * @param {unknown} value
+ * @returns {boolean} true bila alamat tunggal valid di domain QA terkunci tanpa plus-address
  */
-function emailDomain(value) {
-  const m = EMAIL_RE.exec(value);
-  return m ? m[1].toLowerCase() : null;
+export function isLockedQaAddress(value) {
+  if (typeof value !== "string" || value.length > 254) return false;
+  const at = value.indexOf("@");
+  if (at < 1 || at > 64) return false;
+  return LOCKED_ADDRESS_RE.test(value);
 }
 
 /**
@@ -124,21 +131,19 @@ export function findRealQaViolations(env, options = {}) {
     if (ref && findViolations({ REF: ref }).length > 0) out.push(`${name} memuat ref proyek produksi/bersama`);
   }
 
-  // Alamat kotak masuk tetap: email valid, bukan example.test.
+  // SENDER-LOCK: inbox dan pengirim wajib satu alamat tunggal @qa.tanyopo.com (satu identitas tetap, tanpa plus-address).
   const inbox = env.QA_INBOX_ADDRESS;
-  if (typeof inbox === "string" && inbox !== "") {
-    const d = emailDomain(inbox);
-    if (d === null) out.push("QA_INBOX_ADDRESS bukan alamat email valid");
-    else if (d === "example.test" || d.endsWith(".example.test")) out.push("QA_INBOX_ADDRESS tidak boleh di example.test");
+  if (typeof inbox === "string" && inbox !== "" && !isLockedQaAddress(inbox)) {
+    out.push("QA_INBOX_ADDRESS wajib satu alamat tunggal di domain QA terkunci tanpa plus-address");
+  }
+  const sender = env.QA_SENDER_EMAIL;
+  if (typeof sender === "string" && sender !== "" && !isLockedQaAddress(sender)) {
+    out.push("QA_SENDER_EMAIL wajib satu alamat tunggal di domain QA terkunci tanpa plus-address");
   }
 
-  // Pengirim: tidak boleh domain produksi persis (tanyopo.com); sub-domain QA atau domain lain diperbolehkan.
-  const sender = env.QA_SENDER_EMAIL;
-  if (typeof sender === "string" && sender !== "") {
-    const d = emailDomain(sender);
-    if (d === null) out.push("QA_SENDER_EMAIL bukan alamat email valid");
-    else if (d === PRODUCTION_SENDER_DOMAIN) out.push("QA_SENDER_EMAIL memakai domain pengirim produksi");
-  }
+  // Kontrol biaya: satu email per run. Bila diset, hanya "1" yang diterima (kosong/0/>1/non-angka ditolak).
+  const maxEmails = env.QA_MAX_EMAILS_PER_RUN;
+  if (maxEmails !== undefined && maxEmails !== "1") out.push("QA_MAX_EMAILS_PER_RUN harus 1 bila diset");
 
   // Tidak boleh ada variabel produksi. Daftar nama dipakai ulang dari local-stack-guard (findViolations).
   for (const msg of findViolations(env)) {
