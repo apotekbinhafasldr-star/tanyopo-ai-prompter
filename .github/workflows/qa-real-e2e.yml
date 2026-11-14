@@ -81,4 +81,17 @@ jobs:
           QA_SENDER_EMAIL: ${{ secrets.QA_SENDER_EMAIL }}
           QA_PROJECT_REF_EXPECTED: ${{ secrets.QA_PROJECT_REF_EXPECTED }}
           QA_MAX_EMAILS_PER_RUN: "1"
-        run: node scripts/qa/real-e2e.mjs
+        # Build + start + readiness + E2E + stop dalam SATU langkah: hanya langkah ini (dan Guard) yang menerima secret
+        # (tes statis H2 membatasi ke dua langkah). start-app-and-wait.mjs memvalidasi ulang env (guard penuh) dan membangun
+        # env proses anak dari nol: hanya NEXT_PUBLIC_* proyek QA, tanpa kunci server dan tanpa variabel produksi.
+        # Aplikasi hanya di 127.0.0.1:3000. Bila build/start/readiness gagal, langkah berhenti SEBELUM E2E (exit non-0).
+        run: |
+          trap 'node scripts/qa/start-app-and-wait.mjs stop || true' EXIT
+          node scripts/qa/start-app-and-wait.mjs build
+          node scripts/qa/start-app-and-wait.mjs start
+          node scripts/qa/real-e2e.mjs
+
+      # Tanpa env dan tanpa secret. Pengaman kedua: mematikan aplikasi QA bila langkah di atas dibatalkan paksa.
+      - name: Hentikan aplikasi QA (selalu)
+        if: ${{ always() }}
+        run: node scripts/qa/start-app-and-wait.mjs stop
