@@ -37,7 +37,7 @@ const ENV: Record<string, string | undefined> = {
   QA_PROJECT_REF_EXPECTED: FAKE_REF,
   QA_SUPABASE_PUBLISHABLE_KEY: SECRET_PUB,
   QA_SUPABASE_SECRET_KEY: SECRET_SRV,
-  QA_INBOX_ADDRESS: "qa-inbox@fake-inbox.invalid",
+  QA_INBOX_ADDRESS: "qa-inbox@qa.tanyopo.com",
   QA_SENDER_EMAIL: "noreply@qa.tanyopo.com",
 };
 
@@ -237,15 +237,25 @@ describe("runRealE2E: inert secara default", () => {
 
 describe("identitas QA tetap", () => {
   it("plus-addressing ditolak sebelum dependensi apa pun dipanggil", async () => {
-    const { deps, calls } = build({ env: { ...ENV, QA_INBOX_ADDRESS: "qa-inbox+run42@fake-inbox.invalid" } });
+    const { deps, calls } = build({ env: { ...ENV, QA_INBOX_ADDRESS: "qa-inbox+run42@qa.tanyopo.com" } });
     const r = await runRealE2E(deps);
     expect(r.exitCode).toBe(2);
-    expect(r.report.error).toContain("plus-addressing");
+    expect(r.report.error).toContain("plus-address");
     expect(calls).toEqual([]);
   });
 
+  it("inbox di domain asing (bukan qa.tanyopo.com) ditolak guard sebelum dependensi apa pun dipanggil", async () => {
+    for (const addr of ["qa-inbox@fake-inbox.invalid", "qa-inbox@tanyopo.com", "qa-inbox@x.qa.tanyopo.com"]) {
+      const { deps, calls } = build({ env: { ...ENV, QA_INBOX_ADDRESS: addr } });
+      const r = await runRealE2E(deps);
+      expect(r.exitCode).toBe(2);
+      expect(r.report.error).toContain("QA_INBOX_ADDRESS");
+      expect(calls).toEqual([]);
+    }
+  });
+
   it("assertFixedIdentity: hanya alamat polos, huruf kecil", () => {
-    expect(assertFixedIdentity("QA-Inbox@Fake-Inbox.invalid")).toBe("qa-inbox@fake-inbox.invalid");
+    expect(assertFixedIdentity("QA-Inbox@QA.Tanyopo.com")).toBe("qa-inbox@qa.tanyopo.com");
     expect(() => assertFixedIdentity("a+b@x.invalid")).toThrow(/plus/);
     expect(() => assertFixedIdentity("")).toThrow();
     expect(() => assertFixedIdentity(undefined)).toThrow();
@@ -254,8 +264,8 @@ describe("identitas QA tetap", () => {
   it("email yang dipakai di semua pemanggilan adalah QA_INBOX_ADDRESS", async () => {
     const { deps } = build();
     await runRealE2E(deps);
-    for (const c of [...deps.driver.signup.mock.calls, ...deps.driver.signupDuplicate.mock.calls]) expect((c as unknown as [{ email: string }])[0].email).toBe("qa-inbox@fake-inbox.invalid");
-    expect(deps.adminClient.findUserByEmail).toHaveBeenCalledWith("qa-inbox@fake-inbox.invalid");
+    for (const c of [...deps.driver.signup.mock.calls, ...deps.driver.signupDuplicate.mock.calls]) expect((c as unknown as [{ email: string }])[0].email).toBe("qa-inbox@qa.tanyopo.com");
+    expect(deps.adminClient.findUserByEmail).toHaveBeenCalledWith("qa-inbox@qa.tanyopo.com");
   });
 });
 
