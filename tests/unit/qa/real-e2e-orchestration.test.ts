@@ -4,9 +4,14 @@ import {
   assertFixedIdentity,
   extractConfirmationLinks,
   parseAuthenticationResults,
-  runRealE2E,
+  runRealE2E as runRealE2EUntyped,
   validateConfirmationLink,
 } from "../../../scripts/qa/real-e2e.mjs";
+
+// Berkas .mjs bertipe lewat JSDoc yang sempit; tes memakai bentuk longgar agar dependensi palsu dan laporan mudah diperiksa.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Report = Record<string, any>;
+const runRealE2E = runRealE2EUntyped as unknown as (deps: unknown) => Promise<{ exitCode: number; report: Report; json: string }>;
 
 // Semua nilai PALSU. Tidak ada jaringan: seluruh dependensi adalah fungsi palsu di memori.
 const FAKE_REF = "abcdefghij0123456789";
@@ -35,7 +40,7 @@ const AUTH_PASS = "mx.fake.invalid; spf=pass smtp.mailfrom=qa.tanyopo.com; dkim=
 type Overrides = {
   env?: Record<string, string | undefined>;
   html?: string;
-  authResults?: string | undefined;
+  authResults?: string | null;
   trial?: { status: string; trial_ends_at: string } | null;
   followLink?: (url: string) => Promise<{ finalUrl: string; redirectChain?: string[] }>;
   signupOutcomes?: string[];
@@ -51,7 +56,7 @@ function build(o: Overrides = {}) {
   const message = {
     subject: "Konfirmasi",
     html: o.html ?? `<a href="${GOOD_LINK.replaceAll("&", "&amp;")}">Konfirmasi</a>`,
-    headers: o.authResults === undefined && "authResults" in o ? {} : { "Authentication-Results": o.authResults ?? AUTH_PASS },
+    headers: o.authResults === null ? {} : { "Authentication-Results": o.authResults ?? AUTH_PASS },
   };
   let waits = 0;
   const maybeFail = (name: string) => {
@@ -139,7 +144,7 @@ describe("runRealE2E: alur sukses dengan dependensi palsu", () => {
     const order = ["inbox.clear", "driver.signup", "inbox.wait", "driver.followLink", "driver.onboarding", "driver.dashboard", "driver.billing", "admin.getTrial"];
     const idx = order.map((n) => firstIndex(calls, n));
     expect([...idx].sort((a, b) => a - b)).toEqual(idx);
-    expect(calls.at(-1)).toBe("admin.find");
+    expect(calls[calls.length - 1]).toBe("admin.find");
     expect(deps.driver.signup).toHaveBeenCalledTimes(2); // daftar + duplikat
     expect(deps.inbox.waitForMessage).toHaveBeenCalledTimes(2); // 1 menunggu + 1 probe
   });
@@ -267,8 +272,8 @@ describe("validasi tautan konfirmasi", () => {
     expect(r.exitCode).toBe(1);
     expect(deps.driver.followLink).not.toHaveBeenCalled();
     expect(r.report.steps.find((s: { n: number }) => s.n === 6).ok).toBe(false);
-    expect(calls.at(-1)).toBe("admin.find");
-    expect(r.report.steps.at(-1).n).toBe(11);
+    expect(calls[calls.length - 1]).toBe("admin.find");
+    expect(r.report.steps[r.report.steps.length - 1].n).toBe(11);
   });
 
   it("run: satu tautan asing di antara tautan valid tetap menggagalkan run", async () => {
@@ -316,14 +321,12 @@ describe("parseAuthenticationResults", () => {
       expect(r.exitCode).toBe(1);
       expect(r.report.steps.find((s: { n: number }) => s.n === 5).ok).toBe(false);
       expect(deps.driver.followLink).not.toHaveBeenCalled();
-      expect(calls.at(-1)).toBe("admin.find");
+      expect(calls[calls.length - 1]).toBe("admin.find");
     });
   }
 
   it("run gagal bila header Authentication-Results tidak ada", async () => {
-    const { deps } = build();
-    const orig = deps.inbox.waitForMessage.getMockImplementation()!;
-    deps.inbox.waitForMessage.mockImplementationOnce(async (a) => ({ ...(await orig(a)), headers: {} }));
+    const { deps } = build({ authResults: null });
     const r = await runRealE2E(deps);
     expect(r.exitCode).toBe(1);
     expect(r.report.error).toContain("Authentication-Results");
@@ -378,9 +381,9 @@ describe("batas biaya dan cleanup", () => {
     const { deps, calls } = build({ failOn: "wait" });
     const r = await runRealE2E(deps);
     expect(r.exitCode).toBe(1);
-    expect(calls.at(-1)).toBe("admin.find");
+    expect(calls[calls.length - 1]).toBe("admin.find");
     expect(deps.adminClient.deleteUser).toHaveBeenCalled(); // reset awal + cleanup
-    expect(r.report.steps.at(-1)).toMatchObject({ n: 11, ok: true });
+    expect(r.report.steps[r.report.steps.length - 1]).toMatchObject({ n: 11, ok: true });
     expect(r.report.notRun).toEqual([5, 6, 7, 8, 9, 10]);
   });
 
@@ -395,7 +398,7 @@ describe("batas biaya dan cleanup", () => {
     });
     const r = await runRealE2E(deps);
     expect(r.exitCode).toBe(1);
-    expect(r.report.steps.at(-1)).toMatchObject({ n: 11, ok: false });
+    expect(r.report.steps[r.report.steps.length - 1]).toMatchObject({ n: 11, ok: false });
   });
 
   it("reset idempoten: pengguna sudah tidak ada -> tidak ada penghapusan di langkah 1", async () => {
