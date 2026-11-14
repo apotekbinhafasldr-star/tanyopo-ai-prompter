@@ -231,7 +231,7 @@ export function buildBundle({ root, manifest = loadManifest(root), parts = 1 }) 
     );
     if (last) {
       out.push(
-        `-- ---- verifikasi BACA-SAJA (hasil terakhir tampil di SQL Editor). Harapan: migrations_applied=${expectCounts}, trial_trigger=O, free_plan_active=1, signup_trigger=1, shim_policies=3, authenticated_access=true ----`,
+        `-- ---- verifikasi BACA-SAJA (hasil terakhir tampil di SQL Editor). Harapan: migrations_applied=${expectCounts}, trial_trigger=O, free_plan_active=1, signup_trigger=1, shim_policies=3, authenticated_access=true, service_role_access=true, app_table_grants=true, reset_trigger=1 ----`,
         `select`,
         `  (select count(*) from public._linoe_sandbox_applied) as migrations_applied,`,
         `  (select tgenabled from pg_trigger where tgname = 'trg_prompter_subscriptions_enforce_trial_insert') as trial_trigger,`,
@@ -241,7 +241,16 @@ export function buildBundle({ root, manifest = loadManifest(root), parts = 1 }) 
         `  (has_table_privilege('authenticated', 'public.tenants', 'select')`,
         `    and has_table_privilege('authenticated', 'public.user_profiles', 'select')`,
         `    and has_function_privilege('authenticated', 'public.fn_current_tenant_id()', 'execute')`,
-        `    and has_function_privilege('authenticated', 'public.fn_current_role()', 'execute')) as authenticated_access;`,
+        `    and has_function_privilege('authenticated', 'public.fn_current_role()', 'execute')) as authenticated_access,`,
+        `  (has_table_privilege('service_role', 'public.tenants', 'select')`,
+        `    and has_table_privilege('service_role', 'public.user_profiles', 'select')`,
+        `    and has_table_privilege('service_role', 'public.prompter_subscriptions', 'select')) as service_role_access,`,
+        `  (has_table_privilege('authenticated', 'public.prompter_brand_profiles', 'insert')`,
+        `    and has_table_privilege('authenticated', 'public.prompter_audit_logs', 'insert')`,
+        `    and has_table_privilege('authenticated', 'public.prompter_subscriptions', 'insert')`,
+        `    and has_table_privilege('authenticated', 'public.prompter_subscriptions', 'select')`,
+        `    and has_table_privilege('authenticated', 'public.prompter_analytics_insights', 'select')) as app_table_grants,`,
+        `  (select count(*) from pg_trigger where tgname = 'qa2_before_auth_user_delete') as reset_trigger;`,
         ``,
       );
     }

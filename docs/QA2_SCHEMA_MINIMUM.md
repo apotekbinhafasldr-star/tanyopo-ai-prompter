@@ -6,6 +6,24 @@
 
 Sumber kebenaran: [`qa/qa2-schema-manifest.json`](../qa/qa2-schema-manifest.json). Dasar: `origin/main` fba8167.
 
+## Status #154
+**HOLD (Draft). Tidak ada P0. Siap untuk persetujuan MERGE (hanya berkas manifest/shim/skrip/tes/dokumen; tidak mengubah migrasi atau kode aplikasi), BELUM siap APPLY ke proyek QA.** Diaudit terhadap `main` 18db8c2 (kode aplikasi jalur signup/onboarding/trial identik dengan basis fba8167; yang berubah di main hanya skrip/dokumen/tes QA). Tidak ada SQL yang dijalankan di database mana pun.
+
+| Prioritas | Temuan (terbukti dari kode) | Status |
+|---|---|---|
+| P0 | Tidak ada | - |
+| P1 | Reset identitas QA lewat Admin API (`deleteUser`, langkah 1 dan 11 orkestrator) GAGAL setelah onboarding: `prompter_audit_logs.actor_user_id` merujuk `auth.users` tanpa ON DELETE | **Diperbaiki di shim** (trigger khusus QA `qa2_before_auth_user_delete`), diuji statis; perilaku produksi UNKNOWN |
+| P1 | Orkestrator membaca `trial_ends_at`; kolom itu TIDAK ADA di skema (adanya `current_period_end`) | Kontrak untuk admin client: wajib memetakan `current_period_end` ke `trial_ends_at` (7.8). Orkestrator bukan berkas milik PR ini |
+| P1 | Grant Data API proyek QA (authenticated/service_role) bergantung pada default Supabase | Grant minimal ditambahkan di shim; verifikasi akhir bundel memeriksa `authenticated_access`, `service_role_access`, `app_table_grants` |
+| P1 | Role pendaftar produksi dan isi `handle_new_user` produksi (baris tambahan) tidak terbukti | UNKNOWN; shim memakai `owner` (inferensi), kueri baca-saja di 7.5 |
+
+**Harus dibuktikan/diputuskan Founder SEBELUM apply** (frasa `APPROVE QA-2-SCHEMA-BUNDLE`):
+1. Ref di URL dashboard = `gasdqsadnjoknisloaec`, proyek masih kosong, Data API aktif.
+2. Ada yang menyediakan admin client QA yang memetakan `current_period_end` ke `trial_ends_at` (belum ada di main).
+3. Bukti produksi (kueri baca-saja 7.5) untuk role default dan `handle_new_user`, atau terima risiko false pass.
+4. Pakai `--parts 3` dari HP, jalankan 1, 2, 3 berurutan, dan hasil verifikasi akhir semua benar.
+5. Subset ini belum pernah dijalankan di Postgres: terima risiko, atau minta job CI lokal lebih dulu.
+
 ## 1. Apa yang disentuh alur (hasil telusur kode)
 | Langkah | Kode | Objek DB |
 |---|---|---|
@@ -67,24 +85,24 @@ Daftar lengkap + alasan per berkas ada di `excluded` pada manifest. Tes memastik
 **Dilarang ada di QA:** apa pun yang menyentuh `umkmpro-ai`, modul PUBLOE/MITAPENG/UMKMpro, referensi proyek nyata, `DROP TABLE`, `TRUNCATE`, `ALTER` pada `tenants`/`user_profiles`, `CREATE EXTENSION`, `cron.schedule`, tabel `public` di luar awalan `prompter_`/`_linoe_sandbox_`. Skrip menolak bundel yang melanggar. Ref proyek nyata yang tertulis di komentar migrasi (`phase2/3/5/7`) disamarkan di salinan bundel saja; berkas migrasi di repo tidak diubah.
 
 ## 5. Cara paling sederhana dari HP: berkas .sql (dibagi bila besar)
-Skrip `scripts/qa/build-schema-bundle.mjs` (node murni, tanpa dependensi, tidak terhubung ke database mana pun) menggabungkan shim + 15 migrasi. Satu berkas = **162 KB** (KB = 1024 byte), di atas batas nyaman tempel dari HP (100 KB), jadi pakai `--parts`. Urutan migrasi **tidak berubah**; pemisahan hanya di batas migrasi.
+Skrip `scripts/qa/build-schema-bundle.mjs` (node murni, tanpa dependensi, tidak terhubung ke database mana pun) menggabungkan shim + 15 migrasi. Satu berkas = **165 KB** (KB = 1024 byte), di atas batas nyaman tempel dari HP (100 KB), jadi pakai `--parts`. Urutan migrasi **tidak berubah**; pemisahan hanya di batas migrasi.
 ```
-node scripts/qa/build-schema-bundle.mjs --out /path/di/luar/repo/qa2.sql                # 1 berkas, 162 KB, satu transaksi
+node scripts/qa/build-schema-bundle.mjs --out /path/di/luar/repo/qa2.sql                # 1 berkas, 165 KB, satu transaksi
 node scripts/qa/build-schema-bundle.mjs --out /path/di/luar/repo/qa2.sql --parts 3      # disarankan untuk HP
 node scripts/qa/build-schema-bundle.mjs --check                                         # validasi saja
 ```
 | Mode | Berkas | Ukuran | Isi |
 |---|---|---|---|
-| 1 berkas | `qa2.sql` | 162 KB | semua, atomik penuh |
-| `--parts 2` | part1of2 / part2of2 | 83 / 82 KB | shim..`phase7` / `billing_foundation`..`lockdown` |
-| `--parts 3` (disarankan) | part1of3 / 2of3 / 3of3 | 60 / 44 / 63 KB | shim..`phase3` / `phase5`..`starter_plan` / `b9`..`lockdown` |
+| 1 berkas | `qa2.sql` | 165 KB | semua, atomik penuh |
+| `--parts 2` | part1of2 / part2of2 | 85 / 83 KB | shim..`phase7` / `billing_foundation`..`lockdown` |
+| `--parts 3` (disarankan) | part1of3 / 2of3 / 3of3 | 50 / 55 / 64 KB | shim..`phase2` / `phase3`..`starter_plan` / `b9`..`lockdown` |
 
 **Cara pakai dari HP (disarankan `--parts 3`):**
 | Urut | Berkas | Ukuran | Migrasi di dalamnya | Versi terakhir (cek sesudahnya) |
 |---|---|---|---|---|
-| 1 | `qa2.part1of3.sql` | 60 KB | shim + `foundation`..`phase3` (5 migrasi) | `20260829102304` |
-| 2 | `qa2.part2of3.sql` | 44 KB | `phase5`..`starter_plan` (6 migrasi) | `20260910072819` |
-| 3 | `qa2.part3of3.sql` | 63 KB | `b9`, `b10`, `trial_insert_guard`, `plan_tampering_lockdown` (4 migrasi) | `20261029220000` |
+| 1 | `qa2.part1of3.sql` | 50 KB | shim + `foundation`..`phase2` (4 migrasi) | `20260829095447` |
+| 2 | `qa2.part2of3.sql` | 55 KB | `phase3`..`starter_plan` (7 migrasi) | `20260910072819` |
+| 3 | `qa2.part3of3.sql` | 64 KB | `b9`, `b10`, `trial_insert_guard`, `plan_tampering_lockdown` (4 migrasi) | `20261029220000` |
 
 Aturan: jalankan **berurutan** 1, 2, 3; urutan migrasi sama dengan manifest (tidak ada yang dipindah). Tiap potongan atomik (satu transaksi). Guard antar-bagian (di awal potongan 2 dan 3, di luar transaksi): menolak jalan bila versi terakhir potongan sebelumnya belum tercatat di `_linoe_sandbox_applied` ("ABORT: bagian sebelumnya belum diterapkan") atau bila potongan itu sendiri sudah diterapkan ("ABORT: bagian ini sudah diterapkan"). Potongan 1 menolak proyek yang tidak kosong. Cek manual antar potongan (BACA-SAJA): `select max(version) from public._linoe_sandbox_applied;` harus sama dengan kolom "Versi terakhir" di atas. Bila satu potongan gagal, isinya tidak tersimpan, potongan sebelumnya tetap; kirim galatnya (rollback tetap = hapus dan buat ulang proyek). Hanya potongan terakhir yang menutup dengan baris verifikasi. Tes memastikan ukuran, urutan, dan guard ini.
 
@@ -92,7 +110,7 @@ Langkah Founder (Android Chrome, mode "Situs desktop" bila perlu), **setelah** m
 1. Sesi Claude membangun berkas dan membagikannya (mis. tautan/Drive). Buka satu potongan di HP, pilih semua, salin.
 2. Dashboard Supabase, buka proyek dengan ref **gasdqsadnjoknisloaec** (cek di URL; header tiap potongan berisi `HANYA UNTUK PROYEK QA gasdqsadnjoknisloaec`). Jangan lanjut bila ref berbeda.
 3. SQL Editor, query baru, tempel, Run. Konfirmasi peringatan "destructive" bila muncul (dari `drop trigger/policy if exists` dan `revoke` di migrasi). Ulangi untuk potongan berikutnya.
-4. Hasil potongan terakhir harus: `migrations_applied=15`, `trial_trigger=O`, `free_plan_active=1`, `signup_trigger=1`, `shim_policies=3`, `authenticated_access=true`.
+4. Hasil potongan terakhir harus: `migrations_applied=15`, `trial_trigger=O`, `free_plan_active=1`, `signup_trigger=1`, `shim_policies=3`, `authenticated_access=true`, `service_role_access=true`, `app_table_grants=true`, `reset_trigger=1`. Nilai `false` pada tiga kolom grant = grant Data API proyek QA tidak otomatis (lihat 7.8); STOP, jangan lanjut uji.
 
 ## 6. Rollback dan reset QA
 **Rollback skema:** tidak ada per-migrasi. Proyek QA terpisah dari produksi, jadi rollback = **hapus lalu buat ulang proyek QA** (ref baru harus diganti di allowlist lewat PR kecil tersendiri), lalu terapkan ulang bundel. Guard "proyek kosong" menolak menjalankan bundel dua kali.
@@ -100,7 +118,7 @@ Langkah Founder (Android Chrome, mode "Situs desktop" bila perlu), **setelah** m
 **Reset data QA (tanpa membuat ulang proyek), hanya di proyek QA, butuh persetujuan Founder:** menghapus user Auth tidak menghapus `tenants` (hanya `user_profiles` lewat FK), sehingga tenant yatim dan data `prompter_*` menumpuk. Urutan yang benar:
 1. Cetak SQL (tanpa koneksi DB; tidak menjalankan apa pun): `node scripts/qa/print-qa-reset-sql.mjs --ref gasdqsadnjoknisloaec --out /path/di/luar/repo/qa2-reset.sql`. Skrip menolak ref selain allowlist QA dan ref proyek nyata; SQL-nya menolak jalan bila penanda `QA2_SANDBOX_ONLY` tidak ada.
 2. SQL Editor proyek **gasdqsadnjoknisloaec** (cek URL): tempel, Run. Satu transaksi: hapus tenant milik `qa-linoe@example.test` (cascade ke profil dan seluruh `prompter_*` termasuk trial), lalu sapu tenant yatim. Harapan: `qa_tenants_left=0`, `orphan_tenants=0`.
-3. Hapus user Auth QA lewat dashboard (Authentication, Users) atau Admin API khusus proyek QA. Urutan penting: tenant dulu, user kemudian, karena `prompter_audit_logs.actor_user_id` merujuk `auth.users` tanpa cascade. (Opsi `--with-auth-user` menambah `DELETE FROM auth.users`; bukan jalur resmi, UNKNOWN.)
+3. Hapus user Auth QA lewat dashboard (Authentication, Users) atau Admin API khusus proyek QA. Urutan penting: tenant dulu, user kemudian, karena `prompter_audit_logs.actor_user_id` merujuk `auth.users` tanpa cascade (khusus QA, trigger shim `qa2_before_auth_user_delete` juga menghapus tenant otomatis bila user dihapus lewat Admin API/dashboard, sehingga urutan ini tidak lagi wajib; langkah SQL tetap berguna untuk menyapu tenant yatim lama). (Opsi `--with-auth-user` menambah `DELETE FROM auth.users`; bukan jalur resmi, UNKNOWN.)
 4. Setelah itu email QA yang sama bisa mendaftar lagi dan mendapat tenant + trial 14 hari baru.
 
 ## 7. Audit fidelitas shim (terhadap alur signup/onboarding nyata)
@@ -140,6 +158,8 @@ UNKNOWN (hanya ada di produksi): ~30 kolom `tenants` lain dan default/NOT NULL-n
 | P2 R5 | UPDATE tenants `to authenticated` (shim) vs `to public` (snapshot) | tidak teruji alur | catat saja |
 | P2 R6 | Tidak ada policy UPDATE/INSERT `user_profiles`, tidak ada kolom lain | tes yang mengubah profil/tenant gagal di QA | tidak perlu bagi alur ini |
 | P2 R7 | CI QA-1 tidak punya tes RLS lintas tenant | isolasi tenant tidak terbukti | **DITERAPKAN**: tes statis kebijakan RLS + `qa/qa2-rls-cross-tenant.sql` (belum dijalankan; lihat 7.7) |
+| **P1 R8** | FK `auth.users` tanpa ON DELETE (audit log, approvals, connected_accounts, automation_settings) menghalangi Admin API `deleteUser` pada identitas QA yang sudah onboarding | **FALSE FAIL** pada run kedua (reset orkestrator macet) | **DITERAPKAN**: trigger khusus QA di shim (7.8) + tes |
+| **P1 R9** | Orkestrator membaca `trial_ends_at`; skema hanya `current_period_end` | **FALSE FAIL** ("trial_ends_at tidak valid") bila admin client tidak memetakan | Kontrak di 7.8; tes menjaga; implementasi admin client di luar PR ini |
 
 ### 7.4 Koreksi yang diterapkan (diff ringkas)
 ```diff
@@ -203,13 +223,30 @@ Tes statis memeriksa: semua kolom yang dibaca jalur signup/onboarding ada di shi
 - **Eksekusi (BELUM dijalankan):** `qa/qa2-rls-cross-tenant.sql`, dijalankan Founder nanti di proyek QA setelah bundel dan dengan persetujuan terpisah. Membuat dua pengguna uji, beralih ke role `authenticated` sebagai A, memeriksa A tidak bisa membaca/menulis/mengubah data B (dengan kontrol positif dan uji anon), lalu sengaja melempar galat `QA2_RLS_RESULT ...` agar seluruh data uji dibatalkan. Hasil lulus: `QA2_RLS_RESULT ALL_PASS | fails=0`.
 - Batas: ini menguji kebijakan di shim QA, bukan di produksi (policy produksi `tenants`/`user_profiles` UNKNOWN).
 
+### 7.8 Audit akhir terhadap main 18db8c2 (orkestrator, admin client, grant)
+Yang berubah di main sejak basis (#150-#153): `scripts/qa/real-e2e.mjs`, `inbox-adapter.mjs`, `real-e2e-guard.mjs`, workflow dan dokumen QA-2. Tidak ada perubahan pada `app/`, `features/`, `services/`, `lib/`, `proxy.ts`, `types/`, `supabase/`. Jadi hasil 7.1-7.7 tetap berlaku.
+
+**Kontrak admin client orkestrator** (`deps.adminClient`; implementasi nyata belum ada di main, hanya tipe dan mock tes) vs bundel:
+| Yang dipakai orkestrator | Yang ada di bundel | Catatan |
+|---|---|---|
+| `getTrial(email)` mengembalikan `status`, `plan`, **`trial_ends_at`** | `prompter_subscriptions.status`, `plan`, **`current_period_end`**; tidak ada kolom `trial_ends_at` di mana pun | Implementasi wajib: user -> `user_profiles.tenant_id` -> `prompter_subscriptions` lalu `trial_ends_at = current_period_end` (sama dengan yang dipakai `services/billing.ts`). Bila tidak, langkah 9 gagal "trial_ends_at tidak valid" |
+| Trial 14 hari, toleransi 1 hari | trigger SQL `interval '14 days'` = `TRIAL_DURATION_DAYS` = `TRIAL_DAYS` | Konsisten (diuji) |
+| `findUserByEmail`, `deleteUser` (Admin API) langkah 1 dan 11 | FK `audit_logs.actor_user_id` dll. ke `auth.users` tanpa ON DELETE | Tanpa penanganan, `deleteUser` gagal setelah onboarding. Shim: trigger `qa2_before_auth_user_delete` menghapus tenant pengguna (cascade) tepat sebelum user dihapus. Khusus QA; produksi UNKNOWN (kemungkinan pola FK yang sama) |
+| Baca trial lewat service_role (PostgREST) | `service_role` perlu SELECT pada `user_profiles`, `prompter_subscriptions` | Shim memberi SELECT `tenants`/`user_profiles`; tabel `prompter_*` bergantung pada default grant (diperiksa `service_role_access`) |
+
+**Grant/ACL dan Data API proyek baru.** Migrasi memakai `revoke`/`grant update (plan)` yang mengandaikan grant default Supabase (anon/authenticated/service_role mendapat hak pada tabel baru di `public` bila "Data API" aktif dan auto-expose menyala). Itu UNKNOWN untuk proyek QA. Bila tidak menyala: `authenticated` ditolak pada tabel `prompter_*` (false fail). Bundel TIDAK menambah grant pada tabel `prompter_*` (tidak terbukti perlu; menambahnya mengubah ACL migrasi); ia hanya memverifikasi (`app_table_grants`). "Automatic RLS": semua tabel shim dan migrasi mengaktifkan RLS sendiri, jadi aman bila opsi itu menyala.
+
+**Role di jalur signup, onboarding 8 langkah, trial hari-0:** tidak ada pemeriksaan role sampai trial dibuat; pemeriksaan role pertama ada di form paket `/billing` (`owner`). Detail 7.5. **RLS lintas tenant** dan **trigger trial/guard 14 hari**: tidak berubah (7.7; trigger `trg_prompter_subscriptions_enforce_trial_insert` ada di bundel dan dicek `trial_trigger=O`).
+
 ## 8. UNKNOWN (belum dibuktikan)
 | Hal | Status |
 |---|---|
 | Subset 15 migrasi + shim benar-benar berjalan mulus di Postgres | **UNKNOWN**: tidak dijalankan di database mana pun. Bukti hanya statis. CI QA-1 menerapkan SEMUA 50 migrasi, bukan subset ini. Saran: job CI lokal yang menerapkan bundel ke Postgres sementara sebelum Founder menempel |
-| Batas ukuran tempel SQL Editor di HP (potongan 44-83 KB; satu berkas 162 KB) | UNKNOWN |
+| Batas ukuran tempel SQL Editor di HP (potongan 50-85 KB; satu berkas 165 KB) | UNKNOWN |
 | Transaksi eksplisit `begin`/`commit` di SQL Editor dan trigger pada `auth.users` oleh role editor | UNKNOWN (umumnya didukung) |
 | Grant/ACL default tabel di proyek QA vs produksi | UNKNOWN |
+| Admin client QA nyata (pemetaan `trial_ends_at`, reset) belum ada di main | UNKNOWN; hanya kontrak yang diaudit |
+| Trigger `qa2_before_auth_user_delete` bekerja pada `auth.users` hosted dan dengan Admin API | UNKNOWN: tidak dijalankan |
 | Role default pendaftar, isi `handle_new_user`, kolom/CHECK/policy produksi | UNKNOWN (kueri baca-saja di 7.5) |
 | `qa/qa2-rls-cross-tenant.sql` dan `print-qa-reset-sql.mjs` hasil SQL-nya | UNKNOWN: tidak dijalankan di database mana pun (insert minimal ke `auth.users`, perilaku `DELETE` cascade) |
 | Bukan skema, tetap harus disiapkan terpisah (di luar PR ini) | Template email konfirmasi (`/auth/confirm`), Site URL/Redirect URL, SMTP Resend; `ADMIN_CENTER_ENABLED` tidak diisi |

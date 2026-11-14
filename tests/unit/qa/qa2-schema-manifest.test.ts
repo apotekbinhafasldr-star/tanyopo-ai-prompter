@@ -264,14 +264,17 @@ describe("QA-2 bundel dibagi (--parts) untuk tempel dari HP", () => {
 
 describe("QA-2 audit fidelitas: koreksi shim terbukti dari kode", () => {
   const shim = read("qa/qa2-shim.sql");
-  const extra = shim.slice(shim.indexOf("TAMBAHAN KHUSUS QA-2"));
+  const extra = shim.slice(shim.indexOf("TAMBAHAN KHUSUS QA-2: GRANT"), shim.indexOf("TAMBAHAN KHUSUS QA-2: RESET"));
 
   it("grant minimal hanya untuk authenticated: SELECT tenants/user_profiles, EXECUTE fn_current_*; tanpa anon/tulis", () => {
     expect(extra).toContain("grant select on public.tenants, public.user_profiles to authenticated;");
     expect(extra).toContain("grant execute on function public.fn_current_tenant_id() to authenticated;");
     expect(extra).toContain("grant execute on function public.fn_current_role() to authenticated;");
     const code = extra.replace(/--[^\n]*/g, "");
-    expect(/\banon\b|service_role|\b(insert|update|delete|all)\b/i.test(code)).toBe(false);
+    expect(/\banon\b|\b(insert|update|delete|all)\b/i.test(code)).toBe(false);
+    // service_role hanya SELECT pada tenants/user_profiles (admin client QA), tidak ada grant lain.
+    expect([...code.matchAll(/to service_role/g)].length).toBe(1);
+    expect(code).toContain("grant select on public.tenants, public.user_profiles to service_role;");
   });
 
   it("kode benar-benar memakai objek itu lewat sesi pengguna (dasar grant)", () => {
@@ -625,5 +628,73 @@ describe("QA-2 --parts 3 dari HP: dokumen sesuai hasil bangun (revisi 5)", () =>
   it("CLI tertulis di dokumen dan dukungan --parts ada di skrip", () => {
     expect(doc).toContain("--parts 3");
     expect(read("scripts/qa/build-schema-bundle.mjs")).toContain('"--parts"');
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Audit akhir terhadap main 18db8c2: orkestrator/admin client QA-2, rantai reset, kolom trial, grant Data API.
+// ---------------------------------------------------------------------------------------------------------------------
+describe("QA-2 audit akhir: orkestrator real-e2e vs skema bundel", () => {
+  const shim = read("qa/qa2-shim.sql");
+  const e2e = read("scripts/qa/real-e2e.mjs");
+  const bundleSql = buildBundle({ root }).sql;
+
+  it("orkestrator membaca trial_ends_at, tetapi bundel TIDAK punya kolom itu: kolom nyata = current_period_end (admin client wajib memetakan)", () => {
+    expect(e2e).toContain("t.trial_ends_at");
+    expect(/\btrial_ends_at\b/.test(stripComments(bundleSql))).toBe(false);
+    expect(read("services/billing.ts")).toMatch(/current_period_end: trialEnd\.toISOString\(\)/);
+    expect(stripComments(read("supabase/migrations/20260901120847_prompter_billing_foundation.sql"))).toMatch(/current_period_end timestamptz/);
+    // status dan plan yang dibaca orkestrator ada di tabel
+    const cols = stripComments(read("supabase/migrations/20260901120847_prompter_billing_foundation.sql"));
+    expect(cols).toMatch(/\n\s+plan text/);
+    expect(cols).toMatch(/\n\s+status text/);
+    expect(read("docs/QA2_SCHEMA_MINIMUM.md")).toMatch(/trial_ends_at[\s\S]{0,200}current_period_end/);
+  });
+
+  it("panjang trial konsisten: orkestrator 14 hari = services/billing = trigger SQL", () => {
+    expect(e2e).toMatch(/export const TRIAL_DAYS = 14;/);
+    expect(read("services/billing.ts")).toMatch(/TRIAL_DURATION_DAYS = 14;/);
+    expect(read("supabase/migrations/20261019100100_prompter_p0_subscription_trial_insert_guard.sql")).toMatch(/interval '14 days'/);
+  });
+
+  it("orkestrator memakai Admin API/deleteUser untuk reset: setiap FK ke auth.users tanpa ON DELETE punya penanganan reset di shim", () => {
+    expect(e2e).toContain("adminClient.deleteUser");
+    const blocking: string[] = [];
+    for (const m of manifest.migrations) {
+      for (const line of stripComments(read(`supabase/migrations/${m}`)).split("\n")) {
+        if (/references auth\.users\s*\(id\)/i.test(line) && !/on delete/i.test(line)) blocking.push(`${m}: ${line.trim()}`);
+      }
+    }
+    expect(blocking.length, "ada FK penghalang penghapusan user").toBeGreaterThan(0);
+    expect(blocking.join("\n")).toMatch(/actor_user_id/);
+    // onboarding benar-benar menulis actor_user_id = user, jadi FK itu terisi pada identitas QA
+    expect(read("features/onboarding/actions.ts")).toMatch(/actor_user_id: user!\.id/);
+    expect(shim).toMatch(/create trigger qa2_before_auth_user_delete before delete on auth\.users/);
+    const fn = shim.match(/create or replace function public\.qa2_cleanup_on_auth_user_delete\(\)[\s\S]*?end \$\$;/)![0];
+    expect(fn).toMatch(/delete from public\.tenants/);
+    expect(fn).toMatch(/security definer/);
+    expect(fn).toMatch(/not exists \(select 1 from public\.user_profiles o where o\.tenant_id = t\.id and o\.id <> old\.id\)/);
+    expect(shim).toMatch(/revoke all on function public\.qa2_cleanup_on_auth_user_delete\(\) from public, anon, authenticated;/);
+  });
+
+  it("tenant dihapus cascade: semua FK tenant_id pada tabel bundel adalah ON DELETE CASCADE", () => {
+    for (const m of manifest.migrations) {
+      for (const line of stripComments(read(`supabase/migrations/${m}`)).split("\n")) {
+        if (/references public\.tenants\s*\(id\)/i.test(line)) expect(line, m).toMatch(/on delete cascade/i);
+      }
+    }
+  });
+
+  it("verifikasi akhir bundel memeriksa grant Data API untuk authenticated dan service_role, serta trigger reset", () => {
+    for (const col of ["authenticated_access", "service_role_access", "app_table_grants", "reset_trigger"]) expect(bundleSql, col).toContain(`as ${col}`);
+    expect(bundleSql).toMatch(/has_table_privilege\('service_role', 'public\.prompter_subscriptions', 'select'\)/);
+  });
+
+  it("kode aplikasi jalur signup/onboarding/trial tidak berubah antara basis QA-2 dan main: dokumen mencatat head yang diaudit", () => {
+    const doc = read("docs/QA2_SCHEMA_MINIMUM.md");
+    expect(doc).toContain("18db8c2");
+    expect(doc).toMatch(/## Status #154/);
+    expect(doc.indexOf("## Status #154")).toBeLessThan(doc.indexOf("## 1. "));
+    for (const word of ["HOLD", "P0", "P1", "UNKNOWN", "APPROVE QA-2-SCHEMA-BUNDLE"]) expect(doc.slice(0, doc.indexOf("## 1. ")), word).toContain(word);
   });
 });

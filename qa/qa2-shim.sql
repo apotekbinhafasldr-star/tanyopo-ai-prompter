@@ -93,13 +93,38 @@ create trigger qa_on_auth_user_created after insert on auth.users
   for each row execute function public.handle_new_user();
 
 -- ============================================================================
--- TAMBAHAN KHUSUS QA-2 (TIDAK ada di shim CI QA-1) -- terbukti dari kode, bukan dari produksi
+-- TAMBAHAN KHUSUS QA-2: GRANT (TIDAK ada di shim CI QA-1) -- terbukti dari kode, bukan dari produksi
 -- ============================================================================
 -- Kode membaca user_profiles/tenants dengan sesi pengguna (role authenticated: services/session.ts, app/(app)/approvals)
 -- dan memanggil rpc fn_current_tenant_id (features/onboarding/actions.ts). Proyek Supabase baru bisa tidak memberi grant
--- otomatis pada tabel baru (pengaturan "auto-expose" API); tanpa grant ini sesi QA gagal "permission denied" (FALSE FAIL)
--- yang tidak terjadi di produksi. Grant eksplisit ini minimal, hanya SELECT/EXECUTE, tanpa anon, tanpa tulis. RLS tetap berlaku.
--- Grant/ACL ASLI produksi tidak diketahui (UNKNOWN); ini bukan salinannya.
+-- otomatis pada tabel baru (pengaturan "auto-expose" Data API); tanpa grant ini sesi QA gagal "permission denied" (FALSE FAIL)
+-- yang tidak terjadi di produksi. Admin client QA (service_role) membaca tenants/user_profiles (services/umkmpro.ts, orkestrator
+-- scripts/qa/real-e2e.mjs mencari tenant pengguna untuk membaca trial). Grant minimal: hanya SELECT/EXECUTE, tanpa anon, tanpa tulis.
+-- RLS tetap berlaku untuk authenticated. Grant/ACL ASLI produksi tidak diketahui (UNKNOWN); ini bukan salinannya.
 grant select on public.tenants, public.user_profiles to authenticated;
+grant select on public.tenants, public.user_profiles to service_role;
 grant execute on function public.fn_current_tenant_id() to authenticated;
 grant execute on function public.fn_current_role() to authenticated;
+
+-- ============================================================================
+-- TAMBAHAN KHUSUS QA-2: RESET -- perilaku KHUSUS QA, TIDAK ada di produksi (di sana UNKNOWN)
+-- ============================================================================
+-- Masalah terbukti dari migrasi + kode: prompter_audit_logs.actor_user_id (dan approvals.requested_by/decided_by,
+-- connected_accounts.connected_by, automation_settings.emergency_stop_activated_by) merujuk auth.users TANPA "on delete".
+-- Onboarding menulis audit log dengan actor_user_id = user. Akibatnya Admin API deleteUser pada identitas QA yang sudah
+-- onboarding GAGAL (FK), sehingga reset orkestrator (langkah 1 dan 11, scripts/qa/real-e2e.mjs) macet pada run kedua (FALSE FAIL).
+-- Trigger ini menghapus tenant pengguna (cascade ke profil dan seluruh baris prompter_*) tepat sebelum user Auth dihapus,
+-- hanya bila tenant itu tidak punya anggota lain. Tanpa trigger ini reset harus menghapus tenant lebih dulu (docs bagian 6).
+create or replace function public.qa2_cleanup_on_auth_user_delete() returns trigger
+  language plpgsql security definer set search_path = public as $$
+begin
+  delete from public.tenants t
+  where t.id in (select up.tenant_id from public.user_profiles up where up.id = old.id)
+    and not exists (select 1 from public.user_profiles o where o.tenant_id = t.id and o.id <> old.id);
+  return old;
+end $$;
+revoke all on function public.qa2_cleanup_on_auth_user_delete() from public, anon, authenticated;
+
+drop trigger if exists qa2_before_auth_user_delete on auth.users;
+create trigger qa2_before_auth_user_delete before delete on auth.users
+  for each row execute function public.qa2_cleanup_on_auth_user_delete();
