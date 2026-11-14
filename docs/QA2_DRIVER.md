@@ -16,6 +16,9 @@
 - `signup`: maksimal 1 panggilan/driver (dihitung sebelum aksi), 1 klik, satu identitas @qa.tanyopo.com tanpa plus-address.
 - `signupDuplicate`: maks 1 panggilan; menolak (`refused-*`, tanpa request) sebelum akun terkonfirmasi, karena Supabase
   mengirim ulang email untuk akun belum terkonfirmasi. Probe inbox orkestrator (langkah 10) tetap yang menilai.
+  Setelah konfirmasi, pendaftaran ulang dijalankan di konteks browser BARU tanpa cookie (sesi login membuat `/register` hanya menampilkan
+  pemberitahuan "sudah masuk", tanpa form) dengan penyaring origin yang sama; hasil `duplicate`/`check-email` dikenali segera.
+- `close()` menutup browser buatan driver dan membuang jar cookie.
 - `openDashboard`/`openBilling`/`completeOnboarding`: hanya status/url (tanpa query). Validasi 14 hari bukan tugas driver.
 - Driver tidak membaca `process.env`; secret hanya lewat parameter.
 

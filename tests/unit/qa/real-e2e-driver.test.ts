@@ -269,6 +269,44 @@ describe("signup dan identitas", () => {
   });
 });
 
+describe("perbaikan review silang #156", () => {
+  const okFetch = async () => ({ status: 200, headers: Object.assign(new Headers(), { getSetCookie: () => [] }), body: null, type: "basic" });
+
+  it("signupDuplicate memakai konteks browser BARU (sesi login membuat /register tanpa form)", async () => {
+    const fb = fakeBrowser({ visible: ["Email ini sudah terdaftar"] });
+    const d = createRealDriver(base({ browser: fb.browser, fetchImpl: okFetch, timeouts: { stepTimeoutMs: 50 } }));
+    await d.signup({ email: EMAIL, password: PW });
+    await d.fetchHop(`${APP}/onboarding`);
+    expect(fb.contexts).toBe(1);
+    expect(await d.signupDuplicate({ email: EMAIL, password: PW })).toEqual({ outcome: "duplicate" });
+    expect(fb.contexts).toBe(2);
+    expect(await fb.request("https://evil.example/")).toBe(false); // penyaring origin terpasang pada konteks baru juga
+  });
+
+  it("hasil duplikat dikenali segera, tanpa menunggu habis timeout pesan sukses", async () => {
+    const fb = fakeBrowser({ visible: ["Email ini sudah terdaftar"] });
+    const d = createRealDriver(base({ browser: fb.browser, timeouts: { stepTimeoutMs: 5_000 } }));
+    const t0 = Date.now();
+    expect(await d.signup({ email: EMAIL, password: PW })).toEqual({ outcome: "duplicate" });
+    expect(Date.now() - t0).toBeLessThan(1_000);
+  });
+
+  it("close() membuang jar cookie: hop berikutnya tidak membawa cookie", async () => {
+    const calls: Any[] = [];
+    const fetchImpl = async (_u: string, init: Any) => {
+      calls.push(init);
+      return { status: 200, headers: Object.assign(new Headers(), { getSetCookie: () => [`sb=${COOKIE_VAL}; Path=/`] }), body: null, type: "basic" };
+    };
+    const d = createRealDriver(base({ fetchImpl }));
+    await d.fetchHop(`${APP}/a`);
+    await d.fetchHop(`${APP}/b`);
+    expect(calls[1].headers.cookie).toContain(COOKIE_VAL);
+    await d.close();
+    await d.fetchHop(`${APP}/c`);
+    expect(calls[2].headers.cookie).toBeUndefined();
+  });
+});
+
 describe("onboarding dan sanitasi", () => {
   it("completeOnboarding menyuntikkan cookie jar ke konteks dan melaporkan /dashboard", async () => {
     const fb = fakeBrowser({ pathAfterGoto: { [`${APP}/onboarding`]: `${APP}/dashboard` } });

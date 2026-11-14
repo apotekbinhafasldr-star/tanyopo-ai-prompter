@@ -122,6 +122,9 @@ function createCookieJar() {
     values() {
       return [...byOrigin.values()].flatMap((j) => [...j.values()]);
     },
+    clear() {
+      byOrigin.clear();
+    },
   };
 }
 
@@ -191,16 +194,10 @@ export function createRealDriver(options) {
     remember(pw);
   };
 
-  async function getSession() {
-    if (session) return session;
-    let browser = options.browser;
-    if (!browser) {
-      const spec = "playwright"; // variabel: tanpa resolusi tipe/dependensi statis
-      const mod = await import(spec);
-      browser = await mod.chromium.launch();
-    }
+  /** Konteks baru dengan penyaring origin yang sama untuk SEMUA request (navigasi, subresource, XHR). @param {any} browser */
+  async function newGuardedContext(browser) {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: "block", acceptDownloads: false });
-    // Semua request (navigasi, subresource, XHR) di luar allowlist digagalkan; tidak ada pengecualian selain about:blank.
+    // Semua request di luar allowlist digagalkan; tidak ada pengecualian selain about:blank.
     await context.route("**/*", (/** @type {any} */ route) => {
       const url = route.request().url();
       if (url === "about:blank" || originAllowed(url)) return route.continue();
@@ -211,6 +208,18 @@ export function createRealDriver(options) {
       }
       return route.abort("blockedbyclient");
     });
+    return context;
+  }
+
+  async function getSession() {
+    if (session) return session;
+    let browser = options.browser;
+    if (!browser) {
+      const spec = "playwright"; // variabel: tanpa resolusi tipe/dependensi statis
+      const mod = await import(spec);
+      browser = await mod.chromium.launch();
+    }
+    const context = await newGuardedContext(browser);
     const page = await context.newPage();
     if (typeof page.setDefaultTimeout === "function") page.setDefaultTimeout(t.stepTimeoutMs);
     session = { browser, context, page, ownsBrowser: !options.browser };
@@ -223,16 +232,6 @@ export function createRealDriver(options) {
     if (url !== "about:blank" && !originAllowed(url)) throw new Error("halaman berada di origin di luar allowlist");
   };
 
-  /** @param {any} page @param {RegExp} re @param {number} ms */
-  async function waitVisible(page, re, ms) {
-    const end = Date.now() + ms;
-    for (;;) {
-      if (await page.getByText(re).first().isVisible()) return true;
-      if (Date.now() >= end) return false;
-      await new Promise((r) => setTimeout(r, 50));
-    }
-  }
-
   /** @param {any} page @param {string} email @param {string} pw @param {{ nama: string, namaUsaha: string }} o */
   async function fillAndSubmitRegister(page, email, pw, o) {
     await page.goto(`${appOrigin}/register`);
@@ -242,10 +241,14 @@ export function createRealDriver(options) {
     await page.fill("#password", pw);
     await page.check("#acceptLegal");
     await page.getByRole("button", { name: "Daftar Gratis" }).click(); // tepat SATU klik; tanpa retry
-    const created = await waitVisible(page, /Akun berhasil dibuat/, t.stepTimeoutMs);
-    if (created) return "check-email";
-    if (await page.getByText(/sudah terdaftar/).first().isVisible()) return "duplicate";
-    return "timeout";
+    // Satu loop untuk kedua hasil: duplikat tidak menunggu habis timeout pesan sukses ("sudah terdaftar" hanya muncul pada state akun ada).
+    const end = Date.now() + t.stepTimeoutMs;
+    for (;;) {
+      if (await page.getByText(/Akun berhasil dibuat/).first().isVisible()) return "check-email";
+      if (await page.getByText(/sudah terdaftar/).first().isVisible()) return "duplicate";
+      if (Date.now() >= end) return "timeout";
+      await new Promise((r) => setTimeout(r, 50));
+    }
   }
 
   return {
@@ -295,14 +298,22 @@ export function createRealDriver(options) {
         if (signupCalls < 1 || boundEmail === null) return { outcome: "refused-no-signup" };
         bindIdentity(o.email, o.password);
         if (!confirmed) return { outcome: "refused-unconfirmed" };
-        const { page } = await getSession();
-        const outcome = await withTimeout(
-          fillAndSubmitRegister(page, o.email, o.password, { nama: o.nama ?? "QA Linoe", namaUsaha: o.namaUsaha ?? "QA Linoe Sandbox" }),
-          t.stepTimeoutMs + 5_000,
-          "signupDuplicate",
-        );
-        assertPageOrigin(page);
-        return { outcome: outcome === "duplicate" ? "duplicate" : outcome === "check-email" ? "accepted-as-new" : outcome };
+        // Konteks BARU tanpa cookie: sesi login dari onboarding membuat /register menampilkan "sudah masuk" (tanpa form).
+        const { browser } = await getSession();
+        const context = await newGuardedContext(browser);
+        try {
+          const page = await context.newPage();
+          if (typeof page.setDefaultTimeout === "function") page.setDefaultTimeout(t.stepTimeoutMs);
+          const outcome = await withTimeout(
+            fillAndSubmitRegister(page, o.email, o.password, { nama: o.nama ?? "QA Linoe", namaUsaha: o.namaUsaha ?? "QA Linoe Sandbox" }),
+            t.stepTimeoutMs + 5_000,
+            "signupDuplicate",
+          );
+          assertPageOrigin(page);
+          return { outcome: outcome === "duplicate" ? "duplicate" : outcome === "check-email" ? "accepted-as-new" : outcome };
+        } finally {
+          await Promise.resolve(context.close?.()).catch(() => {});
+        }
       } catch (err) {
         throw fail(err);
       }
@@ -410,6 +421,7 @@ export function createRealDriver(options) {
     async close() {
       const s = session;
       session = null;
+      jar.clear(); // cookie sesi dibuang di akhir (juga bila browser tak pernah dibuka)
       if (!s) return;
       await s.context.close?.().catch(() => {});
       if (s.ownsBrowser) await s.browser.close?.().catch(() => {});
