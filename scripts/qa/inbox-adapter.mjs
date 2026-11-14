@@ -30,7 +30,6 @@ import { redact } from "./real-e2e-guard.mjs";
  * @property {typeof fetch} fetch wajib; disuntik (tes memakai fetch palsu)
  * @property {string} token token baca penyedia (dibaca pemanggil dari env QA_INBOX_READ_TOKEN)
  * @property {string} address alamat kotak masuk QA tetap, wajib di domain yang diizinkan
- * @property {readonly string[]} [allowedDomains] bawaan ["qa.tanyopo.com"]; tiap entri domain persis, tanpa wildcard
  * @property {number} [maxAttempts] maksimum polling per waitForMessage (bawaan 20, batas keras 60)
  * @property {number} [initialDelayMs] bawaan 1000
  * @property {number} [maxDelayMs] bawaan 8000
@@ -40,7 +39,10 @@ import { redact } from "./real-e2e-guard.mjs";
 
 export const NOT_IMPLEMENTED_MESSAGE = "NOT_IMPLEMENTED: provider not chosen";
 export const SUPPORTED_KINDS = ["resend"];
-export const DEFAULT_ALLOWED_DOMAINS = ["qa.tanyopo.com"];
+// Salinan konstanta sender-lock (#151, scripts/qa/real-e2e-guard.mjs: QA_SENDER_DOMAIN). Setelah #151 merge, impor dari sana.
+// Tes memastikan nilainya sama dengan di branch #151. Domain TIDAK dapat diperluas lewat deps.
+export const QA_SENDER_DOMAIN = "qa.tanyopo.com";
+export const DEFAULT_ALLOWED_DOMAINS = Object.freeze([QA_SENDER_DOMAIN]);
 
 const API_BASE = "https://api.resend.com";
 const MAX_ATTEMPTS_HARD_CAP = 60;
@@ -48,7 +50,9 @@ const MAX_TIMEOUT_MS = 600_000;
 const MAX_CLEAR_PAGES = 5;
 const PAGE_LIMIT = 100;
 const REQUEST_TIMEOUT_MS = 10_000;
-const ADDRESS_RE = /^[a-z0-9._%+-]+@([a-z0-9-]+(?:\.[a-z0-9-]+)+)$/;
+// Sama dengan LOCKED_ADDRESS_RE di #151: ASCII ketat, tanpa '+', '%', spasi, display-name; domain persis qa.tanyopo.com.
+// Sengaja TANPA toLowerCase()/flag u sebelum uji: "K" (Kelvin) akan menjadi "k" dan lolos sebagai homoglyph.
+const LOCKED_ADDRESS_RE = /^[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*@qa\.tanyopo\.com$/i;
 const ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
 
 /** @param {string} text @param {string} token */
@@ -61,9 +65,10 @@ function scrub(text, token) {
 
 /** @param {string} value @returns {string | null} alamat huruf kecil bila valid */
 function normalizeAddress(value) {
-  if (typeof value !== "string") return null;
-  const v = value.trim().toLowerCase();
-  return ADDRESS_RE.test(v) ? v : null;
+  if (typeof value !== "string" || value.length > 254) return null;
+  const at = value.indexOf("@");
+  if (at < 1 || at > 64) return null;
+  return LOCKED_ADDRESS_RE.test(value) ? value.toLowerCase() : null;
 }
 
 /** @param {unknown} entry @returns {string | null} */
@@ -107,16 +112,9 @@ export function createInboxAdapter(kind, deps) {
 
   const token = /** @type {string} */ (d.token);
   const doFetch = /** @type {typeof fetch} */ (d.fetch);
-  const allowedDomains = (d.allowedDomains ?? DEFAULT_ALLOWED_DOMAINS).map((x) => String(x).toLowerCase());
-  if (allowedDomains.length === 0 || allowedDomains.some((x) => !/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(x))) {
-    throw new Error("INBOX_MISCONFIGURED: allowedDomains tidak valid");
-  }
+  // Hanya alamat tunggal @qa.tanyopo.com (tanpa plus-address/subdomain/homoglyph); selain itu ditolak.
   const address = normalizeAddress(/** @type {string} */ (d.address));
-  if (address === null) throw new Error("INBOX_MISCONFIGURED: address bukan alamat email valid");
-  const domainOf = (/** @type {string} */ a) => a.slice(a.indexOf("@") + 1);
-  if (!allowedDomains.includes(domainOf(address))) {
-    throw new Error("INBOX_REFUSED: address bukan alamat QA yang diizinkan");
-  }
+  if (address === null) throw new Error("INBOX_REFUSED: address bukan alamat tunggal QA @qa.tanyopo.com");
 
   const maxAttempts = Math.min(Math.max(Math.trunc(d.maxAttempts ?? 20), 1), MAX_ATTEMPTS_HARD_CAP);
   const initialDelayMs = Math.max(Math.trunc(d.initialDelayMs ?? 1000), 0);
@@ -196,7 +194,7 @@ export function createInboxAdapter(kind, deps) {
     async clear(options) {
       if (options && options.address !== undefined) {
         const requested = normalizeAddress(options.address);
-        if (requested === null || requested !== address || !allowedDomains.includes(domainOf(requested))) {
+        if (requested === null || requested !== address) {
           throw new Error("INBOX_REFUSED: clear hanya boleh pada alamat QA yang dikonfigurasi");
         }
       }

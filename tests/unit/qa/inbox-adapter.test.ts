@@ -1,5 +1,8 @@
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { createInboxAdapter } from "../../../scripts/qa/inbox-adapter.mjs";
+import { DEFAULT_ALLOWED_DOMAINS, QA_SENDER_DOMAIN, createInboxAdapter } from "../../../scripts/qa/inbox-adapter.mjs";
 
 // Semua nilai PALSU. Tidak ada jaringan: fetch disuntik.
 const TOKEN = "FAKE-INBOX-TOKEN-987";
@@ -106,14 +109,57 @@ describe("inbox adapter (Resend Receiving, fetch palsu)", () => {
     expect(calls.length - before).toBe(3);
   });
 
-  it("alamat non-qa ditolak saat konfigurasi dan saat clear", async () => {
+  it("alamat non-qa ditolak: domain lain, subdomain, plus-address, homoglyph, display-name", async () => {
     const f = makeFetch({ rows: [] });
-    expect(() => createInboxAdapter("resend", { fetch: f, token: TOKEN, address: "orang@gmail.com" })).toThrow("INBOX_REFUSED");
-    expect(() => createInboxAdapter("resend", { fetch: f, token: TOKEN, address: "a@tanyopo.com" })).toThrow("INBOX_REFUSED");
-    expect(() => createInboxAdapter("resend", { fetch: f, token: TOKEN, address: "a@evil.qa.tanyopo.com" })).toThrow("INBOX_REFUSED");
+    const bad = [
+      "orang@gmail.com",
+      "a@tanyopo.com",
+      "a@evil.qa.tanyopo.com",
+      "a@qa.tanyopo.com.evil.com",
+      "a@abc.resend.app",
+      "a+tag@qa.tanyopo.com",
+      "a%b@qa.tanyopo.com",
+      "QA <a@qa.tanyopo.com>",
+      "a@qa.tanyopo.com, b@qa.tanyopo.com",
+      "a@qa.tanyopo.com\r\nbcc:x@y.com",
+      "\u212A@qa.tanyopo.com", // Kelvin sign
+      "a@qa.tanyopo.com\u212A",
+    ];
+    for (const address of bad) {
+      expect(() => createInboxAdapter("resend", { fetch: f, token: TOKEN, address })).toThrow("INBOX_REFUSED");
+    }
     const { adapter } = setup({ rows: [] });
     await expect(adapter.clear({ address: "orang@gmail.com" })).rejects.toThrow("INBOX_REFUSED");
     await expect(adapter.clear({ address: "lain@qa.tanyopo.com" })).rejects.toThrow("INBOX_REFUSED");
+    await expect(adapter.clear({ address: "qa-inbox+x@qa.tanyopo.com" })).rejects.toThrow("INBOX_REFUSED");
+  });
+
+  it("domain tidak dapat diperluas lewat deps (allowedDomains diabaikan)", () => {
+    const f = makeFetch({ rows: [] });
+    const extra = { fetch: f, token: TOKEN, address: "a@abc.resend.app", allowedDomains: ["abc.resend.app"] } as never;
+    expect(() => createInboxAdapter("resend", extra)).toThrow("INBOX_REFUSED");
+    expect(DEFAULT_ALLOWED_DOMAINS).toEqual(["qa.tanyopo.com"]);
+    expect(QA_SENDER_DOMAIN).toBe("qa.tanyopo.com");
+  });
+
+  it("konstanta domain sama dengan sender-lock #151 (git show atau berkas guard lokal bila sudah merge)", () => {
+    const root = path.resolve(__dirname, "../../..");
+    let src: string | null = null;
+    try {
+      src = execFileSync("git", ["show", "origin/qa-2/sender-lock:scripts/qa/real-e2e-guard.mjs"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    } catch {
+      src = null;
+    }
+    if (src === null || !/QA_SENDER_DOMAIN\s*=/.test(src)) {
+      try {
+        src = readFileSync(path.join(root, "scripts/qa/real-e2e-guard.mjs"), "utf8");
+      } catch {
+        src = null;
+      }
+    }
+    if (src === null || !/QA_SENDER_DOMAIN\s*=/.test(src)) return; // #151 tidak terbaca di lingkungan ini (mis. checkout dangkal)
+    const m = /QA_SENDER_DOMAIN\s*=\s*"([^"]+)"/.exec(src);
+    expect(m?.[1]).toBe(QA_SENDER_DOMAIN);
   });
 
   it("token tidak bocor di pesan error (auth gagal, fetch melempar token, parameter kosong)", async () => {
