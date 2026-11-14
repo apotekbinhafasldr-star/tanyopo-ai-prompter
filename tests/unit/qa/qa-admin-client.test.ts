@@ -261,9 +261,12 @@ describe("statis: hanya runner server-side", () => {
     expect(src).not.toMatch(/NEXT_PUBLIC_/);
     expect(src).not.toMatch(/wjjyqovhmwenbcvbnkgx/);
   });
-  it("real-e2e.mjs tidak memuat client ini (wiring ditunda)", () => {
+  it("real-e2e.mjs memuat client ini (wiring), tetapi hanya dibangun setelah cek QA2_ACTIVATED", () => {
     const src = readFileSync(path.join(root, "scripts/qa/real-e2e.mjs"), "utf8");
-    expect(src.includes("qa-admin-client")).toBe(false);
+    expect(src.includes("qa-admin-client")).toBe(true);
+    const body = src.slice(src.indexOf("export async function runMain"));
+    expect(body.indexOf('env.QA2_ACTIVATED !== "true"')).toBeGreaterThan(0);
+    expect(body.indexOf('env.QA2_ACTIVATED !== "true"')).toBeLessThan(body.indexOf("factories.createQaAdminClient("));
   });
   it("tidak ada NEXT_PUBLIC_* yang memuat secret QA di berkas konfigurasi", () => {
     for (const f of ["netlify.toml", ".env.example", "next.config.ts"]) {
