@@ -44,6 +44,13 @@ jobs:
 
       - run: npm ci
 
+      # Playwright TIDAK ada di package.json/package-lock.json (sengaja, agar `npm ci` CI utama dan build hosting tidak berubah).
+      # Dipasang di sini saja, versi PERSIS terkunci, tanpa menulis package.json/lock. Langkah ini TIDAK menerima secret/env.
+      - name: Pasang Playwright (versi terkunci, tanpa secret)
+        run: |
+          npm install --no-save --no-package-lock playwright@1.63.0
+          npx playwright install --with-deps chromium
+
       - name: Guard (hanya proyek QA, tanpa kredensial produksi)
         env:
           QA2_CONFIRM: ${{ inputs.confirm }}
