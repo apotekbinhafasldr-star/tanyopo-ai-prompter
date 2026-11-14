@@ -203,6 +203,98 @@ describe("QA-2 bundel", () => {
   });
 });
 
+describe("QA-2 bundel dibagi (--parts) untuk tempel dari HP", () => {
+  const whole = buildBundle({ root });
+  for (const n of [2, 3]) {
+    const split = buildBundle({ root, parts: n });
+
+    it(`--parts ${n}: ${n} potongan, tiap potongan < 100 KB, header peringatan di setiap potongan`, () => {
+      expect(split.parts.length).toBe(n);
+      for (const [i, text] of split.parts.entries()) {
+        expect(Buffer.byteLength(text, "utf8"), `bagian ${i + 1}`).toBeLessThan(100 * 1024);
+        expect(text.split("\n").slice(0, 3).join("\n")).toContain(WARNING_LINE);
+        expect(text).toContain(`BAGIAN ${i + 1} DARI ${n}`);
+        for (const r of REAL_REFS) expect(text.includes(r)).toBe(false);
+      }
+    });
+
+    it(`--parts ${n}: urutan migrasi gabungan identik manifest, tanpa duplikat, tiap potongan atomik`, () => {
+      const seen = split.parts.flatMap((t) => [...t.matchAll(/MIGRASI (\d{14}_[a-z0-9_]+\.sql) ----/g)].map((m) => m[1]));
+      expect(seen).toEqual(manifest.migrations);
+      for (const t of split.parts) {
+        const lines = t.split("\n");
+        expect(lines.filter((l) => l === "begin;").length).toBe(1);
+        expect(lines.filter((l) => l === "commit;").length).toBe(1);
+      }
+    });
+
+    it(`--parts ${n}: shim + guard proyek kosong hanya di potongan 1; potongan berikut punya guard urutan`, () => {
+      expect(split.parts[0]).toContain("SHIM qa/qa2-shim.sql");
+      expect(split.parts[0]).toContain("ABORT: schema public tidak kosong");
+      for (const t of split.parts.slice(1)) {
+        expect(t).not.toContain("SHIM qa/qa2-shim.sql");
+        expect(t).toContain("ABORT: bagian sebelumnya belum diterapkan");
+        expect(t).toContain("ABORT: bagian ini sudah diterapkan");
+        expect(t.indexOf("do $order$")).toBeLessThan(t.indexOf("\nbegin;"));
+      }
+      // guard potongan k merujuk versi terakhir potongan k-1
+      for (let i = 1; i < n; i++) {
+        const prevLast = [...split.parts[i - 1].matchAll(/^\s+\('(\d{14})', '[0-9a-f]{64}'\)/gm)].map((m) => m[1]).pop();
+        expect(split.parts[i]).toContain(`version = '${prevLast}'`);
+      }
+    });
+
+    it(`--parts ${n}: verifikasi baca-saja hanya di potongan terakhir`, () => {
+      split.parts.forEach((t, i) => expect(t.includes("as authenticated_access"), `bagian ${i + 1}`).toBe(i === n - 1));
+    });
+  }
+
+  it("--parts 1 sama dengan bundel utuh; parts melebihi jumlah migrasi ditolak", () => {
+    expect(buildBundle({ root, parts: 1 }).parts).toEqual([whole.sql]);
+    expect(() => buildBundle({ root, parts: 99 })).toThrow(/REFUSED/);
+  });
+
+  it("bundel utuh > 100 KB sehingga saran dibagi berlaku", () => {
+    expect(whole.bytes).toBeGreaterThan(100 * 1024);
+  });
+});
+
+describe("QA-2 audit fidelitas: koreksi shim terbukti dari kode", () => {
+  const shim = read("qa/qa2-shim.sql");
+  const extra = shim.slice(shim.indexOf("TAMBAHAN KHUSUS QA-2"));
+
+  it("grant minimal hanya untuk authenticated: SELECT tenants/user_profiles, EXECUTE fn_current_*; tanpa anon/tulis", () => {
+    expect(extra).toContain("grant select on public.tenants, public.user_profiles to authenticated;");
+    expect(extra).toContain("grant execute on function public.fn_current_tenant_id() to authenticated;");
+    expect(extra).toContain("grant execute on function public.fn_current_role() to authenticated;");
+    const code = extra.replace(/--[^\n]*/g, "");
+    expect(/\banon\b|service_role|\b(insert|update|delete|all)\b/i.test(code)).toBe(false);
+  });
+
+  it("kode benar-benar memakai objek itu lewat sesi pengguna (dasar grant)", () => {
+    expect(read("services/session.ts")).toMatch(/from\("user_profiles"\)[\s\S]*select\("nama, role, tenant_id"\)/);
+    expect(read("services/session.ts")).toMatch(/from\("tenants"\)[\s\S]*select\("nama_usaha"\)/);
+    expect(read("features/onboarding/actions.ts")).toContain('rpc("fn_current_tenant_id")');
+    expect(read("features/auth/actions.ts")).toMatch(/nama_usaha: namaUsaha/);
+  });
+
+  it("handle_new_user membaca kunci metadata yang dikirim signUp", () => {
+    for (const key of ["nama", "nama_usaha", "jenis_usaha"]) expect(shim).toContain(`'${key}'`);
+  });
+
+  it("role shim mencakup semua nilai TenantRole di types/database.ts dan default pendaftar = owner", () => {
+    const types = read("types/database.ts");
+    const union = types.match(/export type TenantRole =([\s\S]*?);/)![1];
+    for (const role of [...union.matchAll(/"([a-z_]+)"/g)].map((m) => m[1])) expect(shim, role).toContain(`'${role}'`);
+    expect(shim).toMatch(/values \(new\.id, v_tenant, [\s\S]*?, 'owner'\)/);
+  });
+
+  it("verifikasi bundel memeriksa kebijakan shim dan akses authenticated", () => {
+    expect(buildBundle({ root }).sql).toMatch(/as shim_policies/);
+    expect(buildBundle({ root }).sql).toMatch(/as authenticated_access/);
+  });
+});
+
 describe("QA-2 shim tidak menyimpang dari shim CI QA-1", () => {
   const norm = (s: string) => s.replace(/\s+/g, " ").trim();
   const shim = read("qa/qa2-shim.sql");
@@ -247,6 +339,11 @@ describe("QA-2 dokumen", () => {
     expect(doc).toMatch(/hapus.*buat ulang/i);
     expect(doc).toMatch(/SQL Editor/);
     expect(doc).toMatch(/build-schema-bundle\.mjs/);
+  });
+
+  it("memuat bagian Audit fidelitas dengan risiko P0/P1/P2 dan saran --parts", () => {
+    expect(doc).toMatch(/## \d+\. Audit fidelitas/);
+    for (const tag of ["P0", "P1", "P2", "FALSE PASS", "FALSE FAIL", "UNKNOWN", "--parts 3"]) expect(doc, tag).toContain(tag);
   });
 
   it("menyebut setiap migrasi minimum dan tanda risiko fidelitas shim", () => {

@@ -91,3 +91,15 @@ end $$;
 drop trigger if exists qa_on_auth_user_created on auth.users;
 create trigger qa_on_auth_user_created after insert on auth.users
   for each row execute function public.handle_new_user();
+
+-- ============================================================================
+-- TAMBAHAN KHUSUS QA-2 (TIDAK ada di shim CI QA-1) -- terbukti dari kode, bukan dari produksi
+-- ============================================================================
+-- Kode membaca user_profiles/tenants dengan sesi pengguna (role authenticated: services/session.ts, app/(app)/approvals)
+-- dan memanggil rpc fn_current_tenant_id (features/onboarding/actions.ts). Proyek Supabase baru bisa tidak memberi grant
+-- otomatis pada tabel baru (pengaturan "auto-expose" API); tanpa grant ini sesi QA gagal "permission denied" (FALSE FAIL)
+-- yang tidak terjadi di produksi. Grant eksplisit ini minimal, hanya SELECT/EXECUTE, tanpa anon, tanpa tulis. RLS tetap berlaku.
+-- Grant/ACL ASLI produksi tidak diketahui (UNKNOWN); ini bukan salinannya.
+grant select on public.tenants, public.user_profiles to authenticated;
+grant execute on function public.fn_current_tenant_id() to authenticated;
+grant execute on function public.fn_current_role() to authenticated;

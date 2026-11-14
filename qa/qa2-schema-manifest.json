@@ -23,7 +23,8 @@
         "public._linoe_sandbox_applied"
       ],
       "fidelityRisk": "HIGH",
-      "fidelityNotes": "Bukan salinan produksi. Kolom tenants lain, default/CHECK role, policy admin, trigger tambahan, grant/ACL, dan badan asli handle_new_user TIDAK diketahui. Isi disalin dari shim CI QA-1 (supabase/sandbox/doku/01_shim_shared_objects.sql dan qa/supabase-local/sql/01_handle_new_user_simulation.sql); kesamaan dijaga tes."
+      "fidelityNotes": "Bukan salinan produksi. Kolom tenants lain, default/CHECK role, policy admin, trigger tambahan, grant/ACL, dan badan asli handle_new_user TIDAK diketahui. Isi disalin dari shim CI QA-1 (supabase/sandbox/doku/01_shim_shared_objects.sql dan qa/supabase-local/sql/01_handle_new_user_simulation.sql); kesamaan dijaga tes.",
+      "qa2OnlyAdditions": "GRANT SELECT tenants/user_profiles dan EXECUTE fn_current_* ke authenticated (terbukti dari kode; bukan di shim CI QA-1). Lihat docs/QA2_SCHEMA_MINIMUM.md bagian Audit fidelitas."
     }
   ],
   "migrations": [
@@ -276,5 +277,10 @@
       "user_profiles"
     ],
     "note": "Referensi proyek produksi/nyata (ref) tidak boleh ada di manifest, dokumen, maupun bundel; builder menyamarkan ref yang ada di KOMENTAR migrasi dan menolak bila muncul di luar komentar."
+  },
+  "splitAdvice": {
+    "singleFileKB": 166,
+    "recommendedParts": 3,
+    "note": "Satu berkas > 100 KB: pakai --parts 3 (sekitar 61/45/65 KB), jalankan berurutan; urutan migrasi tidak berubah."
   }
 }
