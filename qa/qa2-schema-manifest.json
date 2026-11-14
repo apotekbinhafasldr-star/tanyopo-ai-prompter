@@ -1,0 +1,297 @@
+{
+  "$schema_note": "Manifest skema minimum QA-2. Dibaca oleh scripts/qa/build-schema-bundle.mjs dan tests/unit/qa/qa2-schema-manifest.test.ts. Berkas ini hanya data; TIDAK menerapkan apa pun.",
+  "version": 1,
+  "status": "NOT APPLIED",
+  "baseCommit": "fba8167",
+  "targetProject": {
+    "name": "linoe-qa-real-email",
+    "ref": "gasdqsadnjoknisloaec"
+  },
+  "approvalPhrase": "APPROVE QA-2-SCHEMA-BUNDLE",
+  "bundleHeaderWarning": "HANYA UNTUK PROYEK QA gasdqsadnjoknisloaec",
+  "rollback": "Tidak ada rollback per-migrasi. Proyek QA terpisah: hapus lalu buat ulang proyek QA (bundel berjalan dalam satu transaksi, jadi kegagalan di tengah tidak meninggalkan setengah skema).",
+  "shim": [
+    {
+      "file": "qa/qa2-shim.sql",
+      "provides": [
+        "public.tenants",
+        "public.user_profiles",
+        "public.fn_current_tenant_id()",
+        "public.fn_current_role()",
+        "public.handle_new_user() + trigger auth.users",
+        "public._linoe_sandbox_marker",
+        "public._linoe_sandbox_applied"
+      ],
+      "fidelityRisk": "HIGH",
+      "fidelityNotes": "Bukan salinan produksi. Kolom tenants lain, default/CHECK role, policy admin, trigger tambahan, grant/ACL, dan badan asli handle_new_user TIDAK diketahui. Isi disalin dari shim CI QA-1 (supabase/sandbox/doku/01_shim_shared_objects.sql dan qa/supabase-local/sql/01_handle_new_user_simulation.sql); kesamaan dijaga tes.",
+      "qa2OnlyAdditions": "GRANT SELECT tenants/user_profiles dan EXECUTE fn_current_* ke authenticated (terbukti dari kode; bukan di shim CI QA-1). Lihat docs/QA2_SCHEMA_MINIMUM.md bagian Audit fidelitas."
+    }
+  ],
+  "migrations": [
+    "20260829080127_prompter_foundation_schema.sql",
+    "20260829080155_prompter_fix_function_search_path.sql",
+    "20260829092303_prompter_phase1_schema.sql",
+    "20260829095447_prompter_phase2_schema.sql",
+    "20260829102304_prompter_phase3_schema.sql",
+    "20260829110644_prompter_phase5_schema.sql",
+    "20260829114414_prompter_phase7_schema.sql",
+    "20260901120847_prompter_billing_foundation.sql",
+    "20260901130513_prompter_billing_invoices.sql",
+    "20260901135021_prompter_global_edition_foundation.sql",
+    "20260910072819_prompter_subscriptions_add_starter_plan.sql",
+    "20260915043800_prompter_b9_entitlement_enforcement.sql",
+    "20260915051359_prompter_b10_payment_billing_core.sql",
+    "20261019100100_prompter_p0_subscription_trial_insert_guard.sql",
+    "20261029220000_prompter_p0_subscription_plan_tampering_lockdown.sql"
+  ],
+  "migrationNotes": {
+    "20260829080127_prompter_foundation_schema.sql": "Fondasi: prompter_brand_profiles (onboarding 8 langkah), prompter_audit_logs (log onboarding), prompter_automation_settings, fungsi updated_at. Butuh tenants + auth.users (shim).",
+    "20260829080155_prompter_fix_function_search_path.sql": "Memperbaiki search_path prompter_set_updated_at (dipakai trigger tabel di atasnya).",
+    "20260829092303_prompter_phase1_schema.sql": "prompter_ai_jobs (dibaca halaman /billing: hitung pemakaian AI), prompter_products, prompter_master_campaigns, dll; target ALTER migrasi global edition dan fungsi entitlement B9.",
+    "20260829095447_prompter_phase2_schema.sql": "prompter_attributions (dibaca /billing: nilai atribusi terverifikasi), prompter_conversions (target ALTER global edition), prompter_channel_campaigns.",
+    "20260829102304_prompter_phase3_schema.sql": "prompter_platform_capabilities: target ALTER di migrasi global edition (prasyarat urutan).",
+    "20260829110644_prompter_phase5_schema.sql": "prompter_seo_projects: target ALTER di migrasi global edition (prasyarat urutan).",
+    "20260829114414_prompter_phase7_schema.sql": "prompter_analytics_insights (dibaca halaman /dashboard).",
+    "20260901120847_prompter_billing_foundation.sql": "prompter_subscriptions: tabel trial lazy (services/billing.ts#getOrCreateSubscription), RLS tenant.",
+    "20260901130513_prompter_billing_invoices.sql": "prompter_invoices (dibaca /billing via listInvoices).",
+    "20260901135021_prompter_global_edition_foundation.sql": "Kolom Global Edition: prompter_brand_profiles (country/currency/language dipakai onboarding), prompter_subscriptions (billing_country, invoice_currency yang di-set trigger trial), prompter_invoices.",
+    "20260910072819_prompter_subscriptions_add_starter_plan.sql": "Memperlebar CHECK plan prompter_subscriptions (STARTER dst); prasyarat tabel entitlement/plan.",
+    "20260915043800_prompter_b9_entitlement_enforcement.sql": "prompter_plan_entitlements (baris FREE ACTIVE) + trigger trg_prompter_subscriptions_guard_plan: insert trial FREE ditolak bila tabel ini tidak ada.",
+    "20260915051359_prompter_b10_payment_billing_core.sql": "Menambah kolom cancel_at_period_end & provider_subscription_id pada prompter_subscriptions (di-set trigger trial 14 hari: tanpa kolom ini INSERT trial gagal) dan policy insert trial. Ikut membawa tabel/fungsi pembayaran (tidak dipakai alur).",
+    "20261019100100_prompter_p0_subscription_trial_insert_guard.sql": "Trigger guard trial 14 hari server-side: trg_prompter_subscriptions_enforce_trial_insert (dicek signup-e2e.mjs) + REVOKE delete/truncate.",
+    "20261029220000_prompter_p0_subscription_plan_tampering_lockdown.sql": "Memblokir UPDATE klien pada prompter_subscriptions dan fn_set_trial_plan_preference (dipakai form paket di /billing)."
+  },
+  "excluded": [
+    {
+      "file": "20260829102947_prompter_channel_campaigns_add_error.sql",
+      "group": "iklan",
+      "reason": "Kolom error pada prompter_channel_campaigns; kampanye/iklan tidak ada di alur."
+    },
+    {
+      "file": "20260829104743_prompter_phase4_schema.sql",
+      "group": "umkmpro-integrasi",
+      "reason": "Handoff/snapshot/webhook UMKMpro (prompter_product_snapshots, promotion_handoffs, webhook_events); jalur integrasi bertanda tangan, bukan signup."
+    },
+    {
+      "file": "20260829112835_prompter_phase6_capabilities.sql",
+      "group": "iklan",
+      "reason": "Seed kapabilitas konektor platform (Meta/TikTok/X); halaman koneksi di luar alur."
+    },
+    {
+      "file": "20260829155306_prompter_ai_router_usage_columns.sql",
+      "group": "ai",
+      "reason": "Kolom pemakaian AI Router pada prompter_ai_jobs; AI generation di luar alur."
+    },
+    {
+      "file": "20260901131336_prompter_job_queue.sql",
+      "group": "job-queue",
+      "reason": "Antrean job latar belakang; tidak disentuh alur signup/onboarding/billing."
+    },
+    {
+      "file": "20260901141241_prompter_global_marketing_blueprint.sql",
+      "group": "global-marketing",
+      "reason": "Blueprint pemasaran global; di luar alur."
+    },
+    {
+      "file": "20260901142211_prompter_compliance_flags_global_unique.sql",
+      "group": "global-marketing",
+      "reason": "Perbaikan unik compliance flags; tabel tidak dipakai alur."
+    },
+    {
+      "file": "20260901142236_prompter_compliance_flags_market_sentinel.sql",
+      "group": "global-marketing",
+      "reason": "Sentinel market compliance flags; tabel tidak dipakai alur."
+    },
+    {
+      "file": "20260906061202_prompter_product_stock_unit.sql",
+      "group": "produk",
+      "reason": "Kolom stok/satuan produk; katalog produk di luar alur."
+    },
+    {
+      "file": "20260909073321_prompter_channel_campaigns_add_scheduled_at.sql",
+      "group": "iklan",
+      "reason": "Kolom scheduled_at kampanye kanal; di luar alur."
+    },
+    {
+      "file": "20260909100910_prompter_master_campaigns_add_selected_media.sql",
+      "group": "iklan",
+      "reason": "Media terpilih master campaign; di luar alur."
+    },
+    {
+      "file": "20260909141526_prompter_seo_discovery_no_website.sql",
+      "group": "seo",
+      "reason": "SEO discovery tanpa website (brand profiles/seo projects); kolom tidak dipakai onboarding."
+    },
+    {
+      "file": "20260909164100_prompter_growth_recommendation_job_type.sql",
+      "group": "ai",
+      "reason": "Job type growth recommendation (lalu di-revert); di luar alur."
+    },
+    {
+      "file": "20260910060428_revert_unused_growth_recommendation_job_type.sql",
+      "group": "ai",
+      "reason": "Revert job type growth recommendation; di luar alur."
+    },
+    {
+      "file": "20260913163600_prompter_track_b_meta_page_picker.sql",
+      "group": "iklan",
+      "reason": "Meta page picker (connected accounts); di luar alur."
+    },
+    {
+      "file": "20260924173424_prompter_trial_expiry_gate_fix.sql",
+      "group": "trial-opsional",
+      "reason": "Gerbang kedaluwarsa trial pada fn_activate_product/fn_reserve_active_campaign_slot; bukan alur hari-0. OPSIONAL bila QA menguji trial kedaluwarsa."
+    },
+    {
+      "file": "20260926062741_prompter_scheduled_cancellations_cron.sql",
+      "group": "pembayaran",
+      "reason": "Jadwal pg_cron pembatalan; butuh ekstensi pg_cron (tidak diaktifkan default)."
+    },
+    {
+      "file": "20260926113000_prompter_payment_lifecycle_remediation.sql",
+      "group": "pembayaran",
+      "reason": "Sweep kedaluwarsa langganan/transaksi + pg_cron; di luar alur."
+    },
+    {
+      "file": "20260928161604_prompter_demo_ai_usage.sql",
+      "group": "ai",
+      "reason": "Kuota AI demo publik (prompter_demo_ai_usage); tidak terkait signup."
+    },
+    {
+      "file": "20261018160000_prompter_manual_ad_metrics.sql",
+      "group": "iklan",
+      "reason": "Metrik iklan manual (prompter_manual_ad_metrics); fitur iklan."
+    },
+    {
+      "file": "20261019100000_prompter_p0_ai_jobs_lockdown.sql",
+      "group": "ai-opsional",
+      "reason": "Lockdown grant prompter_ai_jobs (S1). OPSIONAL bila QA menguji kuota AI trial."
+    },
+    {
+      "file": "20261019100200_prompter_p0_plan_entitlements_lockdown.sql",
+      "group": "ai-opsional",
+      "reason": "REVOKE tulis pada prompter_plan_entitlements (S1). OPSIONAL; hardening, tidak mengubah alur."
+    },
+    {
+      "file": "20261021120000_prompter_ai_jobs_quota_guard.sql",
+      "group": "ai-opsional",
+      "reason": "Guard kuota AI atomik (S1). OPSIONAL bila QA menguji kuota AI trial."
+    },
+    {
+      "file": "20261021120100_prompter_ai_jobs_delete_guard.sql",
+      "group": "ai-opsional",
+      "reason": "Guard delete prompter_ai_jobs (S1). OPSIONAL."
+    },
+    {
+      "file": "20261027100000_linoe_finance_foundation.sql",
+      "group": "finance-admin",
+      "reason": "Fondasi finance (finance_*), Admin Center; bukan alur pengguna."
+    },
+    {
+      "file": "20261027110000_linoe_admin_center_access.sql",
+      "group": "finance-admin",
+      "reason": "Akses Admin Center (finance_platform_admins)."
+    },
+    {
+      "file": "20261027120000_linoe_accounting_ledger.sql",
+      "group": "finance-admin",
+      "reason": "Buku besar akuntansi (acct_*)."
+    },
+    {
+      "file": "20261027130000_linoe_tax_optimization_approvals.sql",
+      "group": "finance-admin",
+      "reason": "Persetujuan optimasi pajak (tax_opt_*)."
+    },
+    {
+      "file": "20261030100000_prompter_b1_server_only_checkout.sql",
+      "group": "pembayaran",
+      "reason": "Checkout server-only (fn_begin_checkout, plan prices); DOKU/Midtrans di luar alur."
+    },
+    {
+      "file": "20261030100100_prompter_b1_trial_remainder_carryover.sql",
+      "group": "trial-opsional",
+      "reason": "Carryover sisa trial ke periode berbayar; baru relevan saat pembayaran pertama. OPSIONAL."
+    },
+    {
+      "file": "20261030140000_prompter_b2_double_payment_safety.sql",
+      "group": "pembayaran",
+      "reason": "Keamanan pembayaran ganda (B2)."
+    },
+    {
+      "file": "20261031100000_prompter_b4_payment_alerts.sql",
+      "group": "pembayaran",
+      "reason": "Alert pembayaran (B4)."
+    },
+    {
+      "file": "20261101100000_prompter_b4_2_alert_notifications.sql",
+      "group": "pembayaran",
+      "reason": "Notifikasi alert pembayaran (B4.2)."
+    },
+    {
+      "file": "20261103170000_prompter_p0_2_payment_invoices.sql",
+      "group": "pembayaran",
+      "reason": "Invoice pembayaran P0-2; cek badan fn_apply_verified_payment B2 dan butuh migrasi pembayaran lain."
+    },
+    {
+      "file": "20261111130000_prompter_p0_3_doku_alert_coverage.sql",
+      "group": "pembayaran",
+      "reason": "Cakupan alert webhook DOKU (P0-3)."
+    }
+  ],
+  "forbidden": {
+    "projectNames": [
+      "umkmpro-ai",
+      "linoe-otp-test",
+      "apotek-binhafas",
+      "linoe-doku-sandbox"
+    ],
+    "rule": "Bundel hanya boleh dijalankan di proyek QA kosong. Dilarang memuat/menyentuh apa pun milik umkmpro-ai (proyek bersama UMKMpro, produksi) atau modul PUBLOE, MITAPENG, UMKMpro.",
+    "sqlPatterns": [
+      {
+        "name": "drop table",
+        "regex": "\\bdrop\\s+table\\b"
+      },
+      {
+        "name": "truncate table",
+        "regex": "\\btruncate\\s+table\\b"
+      },
+      {
+        "name": "alter tenants/user_profiles (milik UMKMpro)",
+        "regex": "alter\\s+table\\s+(if\\s+exists\\s+)?(only\\s+)?public\\.(tenants|user_profiles)\\b"
+      },
+      {
+        "name": "create extension",
+        "regex": "create\\s+extension\\b"
+      },
+      {
+        "name": "pg_cron schedule",
+        "regex": "cron\\.schedule\\s*\\("
+      }
+    ],
+    "allowedPublicTablePrefixes": [
+      "prompter_",
+      "_linoe_sandbox_"
+    ],
+    "allowedSharedTables": [
+      "tenants",
+      "user_profiles"
+    ],
+    "note": "Referensi proyek produksi/nyata (ref) tidak boleh ada di manifest, dokumen, maupun bundel; builder menyamarkan ref yang ada di KOMENTAR migrasi dan menolak bila muncul di luar komentar."
+  },
+  "splitAdvice": {
+    "singleFileKB": 162,
+    "recommendedParts": 3,
+    "note": "Satu berkas > 100 KB: pakai --parts 3 (sekitar 60/44/63 KB), jalankan berurutan; urutan migrasi tidak berubah.",
+    "parts": 3
+  },
+  "qaTools": [
+    {
+      "file": "scripts/qa/print-qa-reset-sql.mjs",
+      "purpose": "Mencetak SQL reset QA (tanpa koneksi DB), guard ref allowlist QA"
+    },
+    {
+      "file": "qa/qa2-rls-cross-tenant.sql",
+      "purpose": "Uji RLS lintas tenant untuk dijalankan Founder nanti di proyek QA (BELUM dijalankan; membatalkan diri lewat galat)"
+    }
+  ]
+}
