@@ -75,7 +75,7 @@ jobs:
       - name: Uji RLS lintas tenant (harus ALL_PASS | fails=0)
         run: |
           set -uo pipefail
-          out="$(psql -X -q -v ON_ERROR_STOP=1 -d postgres -f qa/qa2-rls-cross-tenant.sql 2>&1)"
+          out="$(psql -X -q -v ON_ERROR_STOP=1 -d postgres -f qa/qa2-rls-cross-tenant.sql 2>&1)" || true  # blok sengaja berakhir galat (exit 3)
           echo "$out" | grep -o 'QA2_RLS_RESULT.*' | cut -c1-300 || true
           echo "$out" | grep -q 'QA2_RLS_RESULT ALL_PASS | fails=0' || { echo "RLS bukan ALL_PASS"; exit 1; }
 
