@@ -252,3 +252,9 @@ Yang berubah di main sejak basis (#150-#153): `scripts/qa/real-e2e.mjs`, `inbox-
 | Bukan skema, tetap harus disiapkan terpisah (di luar PR ini) | Template email konfirmasi (`/auth/confirm`), Site URL/Redirect URL, SMTP Resend; `ADMIN_CENTER_ENABLED` tidak diisi |
 
 Tidak mengaktifkan QA-2: `QA2_ENABLED` dan `QA2_ACTIVATED` tidak disentuh.
+
+## 9. Penerapan otomatis (tanpa menempel SQL)
+Alternatif dari bagian 5 untuk Founder yang hanya punya HP: workflow manual `QA-2 schema apply` (mode `check`, `apply`, `rls-test`) menerapkan bundel `--parts 3` ke proyek QA lewat secret `QA_DB_URL` (Session pooler) di Environment `qa-real-email`.
+Frasa untuk mode `apply` tetap `APPROVE QA-2-SCHEMA-BUNDLE`. Langkah dan batas bukti: `docs/QA2_SCHEMA_APPLY.md`.
+Uji bundel di CI (Postgres sementara + stand-in, bukti SANDBOX): `.github/workflows/qa2-schema-bundle-test.yml`.
+Tidak mengaktifkan QA-2 (`QA2_ENABLED`/`QA2_ACTIVATED` tidak disentuh).

@@ -1,0 +1,79 @@
+name: QA-2 schema apply
+
+# QA-2: menerapkan bundel skema QA (3 bagian berurutan, tiap bagian satu transaksi) ke proyek Supabase QA
+# gasdqsadnjoknisloaec SAJA, tanpa Founder menempel SQL manual. Lihat docs/QA2_SCHEMA_APPLY.md.
+#  * Hanya workflow_dispatch manual. Tanpa push / pull_request / schedule.
+#  * Hanya dari main; Environment `qa-real-email` (reviewer Founder) harus menyetujui sebelum job berjalan.
+#  * mode=apply wajib frasa konfirmasi persis (dicek fail-closed di langkah tanpa secret DAN di skrip).
+#  * Satu secret saja, QA_DB_URL (Environment qa-real-email), dan hanya di SATU langkah (langkah eksekusi).
+#  * Ini BUKAN aktivasi QA-2: tidak membaca/menyentuh QA2_ENABLED atau QA2_ACTIVATED.
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "check = hanya baca | apply = terapkan skema (butuh frasa) | rls-test = uji RLS lintas tenant"
+        required: true
+        type: choice
+        default: check
+        options:
+          - check
+          - apply
+          - rls-test
+      confirm:
+        description: "Hanya untuk mode apply: ketik APPROVE QA-2-SCHEMA-BUNDLE"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qa-schema-apply
+  cancel-in-progress: false
+
+jobs:
+  schema-apply:
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: qa-real-email
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+
+      # Tanpa secret. Lapis pertama pengecekan mode/frasa (fail-closed); skrip memeriksa ulang.
+      - name: Validasi mode dan frasa konfirmasi
+        env:
+          QA_APPLY_MODE: ${{ inputs.mode }}
+          QA_APPLY_CONFIRM: ${{ inputs.confirm }}
+        run: |
+          case "$QA_APPLY_MODE" in
+            check|rls-test) ;;
+            apply)
+              if [ "$QA_APPLY_CONFIRM" != "APPROVE QA-2-SCHEMA-BUNDLE" ]; then
+                echo "DITOLAK: mode apply butuh frasa konfirmasi persis."
+                exit 2
+              fi
+              ;;
+            *) echo "DITOLAK: mode tidak dikenal."; exit 2 ;;
+          esac
+
+      # Tanpa secret: memastikan psql ada dan bundel valid dibangun dari repo.
+      - name: Pastikan psql dan validasi bundel (tanpa secret)
+        run: |
+          command -v psql || (sudo apt-get update && sudo apt-get install -y postgresql-client)
+          node scripts/qa/build-schema-bundle.mjs --check
+
+      # Satu-satunya langkah yang menerima secret. Env anak psql dibangun dari nol oleh skrip; URL/password tidak pernah dicetak.
+      - name: Jalankan (guard, lalu mode terpilih)
+        env:
+          QA_APPLY_MODE: ${{ inputs.mode }}
+          QA_APPLY_CONFIRM: ${{ inputs.confirm }}
+          QA_DB_URL: ${{ secrets.QA_DB_URL }}
+        run: node scripts/qa/apply-schema-bundle.mjs
