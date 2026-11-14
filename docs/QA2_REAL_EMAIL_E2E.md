@@ -40,6 +40,12 @@ Mencemari data pengguna, menghabiskan kuota/reputasi pengirim produksi, dan memi
 
 Semua hanya di Environment `qa-real-email`. Bukan secret repo, bukan secret produksi. Nilai tidak pernah masuk repo atau chat.
 
+## Sender-lock dan batas biaya
+- `QA_SENDER_EMAIL` dan `QA_INBOX_ADDRESS` wajib satu alamat tunggal `nama@qa.tanyopo.com` (konstanta beku `QA_SENDER_DOMAIN`), tanpa `+`. Ditolak: display-name, koma/titik koma/spasi/CRLF, `x.qa.tanyopo.com`, `tanyopo.com`, `qa.tanyopo.com.evil.com`, unicode/homoglyph.
+- Inbox ikut dikunci karena penyedia inbox belum dipilih dan kiriman ke alamat pihak lain adalah email nyata ke orang nyata. Bila kelak inbox harus di luar domain ini, ubah lewat PR terpisah.
+- `QA_MAX_EMAILS_PER_RUN`, bila diset, hanya boleh `1`. Guard hanya memvalidasi; penghitungan kirim per run harus ditegakkan `real-e2e.mjs`.
+- Batas Resend Free (verifikasi ulang di resend.com/pricing sebelum aktivasi): 100 email/hari dan 3.000/bulan (terverifikasi di halaman harga 2026-11-14). Apakah sent dan received dihitung gabungan TIDAK tertulis di halaman: anggap gabungan (UNKNOWN). Satu run = 1 kirim + 1 terima, sekitar 2 dari kuota.
+
 ## Estimasi biaya
 ESTIMASI: Rp0 bila cukup tier gratis (Supabase, Resend, inbox). Sekitar USD 25/bulan bila perlu Supabase berbayar. DNS: biaya sekali untuk sub-domain (umumnya Rp0 bila domain sudah ada).
 
@@ -54,7 +60,7 @@ Tiap langkah menunggu frasa persetujuan.
 
 ## Risiko dan guard
 - Salah target ke produksi: `assertRealQaEnv` menolak ref di daftar blokir, ref tidak cocok, dan variabel produksi (SERVICE_ROLE, DATABASE_URL, DOKU_*, MIDTRANS_*, dll.).
-- Pengirim produksi: `tanyopo.com` persis ditolak.
+- Pengirim/inbox: SENDER-LOCK (lihat bagian di bawah); selain `@qa.tanyopo.com` ditolak.
 - Kebocoran secret: pesan error hanya memuat nama variabel; ada `redact`.
 - Tanpa aktivasi: skrip keluar kode 3, adapter melempar `NOT_IMPLEMENTED`.
 - Berjalan tidak sengaja: manual saja, butuh variabel + frasa konfirmasi.
@@ -94,7 +100,6 @@ Memasukkan ref TIDAK mengaktifkan QA-2. Yang masih menahan: `QA2_ENABLED` tidak 
 Catatan keterbatasan proyek QA: skema LINOE belum diterapkan, dan objek bersama UMKMpro (`tenants`, `user_profiles`, `handle_new_user`) tidak ada di repo sehingga di QA akan berupa SIMULASI. Hasil QA-2 kelak bukan bukti bahwa jalur produksi identik.
 
 ### Residual (belum diselesaikan oleh PR ini)
-- Pengirim: hanya `@tanyopo.com` persis yang ditolak; sub-domain QA sengaja diizinkan.
 - `QA_PROJECT_REF_EXPECTED` tetap secret; kini hanya cek silang tambahan, bukan penentu (penentunya allowlist di repo).
 - Dengan allowlist terisi, langkah Guard di workflow bisa lulus bila semua variabel benar; langkah E2E tetap keluar kode 3 (NOT ACTIVATED).
 - Adapter inbox dan alur E2E belum ada; status tetap NOT ACTIVATED.
