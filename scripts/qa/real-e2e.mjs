@@ -2,6 +2,8 @@ import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { assertRealQaEnv, redact } from "./real-e2e-guard.mjs";
 import { createInboxAdapter } from "./inbox-adapter.mjs";
+import { createQaAdminClient } from "./qa-admin-client.mjs";
+import { createRealDriver } from "./real-e2e-driver.mjs";
 
 // QA-2 / jalur B (REAL email E2E). DESAIN SAJA: tidak aktif, tidak mengirim email, tidak membaca secret produksi.
 //  * Selalu menjalankan assertRealQaEnv lebih dulu (fail-closed).
@@ -31,39 +33,122 @@ function assertNotProduction(env) {
   }
 }
 
+export const DEFAULT_APP_URL = "http://localhost:3000";
+
+/**
+ * Pintu masuk yang dapat diuji (tanpa process.exit): semua efek lewat parameter. Urutan fail-closed:
+ * guard (exit 2) -> --guard-only -> tanpa QA2_ACTIVATED=true exit 3 TANPA membangun apa pun -> bangun dependensi nyata
+ * (gagal = exit 2, atau 3 bila inbox NOT_IMPLEMENTED; driver parsial ditutup) -> runRealE2E -> close driver (sekali) -> exit.
+ * Kode keluar 3 untuk "belum aktif" (process.exit(3) pada entri nyata lewat handler exit). Kesalahan tak terduga = exit 1.
+ * @param {{ argv: string[], env: Record<string, string | undefined>, factories: any, exit: (code: number) => void, io?: { log: (s: string) => void, error: (s: string) => void }, guardOptions?: { allowedRefs?: readonly string[] } }} o
+ */
+export async function runMain(o) {
+  const { argv, env, factories, exit } = o;
+  const io = o.io ?? { log: (s) => console.log(s), error: (s) => console.error(s) };
+  /** @param {unknown} err */
+  const msg = (err) => redact(String(err instanceof Error ? err.message : err), env);
+  /** @type {any} */
+  let driver = null;
+  try {
+    try {
+      assertNotProduction(env);
+      assertRealQaEnv(env, o.guardOptions);
+      assertMaxEmailsPerRun(env);
+    } catch (err) {
+      io.error(msg(err));
+      return exit(2);
+    }
+    if (argv.includes("--guard-only")) {
+      io.log("QA-2 guard: OK (hanya proyek QA, tanpa kredensial produksi)");
+      return exit(0);
+    }
+    io.log("QA-2 rencana langkah:");
+    for (const line of PLAN) io.log(`  ${line}`);
+    if (env.QA2_ACTIVATED !== "true") {
+      io.error("QA-2 NOT ACTIVATED: inbox adapter / infrastructure not provisioned");
+      return exit(3);
+    }
+    /** @type {RealE2EDeps} */
+    let deps;
+    try {
+      const qaUrl = String(env.QA_SUPABASE_URL);
+      const appUrl = env.QA_APP_URL === undefined || env.QA_APP_URL === "" ? DEFAULT_APP_URL : env.QA_APP_URL;
+      const identity = assertFixedIdentity(env.QA_INBOX_ADDRESS);
+      const allowedOrigins = buildAllowedOrigins(appUrl, qaUrl); // memvalidasi appUrl (lokal/https, bukan produksi)
+      const adminClient = factories.createQaAdminClient({
+        url: qaUrl,
+        secretKey: env.QA_SUPABASE_SECRET_KEY,
+        expectedRef: env.QA_PROJECT_REF_EXPECTED,
+        identityEmail: env.QA_INBOX_ADDRESS,
+      });
+      // Playwright diimpor dinamis oleh driver sendiri (gagal tertutup bila tidak terpasang); tidak ada browser disuntikkan.
+      driver = factories.createRealDriver({ appUrl, qaSupabaseUrl: qaUrl, allowedOrigins, env });
+      const inbox = factories.createInboxAdapter("resend", { fetch: factories.fetch, token: env.QA_INBOX_READ_TOKEN, address: identity });
+      deps = { env, appUrl, adminClient, inbox, driver, clock: { now: factories.now ?? (() => Date.now()) }, guardOptions: o.guardOptions };
+    } catch (err) {
+      const m = msg(err);
+      io.error(m);
+      return exit(m.startsWith("NOT_IMPLEMENTED") ? 3 : 2);
+    }
+    const result = await runRealE2E(deps);
+    io.log(result.json);
+    return exit(result.exitCode);
+  } catch (err) {
+    io.error(msg(err));
+    return exit(1);
+  } finally {
+    if (driver) {
+      const closeError = await closeDriverOnce(driver, env, []);
+      if (closeError) io.error(`driver.close gagal (dicatat, hasil run tidak berubah): ${closeError}`);
+    }
+  }
+}
+
 /**
  * @param {string[]} argv
  */
-async function main(argv) {
-  const env = process.env;
-  try {
-    assertNotProduction(env);
-    assertRealQaEnv(env);
-    assertMaxEmailsPerRun(env);
-  } catch (err) {
-    console.error(redact(String(err instanceof Error ? err.message : err), env));
-    process.exit(2);
-  }
-  if (argv.includes("--guard-only")) {
-    console.log("QA-2 guard: OK (hanya proyek QA, tanpa kredensial produksi)");
-    return;
-  }
-  console.log("QA-2 rencana langkah:");
-  for (const line of PLAN) console.log(`  ${line}`);
-  if (env.QA2_ACTIVATED !== "true") {
-    console.error("QA-2 NOT ACTIVATED: inbox adapter / infrastructure not provisioned");
-    process.exit(3);
-  }
-  // Walau diaktifkan, adapter belum ada: melempar NOT_IMPLEMENTED.
-  try {
-    createInboxAdapter("unset");
-  } catch (err) {
-    console.error(String(err instanceof Error ? err.message : err));
-    process.exit(3);
-  }
-  // Fail-closed: driver browser dan admin client nyata belum ada; runRealE2E hanya dipanggil dengan dependensi suntikan.
-  console.error("NOT_IMPLEMENTED: browser driver / admin client belum diprovisi");
-  process.exit(3);
+function main(argv) {
+  /** @type {number | undefined} */
+  let code;
+  return runMain({
+    argv,
+    env: process.env,
+    factories: { createQaAdminClient, createRealDriver, createInboxAdapter, fetch: globalThis.fetch, now: () => Date.now() },
+    exit: (c) => {
+      code = c;
+    },
+  }).then(() => {
+    // exit dipanggil SETELAH finally (close driver) selesai.
+    process.exit(code ?? 1);
+  });
+}
+
+/** @type {WeakMap<object, Promise<string | null>>} */
+const closedDrivers = new WeakMap();
+
+/**
+ * Menutup driver tepat SEKALI per objek (idempoten; pemanggilan kedua mengembalikan hasil yang sama). Tidak pernah melempar:
+ * galat close dikembalikan sebagai teks tersamar (tanpa secret/URL) agar tidak menutupi hasil run.
+ * @param {any} driver
+ * @param {Record<string, string | undefined>} env
+ * @param {string[]} extraSecrets
+ * @returns {Promise<string | null>}
+ */
+export function closeDriverOnce(driver, env, extraSecrets) {
+  if (!driver || typeof driver !== "object" || typeof driver.close !== "function") return Promise.resolve(null);
+  const prior = closedDrivers.get(driver);
+  if (prior) return prior;
+  const p = (async () => {
+    try {
+      await driver.close();
+      return null;
+    } catch (err) {
+      const first = String(err instanceof Error ? err.message : err).split("\n")[0];
+      return scrub(first, env, extraSecrets).replace(/[a-z][a-z0-9+.-]*:\/\/\S+/gi, "[URL]").slice(0, 200);
+    }
+  })();
+  closedDrivers.set(driver, p);
+  return p;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -346,6 +431,8 @@ export async function runRealE2E(deps) {
   /** @type {Record<string, unknown>} */
   const facts = { identity: email, emailsExpected: maxEmails, emailsRequested: 0 };
   let failure = null;
+  /** @type {string | null} */
+  let closeError = null;
 
   /** @param {number} n @param {() => Promise<string | void>} fn */
   const step = async (n, fn) => {
@@ -457,6 +544,9 @@ export async function runRealE2E(deps) {
       });
     } catch (err) {
       failure ??= String(err instanceof Error ? err.message : err);
+    } finally {
+      // WAJIB di semua jalur (sukses/gagal/throw/cleanup gagal). Idempoten; galat close dicatat, tidak mengubah hasil.
+      closeError = await closeDriverOnce(driver, env, secretsSeen);
     }
   }
 
@@ -471,6 +561,7 @@ export async function runRealE2E(deps) {
     steps,
     notRun: PLAN.map((_, i) => i + 1).filter((n) => !executed.has(n)),
     ...(failure === null ? {} : { error: failure }),
+    ...(closeError === null ? {} : { closeError }),
   };
   return { exitCode: failure === null ? EXIT.PASS : EXIT.FAIL, report, json: scrub(JSON.stringify(report, null, 2), env, secretsSeen) };
 }
