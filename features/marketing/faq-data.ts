@@ -19,6 +19,10 @@ export const FAQS = [
     a: "LINOE dikembangkan oleh PT Tanyopo Future Technology, perusahaan teknologi yang berlokasi di Aceh Selatan, Indonesia.",
   },
   {
+    q: "Apakah PUBLOE dan MITAPENG sudah tersedia?",
+    a: "Belum. PUBLOE dan MITAPENG adalah produk Tanyopo lain yang masih dalam pengembangan dan belum tersedia untuk publik; keduanya bukan bagian dari LINOE.",
+  },
+  {
     q: "Bisakah saya pakai tanpa UMKMpro AI?",
     a: "Bisa. Integrasi dengan UMKMpro AI sepenuhnya opsional. Anda bisa menambahkan produk secara langsung dan menggunakan seluruh fitur LINOE sebagai bisnis mandiri.",
   },
