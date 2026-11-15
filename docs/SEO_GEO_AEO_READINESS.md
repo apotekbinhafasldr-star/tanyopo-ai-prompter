@@ -61,6 +61,32 @@ Dokumentasi resmi Google menyatakan hasil kaya (rich result) FAQ tidak lagi dita
 - Tes baru (2 berkas) dan dokumen ini.
 - Tidak disentuh: `proxy.ts`, auth, migrasi, billing, RLS, env, Netlify/Supabase, modul PUBLOE/MITAPENG/UMKMpro, `features/oauth*`.
 
+## 3A. Audit sprint 2026-11-15 (main d19232a): apa yang benar-benar terhubung
+
+Dasar: kode di `main`, bukan situs hidup (URL produksi tidak diperiksa; isi yang tersaji BELUM TERVERIFIKASI). Klarifikasi Founder: AEO dan GEO belum terhubung ke situs. Pembuktian dari kode:
+
+| Komponen | Bukti di kode | Status |
+|---|---|---|
+| JSON-LD (Organization, WebSite, SoftwareApplication, FAQPage) | `lib/seo/json-ld.ts` dirender di `app/(marketing)/page.tsx` (landing saja) | TERHUBUNG; tanpa rating/review/offers/harga (dijaga tes) |
+| FAQ (AEO) | `features/marketing/faq-data.ts` satu sumber untuk UI dan FAQPage | TERHUBUNG. Celah: tidak ada jawaban tentang PUBLOE/MITAPENG, sehingga mesin jawaban tidak bisa membedakannya dari LINOE |
+| sitemap.xml / robots.txt | `app/sitemap.ts` (`/` + 4 legal), `app/robots.ts` (disallow `/api/` `/auth/`); exact-match di `proxy.ts` | TERHUBUNG, tidak ada bug |
+| noindex area privat/demo | layout `(app)`, `(auth)`, `admin`, `demo`, `onboarding`, `ops/payments` | TERHUBUNG |
+| llms.txt | Tidak ada `public/llms.txt`. `proxy.ts` hanya mengecualikan `.svg/.png/...` dan path exact tertentu, jadi `/llms.txt` akan dialihkan ke `/login` | TIDAK TERHUBUNG (B) |
+| Halaman FAQ/Help terpisah | Tidak ada di `main`; Help Center ada di PR #69 (Draft, belum merge) | TIDAK ADA (jangan diduplikasi) |
+| Fitur AEO/GEO pelanggan (`/seo`) | Ada, di dalam aplikasi login; bukan bagian situs publik | Terpisah dari situs publik |
+
+Status A/B/C:
+
+| Kode | Butir | Tindakan |
+|---|---|---|
+| A (diperbaiki PR ini) | FAQ status PUBLOE/MITAPENG (teks sama dengan `ECOSYSTEM_IN_DEVELOPMENT`; tanpa fitur/harga/tanggal) otomatis masuk FAQPage JSON-LD | `features/marketing/faq-data.ts`; tes `tests/unit/seo/seo-geo-aeo-connection.test.ts` |
+| A | Pagar tes: JSON-LD valid tanpa rating/review/offers, sitemap hanya halaman publik, `public/llms.txt` hanya boleh ada bila proxy mengizinkannya | tes yang sama |
+| B | Mengaktifkan `llms.txt`: butuh baris exact-match `/llms.txt` di `isPublicAsset()` (`proxy.ts`, gerbang autentikasi: perlu persetujuan Founder) lalu `public/llms.txt` berisi fakta berlabel. Nilai spekulatif, prioritas rendah | tidak diubah |
+| B | Domain kanonik final, verifikasi Search Console, DNS | Founder; kode memakai `NEXT_PUBLIC_APP_URL` / `URL` / `PRODUCTION_ORIGIN` (`*.netlify.app`) |
+| C | LCP/CWV nyata, isi robots/sitemap yang tersaji di produksi | belum diukur |
+
+Tindakan Founder minimal dari HP: lihat bagian 5.5 pada PR #138 (S1-S2: putuskan boleh diindeks, Search Console tag HTML, isi `NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION` di Netlify, deploy ulang, kirim `/sitemap.xml`). Perkiraan waktu tidak dicantumkan karena tidak ada bukti.
+
 ## 4. Risiko
 
 - Pengiriman GSC bergantung pada env yang diisi Founder; tanpa itu tidak ada efek (aman).
