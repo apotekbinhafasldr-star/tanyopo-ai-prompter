@@ -91,7 +91,7 @@ describe("XConnector — bagian X-spesifik yang siap", () => {
     const url = new URL(makeConnector(() => ok({})).connector.getAuthorizationUrlWithPkce("st", "chal"));
     expect(url.host).toBe("x.com");
     expect(url.searchParams.get("scope")!.split(" ").sort()).toEqual(
-      ["media.write", "offline.access", "tweet.read", "tweet.write", "users.read"].sort(),
+      ["offline.access", "tweet.read", "users.read"].sort(),
     );
     expect(url.searchParams.get("code_challenge")).toBe("chal");
     expect(url.searchParams.get("code_challenge_method")).toBe("S256");

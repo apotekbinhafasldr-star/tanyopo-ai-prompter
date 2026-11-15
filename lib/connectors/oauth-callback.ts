@@ -6,7 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { requireSessionContext } from "@/services/session";
 import { getConnector } from "@/lib/connectors/get-connector";
 import { encryptToken, isTokenCipherConfigured } from "@/lib/crypto/token-cipher";
-import { ConnectorConfigError } from "@/lib/connectors/types";
+import { ConnectorApiError, ConnectorConfigError } from "@/lib/connectors/types";
 import { logOauthFailure, logOauthPkceRejection, logOauthStateRejection } from "@/lib/connectors/safe-error-log";
 import {
   checkOauthState,
@@ -74,6 +74,12 @@ export async function handleConnectorOauthCallback(
   }
 
   if (oauthError) {
+    // Pengguna menolak = "denied". Untuk konektor PKCE (X), error OAuth lain
+    // (server_error, invalid_scope, unauthorized_client, ...) bukan pembatalan
+    // pengguna; pesannya dibedakan. Nilai `error` TIDAK pernah diteruskan.
+    if (pkceConnector && oauthError !== "access_denied") {
+      return redirectWith(request, { error: "provider_error" });
+    }
     return redirectWith(request, { error: "denied" });
   }
 
@@ -255,7 +261,18 @@ export async function handleConnectorOauthCallback(
     // Safe summary only (see safe-error-log.ts): never the error message,
     // the authorization code, the state, a cookie, or any token.
     logOauthFailure("callback_exception", platform, err);
-    const errorCode = err instanceof ConnectorConfigError ? "not_configured" : "connect_failed";
+    let errorCode = "connect_failed";
+    if (err instanceof ConnectorConfigError) {
+      errorCode = "not_configured";
+    } else if (
+      pkceConnector &&
+      err instanceof ConnectorApiError &&
+      (err.status === 400 || err.status === 401 || err.status === 402 || err.status === 403)
+    ) {
+      // X menolak: kode kedaluwarsa (30 dtk), kredensial/Callback URL salah,
+      // akses API atau kredit belum ada. Bukan bug aplikasi.
+      errorCode = "provider_access";
+    }
     return redirectWith(request, { error: errorCode });
   }
 }

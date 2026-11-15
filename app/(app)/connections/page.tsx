@@ -28,6 +28,9 @@ const ERROR_LABEL: Record<string, string> = {
   encryption_not_configured: "Penyimpanan token belum dikonfigurasi di server (kunci enkripsi kosong atau tidak valid). Hubungi admin.",
   server_not_configured: "Server belum dikonfigurasi untuk menyimpan koneksi (SUPABASE_SECRET_KEY kosong).",
   connect_failed: "Gagal menghubungkan akun. Silakan coba lagi.",
+  provider_error: "Penyedia (X) mengembalikan kesalahan saat otorisasi, bukan pembatalan dari Anda. Silakan coba lagi nanti.",
+  provider_access:
+    "X menolak permintaan: kode otorisasi kedaluwarsa (batas 30 detik), kredensial atau Callback URL aplikasi X tidak cocok, atau akun developer X belum punya akses/kredit API. Coba lagi; bila berulang hubungi admin.",
   provider_pending: "Koneksi ini belum dibuka: aplikasi LINOE masih menunggu persetujuan dari penyedia.",
 };
 
