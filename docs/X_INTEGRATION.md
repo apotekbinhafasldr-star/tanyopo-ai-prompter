@@ -1,6 +1,6 @@
 # Integrasi X (Twitter) — audit, status, biaya, blocker
 
-Terakhir diaudit: **2026-11-11**. Semua klaim dari dokumentasi resmi mencantumkan URL sumber; yang tidak terbaca ditandai **BELUM TERVERIFIKASI**.
+Terakhir diaudit: **2026-11-11**; alur OAuth PKCE diaudit ulang terhadap kode dan docs.x.com pada **2026-11-15**. Semua klaim dari dokumentasi resmi mencantumkan URL sumber; yang tidak terbaca ditandai **BELUM TERVERIFIKASI**.
 
 ## 1. Status (jujur)
 
@@ -13,12 +13,35 @@ Terakhir diaudit: **2026-11-11**. Semua klaim dari dokumentasi resmi mencantumka
 | Penjadwalan | **TIDAK ADA di sisi X** | Lihat bagian 4. |
 | MOCK E2E / SANDBOX E2E / REAL E2E / CUSTOMER READY | **BELUM** | Jangan diklaim. Penyedia belum memberi izin = **EXTERNAL BLOCKED**. |
 
+## 1A. Status & blocker (audit PKCE 2026-11-15)
+
+Jenis temuan: **A** bug kode, **B** blocker persetujuan/akses platform (bukan bug), **C** konfigurasi Founder, **D** UNKNOWN.
+
+| # | Jenis | Temuan | Bukti / tindakan |
+|---|---|---|---|
+| 1 | A (diperbaiki) | Callback memetakan SEMUA `error` X ke "denied" (server_error dsb. tampak seperti pembatalan pengguna) | `oauth-callback.ts` (blok `oauthError`): konektor PKCE: `access_denied` = `denied`, lainnya = `provider_error` |
+| 2 | A (diperbaiki) | Penukaran token ditolak X (kode >30 dtk, kredensial/Callback URL salah, akses/kredit) hanya jadi "Gagal menghubungkan" | `oauth-callback.ts` (`catch`): 400/401/402/403 pada konektor PKCE = `provider_access`, pesan Indonesia di `connections/page.tsx` |
+| 3 | A (diperbaiki) | Scope Hubungkan meminta `tweet.write` + `media.write` padahal tidak ada posting | `X_CONNECT_SCOPES` di `x-api-client.ts`, dipakai `x-connector.ts` |
+| 4 | A (diperbaiki) | `X_REDIRECT_URI` salah path/http tidak terdeteksi sampai X menolak (exact-match) | `isValidXRedirectUri` di `x-pkce.ts`; nilai tak valid = `isConfigured()` false |
+| 5 | A (diperbaiki) | Refresh token + rotasi tidak punya kode (access token 2 jam; `expires_at` lewat = "sambungkan ulang") | `x-token-refresh.ts` (orkestrasi murni, penyimpanan disuntik, token baru disimpan terenkripsi sebelum dikembalikan; 400/401 = ACTION_REQUIRED). **Belum ada pemanggil**: adaptor Supabase dan penjadwal refresh = infra, butuh persetujuan Founder |
+| 6 | A (sudah benar, dikunci tes) | PKCE S256 (32 byte acak = 43 karakter), verifier di cookie httpOnly terikat state+tenant+user, Path hanya callback, dihapus sekali pakai, TTL 300 dtk, token tidak di URL/log, Basic auth saat tukar kode | `x-pkce.ts`, `oauth-state.ts`, tes RFC 7636 Appendix B |
+| 7 | B | Akses API X berbayar: model **pay-per-use**, tanpa tier Free/Basic/Pro di halaman harga; kredit harus dibeli, saldo habis = API ditolak. Buat post US$0,015 (berisi URL US$0,200), baca data sendiri US$0,001, baca user US$0,010 | docs.x.com/x-api/getting-started/pricing.md (2026-11-15). Halaman tidak menyebut persetujuan/review untuk pay-per-use; review app: **UNKNOWN** |
+| 8 | B | X Ads API (iklan) butuh persetujuan Ads + OAuth 1.0a | bagian 2; tetap tidak didukung |
+| 9 | C | `X_CLIENT_ID`, `X_CLIENT_SECRET`, `X_REDIRECT_URI` di server; Callback URL di X Developer Console persis sama; tipe App confidential | tidak diubah di PR ini |
+| 10 | C | Saklar `X_OAUTH_PKCE_WIRED` tetap `false` (kode, bukan env) | butuh frasa persetujuan Founder |
+| 11 | D | Skema header klien rahasia tidak disebut dokumen (kode: Basic + `client_id` di badan); badan penukaran kode tidak ditampilkan; refresh token berotasi/umurnya tidak disebut | verifikasi pada uji sandbox; kode menangani rotasi maupun tidak |
+| 12 | D | Waktu persetujuan akun developer/App | tidak ada bukti di dokumentasi; jangan dijanjikan |
+
+**Syarat sebelum saklar boleh `true`**: (a) kredensial + Callback URL (C) terisi; (b) kredit X dibeli dan batas belanja kecil; (c) uji sandbox sekali dengan akun X uji milik Founder membuktikan item 11; (d) pemanggil refresh (item 5) tersambung bila X akan dipakai lebih dari 2 jam; (e) frasa persetujuan Founder. Soft-launch (maks 10 tenant, trial 14 hari, pembayaran OFF, iklan otomatis OFF): X tidak diperlukan; posting otomatis tidak ada.
+
+**Langkah Founder dari HP (Chrome Android), hanya bila X ingin diaktifkan**: 1) buka console.x.com, masuk akun X, terima Developer Agreement, New App. 2) Aktifkan OAuth 2.0, tipe App *confidential*, Callback URL `https://<domain>/api/connections/x/callback`. 3) Salin Client ID/Secret ke Netlify (butuh frasa persetujuan). 4) Beli kredit kecil + batas belanja. 5) Beri frasa persetujuan saklar.
+
 ## 2. Temuan audit kode lama (`lib/connectors/x-connector.ts`)
 
 1. **Host & autentikasi iklan tidak sesuai dokumen.** Kode lama memakai `https://ads-api.twitter.com/12` dengan `Authorization: Bearer <token OAuth 2.0>`. Dokumen resmi: host Ads API `https://ads-api.x.com`, versi di path pertama (contoh `/6/accounts`), **hanya OAuth 1.0a**, dan aplikasi harus **disetujui untuk akses Ads** ([making-authenticated-requests](https://docs.x.com/x-ads-api/fundamentals/making-authenticated-requests.md), diakses 2026-11-11). Versi `12` dan Bearer OAuth 2.0 tidak terbukti. Semua operasi iklan sekarang melempar `ConnectorConfigError` tanpa mengirim permintaan.
 2. **Tanpa PKCE.** Dokumen mencantumkan `code_challenge` + `code_challenge_method` (`S256`/`plain`) pada URL otorisasi ([authorization-code](https://docs.x.com/fundamentals/authentication/oauth-2-0/authorization-code.md), 2026-11-11). Kode lama tidak mengirimnya.
 3. **Host usang.** `twitter.com/i/oauth2/authorize` dan `api.twitter.com/2/oauth2/*` diganti `x.com/i/oauth2/authorize` dan `api.x.com/2/oauth2/{token,revoke}` sesuai dokumen. (Apakah host lama masih meneruskan: BELUM TERVERIFIKASI; tidak dipakai lagi.)
-4. **Scope salah.** `ads.read ads.write` bukan scope yang tercantum di tabel scope OAuth 2.0. Scope publikasi sekarang: `tweet.read tweet.write users.read media.write offline.access` (semua ada di tabel scope dokumen).
+4. **Scope salah.** `ads.read ads.write` bukan scope yang tercantum di tabel scope OAuth 2.0. Scope alur Hubungkan sekarang minimum: `tweet.read users.read offline.access` (`X_CONNECT_SCOPES`); `tweet.write`/`media.write` ada di `X_PUBLISH_SCOPES` tetapi baru diminta bila posting disetujui Founder (pengguna perlu otorisasi ulang).
 5. Statistik iklan memakai `reach: 0` dan field tebakan — dihapus bersama jalur Ads.
 
 ## 3. Spesifikasi yang dipakai (sumber resmi, diakses 2026-11-11)

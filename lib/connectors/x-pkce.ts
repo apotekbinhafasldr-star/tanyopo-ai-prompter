@@ -51,3 +51,27 @@ export function buildXAuthorizationUrl(input: XAuthorizationUrlInput): string {
   url.searchParams.set("code_challenge_method", "S256");
   return url.toString();
 }
+
+/** Path callback tetap aplikasi (app/api/connections/x/callback/route.ts). */
+export const X_CALLBACK_PATH = "/api/connections/x/callback";
+
+/**
+ * X mewajibkan `redirect_uri` PERSIS sama dengan Callback URL di App
+ * (exact-match). Di sini hanya memastikan nilai env masuk akal: https
+ * (http hanya untuk localhost), tanpa query/fragment/kredensial, dan path =
+ * route callback kita. Salah satu gagal -> konektor dianggap belum
+ * dikonfigurasi (fail-closed) daripada mengirim pengguna ke halaman error X.
+ */
+export function isValidXRedirectUri(value: string | undefined): boolean {
+  if (!value) return false;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  const local = url.hostname === "localhost" || url.hostname === "127.0.0.1";
+  if (url.protocol !== "https:" && !(local && url.protocol === "http:")) return false;
+  if (url.search || url.hash || url.username || url.password) return false;
+  return url.pathname === X_CALLBACK_PATH;
+}

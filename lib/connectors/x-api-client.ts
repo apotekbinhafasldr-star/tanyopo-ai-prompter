@@ -19,7 +19,19 @@ export const X_API_BASE_URL = "https://api.x.com";
 export const X_TOKEN_URL = `${X_API_BASE_URL}/2/oauth2/token`;
 export const X_REVOKE_URL = `${X_API_BASE_URL}/2/oauth2/revoke`;
 
-/** Scope minimum untuk posting organik + gambar/video + identitas + refresh token. */
+/**
+ * Scope minimum untuk MENYAMBUNGKAN akun: baca identitas (`users.read` +
+ * `tweet.read` untuk GET /2/users/me) dan refresh token (`offline.access`).
+ * Tanpa `tweet.write`/`media.write`: LINOE belum memposting apa pun ke X,
+ * jadi izin tulis tidak diminta dari pengguna (least privilege).
+ */
+export const X_CONNECT_SCOPES = ["tweet.read", "users.read", "offline.access"] as const;
+
+/**
+ * Scope untuk posting organik + gambar/video + identitas + refresh token.
+ * TIDAK dipakai oleh alur Hubungkan; baru dipakai bila posting disetujui
+ * Founder (butuh otorisasi ulang pengguna).
+ */
 export const X_PUBLISH_SCOPES = ["tweet.read", "tweet.write", "users.read", "media.write", "offline.access"] as const;
 
 /** Dokumen X: segmen APPEND dijaga <= 5 MB (maksimum server 8 MB). */
