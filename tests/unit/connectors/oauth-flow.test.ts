@@ -726,6 +726,16 @@ describe.each(PLATFORMS)("callback — $platform", ({ platform, cookie, callback
       expect(h.connector.exchangeCodeForToken).not.toHaveBeenCalled();
     });
 
+    it("does not present a non-denial provider error as a user cancel, and spends no code", async () => {
+      arm();
+      const res = await run("error=server_error&error_description=SECRETTEXT&state=STATE");
+      expect(location(res).searchParams.get("error")).toBe("provider_error");
+      expect(location(res).toString()).not.toContain("SECRETTEXT");
+      expect(h.jar.has(cookie)).toBe(false);
+      expect(h.connector.exchangeCodeForToken).not.toHaveBeenCalled();
+      expect(db().ops).toHaveLength(0);
+    });
+
     it("writes nothing when the code exchange fails", async () => {
       h.connector.exchangeCodeForToken = vi.fn(async () => {
         throw new Error("boom");
