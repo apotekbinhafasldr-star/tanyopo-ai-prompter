@@ -14,6 +14,11 @@ export async function GET(request: NextRequest) {
   }
   const configured = connector.isConfigured();
   if (!configured) {
+    // Honest reason: a malformed/mismatched redirect URI is not "credentials missing".
+    const problem = (connector as { configProblem?: () => string | null }).configProblem?.();
+    if (problem?.startsWith("redirect_uri_")) {
+      return NextResponse.redirect(new URL("/connections?error=redirect_uri_invalid", request.url));
+    }
     return NextResponse.redirect(new URL("/connections?error=not_configured", request.url));
   }
   if (!canStartOauth("TIKTOK", { connectorExists: true, configured })) {
