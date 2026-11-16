@@ -24,19 +24,22 @@ const TOTAL_STEPS = 8;
 const initialState: OnboardingActionState = { error: null };
 
 const selectClass =
-  "h-10 rounded-[var(--radius-md)] border border-border-strong bg-surface px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40";
+  "h-11 rounded-[var(--radius-md)] border border-border-strong bg-surface px-3 sm:h-10 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40";
 
 function OptionGrid({
   options,
   value,
   onChange,
+  label,
 }: {
   options: readonly { value: string; label: string }[];
   value: string;
   onChange: (v: string) => void;
+  /** Accessible name of the group (the question being answered). */
+  label: string;
 }) {
   return (
-    <div className="grid grid-cols-2 gap-3" role="group">
+    <div className="grid grid-cols-1 gap-3 min-[400px]:grid-cols-2" role="group" aria-label={label}>
       {options.map((opt) => {
         const isSelected = value === opt.value;
         return (
@@ -123,6 +126,9 @@ export function OnboardingWizard() {
   return (
     <Card className="w-full max-w-lg">
       <CardContent className="p-5 sm:p-8">
+        <p className="mb-2 text-xs text-muted-foreground">
+          Langkah {step} dari {TOTAL_STEPS}
+        </p>
         <div className="mb-6 flex items-center gap-1.5" aria-hidden>
           {Array.from({ length: TOTAL_STEPS }).map((_, i) => (
             <div
@@ -250,6 +256,7 @@ export function OnboardingWizard() {
                 Pilih yang paling sesuai — Anda bisa mengubahnya nanti.
               </p>
               <OptionGrid
+                label="Jenis bisnis"
                 options={businessCategories}
                 value={businessCategory}
                 onChange={setBusinessCategory}
@@ -267,6 +274,7 @@ export function OnboardingWizard() {
                 {isEn ? "What do you sell?" : "Apa yang Anda jual"}
               </Label>
               <Textarea
+                autoFocus
                 id="whatDoYouSellInput"
                 value={whatDoYouSell}
                 onChange={(e) => setWhatDoYouSell(e.target.value)}
@@ -284,7 +292,7 @@ export function OnboardingWizard() {
               <p className="text-sm text-muted-foreground">
                 AI akan menyesuaikan strategi berdasarkan tujuan ini.
               </p>
-              <OptionGrid options={primaryGoals} value={primaryGoal} onChange={setPrimaryGoal} />
+              <OptionGrid label="Tujuan utama" options={primaryGoals} value={primaryGoal} onChange={setPrimaryGoal} />
             </div>
           )}
 

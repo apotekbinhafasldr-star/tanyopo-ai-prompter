@@ -8,7 +8,8 @@ export type ConnectionStatus =
   | "NOT_AVAILABLE"
   | "NOT_CONFIGURED"
   | "PROVIDER_PENDING"
-  | "RECONNECT_REQUIRED";
+  | "RECONNECT_REQUIRED"
+  | "BLOCKED_EXTERNAL";
 
 const STATUS_LABEL: Record<ConnectionStatus, string> = {
   CONNECTED: "Terhubung",
@@ -19,6 +20,7 @@ const STATUS_LABEL: Record<ConnectionStatus, string> = {
   NOT_CONFIGURED: "Belum Dikonfigurasi",
   PROVIDER_PENDING: "Menunggu Persetujuan Penyedia",
   RECONNECT_REQUIRED: "Perlu Hubungkan Ulang",
+  BLOCKED_EXTERNAL: "Diblokir Penyedia",
 };
 
 const STATUS_VARIANT: Record<
@@ -33,6 +35,7 @@ const STATUS_VARIANT: Record<
   NOT_CONFIGURED: "outline",
   PROVIDER_PENDING: "info",
   RECONNECT_REQUIRED: "warning",
+  BLOCKED_EXTERNAL: "danger",
 };
 
 /**

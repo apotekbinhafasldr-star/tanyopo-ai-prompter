@@ -17,13 +17,13 @@ export const PasswordInput = React.forwardRef<HTMLInputElement, React.InputHTMLA
 
     return (
       <div className="relative">
-        <Input ref={ref} type={visible ? "text" : "password"} className={cn("pr-10", className)} {...props} />
+        <Input ref={ref} type={visible ? "text" : "password"} className={cn("pr-11", className)} {...props} />
         <button
           type="button"
           onClick={() => setVisible((current) => !current)}
           aria-label={visible ? "Sembunyikan kata sandi" : "Tampilkan kata sandi"}
           aria-pressed={visible}
-          className="absolute inset-y-0 right-0 flex w-10 items-center justify-center text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 rounded-r-[var(--radius-md)]"
+          className="absolute inset-y-0 right-0 flex w-11 items-center justify-center text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 rounded-r-[var(--radius-md)]"
         >
           {visible ? <EyeOff className="size-4" aria-hidden /> : <Eye className="size-4" aria-hidden />}
         </button>

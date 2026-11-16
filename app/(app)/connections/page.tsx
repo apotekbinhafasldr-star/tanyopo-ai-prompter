@@ -13,22 +13,32 @@ import { DisconnectButton } from "@/features/connections/disconnect-button";
 import { MetaPagePicker } from "@/features/connections/meta-page-picker";
 import { MetaAdAccountSection } from "@/features/connections/meta-ad-account-section";
 import { isFeatureEnabled } from "@/lib/feature-flags";
-import type { ConnectorPlatform } from "@/types/database";
+import type { ConnectorCapability, ConnectorPlatform } from "@/types/database";
 
 export const metadata: Metadata = { title: "Connections — LINOE" };
 
 const ERROR_LABEL: Record<string, string> = {
   owner_required: "Hanya Owner yang dapat menghubungkan atau memutuskan akun.",
-  not_available: "Connector ini belum dibangun.",
-  not_configured: "Connector belum dikonfigurasi di server (kredensial belum diisi).",
+  not_available: "Koneksi ini belum tersedia.",
+  not_configured: "Koneksi ini belum siap dipakai. Hubungi admin LINOE.",
   denied: "Anda membatalkan proses koneksi.",
   invalid_state: "Sesi koneksi kedaluwarsa atau tidak valid. Silakan coba lagi.",
   no_ad_account: "Tidak ditemukan akun iklan pada akun Anda.",
   save_failed: "Gagal menyimpan koneksi dengan aman. Koneksi belum aktif; silakan coba lagi.",
-  encryption_not_configured: "Penyimpanan token belum dikonfigurasi di server (kunci enkripsi kosong atau tidak valid). Hubungi admin.",
-  server_not_configured: "Server belum dikonfigurasi untuk menyimpan koneksi (SUPABASE_SECRET_KEY kosong).",
+  encryption_not_configured: "Penyimpanan koneksi yang aman belum siap. Koneksi belum aktif; hubungi admin LINOE.",
+  server_not_configured: "Layanan penyimpanan koneksi belum siap. Koneksi belum aktif; hubungi admin LINOE.",
   connect_failed: "Gagal menghubungkan akun. Silakan coba lagi.",
   provider_pending: "Koneksi ini belum dibuka: aplikasi LINOE masih menunggu persetujuan dari penyedia.",
+};
+
+const CAPABILITY_LABEL: Record<ConnectorCapability, string> = {
+  CONNECT_ACCOUNT: "Hubungkan akun",
+  READ_ANALYTICS: "Baca analitik",
+  PUBLISH_CONTENT: "Publikasi konten",
+  CREATE_CAMPAIGN: "Buat campaign",
+  CREATE_AD: "Buat iklan",
+  UPDATE_BUDGET: "Ubah budget",
+  PAUSE_CAMPAIGN: "Jeda campaign",
 };
 
 const CONNECTED_LABEL: Record<ConnectorPlatform, string> = {
@@ -36,6 +46,8 @@ const CONNECTED_LABEL: Record<ConnectorPlatform, string> = {
   TIKTOK: "TikTok",
   X: "X",
 };
+
+const NOT_READY_HINT = "Koneksi ini belum diaktifkan oleh LINOE, jadi tombol Hubungkan belum tersedia. Hubungi admin bila perlu.";
 
 const PLATFORM_INFO: Record<
   ConnectorPlatform,
@@ -46,23 +58,21 @@ const PLATFORM_INFO: Record<
     title: "Facebook & Instagram",
     subtitle: "Meta Marketing API",
     authorizePath: "/api/connections/meta/authorize",
-    notConfiguredHint: "Tambahkan META_APP_ID, META_APP_SECRET, dan META_REDIRECT_URI di server untuk mengaktifkan.",
+    notConfiguredHint: NOT_READY_HINT,
   },
   TIKTOK: {
     icon: Music2,
     title: "TikTok",
     subtitle: "TikTok for Business",
     authorizePath: "/api/connections/tiktok/authorize",
-    notConfiguredHint:
-      "Tambahkan TIKTOK_APP_ID, TIKTOK_APP_SECRET, dan TIKTOK_REDIRECT_URI di server untuk mengaktifkan.",
+    notConfiguredHint: NOT_READY_HINT,
   },
   X: {
     icon: XIcon,
     title: "X",
     subtitle: "X Ads API",
     authorizePath: "/api/connections/x/authorize",
-    notConfiguredHint:
-      "Koneksi X belum aktif: butuh X_CLIENT_ID, X_CLIENT_SECRET, dan X_REDIRECT_URI di server, serta alur otorisasi PKCE yang belum diaktifkan.",
+    notConfiguredHint: "Koneksi X belum aktif dan belum dapat dipakai. Kami akan memberi tahu saat tersedia.",
   },
 };
 
@@ -155,13 +165,15 @@ export default async function ConnectionsPage({
       </div>
 
       {error ? (
-        <div className="rounded-[var(--radius-md)] bg-danger-muted p-4 text-sm text-danger">
-          {ERROR_LABEL[error] ?? "Terjadi kesalahan."}
+        <div role="alert" className="rounded-[var(--radius-md)] bg-danger-muted p-4 text-sm text-danger">
+          {ERROR_LABEL[error] ?? "Terjadi kesalahan. Silakan coba lagi."}
         </div>
       ) : null}
       {connected ? (
-        <div className="rounded-[var(--radius-md)] bg-success-muted p-4 text-sm text-success">
-          Berhasil terhubung ke {CONNECTED_LABEL[connected as ConnectorPlatform] ?? connected}.
+        <div role="status" className="rounded-[var(--radius-md)] bg-success-muted p-4 text-sm text-success">
+          {CONNECTED_LABEL[connected as ConnectorPlatform]
+            ? `Berhasil terhubung ke ${CONNECTED_LABEL[connected as ConnectorPlatform]}.`
+            : "Berhasil terhubung."}
         </div>
       ) : null}
 
@@ -228,9 +240,9 @@ function ConnectorCard({
   return (
     <Card>
       <CardContent className="flex flex-col gap-4 p-5">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="flex size-10 items-center justify-center rounded-[var(--radius-md)] bg-surface-muted">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex size-10 shrink-0 items-center justify-center rounded-[var(--radius-md)] bg-surface-muted">
               <Icon className="size-5 text-foreground" aria-hidden />
             </div>
             <div>
@@ -242,7 +254,7 @@ function ConnectorCard({
         </div>
 
         {account?.external_account_name ? (
-          <p className="text-xs text-muted-foreground">
+          <p className="break-words text-xs text-muted-foreground">
             {account.external_account_name}
             {account.last_refreshed_at ? ` · Terhubung ${formatDate(account.last_refreshed_at)}` : ""}
           </p>
@@ -267,7 +279,7 @@ function ConnectorCard({
           <p className="text-xs text-muted-foreground">{info.notConfiguredHint}</p>
         ) : hasStoredConnection ? (
           <div className="flex flex-col gap-2">
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               {canStartOauth ? (
                 <Button asChild size="sm" variant="secondary">
                   <a href={info.authorizePath}>Sambungkan Ulang</a>
@@ -326,7 +338,7 @@ function ConnectorCard({
             <ul className="flex flex-col gap-1">
               {capabilities.map((cap) => (
                 <li key={cap.capability} className="flex items-center justify-between gap-2 text-xs">
-                  <span className="text-muted-foreground">{cap.capability}</span>
+                  <span className="min-w-0 text-muted-foreground">{CAPABILITY_LABEL[cap.capability] ?? cap.capability}</span>
                   <StatusPill status={capabilityStatusToPill(cap.status)} />
                 </li>
               ))}
@@ -345,7 +357,7 @@ function capabilityStatusToPill(status: CapabilityRow["status"]): ConnectionStat
     case "REQUIRES_APPROVAL":
       return "ACTION_REQUIRED";
     case "BLOCKED_EXTERNAL":
-      return "EXPIRED";
+      return "BLOCKED_EXTERNAL";
     case "UNSUPPORTED":
       return "NOT_AVAILABLE";
     case "NOT_CONFIGURED":
@@ -370,9 +382,9 @@ function PlaceholderCard({
   return (
     <Card>
       <CardContent className="flex flex-col gap-4 p-5">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="flex size-10 items-center justify-center rounded-[var(--radius-md)] bg-surface-muted">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex size-10 shrink-0 items-center justify-center rounded-[var(--radius-md)] bg-surface-muted">
               <Icon className="size-5 text-foreground" aria-hidden />
             </div>
             <div>

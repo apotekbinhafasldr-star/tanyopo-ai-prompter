@@ -20,10 +20,12 @@ const buttonVariants = cva(
         link: "text-brand underline-offset-4 hover:underline",
       },
       size: {
-        sm: "h-8 px-3 text-xs",
-        md: "h-10 px-4",
+        // Below the `sm` breakpoint (phones) every size is >=44px tall; the compact
+        // desktop heights return from 640px up.
+        sm: "h-11 px-3 text-xs sm:h-8",
+        md: "h-11 px-4 sm:h-10",
         lg: "h-12 px-6 text-base",
-        icon: "h-10 w-10",
+        icon: "size-11 sm:size-10",
       },
     },
     defaultVariants: {
