@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "check = hanya baca | apply = terapkan skema (butuh frasa) | rls-test = uji RLS lintas tenant"
+        description: "check = hanya baca | apply = terapkan skema (butuh frasa) | rls-test = uji RLS lintas tenant | diagnose = hanya baca ACL/grant | grants = bagian ke-4 grant minimal (butuh frasa)"
         required: true
         type: choice
         default: check
@@ -19,8 +19,10 @@ on:
           - check
           - apply
           - rls-test
+          - diagnose
+          - grants
       confirm:
-        description: "Hanya untuk mode apply: ketik APPROVE QA-2-SCHEMA-BUNDLE"
+        description: "Hanya untuk apply: APPROVE QA-2-SCHEMA-BUNDLE | hanya untuk grants: APPROVE QA-2-SCHEMA-GRANTS"
         required: false
         type: string
         default: ""
@@ -54,10 +56,16 @@ jobs:
           QA_APPLY_CONFIRM: ${{ inputs.confirm }}
         run: |
           case "$QA_APPLY_MODE" in
-            check|rls-test) ;;
+            check|rls-test|diagnose) ;;
             apply)
               if [ "$QA_APPLY_CONFIRM" != "APPROVE QA-2-SCHEMA-BUNDLE" ]; then
                 echo "DITOLAK: mode apply butuh frasa konfirmasi persis."
+                exit 2
+              fi
+              ;;
+            grants)
+              if [ "$QA_APPLY_CONFIRM" != "APPROVE QA-2-SCHEMA-GRANTS" ]; then
+                echo "DITOLAK: mode grants butuh frasa konfirmasi persis."
                 exit 2
               fi
               ;;

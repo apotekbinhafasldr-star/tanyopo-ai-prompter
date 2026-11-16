@@ -7,6 +7,9 @@
 //   apply     wajib QA_APPLY_CONFIRM == "APPROVE QA-2-SCHEMA-BUNDLE" (persis). Menjalankan `check` dulu; hanya bila proyek KOSONG
 //             (atau terpasang sebagian dari bundel ini) lalu bagian 1,2,3 berurutan, berhenti di galat pertama, lalu verifikasi akhir.
 //   rls-test  qa/qa2-rls-cross-tenant.sql (sengaja berakhir galat QA2_RLS_RESULT); hanya bila skema sudah terpasang + terverifikasi.
+//   diagnose  BACA-SAJA: tiap sub-syarat ACL (grant) satu baris t/f/MISSING, ACL relasi, default privileges, role. Tidak menulis.
+//   grants    wajib QA_APPLY_CONFIRM == "APPROVE QA-2-SCHEMA-GRANTS". Bagian ke-4 (qa/qa2-grants.sql, grant minimal, idempotent), hanya bila
+//             15 migrasi terpasang dan HANYA indikator service_role_access/app_table_grants yang salah. Tidak mengulang migrasi.
 // Kode keluar: 0 sukses | 1 gagal verifikasi/eksekusi | 2 ditolak guard (sebelum/tanpa koneksi atau proyek tidak dikenal).
 // TIDAK ada fungsi drop/reset/truncate proyek. Tidak pernah mencetak URL/password.
 import { spawnSync } from "node:child_process";
@@ -16,9 +19,25 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { APPROVAL_PHRASE, REAL_REFS, buildBundle, loadManifest } from "./build-schema-bundle.mjs";
 import { ALLOWED_QA_PROJECT_REFS } from "./qa-project-allowlist.mjs";
+import { Q_DIAG_DEFACL, Q_DIAG_RELACL, Q_DIAG_ROLES, buildAclQuery } from "./qa-acl-requirements.mjs";
 
 export { APPROVAL_PHRASE };
-export const MODES = Object.freeze(["check", "apply", "rls-test"]);
+export const MODES = Object.freeze(["check", "apply", "rls-test", "diagnose", "grants"]);
+export const GRANTS_PHRASE = "APPROVE QA-2-SCHEMA-GRANTS";
+export const GRANTS_FILE = "qa/qa2-grants.sql";
+/** Indikator yang boleh salah agar mode grants berjalan (semua indikator lain harus OK). */
+export const GRANT_FIXABLE_INDICATORS = Object.freeze(["service_role_access", "app_table_grants"]);
+/** Pola yang tidak boleh ada di SQL grants (di luar komentar): lapis kedua selain tes. */
+export const GRANTS_FORBIDDEN = Object.freeze([
+  /\bgrant\s+all\b/i,
+  /\bdefault\s+privileges\b/i,
+  /\bwith\s+grant\s+option\b/i,
+  /\bto\s+(anon|public)\b/i,
+  /\b(alter|drop|create)\s+policy\b/i,
+  /\b(enable|disable|force|no\s+force)\s+row\s+level\s+security\b/i,
+  /\balter\s+table\b/i,
+  /\b(grant|revoke)\b[^;]*\b(update|delete)\b[^;]*\bprompter_subscriptions\b[^;]*\bto\s+authenticated\b/i,
+]);
 export const EXIT = Object.freeze({ OK: 0, FAIL: 1, REFUSED: 2 });
 export const PARTS = 3;
 export const RLS_FILE = "qa/qa2-rls-cross-tenant.sql";
@@ -284,6 +303,7 @@ export async function runApply(deps = {}) {
   const mode = String(env.QA_APPLY_MODE ?? deps.mode ?? "");
   if (!MODES.includes(mode)) return refuse(`mode tidak dikenal (harus salah satu: ${MODES.join(", ")})`);
   if (mode === "apply" && env.QA_APPLY_CONFIRM !== APPROVAL_PHRASE) return refuse("mode apply butuh frasa konfirmasi persis (tidak cocok)");
+  if (mode === "grants" && env.QA_APPLY_CONFIRM !== GRANTS_PHRASE) return refuse("mode grants butuh frasa konfirmasi persis (tidak cocok)");
   const badEnv = forbiddenEnvNames(env);
   if (badEnv.length) return refuse(`env proses memuat variabel terlarang: ${badEnv.join(", ")}`);
   let conn;
@@ -371,6 +391,68 @@ export async function runApply(deps = {}) {
     }
     emit(`CHECK: ${before.state} - tidak ada yang ditulis.`);
     return finish(EXIT.FAIL, `CHECK: ${before.state}`, beforeSummary);
+  }
+
+  if (mode === "diagnose") {
+    // BACA-SAJA. Semua kueri lolos assertReadOnly (SELECT tunggal). Keluaran tidak memuat data baris atau rahasia.
+    const rows = (sql) => {
+      const r = psql(sql, { readOnly: true });
+      return r.status === 0 ? { ok: true, lines: r.stdout.trim().split("\n").filter(Boolean) } : { ok: false, err: tail(r.stderr, 3) };
+    };
+    const acl = rows(buildAclQuery());
+    if (!acl.ok) {
+      emit(`DIAGNOSE: kueri ACL gagal: ${acl.err}`);
+      return finish(EXIT.FAIL, "DIAGNOSE gagal dieksekusi", beforeSummary);
+    }
+    const bad = [];
+    for (const line of acl.lines) {
+      const [, ind, role, obj, priv, val] = line.split("|");
+      const forbidden = ind === "terlarang";
+      const wrong = forbidden ? val === "t" : val !== "t";
+      emit(`  ${wrong ? "SALAH" : "OK   "} ${ind}: ${role} ${priv.toUpperCase()} ${obj} = ${val}${forbidden ? " (harapan: tidak ada)" : ""}`);
+      if (wrong) bad.push(`${ind}: ${role} ${priv.toUpperCase()} ${obj} = ${val}`);
+    }
+    for (const [label, q] of [["ACL RELASI", Q_DIAG_RELACL], ["DEFAULT PRIVILEGES", Q_DIAG_DEFACL], ["ROLE", Q_DIAG_ROLES]]) {
+      const r = rows(q);
+      emit(`${label}:`);
+      if (!r.ok) emit(`  (kueri gagal: ${r.err})`);
+      else if (r.lines.length === 0) emit("  (tidak ada baris)");
+      else r.lines.forEach((l) => emit(`  ${l}`));
+    }
+    const verdict = bad.length === 0 ? "DIAGNOSE: semua sub-syarat ACL terpenuhi" : `DIAGNOSE: ${bad.length} sub-syarat ACL salah`;
+    emit(verdict);
+    return finish(EXIT.OK, verdict, [...beforeSummary, ...(bad.length ? ["- Sub-syarat yang salah:", ...bad.map((b) => `  - ${b}`)] : ["- Tidak ada sub-syarat yang salah."]), "- Mode ini BACA-SAJA; tidak ada yang ditulis."]);
+  }
+
+  if (mode === "grants") {
+    if (before.state === "INSTALLED_VERIFIED") {
+      emit("GRANTS_NOT_NEEDED: sudah terverifikasi (tidak ada yang ditulis).");
+      return finish(EXIT.OK, "GRANTS tidak diperlukan", [...beforeSummary, ...indicatorLines(before.verify), "- Tidak ada yang ditulis."]);
+    }
+    const failing = before.verify ? before.verify.rows.filter((x) => !x.ok).map((x) => x.name) : [];
+    if (before.state !== "UNKNOWN" || !before.verify || failing.length === 0 || failing.some((n) => !GRANT_FIXABLE_INDICATORS.includes(n))) {
+      return refuse(`grants hanya untuk skema 15 migrasi terpasang yang gagal HANYA di ${GRANT_FIXABLE_INDICATORS.join("/")} (status: ${before.state}; salah: ${failing.join(",") || "-"})`);
+    }
+    const gsql = readFile(path.join(root, GRANTS_FILE));
+    const gcode = gsql.replace(/--[^\n]*/g, "");
+    if (/^\s*\\/m.test(gsql)) return refuse("berkas grants memuat meta-command psql");
+    const hit = GRANTS_FORBIDDEN.find((re) => re.test(gcode));
+    if (hit) return refuse("berkas grants memuat pola terlarang (GRANT ALL/default privileges/anon/RLS/policy/UPDATE-DELETE langganan)");
+    emit(`Menerapkan ${GRANTS_FILE} (grant minimal, satu transaksi, idempotent) sha256=${sha256(gsql)}`);
+    const g = psql(gsql, { timeoutMs: 120_000 });
+    if (g.status !== 0) {
+      emit(`GAGAL menerapkan grants; tidak ada yang tersimpan. Galat:\n${tail(g.stderr, 10)}`);
+      return finish(EXIT.FAIL, "GRANTS GAGAL", [...beforeSummary, "- Transaksi grants dibatalkan; bagian 1-3 tidak berubah."]);
+    }
+    const v2 = psql(Q_VERIFY, { readOnly: true });
+    const ev2 = v2.status === 0 ? evaluateVerify(v2.stdout, migrationCount) : { pass: false, rows: [] };
+    ev2.rows.forEach((x) => emit(`  ${x.name}=${x.got} (harapan ${x.want}) ${x.ok ? "OK" : "SALAH"}`));
+    if (!ev2.pass) {
+      emit("VERIFIKASI SETELAH GRANTS: FAIL");
+      return finish(EXIT.FAIL, "GRANTS diterapkan, VERIFIKASI FAIL", [...beforeSummary, ...indicatorLines(ev2), "- Jalankan mode diagnose untuk melihat sub-syarat yang masih salah."]);
+    }
+    emit("VERIFIKASI SETELAH GRANTS: PASS");
+    return finish(EXIT.OK, "GRANTS PASS", [...beforeSummary, "- Grants minimal diterapkan; verifikasi ulang: PASS", ...indicatorLines(ev2), "- Bukti SANDBOX/REAL untuk proyek QA; QA-2 TIDAK diaktifkan."]);
   }
 
   if (mode === "rls-test") {
