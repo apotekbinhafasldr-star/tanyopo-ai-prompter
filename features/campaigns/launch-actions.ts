@@ -14,6 +14,7 @@ import type { PlatformConnector } from "@/lib/connectors/types";
 import { checkBudgetGuard } from "@/lib/budget-guard";
 import { checkApprovalThreshold, type ApprovalRecordForThreshold } from "@/lib/campaigns/approval-threshold";
 import { checkTotalBudgetCoverage, resolveMetaFlightEndTime } from "@/lib/campaigns/meta-flight";
+import { checkCampaignLimitCoverage } from "@/lib/campaigns/campaign-limit";
 import {
   BUDGET_WRITE_DISABLED_MESSAGE,
   evaluateExternalBudgetWrite,
@@ -552,6 +553,19 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
   });
   if (!guard.allowed) {
     return { error: guard.reason ?? "Peluncuran ditolak oleh Budget Guard." };
+  }
+
+  // Per-campaign cap for a campaign WITHOUT a total budget: Budget Guard only
+  // compares `total_budget` with `campaign_limit`, so a daily-only campaign
+  // would otherwise pass the cap unchecked. Refusal-only, before the claim.
+  const campaignLimit = checkCampaignLimitCoverage({
+    campaignLimit: policy.campaign_limit,
+    dailyBudget: masterCampaign.daily_budget,
+    totalBudget: masterCampaign.total_budget,
+    durationDays: masterCampaign.duration_days,
+  });
+  if (!campaignLimit.ok) {
+    return { error: campaignLimit.message };
   }
 
   // Approval threshold (Settings > "Minta persetujuan jika biaya melebihi"):
