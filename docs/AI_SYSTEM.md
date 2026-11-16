@@ -66,7 +66,17 @@ Autopilot is a policy-gated *routing* decision, never an autonomous *execution* 
 
 ## AI jobs
 
-`prompter_ai_jobs` (see `docs/DATABASE.md`) tracks every generation request: `job_type`, `status` (`QUEUED`/`PROCESSING`/`COMPLETED`/`FAILED`), `provider` (which provider actually ran — `"openai"`/`"anthropic"`), `model`, `fallback_provider` (set only when a fallback was used), `error_category` (coarse, provider-agnostic), token counts, `estimated_cost`, `error`, `actor_user_id`, timestamps. `services/ai-jobs.ts#runAiJob()` wraps every call to the AI Router (`routeStructuredGeneration()`) — inserts the job row, updates it to `COMPLETED` with the real provider/model/token counts or `FAILED` with the error message and category afterward. No job is ever left stuck `QUEUED`; a request that reaches "nothing configured" never creates a row at all. `estimated_cost` is still not populated for any job type (needs per-model, per-provider pricing — remains open).
+`prompter_ai_jobs` (see `docs/DATABASE.md`) tracks every generation request: `job_type`, `status` (`QUEUED`/`PROCESSING`/`COMPLETED`/`FAILED`), `provider` (which provider actually ran — `"openai"`/`"anthropic"`), `model`, `fallback_provider` (set only when a fallback was used), `error_category` (coarse, provider-agnostic), token counts, `estimated_cost`, `error`, `actor_user_id`, timestamps. `services/ai-jobs.ts#runAiJob()` wraps every call to the AI Router (`routeStructuredGeneration()`) — the quota RPC inserts the job row as `PROCESSING`, then it is closed as `COMPLETED` with the real provider/model/token counts or `FAILED` with a user-safe message and category. A request that reaches "nothing configured" never creates a row at all.
+
+Failure handling (unit tests: `tests/unit/services/ai-jobs-failsafe.test.ts`, `tests/unit/lib/ai-provider-http-errors.test.ts`):
+
+- Only `AIProviderError` text is shown to tenants or stored in `error`. Any other error (Zod/JSON parse errors, SDK or runtime errors) is replaced by a generic message; `AUTH`/`CONFIG` get a neutral "layanan tidak tersedia" text (the adapter text names environment variables). The category is still stored for operators.
+- Closing the job tries the caller's client, then retries once through the server-only admin client (tenant + id + `PROCESSING`), so one failed bookkeeping write does not leave a paid job in `PROCESSING` or turn a successful generation into a reported failure.
+- Retry policy (`lib/ai/resilience.ts`): one retry for `RATE_LIMIT` (429), `CONNECTION` (incl. our own 45 s timeout) and vendor 5xx (incl. 529); never for `AUTH`, `REFUSAL`, `INVALID_OUTPUT`, `CONFIG` or a 4xx.
+
+Cost bound per quota unit: at most 2 attempts on the primary provider plus 2 on the fallback = 4 paid provider calls, each capped at 4000 output tokens (`DEFAULT_MAX_TOKENS` / `DEFAULT_MAX_OUTPUT_TOKENS`) and 45 s, i.e. up to about 3 minutes in the worst case. The quota counts job rows, including `FAILED` ones.
+
+`estimated_cost` is written by `recordEstimatedCost()` (admin client, `COMPLETED` rows only) but `AI_MODEL_PRICING` in `lib/ai/pricing.ts` is still empty on purpose, so it stays `NULL` until someone copies the prices of the models actually in use from the providers' official pricing pages. Known gaps (need Founder approval or infrastructure, not code in this module): no reaper for jobs stuck in `PROCESSING` after a platform timeout, no usage alert, no idempotency key for double submits.
 
 ## Guardrails
 

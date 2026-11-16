@@ -11,6 +11,7 @@ import {
   getMonthlyAiJobCount,
   getVerifiedAttributedValueThisMonth,
   listInvoices,
+  SubscriptionUnavailableError,
   TRIAL_DURATION_DAYS,
 } from "@/services/billing";
 import { getPaymentProvider } from "@/lib/billing/get-payment-provider";
@@ -106,12 +107,36 @@ export default async function BillingPage({
   const supabase = await createClient();
 
   const [subscription, aiJobCount, verifiedAttributedValue, invoices, reconciliation] = await Promise.all([
-    getOrCreateSubscription(supabase, session.tenantId),
+    // Fail closed: if the subscription cannot be read or stored we show a
+    // friendly error below, never a made-up trial period.
+    getOrCreateSubscription(supabase, session.tenantId).catch((error: unknown) => {
+      if (error instanceof SubscriptionUnavailableError) return null;
+      throw error;
+    }),
     getMonthlyAiJobCount(supabase, session.tenantId),
     getVerifiedAttributedValueThisMonth(supabase, session.tenantId),
     listInvoices(supabase, session.tenantId),
     txn ? reconcileCheckoutReturn(supabase, session.tenantId, txn) : Promise.resolve(null),
   ]);
+
+  if (!subscription) {
+    return (
+      <div className="flex flex-1 flex-col gap-6 p-4 sm:p-8">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight text-foreground">Paket & Langganan</h1>
+        </div>
+        <div
+          role="alert"
+          className="flex flex-col gap-1 rounded-[var(--radius-md)] border border-danger/30 bg-danger/5 p-3 text-sm text-danger"
+        >
+          <p>Informasi paket dan masa coba belum dapat dimuat saat ini.</p>
+          <p className="text-xs text-muted-foreground">
+            Silakan muat ulang halaman ini beberapa saat lagi. Jika masih berlanjut, hubungi dukungan LINOE.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   const successFee = calculateSuccessFee({
     rateBasisPoints: subscription.success_fee_rate_bps,

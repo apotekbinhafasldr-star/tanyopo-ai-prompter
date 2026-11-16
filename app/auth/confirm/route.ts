@@ -38,17 +38,17 @@ export async function GET(request: NextRequest) {
   const type = searchParams.get("type") as EmailOtpType | null;
   const next = safeNextPath(searchParams.get("next"));
 
+  let notice: "link_expired" | "link_invalid" = "link_invalid";
   if (tokenHash && type && SUPPORTED_TYPES.includes(type)) {
     const supabase = await createClient();
     const { error } = await supabase.auth.verifyOtp({ type, token_hash: tokenHash });
     if (!error) {
       return NextResponse.redirect(`${origin}${next}`);
     }
+    if (error.code === "otp_expired") notice = "link_expired";
   }
 
-  // An expired/invalid/reused token fails verifyOtp — sent to /login
-  // rather than a page that assumes a session or a recovery-flavored
-  // "request a new link" form that doesn't apply to a failed signup
-  // confirmation.
-  return NextResponse.redirect(`${origin}/login`);
+  // An expired/invalid/reused token fails verifyOtp. The person lands on /login with a fixed, explained notice (the
+  // code is one of two constants, never reflected input) and a resend form; it never assumes a session exists.
+  return NextResponse.redirect(`${origin}/login?notice=${notice}`);
 }

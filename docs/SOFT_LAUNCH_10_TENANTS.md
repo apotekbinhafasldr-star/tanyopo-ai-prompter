@@ -262,3 +262,12 @@ Dilakukan: dua dokumen ini; batas per IP pada `app/api/demo/start/route.ts` (+ t
 tes drift dokumen (`tests/unit/docs/soft-launch-docs.test.ts`).
 Tidak dilakukan: tidak menyentuh `proxy.ts`, auth/login, migrasi, billing, RLS, env, `netlify.toml`, Netlify/Supabase, produksi; tidak ada tes beban; tidak ada pengajuan hukum; tidak ada panggilan MCP.
 Header baru di `netlify.toml`/`next.config.ts` tidak ditambahkan: `netlify.toml` tidak punya pola header, `next.config.ts` sudah punya header yang dijaga tes, dan CSP `report-uri` butuh rute publik baru (T7, P1-6).
+
+## 12. Pembaruan 2026-11-15 (jalur kritis)
+
+Rincian, urutan merge, dan tanggal paling cepat ada di [audit/SOFT_LAUNCH_CRITICAL_PATH.md](audit/SOFT_LAUNCH_CRITICAL_PATH.md). Ringkas:
+- **Pembayaran live bukan syarat soft-launch.** Izin LPE/PJP belum didaftarkan (fakta Founder); semua tenant tetap gratis. Tanggal pembayaran live: UNKNOWN.
+- **AEO/GEO belum terhubung ke situs** (fakta Founder); tidak menghalangi undangan pribadi, jangan dipromosikan publik dulu.
+- G11: `ADMIN_CENTER_ENABLED` dilaporkan `true` di produksi per 13 Nov; nilai belum diverifikasi dari repo. Founder kosongkan/hapus, lalu catat hasilnya (langkah C6 di FOUNDER_CHECKLIST_HP.md).
+- Temuan kode F1 (trial rekaan bila insert langganan gagal): diperbaiki gagal-tertutup di Draft PR; trial tetap 14 hari, dipaksa DB, tanpa reset.
+

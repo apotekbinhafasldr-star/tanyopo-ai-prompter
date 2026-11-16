@@ -104,6 +104,12 @@ Syarat tersisa (urutan kerja):
 
 Tidak ada langkah di bagian C yang mengubah apa pun. Setiap langkah berlaku aturan: **jika hasil berbeda dari yang diharapkan: STOP dan kabari** (tulis apa yang terlihat; jangan memperbaiki sendiri).
 
+### A4. Pembaruan 2026-11-15
+
+- **Utamakan C6 hari ini**: `ADMIN_CENTER_ENABLED` dilaporkan `true` di produksi (13 Nov). G11 mensyaratkan kosong. Lihat saja dulu; bila `true`, kabari sebelum mengubah.
+- **Pembayaran live bukan syarat soft-launch** (LPE belum didaftarkan di Komdigi; semua tenant gratis). AEO/GEO belum terhubung ke situs: tidak menghalangi undangan pribadi.
+- Urutan kerja, pemilik, dan tanggal paling cepat: [audit/SOFT_LAUNCH_CRITICAL_PATH.md](audit/SOFT_LAUNCH_CRITICAL_PATH.md).
+
 ---
 
 ## Bagian B. Aturan sebelum mulai
