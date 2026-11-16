@@ -1,0 +1,60 @@
+# QA-1 (LINOE Reusable QA Sandbox, jalur A: MOCK/INTEGRATION).
+# Supabase LOKAL sementara untuk CI GitHub saja. Dijalankan dari qa/supabase-local (BUKAN dari root repo) supaya
+# `supabase start` tidak menerapkan supabase/migrations lebih dulu (migrasi butuh objek bersama; lihat scripts/qa/apply-local-db.sh).
+# Tidak ada rahasia produksi di berkas ini. Email ditangkap Mailpit lokal: TIDAK ada email nyata terkirim.
+project_id = "linoe-qa-local"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+
+[db]
+port = 54322
+major_version = 17
+
+[db.pooler]
+enabled = false
+
+[realtime]
+enabled = false
+
+[studio]
+enabled = false
+
+# Skema `storage` dibutuhkan migrasi repo (bucket); layanan ringan, hanya untuk memenuhi skema.
+[storage]
+enabled = true
+
+[edge_runtime]
+enabled = false
+
+[analytics]
+enabled = false
+
+# Penangkap email lokal (Mailpit): UI/API di http://127.0.0.1:54324
+[inbucket]
+enabled = true
+port = 54324
+
+[auth]
+enabled = true
+site_url = "http://localhost:3000"
+additional_redirect_urls = ["http://localhost:3000/auth/callback"]
+jwt_expiry = 3600
+enable_signup = true
+enable_anonymous_sign_ins = false
+
+[auth.email]
+enable_signup = true
+double_confirm_changes = true
+enable_confirmations = true
+max_frequency = "1s"
+
+# Meniru template "Confirm signup" produksi yang didokumentasikan di features/auth/actions.ts
+[auth.email.template.confirmation]
+subject = "Konfirmasi pendaftaran LINOE (QA lokal)"
+content_path = "./supabase/templates/confirm.html"
+
+[auth.rate_limit]
+email_sent = 100
