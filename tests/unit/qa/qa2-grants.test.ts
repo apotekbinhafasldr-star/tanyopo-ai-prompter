@@ -1,3 +1,5 @@
+// @vitest-environment node
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // QA-2: mode diagnose (baca-saja) dan bagian ke-4 grant minimal (qa/qa2-grants.sql).
 // Semua psql PALSU (di memori): tanpa koneksi database/jaringan. Tipe sengaja longgar (pelajaran #153: .mjs bertipe JSDoc sempit).
 import { readFileSync } from "node:fs";
