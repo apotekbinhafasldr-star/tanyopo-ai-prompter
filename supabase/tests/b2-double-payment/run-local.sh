@@ -105,12 +105,15 @@ paid=$(PA -d b2_conc -c "select count(*) from prompter_payment_transactions wher
   && pass "D: 6 different invoices paid at the same instant -> exactly 1 activates, 5 go to REVIEW (money recorded), period = 1 month + bonus" || bad "D parallel different invoices (paid=$paid review=$rev)"
 
 # D2. defence in depth: even if several PENDING rows of one tenant existed (legacy), concurrent payments STACK, none is lost
+# Expected end mirrors fn_apply_verified_payment: first payment = (now + 1 month) + trial carryover (13 days), then +1 month per further payment,
+# added one month at a time (Postgres clamps to the last day of short months). `now() + 6 months + 13 days` is NOT equal on ~14% of calendar days
+# (e.g. 16-18 Nov, 16-30 Dec), which made this assertion date-dependent. 5 vs 6 stacked months still differ by >= 28 days, so a lost update is still caught.
 mk b2_leg && m2 b2_leg || bad "mk b2_leg"
 PA -d b2_leg -c "drop index public.uq_prompter_payment_txn_one_pending_per_tenant" >/dev/null
 T=$(conc_setup b2_leg 0005 STARTER); ids=""; for i in 1 2 3 4 5 6; do ids="$ids $(PA -d b2_leg -c "insert into prompter_payment_transactions(tenant_id,user_id,provider,plan,amount,currency) values ('$T','$T','midtrans','STARTER',99000,'IDR') returning id")"; done
 rm -f "$W"/e_*; n=0; for id in $ids; do n=$((n+1)); ( SVC b2_leg "select allowed::text||':'||coalesce(reason,'') from public.fn_apply_verified_payment('$id','pay_e$n','evt_e$n',99000,'IDR')" > "$W/e_$n" ) & done; wait
 okc=$(cat "$W"/e_* | grep -c '^true:$')
-[ "$okc" = 6 ] && [ "$(PA -d b2_leg -c "select (current_period_end between now()+interval '6 months'+interval '12 days 23 hours' and now()+interval '6 months'+interval '13 days 1 hour') from prompter_subscriptions where tenant_id='$T'")" = t ] \
+[ "$okc" = 6 ] && [ "$(PA -d b2_leg -c "with e as (select ((((((now()+interval '1 month')+interval '13 days')+interval '1 month')+interval '1 month')+interval '1 month')+interval '1 month')+interval '1 month' as v) select (current_period_end between e.v-interval '1 hour' and e.v+interval '1 hour') from prompter_subscriptions, e where tenant_id='$T'")" = t ] \
   && pass "D: 6 legacy PENDING invoices paid concurrently -> all 6 applied, periods stack to 6 months + one bonus (no lost update)" || bad "D legacy stacking (applied=$okc)"
 
 # 4) composition with the S1 trial migrations, both orders: B2 then S1 / S1 then B2 still pass the scenarios

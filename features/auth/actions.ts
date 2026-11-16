@@ -10,6 +10,12 @@ import { isExistingAccountSignUp } from "@/lib/auth/existing-account";
 import { isUncertainSignupOutcome, mapSignupError, UNCERTAIN_SIGNUP_MESSAGE } from "@/lib/auth/signup-error";
 import { safeNextPath } from "@/lib/auth/safe-next";
 import { isEmailOtpEnabled } from "@/lib/auth/email-otp";
+import { mapLoginError } from "@/lib/auth/login-error";
+import {
+  RESEND_CONFIRMATION_COOLDOWN_SECONDS,
+  RESEND_CONFIRMATION_HOURLY_LIMIT,
+  UNCONFIRMED_RESEND_MESSAGES,
+} from "@/lib/auth/confirm-notice";
 
 /**
  * Best-effort brake on trial-farming (repeated signups to get fresh
@@ -60,6 +66,34 @@ function keptValues(formData: FormData): RegisterKeptValues {
   return { nama: keptField(formData, "nama"), namaUsaha: keptField(formData, "namaUsaha"), email: keptField(formData, "email") };
 }
 
+/**
+ * Re-sends the signup confirmation link. Called ONLY from loginAction after Supabase answered `email_not_confirmed`
+ * (returned only for a correct password), so it is never reachable without proof of the account's password and there is
+ * no anonymous resend endpoint. Bounded per address (1/min and 5/hour, in-memory per server instance: best effort, not
+ * a global limit); counters are only created after that proof. "sent" is reported only when Supabase accepted the
+ * request; every other outcome is "wait" or "uncertain".
+ */
+async function resendAfterVerifiedPassword(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  email: string,
+): Promise<string> {
+  const address = email.toLowerCase();
+  if (
+    !checkRateLimit(`confirm-resend-cooldown:${address}`, 1, RESEND_CONFIRMATION_COOLDOWN_SECONDS * 1000).allowed ||
+    !checkRateLimit(`confirm-resend-hour:${address}`, RESEND_CONFIRMATION_HOURLY_LIMIT, 60 * 60 * 1000).allowed
+  ) {
+    return UNCONFIRMED_RESEND_MESSAGES.wait;
+  }
+  try {
+    const { error } = await supabase.auth.resend({ type: "signup", email: address });
+    if (!error) return UNCONFIRMED_RESEND_MESSAGES.sent;
+    if (error.status === 429 || error.code?.includes("rate_limit")) return UNCONFIRMED_RESEND_MESSAGES.wait;
+    return UNCONFIRMED_RESEND_MESSAGES.uncertain;
+  } catch {
+    return UNCONFIRMED_RESEND_MESSAGES.uncertain;
+  }
+}
+
 export async function loginAction(
   _prevState: AuthActionState,
   formData: FormData,
@@ -74,15 +108,20 @@ export async function loginAction(
   }
 
   const supabase = await createClient();
-  const { error } = await supabase.auth.signInWithPassword(parsed.data);
+  let signInError: Awaited<ReturnType<typeof supabase.auth.signInWithPassword>>["error"] = null;
+  try {
+    ({ error: signInError } = await supabase.auth.signInWithPassword(parsed.data));
+  } catch {
+    return { error: "Gagal masuk. Silakan coba lagi." };
+  }
 
-  if (error) {
-    return {
-      error:
-        error.status === 400
-          ? "Email atau kata sandi salah."
-          : "Gagal masuk. Silakan coba lagi.",
-    };
+  if (signInError) {
+    const mapped = mapLoginError(signInError);
+    if (mapped.unconfirmed) {
+      // Correct password, address not confirmed: the only case that re-sends the link (code-based, never message text).
+      return { error: null, info: await resendAfterVerifiedPassword(supabase, parsed.data.email) };
+    }
+    return { error: mapped.message };
   }
 
   redirect(safeNextPath(formData.get("next")));
