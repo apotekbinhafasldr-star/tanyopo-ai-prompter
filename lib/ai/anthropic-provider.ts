@@ -55,7 +55,7 @@ export class AnthropicProvider implements AIProvider {
         throw new AIProviderError("Tidak dapat menghubungi Anthropic. Periksa koneksi jaringan.", "CONNECTION");
       }
       if (err instanceof Anthropic.APIError) {
-        throw new AIProviderError(`Anthropic mengembalikan error (${err.status}).`, "API");
+        throw new AIProviderError(`Anthropic mengembalikan error (${err.status}).`, "API", err.status);
       }
       throw err;
     }
