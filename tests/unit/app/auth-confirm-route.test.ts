@@ -57,14 +57,33 @@ describe("GET /auth/confirm — B12 signup confirmation (token_hash + type, bypa
       requestFor("https://tanyopo-ai-prompter.netlify.app/auth/confirm?token_hash=th_4&type=signup&next=/onboarding"),
     );
 
-    expect(res.headers.get("location")).toBe("https://tanyopo-ai-prompter.netlify.app/login");
+    expect(res.headers.get("location")).toBe("https://tanyopo-ai-prompter.netlify.app/login?notice=link_invalid");
   });
 
   it("missing token_hash or type redirects to /login without ever calling Supabase", async () => {
     const res = await GET(requestFor("https://tanyopo-ai-prompter.netlify.app/auth/confirm?type=signup"));
 
     expect(verifyOtpMock).not.toHaveBeenCalled();
-    expect(res.headers.get("location")).toBe("https://tanyopo-ai-prompter.netlify.app/login");
+    expect(res.headers.get("location")).toBe("https://tanyopo-ai-prompter.netlify.app/login?notice=link_invalid");
+  });
+});
+
+describe("GET /auth/confirm — auth recovery notices", () => {
+  beforeEach(() => verifyOtpMock.mockReset());
+
+  it("otp_expired mengarah ke /login?notice=link_expired, kode lain ke link_invalid", async () => {
+    verifyOtpMock.mockResolvedValue({ error: { code: "otp_expired", message: "expired" } });
+    const expired = await GET(requestFor("https://tanyopo-ai-prompter.netlify.app/auth/confirm?token_hash=t&type=signup"));
+    expect(expired.headers.get("location")).toBe("https://tanyopo-ai-prompter.netlify.app/login?notice=link_expired");
+
+    verifyOtpMock.mockResolvedValue({ error: { code: "otp_disabled", message: "x" } });
+    const other = await GET(requestFor("https://tanyopo-ai-prompter.netlify.app/auth/confirm?token_hash=t&type=signup"));
+    expect(other.headers.get("location")).toBe("https://tanyopo-ai-prompter.netlify.app/login?notice=link_invalid");
+  });
+
+  it("kode notice bukan hasil pantulan input pengguna", async () => {
+    const res = await GET(requestFor("https://tanyopo-ai-prompter.netlify.app/auth/confirm?token_hash=t&type=%3Cscript%3E"));
+    expect(res.headers.get("location")).toBe("https://tanyopo-ai-prompter.netlify.app/login?notice=link_invalid");
   });
 });
 
@@ -79,7 +98,7 @@ describe("GET /auth/confirm — Stage A hardening: only the type this app sends 
     async (type) => {
       const res = await GET(requestFor(`https://tanyopo-ai-prompter.netlify.app/auth/confirm?token_hash=th&type=${type}&next=/onboarding`));
       expect(verifyOtpMock).not.toHaveBeenCalled();
-      expect(res.headers.get("location")).toBe("https://tanyopo-ai-prompter.netlify.app/login");
+      expect(res.headers.get("location")).toBe("https://tanyopo-ai-prompter.netlify.app/login?notice=link_invalid");
     },
   );
 

@@ -8,13 +8,17 @@ export const AI_MAX_RETRIES = 1;
 export const AI_RETRY_DELAY_MS = 1_000;
 
 /**
- * Transient failures worth one retry: rate limit, connection problems and
- * our own timeout (reported as CONNECTION). AUTH, REFUSAL, INVALID_OUTPUT,
- * CONFIG, API and uncategorised errors are never retried: repeating them
- * cannot succeed and would only burn money or time.
+ * Transient failures worth one retry: rate limit, connection problems, our
+ * own timeout (reported as CONNECTION) and a vendor 5xx (incl. Anthropic's
+ * 529 "overloaded"), which the adapters report as API with the HTTP status.
+ * AUTH, REFUSAL, INVALID_OUTPUT, CONFIG, a 4xx API error (or one without a
+ * status) and uncategorised errors are never retried: repeating them cannot
+ * succeed and would only burn money or time.
  */
 export function isRetryableAiError(err: unknown): boolean {
-  return err instanceof AIProviderError && (err.category === "RATE_LIMIT" || err.category === "CONNECTION");
+  if (!(err instanceof AIProviderError)) return false;
+  if (err.category === "RATE_LIMIT" || err.category === "CONNECTION") return true;
+  return err.category === "API" && typeof err.status === "number" && err.status >= 500;
 }
 
 export interface ResilienceOptions {

@@ -48,11 +48,14 @@ export type AIErrorCategory =
  */
 export class AIProviderError extends Error {
   readonly category: AIErrorCategory;
+  /** HTTP status reported by the vendor, when the failure was an API response (used to tell 5xx from 4xx). */
+  readonly status?: number;
 
-  constructor(message: string, category: AIErrorCategory) {
+  constructor(message: string, category: AIErrorCategory, status?: number) {
     super(message);
     this.name = "AIProviderError";
     this.category = category;
+    this.status = status;
   }
 }
 

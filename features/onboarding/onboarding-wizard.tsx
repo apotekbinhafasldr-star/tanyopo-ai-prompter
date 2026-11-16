@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useRef, useState, type FormEvent } from "react";
 import { Package, Radio, ArrowRight, ArrowLeft, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -78,6 +78,19 @@ export function OnboardingWizard() {
   const [primaryGoal, setPrimaryGoal] = useState("");
   const [targetMarketCountryCode, setTargetMarketCountryCode] = useState("");
   const [state, formAction, pending] = useActionState(completeOnboardingAction, initialState);
+  const formRef = useRef<HTMLFormElement>(null);
+  const firstRender = useRef(true);
+
+  // On every step change, move focus to the new step heading (programmatic focus, tabIndex -1). Screen readers announce
+  // it, and focus never falls back to <body> when the focused "Lanjut" is removed (step 8) or becomes disabled (steps 3, 5).
+  // Deliberately NOT the primary button: focusing "Selesai" would let one extra Enter submit the whole form by accident.
+  useEffect(() => {
+    if (firstRender.current) {
+      firstRender.current = false;
+      return;
+    }
+    formRef.current?.querySelector<HTMLElement>("h2")?.focus();
+  }, [step]);
   const timezones = listTimezones();
   const isEn = language === "en";
 
@@ -91,6 +104,17 @@ export function OnboardingWizard() {
     7: true,
     8: true,
   };
+
+  // Only the LAST step may submit. Before that, any submit (Enter inside the single text field of step 1, or a stray
+  // activation) is cancelled — React then does not run the server action — and acts like "Lanjut" when the step is valid.
+  function handleFormSubmit(event: FormEvent<HTMLFormElement>) {
+    if (step < TOTAL_STEPS) {
+      event.preventDefault();
+      if (canAdvanceFrom[step]) {
+        setStep((s) => s + 1);
+      }
+    }
+  }
 
   const incompleteHints: Record<number, string> = {
     1: "Isi nama bisnis (minimal 2 karakter) untuk melanjutkan.",
@@ -117,7 +141,7 @@ export function OnboardingWizard() {
           ))}
         </div>
 
-        <form action={formAction} className="flex flex-col gap-6">
+        <form ref={formRef} action={formAction} onSubmit={handleFormSubmit} className="flex flex-col gap-6">
           <input type="hidden" name="brandName" value={brandName} />
           <input type="hidden" name="countryCode" value={countryCode} />
           <input type="hidden" name="language" value={language} />
@@ -130,7 +154,7 @@ export function OnboardingWizard() {
 
           {step === 1 && (
             <div className="flex flex-col gap-3">
-              <h2 className="text-lg font-semibold text-foreground">
+              <h2 tabIndex={-1} className="text-lg font-semibold text-foreground focus:outline-none">
                 Apa nama bisnis Anda?
               </h2>
               <p className="text-sm text-muted-foreground">
@@ -151,7 +175,7 @@ export function OnboardingWizard() {
 
           {step === 2 && (
             <div className="flex flex-col gap-3">
-              <h2 className="text-lg font-semibold text-foreground">
+              <h2 tabIndex={-1} className="text-lg font-semibold text-foreground focus:outline-none">
                 {isEn ? "Market & global preferences" : "Pasar & Preferensi Global"}
               </h2>
               <p className="text-sm text-muted-foreground">
@@ -227,7 +251,7 @@ export function OnboardingWizard() {
 
           {step === 3 && (
             <div className="flex flex-col gap-3">
-              <h2 className="text-lg font-semibold text-foreground">Apa jenis bisnis Anda?</h2>
+              <h2 tabIndex={-1} className="text-lg font-semibold text-foreground focus:outline-none">Apa jenis bisnis Anda?</h2>
               <p className="text-sm text-muted-foreground">
                 Pilih yang paling sesuai — Anda bisa mengubahnya nanti.
               </p>
@@ -242,13 +266,16 @@ export function OnboardingWizard() {
 
           {step === 4 && (
             <div className="flex flex-col gap-3">
-              <h2 className="text-lg font-semibold text-foreground">Apa yang Anda jual?</h2>
+              <h2 tabIndex={-1} className="text-lg font-semibold text-foreground focus:outline-none">Apa yang Anda jual?</h2>
               <p className="text-sm text-muted-foreground">
                 Ceritakan singkat produk atau jasa Anda. AI memakai ini untuk memahami bisnis Anda.
               </p>
+              <Label htmlFor="whatDoYouSellInput" className="sr-only">
+                {isEn ? "What do you sell?" : "Apa yang Anda jual"}
+              </Label>
               <Textarea
-                aria-label="Produk atau jasa yang Anda jual"
                 autoFocus
+                id="whatDoYouSellInput"
                 value={whatDoYouSell}
                 onChange={(e) => setWhatDoYouSell(e.target.value)}
                 placeholder="Contoh: Kopi kemasan siap seduh dari petani lokal, tersedia dalam 3 varian rasa."
@@ -259,7 +286,7 @@ export function OnboardingWizard() {
 
           {step === 5 && (
             <div className="flex flex-col gap-3">
-              <h2 className="text-lg font-semibold text-foreground">
+              <h2 tabIndex={-1} className="text-lg font-semibold text-foreground focus:outline-none">
                 Apa tujuan utama Anda?
               </h2>
               <p className="text-sm text-muted-foreground">
@@ -271,7 +298,7 @@ export function OnboardingWizard() {
 
           {step === 6 && (
             <div className="flex flex-col gap-3">
-              <h2 className="text-lg font-semibold text-foreground">
+              <h2 tabIndex={-1} className="text-lg font-semibold text-foreground focus:outline-none">
                 {isEn ? "Campaign target market (optional)" : "Target Pasar Campaign (opsional)"}
               </h2>
               <p className="text-sm text-muted-foreground">
@@ -279,8 +306,11 @@ export function OnboardingWizard() {
                   ? "If your campaign target differs from your business country (e.g. business in Indonesia, campaign targeting Malaysia), set it here. Leave blank if it's the same as your business country."
                   : "Jika target campaign Anda berbeda dari negara bisnis (mis. bisnis di Indonesia, target campaign di Malaysia), pilih di sini. Kosongkan jika sama dengan negara bisnis."}
               </p>
+              <Label htmlFor="targetMarketSelect" className="sr-only">
+                {isEn ? "Campaign target market" : "Target pasar campaign"}
+              </Label>
               <select
-                aria-label={isEn ? "Campaign target market" : "Target pasar campaign"}
+                id="targetMarketSelect"
                 value={targetMarketCountryCode}
                 onChange={(e) => setTargetMarketCountryCode(e.target.value)}
                 className={selectClass}
@@ -300,11 +330,11 @@ export function OnboardingWizard() {
               <div className="flex size-12 items-center justify-center rounded-full bg-brand-muted">
                 <Package className="size-6 text-brand" aria-hidden />
               </div>
-              <h2 className="text-lg font-semibold text-foreground">
+              <h2 tabIndex={-1} className="text-lg font-semibold text-foreground focus:outline-none">
                 Tambahkan produk pertama Anda
               </h2>
               <p className="text-sm text-muted-foreground">
-                Anda bisa menambahkan produk sekarang atau nanti dari halaman Products.
+                Anda bisa menambahkan produk nanti dari halaman Products.
               </p>
             </div>
           )}
@@ -314,7 +344,7 @@ export function OnboardingWizard() {
               <div className="flex size-12 items-center justify-center rounded-full bg-brand-muted">
                 <Radio className="size-6 text-brand" aria-hidden />
               </div>
-              <h2 className="text-lg font-semibold text-foreground">
+              <h2 tabIndex={-1} className="text-lg font-semibold text-foreground focus:outline-none">
                 Hubungkan channel marketing
               </h2>
               <p className="text-sm text-muted-foreground">
@@ -335,9 +365,9 @@ export function OnboardingWizard() {
             </p>
           ) : null}
 
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             {step > 1 ? (
-              <Button type="button" variant="ghost" onClick={() => setStep((s) => s - 1)}>
+              <Button type="button" variant="ghost" className="min-h-11" onClick={() => setStep((s) => s - 1)}>
                 <ArrowLeft />
                 Kembali
               </Button>
@@ -347,7 +377,9 @@ export function OnboardingWizard() {
 
             {step < TOTAL_STEPS ? (
               <Button
+                key="onboarding-next"
                 type="button"
+                className="min-h-11"
                 disabled={!canAdvanceFrom[step]}
                 onClick={() => setStep((s) => s + 1)}
               >
@@ -355,7 +387,12 @@ export function OnboardingWizard() {
                 <ArrowRight />
               </Button>
             ) : (
-              <Button type="submit" loading={pending}>
+              <Button
+                key="onboarding-finish"
+                type="submit"
+                loading={pending}
+                className="ml-auto h-auto min-h-11 max-w-full whitespace-normal py-2 text-center"
+              >
                 Selesai, ke Dashboard
               </Button>
             )}
@@ -366,7 +403,7 @@ export function OnboardingWizard() {
           <form action={skipOnboardingAction} className="mt-3 text-center">
             <button
               type="submit"
-              className="min-h-11 px-3 text-sm text-muted-foreground underline-offset-4 hover:underline"
+              className="inline-flex min-h-11 min-w-11 items-center justify-center px-3 text-sm text-muted-foreground underline-offset-4 hover:underline"
             >
               Lewati, atur nanti
             </button>

@@ -1,0 +1,107 @@
+name: QA signup E2E (local Supabase)
+
+# QA-1, jalur A (MOCK/INTEGRATION). Menjalankan Supabase LOKAL sementara di runner (Auth nyata + Mailpit penangkap email),
+# lalu menguji signup -> konfirmasi email -> onboarding -> trial 14 hari dengan identitas tetap qa-linoe@example.test.
+#  * Tidak memakai satu pun secret (tidak ada `secrets.*`), tidak menyentuh Supabase produksi/bersama, tidak deploy, tidak memanggil Netlify.
+#  * Email ditangkap Mailpit lokal: ini BUKAN bukti pengiriman email nyata (Resend). Itu jalur B (REAL E2E), terpisah dan manual.
+#  * Reset = stack baru tiap run; tidak ada data yang bertahan.
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/qa-signup-e2e.yml"
+      - "qa/**"
+      - "scripts/qa/**"
+      - "supabase/migrations/**"
+      - "supabase/sandbox/doku/01_shim_shared_objects.sql"
+      - "app/auth/**"
+      - "app/onboarding/**"
+      - "features/auth/**"
+      - "features/onboarding/**"
+      - "services/billing.ts"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qa-signup-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  signup-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      MAILPIT_URL: http://127.0.0.1:54324
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Ensure psql client
+        run: command -v psql || (sudo apt-get update && sudo apt-get install -y postgresql-client)
+
+      - name: Guard (env bersih dari kredensial/target produksi)
+        run: node scripts/qa/local-stack-guard.mjs
+
+      - name: Start Supabase LOKAL sementara (Auth + PostgREST + Mailpit)
+        working-directory: qa/supabase-local
+        run: |
+          npx --yes supabase@2 start
+          npx --yes supabase@2 status -o env > "$RUNNER_TEMP/supabase-local.env"
+          # Kunci demo lokal; tetap disamarkan di log.
+          key="$(grep -E '^ANON_KEY=' "$RUNNER_TEMP/supabase-local.env" | head -1 | cut -d= -f2- | tr -d '"')"
+          [ -n "$key" ] || key="$(grep -E '^PUBLISHABLE_KEY=' "$RUNNER_TEMP/supabase-local.env" | head -1 | cut -d= -f2- | tr -d '"')"
+          [ -n "$key" ] || { echo "kunci lokal tidak ditemukan" >&2; exit 1; }
+          echo "::add-mask::$key"
+          {
+            echo "NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321"
+            echo "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=$key"
+          } >> "$GITHUB_ENV"
+
+      - name: Guard (target lokal terkonfirmasi)
+        run: node scripts/qa/local-stack-guard.mjs NEXT_PUBLIC_SUPABASE_URL NEXT_PUBLIC_APP_URL MAILPIT_URL
+
+      - name: Terapkan shim + simulasi handle_new_user + semua migrasi repo (basis data lokal)
+        run: bash scripts/qa/apply-local-db.sh
+
+      - run: npm ci
+      - run: npm run build
+
+      - name: Install Playwright (versi sama dengan harness QA 360px)
+        run: |
+          npm i --no-save playwright@1.49.1
+          npx playwright install --with-deps chromium
+
+      - name: Start app (produksi lokal, tanpa deploy)
+        run: |
+          mkdir -p qa-output
+          nohup npm run start > qa-output/server.log 2>&1 &
+          for i in $(seq 1 40); do curl -sf http://localhost:3000/login >/dev/null && break; sleep 2; done
+          curl -sf http://localhost:3000/login >/dev/null
+
+      - name: E2E signup, konfirmasi, onboarding, trial 14 hari (identitas tetap)
+        run: node scripts/qa/signup-e2e.mjs
+
+      - name: Diagnostik (tanpa data pribadi) bila gagal
+        if: failure()
+        working-directory: qa/supabase-local
+        run: |
+          tail -n 60 ../../qa-output/server.log || true
+          npx --yes supabase@2 status || true
+
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-signup-e2e
+          path: qa-output
+          if-no-files-found: ignore
+
+      - name: Stop stack lokal
+        if: always()
+        working-directory: qa/supabase-local
+        run: npx --yes supabase@2 stop --no-backup || true

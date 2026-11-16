@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Menu, X } from "lucide-react";
 import { Sidebar } from "@/components/layout/sidebar";
 import { LinoeLogo } from "@/components/brand/linoe-logo";
@@ -17,6 +17,17 @@ interface AppShellProps {
   children: ReactNode;
 }
 
+const DESKTOP_QUERY = "(min-width: 1024px)";
+const canMatchMedia = () => typeof window !== "undefined" && typeof window.matchMedia === "function";
+function subscribeDesktop(onChange: () => void) {
+  if (!canMatchMedia()) return () => {};
+  const mq = window.matchMedia(DESKTOP_QUERY);
+  mq.addEventListener("change", onChange);
+  return () => mq.removeEventListener("change", onChange);
+}
+const getDesktop = () => (canMatchMedia() ? window.matchMedia(DESKTOP_QUERY).matches : true);
+const getDesktopOnServer = () => true;
+
 /**
  * Below `lg` (1024px) the sidebar has nowhere to live at its normal 256px
  * width without pushing every dashboard page's content into a sliver a few
@@ -27,6 +38,7 @@ interface AppShellProps {
  */
 export function AppShell({ businessName, userName, userRole, showAdminLink = false, banner = null, children }: AppShellProps) {
   const [open, setOpen] = useState(false);
+  const desktop = useSyncExternalStore(subscribeDesktop, getDesktop, getDesktopOnServer);
 
   useEffect(() => {
     if (!open) return;
@@ -63,6 +75,8 @@ export function AppShell({ businessName, userName, userRole, showAdminLink = fal
 
       <div
         id="app-sidebar-drawer"
+        // Off-canvas and closed: keep it out of the tab order and the TalkBack reading order (docked on lg, so never inert there).
+        inert={!open && !desktop}
         className={cn(
           "fixed inset-y-0 left-0 z-40 transition-transform duration-200 ease-out lg:static lg:z-auto lg:translate-x-0",
           open ? "translate-x-0" : "-translate-x-full",
