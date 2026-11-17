@@ -53,6 +53,7 @@ import { DetailDisclosure } from "@/features/campaigns/detail-disclosure";
 import { AiQualityCard } from "@/features/campaigns/ai-quality-card";
 import { evaluateCampaignQuality } from "@/lib/ai/campaign-quality-gate";
 import { describeAiProvenance } from "@/lib/ai/provenance";
+import { getAiJobProvenance } from "@/services/ai-jobs";
 import { CampaignProposalSchema } from "@/schemas/ai/campaign-proposal";
 import { isQuickReview } from "@/lib/campaigns/review-mode";
 import type { CampaignProposal } from "@/schemas/ai/campaign-proposal";
@@ -359,16 +360,7 @@ export default async function CampaignDetailPage({
 
   // Where the strategy came from (recorded job row, tenant-scoped by RLS and by
   // this filter) and what the rule-based quality gate says about it.
-  let aiJob: { status: string; provider: string | null; model: string | null; fallback_provider: string | null } | null = null;
-  if (campaign.ai_job_id) {
-    const { data } = await supabase
-      .from("prompter_ai_jobs")
-      .select("status, provider, model, fallback_provider")
-      .eq("id", campaign.ai_job_id)
-      .eq("tenant_id", session.tenantId)
-      .maybeSingle();
-    aiJob = data ?? null;
-  }
+  const aiJob = campaign.ai_job_id ? await getAiJobProvenance(supabase, session.tenantId, campaign.ai_job_id) : null;
   const parsedProposal = CampaignProposalSchema.safeParse(campaign.ai_proposal);
   const aiQuality = parsedProposal.success
     ? evaluateCampaignQuality(parsedProposal.data, { productName: product?.name, knownFacts: product?.description })
