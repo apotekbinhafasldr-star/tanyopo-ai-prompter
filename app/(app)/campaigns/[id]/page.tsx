@@ -50,6 +50,10 @@ import { recommendPublishTime } from "@/lib/scheduling/recommend-time";
 import { ScheduleForm, type ScheduleRecommendation } from "@/features/content/schedule-form";
 import { QuickReviewSummary } from "@/features/campaigns/quick-review-summary";
 import { DetailDisclosure } from "@/features/campaigns/detail-disclosure";
+import { AiQualityCard } from "@/features/campaigns/ai-quality-card";
+import { evaluateCampaignQuality } from "@/lib/ai/campaign-quality-gate";
+import { describeAiProvenance } from "@/lib/ai/provenance";
+import { CampaignProposalSchema } from "@/schemas/ai/campaign-proposal";
 import { isQuickReview } from "@/lib/campaigns/review-mode";
 import type { CampaignProposal } from "@/schemas/ai/campaign-proposal";
 import { PurchaseDestinationCard } from "@/features/campaigns/purchase-destination-card";
@@ -180,7 +184,7 @@ export default async function CampaignDetailPage({
     { data: productMedia },
   ] = await Promise.all([
     campaign.product_id
-      ? supabase.from("prompter_products").select("id, name").eq("id", campaign.product_id).single()
+      ? supabase.from("prompter_products").select("id, name, description").eq("id", campaign.product_id).single()
       : Promise.resolve({ data: null }),
     supabase
       .from("prompter_channel_campaigns")
@@ -352,6 +356,23 @@ export default async function CampaignDetailPage({
   }
 
   const proposal = campaign.ai_proposal as CampaignProposal | null;
+
+  // Where the strategy came from (recorded job row, tenant-scoped by RLS and by
+  // this filter) and what the rule-based quality gate says about it.
+  let aiJob: { status: string; provider: string | null; model: string | null; fallback_provider: string | null } | null = null;
+  if (campaign.ai_job_id) {
+    const { data } = await supabase
+      .from("prompter_ai_jobs")
+      .select("status, provider, model, fallback_provider")
+      .eq("id", campaign.ai_job_id)
+      .eq("tenant_id", session.tenantId)
+      .maybeSingle();
+    aiJob = data ?? null;
+  }
+  const parsedProposal = CampaignProposalSchema.safeParse(campaign.ai_proposal);
+  const aiQuality = parsedProposal.success
+    ? evaluateCampaignQuality(parsedProposal.data, { productName: product?.name, knownFacts: product?.description })
+    : null;
   const boundCopyAction = updateCampaignCopyAction.bind(null, id);
   const isDraft = campaign.status === "DRAFT";
   // PR-A phase-1 gate: simplified review ONLY for a DRAFT reached from Quick
@@ -463,6 +484,8 @@ export default async function CampaignDetailPage({
       {campaign.status === "SCHEDULED" && session.role === "owner" ? (
         <RecoverToDraft campaignId={id} />
       ) : null}
+
+      {aiQuality ? <AiQualityCard provenance={describeAiProvenance(aiJob)} quality={aiQuality} /> : null}
 
       {proposal ? (
         <PurchaseDestinationCard
