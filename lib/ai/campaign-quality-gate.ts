@@ -19,6 +19,8 @@ export type QualityDimensionId =
   | "relevance"
   | "differentiation"
   | "benefit_clarity"
+  | "hook_strength"
+  | "audience_fit"
   | "cta_strength"
   | "ad_policy"
   | "claim_risk";
@@ -75,6 +77,8 @@ export const DIMENSION_LABELS: Record<QualityDimensionId, string> = {
   relevance: "Relevansi produk",
   differentiation: "Diferensiasi",
   benefit_clarity: "Kejelasan manfaat",
+  hook_strength: "Kekuatan hook",
+  audience_fit: "Kejelasan audiens",
   cta_strength: "Kekuatan ajakan (CTA)",
   ad_policy: "Kepatuhan format iklan",
   claim_risk: "Risiko klaim",
@@ -84,6 +88,8 @@ const DIMENSION_ORDER: readonly QualityDimensionId[] = [
   "relevance",
   "differentiation",
   "benefit_clarity",
+  "hook_strength",
+  "audience_fit",
   "cta_strength",
   "ad_policy",
   "claim_risk",
@@ -167,6 +173,7 @@ const TEXT_RULES: readonly TextRule[] = [
 const SPEC_PATTERN =
   /(?:\bRp\s?\d[\d.,]*|\b\d[\d.,]*\s*(?:(?:gram|gr|kg|ml|liter|mdpl|meter|persen|hari|jam|bulan|tahun|pcs|sachet|bungkus)\b|%)|\bgrade\s+\w+|\bsingle\s*origin\b|\borganik\b|\bfair\s*trade\b|\bhalal\b|\bbpom\b|\bbebas\s+(?:pestisida|gula|pengawet)\b|\btanpa\s+(?:pengawet|gula|bahan\s+kimia)\b)/gi;
 
+const BROAD_AUDIENCE = /\b(?:semua\s+(?:orang|kalangan|usia|golongan)|siapa\s*saja|seluruh\s+masyarakat|umum)\b/i;
 const TRANSACTION_PATTERN = /\b(?:beli|pesan|order|checkout|bayar|transfer|buy\s+now|order\s+now)\b/i;
 
 const WEAK_CTA = /^(?:klik\s+(?:di\s+)?sini|click\s+here|selengkapnya|more|lihat|ok)$/i;
@@ -309,6 +316,40 @@ export function evaluateCampaignQuality(
       dimension: "benefit_clarity",
       severity: "warn",
       message: "Nilai jual produk belum jelas.",
+    });
+  }
+
+  // Hook strength: a hook must be specific to THIS product/problem, not a slogan.
+  const specific = new Set([
+    ...tokens(`${context.productName ?? ""} ${proposal.customer_pain} ${proposal.value_proposition} ${proposal.positioning}`),
+  ]);
+  for (const [i, c] of proposal.candidates.entries()) {
+    const hook = c.hook.trim();
+    const same = hook.length > 0 && hook.toLowerCase() === c.headline.trim().toLowerCase();
+    const short = hook.length < 15;
+    const shares = [...tokens(hook)].some((t) => specific.has(t));
+    if (short || same || !shares) {
+      issues.push({
+        code: "WEAK_HOOK",
+        dimension: "hook_strength",
+        severity: "warn",
+        message: `Hook kandidat ${i + 1} ${
+          short ? "terlalu pendek" : same ? "sama dengan judul" : "tidak terkait masalah atau produk"
+        }. Hook harus spesifik dan menyentuh masalah pembeli.`,
+        excerpt: hook || undefined,
+      });
+    }
+  }
+
+  // Audience: who it is for must be stated, and not "everyone".
+  const audience = proposal.audience_summary.trim();
+  if (audience.length < 20 || BROAD_AUDIENCE.test(audience)) {
+    issues.push({
+      code: "AUDIENCE_TOO_BROAD",
+      dimension: "audience_fit",
+      severity: "warn",
+      message: "Audiens belum jelas atau terlalu luas (mis. \"semua orang\"). Sebutkan siapa yang paling cocok dan situasinya.",
+      excerpt: audience || undefined,
     });
   }
 

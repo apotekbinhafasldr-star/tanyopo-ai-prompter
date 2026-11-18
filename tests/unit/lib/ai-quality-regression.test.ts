@@ -31,6 +31,8 @@ describe("rubric regression — scenario A: simulated Kopi Robusta Aceh", () => 
       "CANDIDATES_TOO_SIMILAR",
       "TRANSACTION_IN_SIMULATION",
       "ALLOCATION_NOT_100",
+      "WEAK_HOOK",
+      "AUDIENCE_TOO_BROAD",
     ]) {
       expect(codes).toContain(expected);
     }
@@ -68,6 +70,23 @@ describe("rubric regression — scenario A: simulated Kopi Robusta Aceh", () => 
     expect(evaluateCampaignQuality(invented, ctx).issues.map((i) => i.code)).toContain("UNSUPPORTED_SPEC");
     const given = evaluateCampaignQuality(KOPI_ROBUSTA_IMPROVED, ctx).issues.filter((i) => i.code === "UNSUPPORTED_SPEC");
     expect(given).toHaveLength(0); // "200 gram" IS in the facts
+  });
+
+  it("scores hook strength and audience clarity as their own dimensions", () => {
+    const id = (r: typeof weak, d: string) => r.dimensions.find((x) => x.id === d)?.status;
+    expect(id(weak, "hook_strength")).not.toBe("PASS");
+    expect(id(weak, "audience_fit")).not.toBe("PASS");
+    expect(id(improved, "hook_strength")).toBe("PASS");
+    expect(id(improved, "audience_fit")).toBe("PASS");
+    const vague = evaluateCampaignQuality({ ...KOPI_ROBUSTA_IMPROVED, audience_summary: "Semua orang yang suka minum." }, ctx);
+    expect(vague.issues.map((i) => i.code)).toContain("AUDIENCE_TOO_BROAD");
+  });
+
+  it("covers every dimension the Founder asked for", () => {
+    const ids = improved.dimensions.map((d) => d.id);
+    for (const d of ["relevance", "hook_strength", "differentiation", "audience_fit", "cta_strength", "claim_risk"]) {
+      expect(ids).toContain(d);
+    }
   });
 
   it("is deterministic across runs (stable regression signal)", () => {

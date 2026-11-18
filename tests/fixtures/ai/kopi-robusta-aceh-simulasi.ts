@@ -22,27 +22,27 @@ export const KOPI_ROBUSTA_WEAK = buildProposal({
   creative_concept: "Foto kopi.",
   candidates: [
     {
-      hook: "Solusi terbaik untuk pecinta kopi",
+      hook: "Kopi enak!",
       headline: "Kopi Robusta Aceh grade 1 dari 1.200 mdpl",
       cta: "Beli sekarang",
       primary_text:
-        "Stok terbatas! Kopi robusta Aceh dijamin laris dan dipercaya 1000 pelanggan. Kunjungi www.kopiaceh.com atau hubungi 0812-3456-7890 hari ini juga.",
+        "Solusi terbaik untuk pecinta kopi. Stok terbatas! Kopi robusta Aceh dijamin laris dan dipercaya 1000 pelanggan. Kunjungi www.kopiaceh.com atau hubungi 0812-3456-7890 hari ini juga.",
       rationale: "Kopi enak.",
     },
     {
-      hook: "Solusi terbaik untuk pecinta kopi",
+      hook: "Kopi enak!",
       headline: "Kopi Robusta Aceh grade 1 dari 1.200 mdpl",
       cta: "Beli sekarang",
       primary_text:
-        "Stok terbatas! Kopi robusta Aceh dijamin laris dan dipercaya 1000 pelanggan. Kunjungi www.kopiaceh.com atau hubungi 0812-3456-7890 hari ini juga.",
+        "Solusi terbaik untuk pecinta kopi. Stok terbatas! Kopi robusta Aceh dijamin laris dan dipercaya 1000 pelanggan. Kunjungi www.kopiaceh.com atau hubungi 0812-3456-7890 hari ini juga.",
       rationale: "Kopi enak.",
     },
     {
-      hook: "Solusi terbaik untuk pecinta kopi",
+      hook: "Kopi enak!",
       headline: "Kopi Robusta Aceh grade 1 dari 1.200 mdpl",
       cta: "Beli sekarang",
       primary_text:
-        "Stok terbatas! Kopi robusta Aceh dijamin laris dan dipercaya 1000 pelanggan. Kunjungi www.kopiaceh.com atau hubungi 0812-3456-7890 hari ini juga.",
+        "Solusi terbaik untuk pecinta kopi. Stok terbatas! Kopi robusta Aceh dijamin laris dan dipercaya 1000 pelanggan. Kunjungi www.kopiaceh.com atau hubungi 0812-3456-7890 hari ini juga.",
       rationale: "Kopi enak.",
     },
   ],
