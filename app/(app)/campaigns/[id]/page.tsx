@@ -58,6 +58,7 @@ import { CampaignProposalSchema } from "@/schemas/ai/campaign-proposal";
 import { isQuickReview } from "@/lib/campaigns/review-mode";
 import type { CampaignProposal } from "@/schemas/ai/campaign-proposal";
 import { PurchaseDestinationCard } from "@/features/campaigns/purchase-destination-card";
+import { readStoredDestination, resolveOwnHostsFromEnv } from "@/lib/campaigns/purchase-destination";
 import { RecoverToDraft } from "@/features/campaigns/recover-to-draft";
 import { LaunchReadinessPanel } from "@/features/campaigns/launch-readiness-panel";
 import { evaluateLaunchReadiness, type Read } from "@/lib/campaigns/launch-readiness";
@@ -264,6 +265,17 @@ export default async function CampaignDetailPage({
   );
   const hasChannelData = (channelCampaigns ?? []).length > 0;
 
+  // Re-validate the stored purchase destination (never trusted). legacy => unknown (undefined).
+  const storedDestination = readStoredDestination(
+    campaign.ai_proposal,
+    resolveOwnHostsFromEnv({
+      NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
+      META_REDIRECT_URI: process.env.META_REDIRECT_URI,
+      NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
+    }),
+  );
+  const journeyHasDestination = storedDestination.kind === "legacy" ? undefined : storedDestination.kind === "valid";
+
   // Read-only Meta readiness panel. Every source below is a plain read, scoped
   // to the session tenant; none contacts Meta. A failed read becomes
   // `{ ok: false }` so the checklist shows "belum siap", never a guess.
@@ -325,6 +337,7 @@ export default async function CampaignDetailPage({
       now: new Date(),
       connection,
       adAccountConfirmed,
+      purchaseDestination: journeyHasDestination ?? null,
       dailyBudget: campaign.daily_budget,
       currency: campaign.currency,
       approvalPolicy: policyRes.error
@@ -427,7 +440,7 @@ export default async function CampaignDetailPage({
         </div>
       </div>
 
-      <CampaignJourney status={campaign.status} hasProposal={!!proposal} />
+      <CampaignJourney status={campaign.status} hasProposal={!!proposal} hasDestination={journeyHasDestination} />
 
       {banner ? <div className={`rounded-[var(--radius-md)] p-4 text-sm ${bannerClass}`}>{banner.text}</div> : null}
 

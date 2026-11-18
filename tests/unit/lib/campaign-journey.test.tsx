@@ -44,6 +44,24 @@ describe("buildCampaignJourney", () => {
     }
   });
 
+  it("DRAFT with a proposal but no valid destination asks for the destination first", () => {
+    const j = buildCampaignJourney("DRAFT", true, false);
+    expect(j.nextAction).toContain("Tentukan tujuan pembelian dulu");
+    expect(j.nextAction).toContain("Belum ada yang diterbitkan");
+    expect(j.currentLabel).toBe("Review");
+  });
+
+  it("a valid or unknown (legacy) destination keeps the original wording", () => {
+    for (const d of [true, undefined]) {
+      expect(buildCampaignJourney("DRAFT", true, d).nextAction).toContain("Periksa strategi dan teks iklan");
+    }
+  });
+
+  it("destination only affects DRAFT-with-proposal", () => {
+    expect(buildCampaignJourney("AWAITING_APPROVAL", true, false).nextAction).toBe(buildCampaignJourney("AWAITING_APPROVAL", true).nextAction);
+    expect(buildCampaignJourney("DRAFT", false, false).nextAction).toBe(buildCampaignJourney("DRAFT", false).nextAction);
+  });
+
   it("an unknown status degrades safely", () => {
     const j = buildCampaignJourney("WHATEVER", true);
     expect(j.steps).toHaveLength(6);
@@ -60,5 +78,10 @@ describe("CampaignJourney", () => {
     for (const label of ["Produk", "Strategi AI", "Review", "Persetujuan", "Eksekusi", "Analitik"]) {
       expect(screen.getAllByText(label).length).toBeGreaterThan(0);
     }
+  });
+
+  it("renders the destination-first hint for a DRAFT without a destination", () => {
+    render(<CampaignJourney status="DRAFT" hasProposal hasDestination={false} />);
+    expect(screen.getByTestId("journey-next").textContent).toContain("Tentukan tujuan pembelian dulu");
   });
 });
