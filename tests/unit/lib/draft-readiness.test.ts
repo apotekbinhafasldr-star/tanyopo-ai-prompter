@@ -115,7 +115,7 @@ describe("launch reasons per channel", () => {
     const text = r.launch!.reasons.join(" | ");
     expect(text).toContain("belum terhubung");
     expect(text).toContain("belum diaktifkan");
-    expect(text).toContain("gambar produk");
+    expect(text).toContain("belum punya gambar");
     expect(text).toContain("terkunci");
   });
 
