@@ -11,6 +11,7 @@ const BASE: ReadinessInput = {
   status: "DRAFT",
   quality: "PASS",
   destination: "valid",
+  hostsConfigured: true,
   channels: ["TIKTOK", "X"],
   connectedPlatforms: new Set(),
   createAdEnabledPlatforms: new Set(),
@@ -54,6 +55,22 @@ describe("DraftReadinessBanner", () => {
   it("legacy without a landing URL is a reason with the fix", () => {
     render(<DraftReadinessBanner readiness={buildCampaignReadiness({ ...BASE, destination: "legacy_missing" })} />);
     expect(screen.getByTestId("readiness-draft-reasons").textContent).toContain("Isi URL pada produk atau profil brand");
+  });
+
+  it("hosts unconfigured: legacy says it cannot be confirmed and the Meta launch reason is visible", () => {
+    render(
+      <DraftReadinessBanner
+        readiness={buildCampaignReadiness({
+          ...BASE,
+          channels: ["INSTAGRAM"],
+          destination: "legacy_unverified",
+          hostsConfigured: false,
+        })}
+      />,
+    );
+    expect(screen.getByTestId("readiness-notes").textContent).toContain("belum dapat dipastikan");
+    expect(document.body.textContent).toContain("Peluncuran Meta ditolak");
+    expect(screen.getByTestId("readiness-launch-label").textContent).toBe("Belum siap tayang");
   });
 
   it("SCHEDULED stays 'belum berjalan'; ACTIVE shows no launch-readiness block", () => {

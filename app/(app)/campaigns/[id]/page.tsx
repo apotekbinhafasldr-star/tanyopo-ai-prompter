@@ -56,10 +56,10 @@ import { ChannelInfoChecklist } from "@/features/campaigns/channel-info-checklis
 import {
   assessLaunchMedia,
   buildCampaignReadiness,
-  type DestinationState,
+  ownHostsConfigured,
+  resolveDestinationState,
   type ReadinessQuality,
 } from "@/lib/campaigns/draft-readiness";
-import { resolveLandingUrl } from "@/lib/campaigns/meta-launch-preflight";
 import { evaluateCampaignQuality } from "@/lib/ai/campaign-quality-gate";
 import { describeAiProvenance } from "@/lib/ai/provenance";
 import { getAiJobProvenance } from "@/services/ai-jobs";
@@ -401,18 +401,17 @@ export default async function CampaignDetailPage({
   });
   // Legacy (no stored destination) is accepted by launch only with a usable
   // product/brand landing URL (same pure resolver as the launch preflight).
-  const destination: DestinationState =
-    storedDestination.kind === "legacy"
-      ? resolveLandingUrl({ productUrl: product?.website_url, brandUrl: brandProfile?.website_url }, ownHosts ?? []).ok
-        ? "legacy_ok"
-        : "legacy_missing"
-      : storedDestination.kind === "valid"
-        ? "valid"
-        : "invalid";
+  const destination = resolveDestinationState({
+    storedKind: storedDestination.kind,
+    ownHosts,
+    productUrl: product?.website_url,
+    brandUrl: brandProfile?.website_url,
+  });
   const campaignReadiness = buildCampaignReadiness({
     status: campaign.status,
     quality: readinessQuality,
     destination,
+    hostsConfigured: ownHostsConfigured(ownHosts),
     channels: campaign.channels,
     connectedPlatforms,
     createAdEnabledPlatforms,

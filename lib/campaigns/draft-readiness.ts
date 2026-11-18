@@ -1,5 +1,6 @@
 import { CHANNEL_TO_CONNECTOR } from "@/lib/connectors/channel-map";
 import { isOwnProductMediaPath } from "@/lib/media/product-media-path";
+import { resolveLandingUrl } from "@/lib/campaigns/meta-launch-preflight";
 import type { ConnectorPlatform } from "@/types/database";
 
 /**
@@ -27,8 +28,33 @@ export type ReadinessQuality = "PASS" | "REVIEW" | "FAIL" | "UNKNOWN" | "NONE";
  * - invalid: a stored destination that is missing/invalid (launch refuses it);
  * - legacy_ok: no stored destination (legacy), but a valid product/brand landing URL exists (launch accepts it);
  * - legacy_missing: legacy and no valid landing URL (launch fails with LANDING_URL_MISSING).
+ * - legacy_unverified: legacy, but this server's own hosts are not configured, so the landing URL cannot be
+ *   verified (launch itself stops with APP_HOST_UNCONFIGURED). Never reported as valid.
  */
-export type DestinationState = "valid" | "invalid" | "legacy_ok" | "legacy_missing";
+export type DestinationState = "valid" | "invalid" | "legacy_ok" | "legacy_missing" | "legacy_unverified";
+
+/** `null` or an empty list both mean "own hosts not configured": the app domain cannot be proven. */
+export function ownHostsConfigured(ownHosts: readonly string[] | null | undefined): ownHosts is readonly string[] {
+  return Array.isArray(ownHosts) && ownHosts.length > 0;
+}
+
+/**
+ * Pure mapping of the stored destination (from readStoredDestination) to what launch would do.
+ * Legacy is judged with the same resolveLandingUrl as launch, but only when the own hosts are configured.
+ */
+export function resolveDestinationState(input: {
+  storedKind: "legacy" | "none" | "valid" | "invalid";
+  ownHosts: readonly string[] | null | undefined;
+  productUrl?: string | null;
+  brandUrl?: string | null;
+}): DestinationState {
+  if (input.storedKind === "valid") return "valid";
+  if (input.storedKind !== "legacy") return "invalid";
+  if (!ownHostsConfigured(input.ownHosts)) return "legacy_unverified";
+  return resolveLandingUrl({ productUrl: input.productUrl, brandUrl: input.brandUrl }, input.ownHosts).ok
+    ? "legacy_ok"
+    : "legacy_missing";
+}
 
 /**
  * What the page can tell about the Meta creative image WITHOUT reading storage.
@@ -82,6 +108,8 @@ export interface ReadinessInput {
   status: string;
   quality: ReadinessQuality;
   destination: DestinationState;
+  /** False when ownHosts is null/empty: Meta launch is refused with APP_HOST_UNCONFIGURED. */
+  hostsConfigured: boolean;
   /** Channels the campaign actually selected (SEO is ignored: it is not an ad channel). */
   channels: readonly string[];
   connectedPlatforms: ReadonlySet<string>;
@@ -219,17 +247,28 @@ function destinationReason(destination: DestinationState): string | null {
 }
 
 const LEGACY_NOTE = "Campaign lama: tujuan pembelian memakai URL produk atau brand.";
+const LEGACY_UNVERIFIED_NOTE =
+  "Campaign lama: URL tujuan belum dapat dipastikan karena domain aplikasi belum dikonfigurasi di server.";
+const HOST_UNCONFIGURED_REASON =
+  "Meta (Facebook/Instagram): Domain aplikasi belum terkonfigurasi di server (NEXT_PUBLIC_APP_URL atau META_REDIRECT_URI). Peluncuran Meta ditolak sampai admin memperbaikinya.";
 const NOT_READY_DETAIL =
   "Anda masih bisa mengajukan campaign ini untuk ditinjau Owner. Namun syarat peluncuran harus dipenuhi: tujuan pembelian yang valid dan syarat media tiap channel. Catatan kualitas yang belum diperbaiki akan terlihat saat Owner meninjau.";
 
 export function buildCampaignReadiness(input: ReadinessInput): CampaignReadiness {
   const platforms = selectedAdPlatforms(input.channels).map((p) => buildPlatformChecklist(p, input));
 
-  const notes = input.destination === "legacy_ok" ? [LEGACY_NOTE] : [];
+  const notes =
+    input.destination === "legacy_ok"
+      ? [LEGACY_NOTE]
+      : input.destination === "legacy_unverified"
+        ? [LEGACY_UNVERIFIED_NOTE]
+        : [];
+  const hostBlocked = !input.hostsConfigured && platforms.some((p) => p.platform === "META");
   const destinationLaunchReason = destinationReason(input.destination);
   const launchReasons = (extra: string[]): string[] => [
     ...extra,
     ...(destinationLaunchReason ? [destinationLaunchReason] : []),
+    ...(hostBlocked ? [HOST_UNCONFIGURED_REASON] : []),
     ...platforms.flatMap((p) => p.checks.filter((c) => c.status !== "PASS").map((c) => `${p.label}: ${c.detail}`)),
   ];
 

@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   assessLaunchMedia,
   buildCampaignReadiness,
+  ownHostsConfigured,
+  resolveDestinationState,
   selectedAdPlatforms,
   type DestinationState,
   type LaunchMediaRow,
@@ -13,6 +15,7 @@ const BASE: ReadinessInput = {
   status: "DRAFT",
   quality: "PASS",
   destination: "valid",
+  hostsConfigured: true,
   channels: ["INSTAGRAM", "FACEBOOK"],
   connectedPlatforms: new Set(["META"]),
   createAdEnabledPlatforms: new Set(["META"]),
@@ -269,5 +272,74 @@ describe("assessLaunchMedia mirrors the Meta pick + static checks", () => {
     expect(assessLaunchMedia([at("t1/p1/../a.jpg")], "a", owner)).toBe("BAD_PATH");
     expect(assessLaunchMedia([at("t1/p1/a%2e.jpg")], "a", owner)).toBe("BAD_PATH");
     expect(assessLaunchMedia([row("a", "jpg")], "a", { tenantId: "t1", productId: null })).toBe("BAD_PATH");
+  });
+});
+
+describe("ownHosts not configured (null or []) is 'cannot be verified', never ready", () => {
+  const LANDING = { productUrl: "https://tokokopi.example.id/produk", brandUrl: null };
+  const HOSTS = ["app.linoe-test.id"];
+
+  it("ownHostsConfigured: only a non-empty list counts as configured", () => {
+    expect(ownHostsConfigured(null)).toBe(false);
+    expect(ownHostsConfigured(undefined)).toBe(false);
+    expect(ownHostsConfigured([])).toBe(false);
+    expect(ownHostsConfigured(HOSTS)).toBe(true);
+  });
+
+  it.each<[string[] | null]>([[null], [[]]])("legacy + ownHosts %j => legacy_unverified even with a usable URL", (ownHosts) => {
+    expect(resolveDestinationState({ storedKind: "legacy", ownHosts, ...LANDING })).toBe("legacy_unverified");
+    expect(resolveDestinationState({ storedKind: "legacy", ownHosts })).toBe("legacy_unverified");
+  });
+
+  it("legacy + configured hosts keeps the launch rule: usable URL => legacy_ok, none => legacy_missing, own host => legacy_missing", () => {
+    expect(resolveDestinationState({ storedKind: "legacy", ownHosts: HOSTS, ...LANDING })).toBe("legacy_ok");
+    expect(resolveDestinationState({ storedKind: "legacy", ownHosts: HOSTS })).toBe("legacy_missing");
+    expect(resolveDestinationState({ storedKind: "legacy", ownHosts: HOSTS, productUrl: "https://app.linoe-test.id/x" })).toBe("legacy_missing");
+    expect(resolveDestinationState({ storedKind: "legacy", ownHosts: HOSTS, productUrl: "http://tokokopi.example.id" })).toBe("legacy_missing");
+  });
+
+  it("stored destinations map the same regardless of hosts: valid => valid, none/invalid => invalid", () => {
+    expect(resolveDestinationState({ storedKind: "valid", ownHosts: null })).toBe("valid");
+    expect(resolveDestinationState({ storedKind: "none", ownHosts: HOSTS })).toBe("invalid");
+    expect(resolveDestinationState({ storedKind: "invalid", ownHosts: null })).toBe("invalid");
+  });
+
+  it("legacy_unverified: no 'valid' note, no failure reason, draft can still be reviewed; the note says it cannot be confirmed", () => {
+    const r = make({ destination: "legacy_unverified", hostsConfigured: false });
+    expect(r.draftReasons).toEqual([]);
+    expect(r.primary.label).toBe("Draft siap ditinjau");
+    expect(r.notes.join(" ")).toContain("belum dapat dipastikan");
+    expect(r.notes.join(" ")).not.toContain("memakai URL produk atau brand");
+    expect(r.launch?.label).toBe("Belum siap tayang");
+    expect(r.launch?.reasons.join(" ")).toContain("NEXT_PUBLIC_APP_URL");
+  });
+
+  it("valid destination + hosts unconfigured + Meta: launch reason is explicit and the launch is not ready", () => {
+    const r = make({ destination: "valid", hostsConfigured: false });
+    expect(r.launch?.ready).toBe(false);
+    expect(r.launch?.reasons.join(" ")).toContain("Peluncuran Meta ditolak");
+    expect(make({ destination: "valid", hostsConfigured: true }).launch?.reasons.join(" ")).not.toContain("Peluncuran Meta ditolak");
+  });
+
+  it("SCHEDULED + Meta + hosts unconfigured is never 'conditions met', for legacy or valid", () => {
+    for (const destination of ["legacy_unverified", "valid"] as const) {
+      const r = make({ status: "SCHEDULED", destination, hostsConfigured: false, budgetWriteEnabled: { META: true } });
+      expect(r.launch?.ready).toBe(false);
+      expect(r.launch?.label).toBe("Belum siap tayang");
+      expect(r.launch?.reasons.join(" ")).toContain("Peluncuran Meta ditolak");
+    }
+  });
+
+  it("AWAITING_APPROVAL also lists the host reason for Meta", () => {
+    expect(make({ status: "AWAITING_APPROVAL", hostsConfigured: false }).launch?.reasons.join(" ")).toContain("Peluncuran Meta ditolak");
+  });
+
+  it("TikTok/X-only campaigns get no Meta host reason", () => {
+    const r = make({ channels: ["TIKTOK", "X"], hostsConfigured: false });
+    expect(r.launch?.reasons.join(" ")).not.toContain("Peluncuran Meta ditolak");
+  });
+
+  it("a new campaign with an invalid destination still warns when hosts are unconfigured", () => {
+    expect(make({ destination: "invalid", hostsConfigured: false }).draftReasons.join(" ")).toContain("Tujuan pembelian");
   });
 });
