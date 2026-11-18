@@ -53,7 +53,13 @@ import { DetailDisclosure } from "@/features/campaigns/detail-disclosure";
 import { AiQualityCard, QualityUnavailableCard } from "@/features/campaigns/ai-quality-card";
 import { DraftReadinessBanner } from "@/features/campaigns/draft-readiness-banner";
 import { ChannelInfoChecklist } from "@/features/campaigns/channel-info-checklist";
-import { buildCampaignReadiness, type ReadinessQuality } from "@/lib/campaigns/draft-readiness";
+import {
+  assessLaunchMedia,
+  buildCampaignReadiness,
+  type DestinationState,
+  type ReadinessQuality,
+} from "@/lib/campaigns/draft-readiness";
+import { resolveLandingUrl } from "@/lib/campaigns/meta-launch-preflight";
 import { evaluateCampaignQuality } from "@/lib/ai/campaign-quality-gate";
 import { describeAiProvenance } from "@/lib/ai/provenance";
 import { getAiJobProvenance } from "@/services/ai-jobs";
@@ -192,7 +198,7 @@ export default async function CampaignDetailPage({
     { data: productMedia },
   ] = await Promise.all([
     campaign.product_id
-      ? supabase.from("prompter_products").select("id, name, description").eq("id", campaign.product_id).single()
+      ? supabase.from("prompter_products").select("id, name, description, website_url").eq("id", campaign.product_id).single()
       : Promise.resolve({ data: null }),
     supabase
       .from("prompter_channel_campaigns")
@@ -223,7 +229,7 @@ export default async function CampaignDetailPage({
           .eq("status", "PENDING")
           .maybeSingle()
       : Promise.resolve({ data: null }),
-    supabase.from("prompter_brand_profiles").select("default_timezone").eq("tenant_id", session.tenantId).maybeSingle(),
+    supabase.from("prompter_brand_profiles").select("default_timezone, website_url").eq("tenant_id", session.tenantId).maybeSingle(),
     // Batch B4 — Media Workflow: reuses the product's own media library
     // (Phase 1) rather than a separate campaign-media upload path.
     campaign.product_id
@@ -269,14 +275,12 @@ export default async function CampaignDetailPage({
   const hasChannelData = (channelCampaigns ?? []).length > 0;
 
   // Re-validate the stored purchase destination (never trusted). legacy => unknown (undefined).
-  const storedDestination = readStoredDestination(
-    campaign.ai_proposal,
-    resolveOwnHostsFromEnv({
-      NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
-      META_REDIRECT_URI: process.env.META_REDIRECT_URI,
-      NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
-    }),
-  );
+  const ownHosts = resolveOwnHostsFromEnv({
+    NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
+    META_REDIRECT_URI: process.env.META_REDIRECT_URI,
+    NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
+  });
+  const storedDestination = readStoredDestination(campaign.ai_proposal, ownHosts);
   const journeyHasDestination = storedDestination.kind === "legacy" ? undefined : storedDestination.kind === "valid";
 
   // Read-only Meta readiness panel. Every source below is a plain read, scoped
@@ -391,17 +395,28 @@ export default async function CampaignDetailPage({
   // hasLaunchImage mirrors the Meta launch rule (pickLaunchMedia): the selected
   // media must exist, otherwise the product needs an IMAGE.
   const readinessQuality: ReadinessQuality = !campaign.ai_proposal ? "NONE" : aiQuality ? aiQuality.status : "UNKNOWN";
-  const hasLaunchImage = campaign.selected_media_id
-    ? (productMedia ?? []).some((m) => m.id === campaign.selected_media_id)
-    : (productMedia ?? []).some((m) => m.media_type === "IMAGE");
+  const launchMedia = assessLaunchMedia(productMedia, campaign.selected_media_id, {
+    tenantId: session.tenantId,
+    productId: campaign.product_id,
+  });
+  // Legacy (no stored destination) is accepted by launch only with a usable
+  // product/brand landing URL (same pure resolver as the launch preflight).
+  const destination: DestinationState =
+    storedDestination.kind === "legacy"
+      ? resolveLandingUrl({ productUrl: product?.website_url, brandUrl: brandProfile?.website_url }, ownHosts).ok
+        ? "legacy_ok"
+        : "legacy_missing"
+      : storedDestination.kind === "valid"
+        ? "valid"
+        : "invalid";
   const campaignReadiness = buildCampaignReadiness({
     status: campaign.status,
     quality: readinessQuality,
-    destinationValid: journeyHasDestination,
+    destination,
     channels: campaign.channels,
     connectedPlatforms,
     createAdEnabledPlatforms,
-    hasLaunchImage,
+    launchMedia,
     budgetWriteEnabled: {
       META: isBudgetWritePlatformEnabled("META"),
       TIKTOK: isBudgetWritePlatformEnabled("TIKTOK"),

@@ -18,7 +18,7 @@ const TONE_TEXT: Record<ReadinessTone, string> = {
 const TONE_MARK: Record<ReadinessTone, string> = {
   ready: "Siap ditinjau",
   review: "Perlu pemeriksaan",
-  blocked: "Belum siap",
+  blocked: "Perlu dilengkapi",
   info: "Status",
 };
 
@@ -29,7 +29,7 @@ const TONE_MARK: Record<ReadinessTone, string> = {
  * alone. Presentational: reads a precomputed readiness, fetches nothing.
  */
 export function DraftReadinessBanner({ readiness }: { readiness: CampaignReadiness }) {
-  const { primary, draftReasons, reviewNote, launch } = readiness;
+  const { primary, draftReasons, reviewNote, launch, notes } = readiness;
   const Icon = primary.tone === "ready" ? CheckCircle2 : primary.tone === "info" ? Info : AlertTriangle;
 
   return (
@@ -54,6 +54,14 @@ export function DraftReadinessBanner({ readiness }: { readiness: CampaignReadine
         <p className="text-sm text-foreground" data-testid="readiness-review-note">
           {reviewNote}
         </p>
+      ) : null}
+
+      {notes.length > 0 ? (
+        <ul className="flex list-disc flex-col gap-1 pl-5 text-sm text-muted-foreground" data-testid="readiness-notes">
+          {notes.map((n) => (
+            <li key={n}>{n}</li>
+          ))}
+        </ul>
       ) : null}
 
       {draftReasons.length > 0 ? (

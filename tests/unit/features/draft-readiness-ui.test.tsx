@@ -10,11 +10,11 @@ afterEach(cleanup);
 const BASE: ReadinessInput = {
   status: "DRAFT",
   quality: "PASS",
-  destinationValid: true,
+  destination: "valid",
   channels: ["TIKTOK", "X"],
   connectedPlatforms: new Set(),
   createAdEnabledPlatforms: new Set(),
-  hasLaunchImage: false,
+  launchMedia: "NO_IMAGE",
   budgetWriteEnabled: {},
   canRegenerate: true,
 };
@@ -34,12 +34,26 @@ describe("DraftReadinessBanner", () => {
   });
 
   it("blocked draft lists specific reasons and uses words, not colour only", () => {
-    render(<DraftReadinessBanner readiness={buildCampaignReadiness({ ...BASE, quality: "FAIL", destinationValid: false })} />);
-    expect(screen.getByTestId("readiness-primary").textContent).toContain("Draft belum siap diajukan");
-    expect(screen.getByTestId("readiness-primary").textContent).toContain("Belum siap");
+    render(<DraftReadinessBanner readiness={buildCampaignReadiness({ ...BASE, quality: "FAIL", destination: "invalid" })} />);
+    expect(screen.getByTestId("readiness-primary").textContent).toContain("Draft perlu dilengkapi sebelum diajukan");
+    expect(screen.getByTestId("readiness-primary").textContent).toContain("Perlu dilengkapi");
+    expect(document.body.textContent).toContain("masih bisa mengajukan");
+    expect(document.body.textContent).not.toContain("belum siap diajukan");
     const reasons = screen.getByTestId("readiness-draft-reasons").textContent ?? "";
     expect(reasons).toContain("harus diperbaiki");
     expect(reasons).toContain("Tujuan pembelian");
+  });
+
+  it("legacy with a landing URL shows an information note, not a failure", () => {
+    render(<DraftReadinessBanner readiness={buildCampaignReadiness({ ...BASE, destination: "legacy_ok" })} />);
+    expect(screen.getByTestId("readiness-primary").textContent).toContain("Draft siap ditinjau");
+    expect(screen.getByTestId("readiness-notes").textContent).toContain("Campaign lama");
+    expect(screen.queryByTestId("readiness-draft-reasons")).toBeNull();
+  });
+
+  it("legacy without a landing URL is a reason with the fix", () => {
+    render(<DraftReadinessBanner readiness={buildCampaignReadiness({ ...BASE, destination: "legacy_missing" })} />);
+    expect(screen.getByTestId("readiness-draft-reasons").textContent).toContain("Isi URL pada produk atau profil brand");
   });
 
   it("SCHEDULED stays 'belum berjalan'; ACTIVE shows no launch-readiness block", () => {

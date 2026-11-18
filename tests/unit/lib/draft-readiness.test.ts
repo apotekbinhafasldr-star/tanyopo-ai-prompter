@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  assessLaunchMedia,
   buildCampaignReadiness,
   selectedAdPlatforms,
+  type DestinationState,
+  type LaunchMediaRow,
   type ReadinessInput,
   type ReadinessQuality,
 } from "@/lib/campaigns/draft-readiness";
@@ -9,28 +12,38 @@ import {
 const BASE: ReadinessInput = {
   status: "DRAFT",
   quality: "PASS",
-  destinationValid: true,
+  destination: "valid",
   channels: ["INSTAGRAM", "FACEBOOK"],
   connectedPlatforms: new Set(["META"]),
   createAdEnabledPlatforms: new Set(["META"]),
-  hasLaunchImage: true,
+  launchMedia: "PLAUSIBLE",
   budgetWriteEnabled: { META: false, TIKTOK: false, X: false },
   canRegenerate: true,
 };
 const make = (over: Partial<ReadinessInput> = {}) => buildCampaignReadiness({ ...BASE, ...over });
 
 describe("draft status: quality x destination", () => {
-  it.each<[ReadinessQuality, boolean | undefined, string]>([
-    ["PASS", true, "Draft siap ditinjau"],
-    ["REVIEW", true, "Draft siap ditinjau"],
-    ["FAIL", true, "Draft belum siap diajukan"],
-    ["UNKNOWN", true, "Draft belum siap diajukan"],
-    ["NONE", true, "Draft belum siap diajukan"],
-    ["PASS", false, "Draft belum siap diajukan"],
-    ["REVIEW", false, "Draft belum siap diajukan"],
-    ["PASS", undefined, "Draft belum siap diajukan"],
-  ])("quality %s + destination %s => %s", (quality, destinationValid, label) => {
-    expect(make({ quality, destinationValid }).primary.label).toBe(label);
+  const NOT_READY = "Draft perlu dilengkapi sebelum diajukan";
+  it.each<[ReadinessQuality, DestinationState, string]>([
+    ["PASS", "valid", "Draft siap ditinjau"],
+    ["REVIEW", "valid", "Draft siap ditinjau"],
+    ["FAIL", "valid", NOT_READY],
+    ["UNKNOWN", "valid", NOT_READY],
+    ["NONE", "valid", NOT_READY],
+    ["PASS", "invalid", NOT_READY],
+    ["REVIEW", "invalid", NOT_READY],
+    ["PASS", "legacy_ok", "Draft siap ditinjau"],
+    ["PASS", "legacy_missing", NOT_READY],
+  ])("quality %s + destination %s => %s", (quality, destination, label) => {
+    expect(make({ quality, destination }).primary.label).toBe(label);
+  });
+
+  it("not-ready wording: old 'belum siap diajukan' is gone; says submission is still possible but launch conditions must be met", () => {
+    const r = make({ quality: "FAIL" });
+    expect(r.primary.label).not.toContain("belum siap diajukan");
+    expect(r.primary.detail).toContain("masih bisa mengajukan");
+    expect(r.primary.detail).toContain("syarat peluncuran harus dipenuhi");
+    expect(make({ quality: "PASS" }).primary.detail).not.toContain("masih bisa mengajukan");
   });
 
   it("REVIEW is ready to review but must say the Owner has to check the notes", () => {
@@ -43,8 +56,38 @@ describe("draft status: quality x destination", () => {
   it("gives a specific reason for each blocker", () => {
     expect(make({ quality: "FAIL" }).draftReasons.join(" ")).toContain("harus diperbaiki");
     expect(make({ quality: "NONE" }).draftReasons.join(" ")).toContain("belum dibuat");
-    expect(make({ destinationValid: false }).draftReasons.join(" ")).toContain("Tujuan pembelian");
-    expect(make({ destinationValid: undefined }).draftReasons.join(" ")).toContain("campaign lama");
+    expect(make({ destination: "invalid" }).draftReasons.join(" ")).toContain("Tujuan pembelian");
+  });
+
+  describe("legacy campaigns follow the launch rule (no stored destination is not a failure)", () => {
+    it("legacy with a usable landing URL: not a reason, only an information note; draft stays ready to review", () => {
+      const r = make({ destination: "legacy_ok" });
+      expect(r.draftReasons).toEqual([]);
+      expect(r.primary.label).toBe("Draft siap ditinjau");
+      expect(r.notes.join(" ")).toContain("Campaign lama");
+      expect(r.launch?.reasons.join(" ")).not.toContain("URL tujuan");
+    });
+
+    it("legacy WITHOUT a usable landing URL fails, with the exact fix", () => {
+      const r = make({ destination: "legacy_missing" });
+      expect(r.draftReasons.join(" ")).toContain("Isi URL pada produk atau profil brand");
+      expect(r.launch?.reasons.join(" ")).toContain("Isi URL pada produk atau profil brand");
+      expect(r.notes).toEqual([]);
+    });
+
+    it("a NEW campaign with an invalid destination still warns; valid has neither reason nor note", () => {
+      const bad = make({ destination: "invalid" });
+      expect(bad.draftReasons.join(" ")).toContain("Tujuan pembelian belum ditentukan atau tidak valid");
+      expect(bad.notes).toEqual([]);
+      const ok = make({ destination: "valid" });
+      expect(ok.draftReasons).toEqual([]);
+      expect(ok.notes).toEqual([]);
+    });
+
+    it("SCHEDULED is not 'conditions met' for a legacy campaign without a landing URL", () => {
+      const r = make({ status: "SCHEDULED", channels: ["INSTAGRAM"], budgetWriteEnabled: { META: true }, destination: "legacy_missing" });
+      expect(r.launch?.ready).toBe(false);
+    });
   });
 
   it("an unreadable strategy says it cannot be assessed and only suggests regenerate for a draft", () => {
@@ -68,12 +111,38 @@ describe("draft status: quality x destination", () => {
 
 describe("launch reasons per channel", () => {
   it("lists Meta reasons: S1 locked, missing image, not connected, capability off", () => {
-    const r = make({ connectedPlatforms: new Set(), createAdEnabledPlatforms: new Set(), hasLaunchImage: false });
+    const r = make({ connectedPlatforms: new Set(), createAdEnabledPlatforms: new Set(), launchMedia: "NO_IMAGE" });
     const text = r.launch!.reasons.join(" | ");
     expect(text).toContain("belum terhubung");
     expect(text).toContain("belum diaktifkan");
     expect(text).toContain("gambar produk");
     expect(text).toContain("terkunci");
+  });
+
+  describe("Meta media: three states, never verified from the page", () => {
+    const meta = (launchMedia: ReadinessInput["launchMedia"]) =>
+      make({ launchMedia }).platforms[0].checks.find((c) => c.id === "media")!;
+
+    it.each([
+      ["NO_IMAGE", "FAIL", "belum punya gambar"],
+      ["SELECTED_NOT_FOUND", "FAIL", "tidak ditemukan"],
+      ["SELECTED_NOT_IMAGE", "FAIL", "berupa video"],
+      ["BAD_PATH", "FAIL", "Lokasi file"],
+      ["BAD_FORMAT", "FAIL", "JPG atau PNG"],
+      ["PLAUSIBLE", "UNKNOWN", "dicek saat peluncuran"],
+    ] as const)("%s => %s", (state, status, text) => {
+      expect(meta(state).status).toBe(status);
+      expect(meta(state).detail).toContain(text);
+    });
+
+    it("no state ever yields PASS, so Meta is never 'complete' from this view and the launch stays 'belum siap'", () => {
+      for (const s of ["NO_IMAGE", "SELECTED_NOT_FOUND", "SELECTED_NOT_IMAGE", "BAD_PATH", "BAD_FORMAT", "PLAUSIBLE"] as const) {
+        expect(meta(s).status).not.toBe("PASS");
+      }
+      const r = make({ status: "SCHEDULED", channels: ["INSTAGRAM"], budgetWriteEnabled: { META: true } });
+      expect(r.launch?.ready).toBe(false);
+      expect(r.launch?.reasons.join(" ")).toContain("dicek saat peluncuran");
+    });
   });
 
   it("TikTok: asset upload not available even when connected and capable", () => {
@@ -130,14 +199,13 @@ describe("stages stay distinct and honest", () => {
     expect(r.launch?.label).toBe("Belum siap tayang");
   });
 
-  it("SCHEDULED only reports launch conditions as met when every check passes, and still says manual", () => {
+  it("SCHEDULED reports launch conditions as met only when every check passes (TikTok/X-free case cannot, because Meta media is never verified here)", () => {
     const r = make({
       status: "SCHEDULED",
       channels: ["INSTAGRAM"],
       budgetWriteEnabled: { META: true },
     });
-    expect(r.launch?.ready).toBe(true);
-    expect(r.launch?.label).toContain("tetap manual");
+    expect(r.launch?.ready).toBe(false);
   });
 
   it("ACTIVE and COMPLETED are LIVE with no launch-readiness claim; other statuses stay neutral", () => {
@@ -157,5 +225,49 @@ describe("stages stay distinct and honest", () => {
     const snapshot = JSON.stringify({ ...input, connectedPlatforms: [...input.connectedPlatforms] });
     expect(buildCampaignReadiness(input)).toEqual(buildCampaignReadiness(input));
     expect(JSON.stringify({ ...input, connectedPlatforms: [...input.connectedPlatforms] })).toBe(snapshot);
+  });
+});
+
+describe("assessLaunchMedia mirrors the Meta pick + static checks", () => {
+  const owner = { tenantId: "t1", productId: "p1" };
+  const row = (id: string, ext: string, media_type = "IMAGE"): LaunchMediaRow => ({
+    id,
+    media_type,
+    storage_path: `t1/p1/${id}.${ext}`,
+  });
+
+  it("no media / only video with no selection => NO_IMAGE", () => {
+    expect(assessLaunchMedia([], null, owner)).toBe("NO_IMAGE");
+    expect(assessLaunchMedia(null, undefined, owner)).toBe("NO_IMAGE");
+    expect(assessLaunchMedia([row("v", "mp4", "VIDEO")], null, owner)).toBe("NO_IMAGE");
+  });
+
+  it("a selected VIDEO is never a product image, even when the product has another image", () => {
+    const rows = [row("v", "mp4", "VIDEO"), row("i", "jpg")];
+    expect(assessLaunchMedia(rows, "v", owner)).toBe("SELECTED_NOT_IMAGE");
+  });
+
+  it("a selected id that does not exist fails and is not swapped for another image", () => {
+    expect(assessLaunchMedia([row("i", "jpg")], "ghost", owner)).toBe("SELECTED_NOT_FOUND");
+  });
+
+  it("without a selection the first IMAGE is used (a video before it is skipped)", () => {
+    expect(assessLaunchMedia([row("v", "mp4", "VIDEO"), row("i", "png")], null, owner)).toBe("PLAUSIBLE");
+  });
+
+  it("extension must be jpg/jpeg/png (case-insensitive); other formats fail", () => {
+    expect(assessLaunchMedia([row("a", "JPG")], "a", owner)).toBe("PLAUSIBLE");
+    expect(assessLaunchMedia([row("a", "jpeg")], "a", owner)).toBe("PLAUSIBLE");
+    expect(assessLaunchMedia([row("a", "webp")], "a", owner)).toBe("BAD_FORMAT");
+    expect(assessLaunchMedia([row("a", "gif")], "a", owner)).toBe("BAD_FORMAT");
+  });
+
+  it("the path must belong to this tenant and product, with no traversal or odd characters", () => {
+    const at = (storage_path: string): LaunchMediaRow => ({ id: "a", media_type: "IMAGE", storage_path });
+    expect(assessLaunchMedia([at("t2/p1/a.jpg")], "a", owner)).toBe("BAD_PATH");
+    expect(assessLaunchMedia([at("t1/p2/a.jpg")], "a", owner)).toBe("BAD_PATH");
+    expect(assessLaunchMedia([at("t1/p1/../a.jpg")], "a", owner)).toBe("BAD_PATH");
+    expect(assessLaunchMedia([at("t1/p1/a%2e.jpg")], "a", owner)).toBe("BAD_PATH");
+    expect(assessLaunchMedia([row("a", "jpg")], "a", { tenantId: "t1", productId: null })).toBe("BAD_PATH");
   });
 });

@@ -1,4 +1,5 @@
 import { CHANNEL_TO_CONNECTOR } from "@/lib/connectors/channel-map";
+import { isOwnProductMediaPath } from "@/lib/media/product-media-path";
 import type { ConnectorPlatform } from "@/types/database";
 
 /**
@@ -20,19 +21,73 @@ export type CheckStatus = "PASS" | "FAIL" | "UNKNOWN";
 /** `UNKNOWN` = a proposal exists but could not be parsed; `NONE` = no proposal at all. */
 export type ReadinessQuality = "PASS" | "REVIEW" | "FAIL" | "UNKNOWN" | "NONE";
 
+/**
+ * Purchase destination as the LAUNCH path sees it (checkLaunchDestination):
+ * - valid: a stored destination that re-validates;
+ * - invalid: a stored destination that is missing/invalid (launch refuses it);
+ * - legacy_ok: no stored destination (legacy), but a valid product/brand landing URL exists (launch accepts it);
+ * - legacy_missing: legacy and no valid landing URL (launch fails with LANDING_URL_MISSING).
+ */
+export type DestinationState = "valid" | "invalid" | "legacy_ok" | "legacy_missing";
+
+/**
+ * What the page can tell about the Meta creative image WITHOUT reading storage.
+ * mime type, file size and object existence are only known to the launch
+ * preflight, so a plausible image is never reported as verified.
+ */
+export type LaunchMediaState =
+  | "NO_IMAGE"
+  | "SELECTED_NOT_FOUND"
+  | "SELECTED_NOT_IMAGE"
+  | "BAD_PATH"
+  | "BAD_FORMAT"
+  | "PLAUSIBLE";
+
+export interface LaunchMediaRow {
+  id: string;
+  storage_path: string;
+  media_type: string;
+}
+
+/**
+ * Mirrors pickLaunchMedia + the static part of checkCreativeImage (type, own
+ * path, JPG/PNG extension). Pure; rows must already be product-scoped and
+ * ordered by position.
+ */
+export function assessLaunchMedia(
+  rows: readonly LaunchMediaRow[] | null | undefined,
+  selectedMediaId: string | null | undefined,
+  owner: { tenantId: string; productId: string | null | undefined },
+): LaunchMediaState {
+  const list = rows ?? [];
+  const media = selectedMediaId ? list.find((r) => r.id === selectedMediaId) : list.find((r) => r.media_type === "IMAGE");
+  if (!media) return selectedMediaId ? "SELECTED_NOT_FOUND" : "NO_IMAGE";
+  if (media.media_type !== "IMAGE") return "SELECTED_NOT_IMAGE";
+  const path = media.storage_path;
+  if (
+    !owner.productId ||
+    !isOwnProductMediaPath(path, owner.tenantId, owner.productId) ||
+    /[\\?#%\u0000-\u001f\u007f]/.test(path) ||
+    path.split("/").some((segment) => segment === "" || segment === "." || segment === "..")
+  ) {
+    return "BAD_PATH";
+  }
+  if (!/\.(?:jpe?g|png)$/i.test(path)) return "BAD_FORMAT";
+  return "PLAUSIBLE";
+}
+
 export type AdPlatform = Extract<ConnectorPlatform, "META" | "TIKTOK" | "X">;
 
 export interface ReadinessInput {
   status: string;
   quality: ReadinessQuality;
-  /** `true` valid, `false` none/invalid, `undefined` legacy / not determinable. */
-  destinationValid: boolean | undefined;
+  destination: DestinationState;
   /** Channels the campaign actually selected (SEO is ignored: it is not an ad channel). */
   channels: readonly string[];
   connectedPlatforms: ReadonlySet<string>;
   createAdEnabledPlatforms: ReadonlySet<string>;
-  /** Mirrors the Meta launch rule: selected media exists, or the product has an IMAGE. */
-  hasLaunchImage: boolean;
+  /** Static Meta image check (see assessLaunchMedia). Never a verified PASS. */
+  launchMedia: LaunchMediaState;
   /** S1 per platform; a missing key counts as locked. */
   budgetWriteEnabled: Partial<Record<string, boolean>>;
   /** Regenerate is offered only for a DRAFT the user may edit. */
@@ -61,6 +116,8 @@ export interface CampaignReadiness {
   draftReasons: readonly string[];
   /** Shown when the gate says REVIEW: the Owner must check the notes. */
   reviewNote: string | null;
+  /** Neutral information that is NOT a failure (e.g. legacy destination in use). */
+  notes: readonly string[];
   /** Separate "can it go live" statement; null once live or when it does not apply. */
   launch: { label: string; ready: boolean; reasons: readonly string[] } | null;
   platforms: readonly PlatformChecklist[];
@@ -90,12 +147,20 @@ export function selectedAdPlatforms(channels: readonly string[]): AdPlatform[] {
   return PLATFORM_ORDER.filter((p) => found.has(p));
 }
 
-function mediaCheck(platform: AdPlatform, hasLaunchImage: boolean): ChannelCheck {
+const META_MEDIA_DETAIL: Record<LaunchMediaState, { status: CheckStatus; detail: string }> = {
+  NO_IMAGE: { status: "FAIL", detail: "Produk belum punya gambar. Meta memerlukan gambar JPG atau PNG." },
+  SELECTED_NOT_FOUND: { status: "FAIL", detail: "Media terpilih tidak ditemukan pada produk ini." },
+  SELECTED_NOT_IMAGE: { status: "FAIL", detail: "Media terpilih berupa video. Meta memakai gambar JPG atau PNG." },
+  BAD_PATH: { status: "FAIL", detail: "Lokasi file media tidak valid." },
+  BAD_FORMAT: { status: "FAIL", detail: "Format file harus JPG atau PNG." },
+  PLAUSIBLE: { status: "UNKNOWN", detail: "Ada gambar JPG/PNG. Ukuran dan format file dicek saat peluncuran." },
+};
+
+function mediaCheck(platform: AdPlatform, launchMedia: LaunchMediaState): ChannelCheck {
   const label = "Media";
   if (platform === "META") {
-    return hasLaunchImage
-      ? { id: "media", label, status: "PASS", detail: "Ada gambar produk. Dicek ulang saat peluncuran." }
-      : { id: "media", label, status: "FAIL", detail: "Peluncuran Meta memerlukan gambar produk." };
+    // Never PASS from the page: mime and size are known only to the launch preflight.
+    return { id: "media", label, ...META_MEDIA_DETAIL[launchMedia] };
   }
   if (platform === "TIKTOK") {
     return { id: "media", label, status: "FAIL", detail: "Unggah aset TikTok belum tersedia di LINOE." };
@@ -106,7 +171,7 @@ function mediaCheck(platform: AdPlatform, hasLaunchImage: boolean): ChannelCheck
 
 export function buildPlatformChecklist(
   platform: AdPlatform,
-  input: Pick<ReadinessInput, "connectedPlatforms" | "createAdEnabledPlatforms" | "hasLaunchImage" | "budgetWriteEnabled">,
+  input: Pick<ReadinessInput, "connectedPlatforms" | "createAdEnabledPlatforms" | "launchMedia" | "budgetWriteEnabled">,
 ): PlatformChecklist {
   const connected = input.connectedPlatforms.has(platform);
   const capable = input.createAdEnabledPlatforms.has(platform);
@@ -118,7 +183,7 @@ export function buildPlatformChecklist(
     capable
       ? { id: "capability", label: "Kapabilitas peluncuran", status: "PASS", detail: "Kapabilitas peluncuran aktif." }
       : { id: "capability", label: "Kapabilitas peluncuran", status: "FAIL", detail: "Kapabilitas peluncuran belum diaktifkan." },
-    mediaCheck(platform, input.hasLaunchImage),
+    mediaCheck(platform, input.launchMedia),
     s1Open
       ? { id: "budget_gate", label: "Gerbang peluncuran berbayar (S1)", status: "PASS", detail: "Gerbang terbuka." }
       : { id: "budget_gate", label: "Gerbang peluncuran berbayar (S1)", status: "FAIL", detail: "Peluncuran iklan berbayar masih terkunci." },
@@ -139,19 +204,32 @@ function draftReasonsFor(input: ReadinessInput): string[] {
   } else if (input.quality === "FAIL") {
     reasons.push("Pemeriksaan kualitas menemukan hal yang harus diperbaiki.");
   }
-  if (input.destinationValid === false) {
-    reasons.push("Tujuan pembelian belum ditentukan atau tidak valid.");
-  } else if (input.destinationValid === undefined) {
-    reasons.push("Tujuan pembelian belum tercatat valid (campaign lama). Tentukan tujuan agar pasti ke mana pembeli diarahkan.");
-  }
+  const destination = destinationReason(input.destination);
+  if (destination) reasons.push(destination);
   return reasons;
 }
+
+/** Why launch would refuse the destination; null when launch accepts it (valid, or a legacy campaign with a usable landing URL). */
+function destinationReason(destination: DestinationState): string | null {
+  if (destination === "invalid") return "Tujuan pembelian belum ditentukan atau tidak valid.";
+  if (destination === "legacy_missing") {
+    return "Campaign lama belum punya URL tujuan. Isi URL pada produk atau profil brand.";
+  }
+  return null;
+}
+
+const LEGACY_NOTE = "Campaign lama: tujuan pembelian memakai URL produk atau brand.";
+const NOT_READY_DETAIL =
+  "Anda masih bisa mengajukan campaign ini untuk ditinjau Owner. Namun syarat peluncuran harus dipenuhi: tujuan pembelian yang valid dan syarat media tiap channel. Catatan kualitas yang belum diperbaiki akan terlihat saat Owner meninjau.";
 
 export function buildCampaignReadiness(input: ReadinessInput): CampaignReadiness {
   const platforms = selectedAdPlatforms(input.channels).map((p) => buildPlatformChecklist(p, input));
 
+  const notes = input.destination === "legacy_ok" ? [LEGACY_NOTE] : [];
+  const destinationLaunchReason = destinationReason(input.destination);
   const launchReasons = (extra: string[]): string[] => [
     ...extra,
+    ...(destinationLaunchReason ? [destinationLaunchReason] : []),
     ...platforms.flatMap((p) => p.checks.filter((c) => c.status !== "PASS").map((c) => `${p.label}: ${c.detail}`)),
   ];
 
@@ -169,8 +247,9 @@ export function buildCampaignReadiness(input: ReadinessInput): CampaignReadiness
               tone: reviewing ? "review" : "ready",
               detail: "Belum disetujui dan belum ada yang diterbitkan.",
             }
-          : { label: "Draft belum siap diajukan", tone: "blocked", detail: null },
+          : { label: "Draft perlu dilengkapi sebelum diajukan", tone: "blocked", detail: NOT_READY_DETAIL },
         draftReasons,
+        notes,
         reviewNote: reviewing ? "Ada catatan dari pemeriksaan kualitas. Owner perlu memeriksanya sebelum mengajukan." : null,
         launch: platforms.length === 0 ? noAdChannel() : { label: "Belum siap tayang", ready: false, reasons: launchList },
         platforms,
@@ -181,6 +260,7 @@ export function buildCampaignReadiness(input: ReadinessInput): CampaignReadiness
         stage: "AWAITING_APPROVAL",
         primary: { label: "Menunggu keputusan Owner", tone: "info", detail: "Belum disetujui dan belum ada yang diterbitkan." },
         draftReasons: [],
+        notes,
         reviewNote: null,
         launch:
           platforms.length === 0
@@ -199,6 +279,7 @@ export function buildCampaignReadiness(input: ReadinessInput): CampaignReadiness
           detail: "Tidak ada yang terkirim otomatis. Tiap channel diluncurkan manual.",
         },
         draftReasons: [],
+        notes,
         reviewNote: null,
         launch:
           platforms.length === 0
@@ -218,6 +299,7 @@ export function buildCampaignReadiness(input: ReadinessInput): CampaignReadiness
         stage: "OTHER",
         primary: { label: "Periksa status campaign", tone: "info", detail: null },
         draftReasons: [],
+        notes,
         reviewNote: null,
         launch: null,
         platforms,
@@ -234,6 +316,7 @@ function live(label: string, platforms: readonly PlatformChecklist[]): CampaignR
     stage: "LIVE",
     primary: { label, tone: "info", detail: null },
     draftReasons: [],
+    notes: [],
     reviewNote: null,
     launch: null,
     platforms,
