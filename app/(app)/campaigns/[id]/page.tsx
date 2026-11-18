@@ -403,7 +403,7 @@ export default async function CampaignDetailPage({
   // product/brand landing URL (same pure resolver as the launch preflight).
   const destination: DestinationState =
     storedDestination.kind === "legacy"
-      ? resolveLandingUrl({ productUrl: product?.website_url, brandUrl: brandProfile?.website_url }, ownHosts).ok
+      ? resolveLandingUrl({ productUrl: product?.website_url, brandUrl: brandProfile?.website_url }, ownHosts ?? []).ok
         ? "legacy_ok"
         : "legacy_missing"
       : storedDestination.kind === "valid"
