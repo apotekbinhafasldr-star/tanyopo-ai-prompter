@@ -263,6 +263,17 @@ export default async function CampaignDetailPage({
   );
   const hasChannelData = (channelCampaigns ?? []).length > 0;
 
+  // Re-validate the stored purchase destination (never trusted). legacy => unknown (undefined).
+  const storedDestination = readStoredDestination(
+    campaign.ai_proposal,
+    resolveOwnHostsFromEnv({
+      NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
+      META_REDIRECT_URI: process.env.META_REDIRECT_URI,
+      NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
+    }),
+  );
+  const journeyHasDestination = storedDestination.kind === "legacy" ? undefined : storedDestination.kind === "valid";
+
   // Read-only Meta readiness panel. Every source below is a plain read, scoped
   // to the session tenant; none contacts Meta. A failed read becomes
   // `{ ok: false }` so the checklist shows "belum siap", never a guess.
@@ -324,6 +335,7 @@ export default async function CampaignDetailPage({
       now: new Date(),
       connection,
       adAccountConfirmed,
+      purchaseDestination: journeyHasDestination ?? null,
       dailyBudget: campaign.daily_budget,
       currency: campaign.currency,
       approvalPolicy: policyRes.error
@@ -359,16 +371,6 @@ export default async function CampaignDetailPage({
   }
 
   const proposal = campaign.ai_proposal as CampaignProposal | null;
-  // Journey wording only: re-validate the stored destination (never trusted). legacy => unknown.
-  const storedDestination = readStoredDestination(
-    campaign.ai_proposal,
-    resolveOwnHostsFromEnv({
-      NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
-      META_REDIRECT_URI: process.env.META_REDIRECT_URI,
-      NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
-    }),
-  );
-  const journeyHasDestination = storedDestination.kind === "legacy" ? undefined : storedDestination.kind === "valid";
 
   // Where the strategy came from (recorded job row, tenant-scoped by RLS and by
   // this filter) and what the rule-based quality gate says about it.

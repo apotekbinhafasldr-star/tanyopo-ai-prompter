@@ -26,6 +26,7 @@ const GOOD: LaunchReadinessInput = {
   now: NOW,
   connection: { ok: true, value: { status: "CONNECTED", expiresAt: FUTURE, hasAdAccount: true } },
   adAccountConfirmed: { ok: true, value: true },
+  purchaseDestination: true,
   dailyBudget: 100000,
   currency: "IDR",
   approvalPolicy: { ok: true, value: { requireApprovalAbove: 500000, currency: "IDR" } },
@@ -41,9 +42,19 @@ describe("evaluateLaunchReadiness", () => {
   it("is READY only when every item passes", () => {
     const r = evaluateLaunchReadiness(GOOD);
     expect(r.overall).toBe("READY");
-    expect(r.passCount).toBe(9);
+    expect(r.passCount).toBe(10);
     expect(r.summary).toBe(READY_SUMMARY);
     expect(r.summary).not.toMatch(/pasti tayang|dijamin|pasti berhasil/i);
+  });
+
+  it("a campaign without a purchase destination is never READY (fail-closed)", () => {
+    for (const [value, status] of [[false, "FAIL"], [null, "UNKNOWN"]] as const) {
+      const r = evaluateLaunchReadiness({ ...GOOD, purchaseDestination: value });
+      expect(r.overall).toBe("NOT_READY");
+      expect(statusOf(r, "PURCHASE_DESTINATION")).toBe(status);
+      expect(r.summary).toContain("Belum siap");
+    }
+    expect(statusOf(evaluateLaunchReadiness(GOOD), "PURCHASE_DESTINATION")).toBe("PASS");
   });
 
   it("is NOT_READY while the S1 gate is locked (today's real state)", () => {
@@ -59,6 +70,7 @@ describe("evaluateLaunchReadiness", () => {
       now: NOW,
       connection: { ok: false },
       adAccountConfirmed: { ok: false },
+      purchaseDestination: null,
       dailyBudget: undefined,
       currency: undefined,
       approvalPolicy: { ok: false },
