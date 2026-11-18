@@ -77,7 +77,7 @@ export function DeviceShowcase() {
           <Button
             asChild
             size="lg"
-            className="mt-2 bg-gradient-to-r from-brand to-brand-2 shadow-[var(--shadow-glow)] hover:opacity-95"
+            className="mt-2"
           >
             <Link href="/register">
               Mulai Gratis Sekarang
