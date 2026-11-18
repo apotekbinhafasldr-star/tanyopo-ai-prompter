@@ -66,6 +66,7 @@ import { readSelectionConfirmed } from "@/features/connections/meta-selection-co
 import { readEmergencyStopStrict } from "@/services/automation-settings";
 import type { Channel, ConnectorPlatform, OptimizationActionType, RiskLevel } from "@/types/database";
 import { CampaignJourney } from "@/features/campaigns/campaign-journey";
+import { readStoredDestination, resolveOwnHostsFromEnv } from "@/lib/campaigns/purchase-destination";
 
 export const metadata: Metadata = { title: "Detail Campaign — LINOE" };
 
@@ -358,6 +359,16 @@ export default async function CampaignDetailPage({
   }
 
   const proposal = campaign.ai_proposal as CampaignProposal | null;
+  // Journey wording only: re-validate the stored destination (never trusted). legacy => unknown.
+  const storedDestination = readStoredDestination(
+    campaign.ai_proposal,
+    resolveOwnHostsFromEnv({
+      NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
+      META_REDIRECT_URI: process.env.META_REDIRECT_URI,
+      NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
+    }),
+  );
+  const journeyHasDestination = storedDestination.kind === "legacy" ? undefined : storedDestination.kind === "valid";
 
   // Where the strategy came from (recorded job row, tenant-scoped by RLS and by
   // this filter) and what the rule-based quality gate says about it.
@@ -425,7 +436,7 @@ export default async function CampaignDetailPage({
         </div>
       </div>
 
-      <CampaignJourney status={campaign.status} hasProposal={!!proposal} />
+      <CampaignJourney status={campaign.status} hasProposal={!!proposal} hasDestination={journeyHasDestination} />
 
       {banner ? <div className={`rounded-[var(--radius-md)] p-4 text-sm ${bannerClass}`}>{banner.text}</div> : null}
 

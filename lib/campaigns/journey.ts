@@ -43,9 +43,20 @@ function build(states: readonly JourneyStepState[], nextAction: string): Campaig
   return { steps, currentIndex, currentLabel: steps[currentIndex - 1].label, nextAction };
 }
 
-export function buildCampaignJourney(status: string, hasProposal: boolean): CampaignJourney {
+/**
+ * `hasDestination`: `false` only when the campaign is known to have NO valid
+ * purchase destination (none set, or a stored value that fails validation).
+ * `undefined` = unknown/legacy campaign, which never changes the wording.
+ */
+export function buildCampaignJourney(status: string, hasProposal: boolean, hasDestination?: boolean): CampaignJourney {
   switch (status) {
     case "DRAFT":
+      if (hasProposal && hasDestination === false) {
+        return build(
+          ["done", "done", "current", "upcoming", "upcoming", "upcoming"],
+          "Tentukan tujuan pembelian dulu, lalu ajukan persetujuan. Belum ada yang diterbitkan.",
+        );
+      }
       return hasProposal
         ? build(
             ["done", "done", "current", "upcoming", "upcoming", "upcoming"],
