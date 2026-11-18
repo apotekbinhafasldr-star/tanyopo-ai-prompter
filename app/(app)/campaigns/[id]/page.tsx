@@ -58,6 +58,7 @@ import { CampaignProposalSchema } from "@/schemas/ai/campaign-proposal";
 import { isQuickReview } from "@/lib/campaigns/review-mode";
 import type { CampaignProposal } from "@/schemas/ai/campaign-proposal";
 import { PurchaseDestinationCard } from "@/features/campaigns/purchase-destination-card";
+import { readStoredDestination, resolveOwnHostsFromEnv } from "@/lib/campaigns/purchase-destination";
 import { RecoverToDraft } from "@/features/campaigns/recover-to-draft";
 import { LaunchReadinessPanel } from "@/features/campaigns/launch-readiness-panel";
 import { evaluateLaunchReadiness, type Read } from "@/lib/campaigns/launch-readiness";
@@ -66,7 +67,6 @@ import { readSelectionConfirmed } from "@/features/connections/meta-selection-co
 import { readEmergencyStopStrict } from "@/services/automation-settings";
 import type { Channel, ConnectorPlatform, OptimizationActionType, RiskLevel } from "@/types/database";
 import { CampaignJourney } from "@/features/campaigns/campaign-journey";
-import { readStoredDestination, resolveOwnHostsFromEnv } from "@/lib/campaigns/purchase-destination";
 
 export const metadata: Metadata = { title: "Detail Campaign — LINOE" };
 
