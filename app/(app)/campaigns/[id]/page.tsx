@@ -50,7 +50,16 @@ import { recommendPublishTime } from "@/lib/scheduling/recommend-time";
 import { ScheduleForm, type ScheduleRecommendation } from "@/features/content/schedule-form";
 import { QuickReviewSummary } from "@/features/campaigns/quick-review-summary";
 import { DetailDisclosure } from "@/features/campaigns/detail-disclosure";
-import { AiQualityCard } from "@/features/campaigns/ai-quality-card";
+import { AiQualityCard, QualityUnavailableCard } from "@/features/campaigns/ai-quality-card";
+import { DraftReadinessBanner } from "@/features/campaigns/draft-readiness-banner";
+import { ChannelInfoChecklist } from "@/features/campaigns/channel-info-checklist";
+import {
+  assessLaunchMedia,
+  buildCampaignReadiness,
+  ownHostsConfigured,
+  resolveDestinationState,
+  type ReadinessQuality,
+} from "@/lib/campaigns/draft-readiness";
 import { evaluateCampaignQuality } from "@/lib/ai/campaign-quality-gate";
 import { describeAiProvenance } from "@/lib/ai/provenance";
 import { getAiJobProvenance } from "@/services/ai-jobs";
@@ -189,7 +198,7 @@ export default async function CampaignDetailPage({
     { data: productMedia },
   ] = await Promise.all([
     campaign.product_id
-      ? supabase.from("prompter_products").select("id, name, description").eq("id", campaign.product_id).single()
+      ? supabase.from("prompter_products").select("id, name, description, website_url").eq("id", campaign.product_id).single()
       : Promise.resolve({ data: null }),
     supabase
       .from("prompter_channel_campaigns")
@@ -220,7 +229,7 @@ export default async function CampaignDetailPage({
           .eq("status", "PENDING")
           .maybeSingle()
       : Promise.resolve({ data: null }),
-    supabase.from("prompter_brand_profiles").select("default_timezone").eq("tenant_id", session.tenantId).maybeSingle(),
+    supabase.from("prompter_brand_profiles").select("default_timezone, website_url").eq("tenant_id", session.tenantId).maybeSingle(),
     // Batch B4 — Media Workflow: reuses the product's own media library
     // (Phase 1) rather than a separate campaign-media upload path.
     campaign.product_id
@@ -266,14 +275,12 @@ export default async function CampaignDetailPage({
   const hasChannelData = (channelCampaigns ?? []).length > 0;
 
   // Re-validate the stored purchase destination (never trusted). legacy => unknown (undefined).
-  const storedDestination = readStoredDestination(
-    campaign.ai_proposal,
-    resolveOwnHostsFromEnv({
-      NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
-      META_REDIRECT_URI: process.env.META_REDIRECT_URI,
-      NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
-    }),
-  );
+  const ownHosts = resolveOwnHostsFromEnv({
+    NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
+    META_REDIRECT_URI: process.env.META_REDIRECT_URI,
+    NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
+  });
+  const storedDestination = readStoredDestination(campaign.ai_proposal, ownHosts);
   const journeyHasDestination = storedDestination.kind === "legacy" ? undefined : storedDestination.kind === "valid";
 
   // Read-only Meta readiness panel. Every source below is a plain read, scoped
@@ -383,6 +390,39 @@ export default async function CampaignDetailPage({
     : null;
   const boundCopyAction = updateCampaignCopyAction.bind(null, id);
   const isDraft = campaign.status === "DRAFT";
+
+  // Honest readiness wording, from values already loaded above (no new query).
+  // hasLaunchImage mirrors the Meta launch rule (pickLaunchMedia): the selected
+  // media must exist, otherwise the product needs an IMAGE.
+  const readinessQuality: ReadinessQuality = !campaign.ai_proposal ? "NONE" : aiQuality ? aiQuality.status : "UNKNOWN";
+  const launchMedia = assessLaunchMedia(productMedia, campaign.selected_media_id, {
+    tenantId: session.tenantId,
+    productId: campaign.product_id,
+  });
+  // Legacy (no stored destination) is accepted by launch only with a usable
+  // product/brand landing URL (same pure resolver as the launch preflight).
+  const destination = resolveDestinationState({
+    storedKind: storedDestination.kind,
+    ownHosts,
+    productUrl: product?.website_url,
+    brandUrl: brandProfile?.website_url,
+  });
+  const campaignReadiness = buildCampaignReadiness({
+    status: campaign.status,
+    quality: readinessQuality,
+    destination,
+    hostsConfigured: ownHostsConfigured(ownHosts),
+    channels: campaign.channels,
+    connectedPlatforms,
+    createAdEnabledPlatforms,
+    launchMedia,
+    budgetWriteEnabled: {
+      META: isBudgetWritePlatformEnabled("META"),
+      TIKTOK: isBudgetWritePlatformEnabled("TIKTOK"),
+      X: isBudgetWritePlatformEnabled("X"),
+    },
+    canRegenerate: isDraft,
+  });
   // PR-A phase-1 gate: simplified review ONLY for a DRAFT reached from Quick
   // Promote. Every other status/entry keeps the full page unchanged.
   const quickReview = isQuickReview(from, campaign.status, !!proposal);
@@ -444,11 +484,15 @@ export default async function CampaignDetailPage({
 
       {banner ? <div className={`rounded-[var(--radius-md)] p-4 text-sm ${bannerClass}`}>{banner.text}</div> : null}
 
+      {campaignReadiness.stage === "AWAITING_APPROVAL" || campaignReadiness.stage === "SCHEDULED" ? (
+        <DraftReadinessBanner readiness={campaignReadiness} />
+      ) : null}
+
       {isAwaitingApproval && session.role === "owner" && pendingApproval ? (
         <Card className="border-brand/30 bg-brand-muted/40">
           <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
             <div>
-              <p className="text-sm font-medium text-foreground">Siap dipromosikan</p>
+              <p className="text-sm font-medium text-foreground">Menunggu keputusan Anda</p>
               <p className="text-xs text-muted-foreground">
                 Anda mengajukan campaign ini sebagai Owner — setujui langsung di sini, atau tinjau lebih
                 lanjut di Approval Center.
@@ -495,7 +539,11 @@ export default async function CampaignDetailPage({
         <RecoverToDraft campaignId={id} />
       ) : null}
 
-      {aiQuality ? <AiQualityCard provenance={describeAiProvenance(aiJob)} quality={aiQuality} /> : null}
+      {aiQuality ? (
+        <AiQualityCard provenance={describeAiProvenance(aiJob)} quality={aiQuality} />
+      ) : campaign.ai_proposal ? (
+        <QualityUnavailableCard canRegenerate={isDraft} />
+      ) : null}
 
       {proposal ? (
         <PurchaseDestinationCard
@@ -504,6 +552,8 @@ export default async function CampaignDetailPage({
           canEdit={isDraft && (session.role === "owner" || session.role === "marketing")}
         />
       ) : null}
+
+      {quickReview && proposal ? <DraftReadinessBanner readiness={campaignReadiness} /> : null}
 
       {quickReview && proposal ? (
         <QuickReviewSummary
@@ -651,6 +701,12 @@ export default async function CampaignDetailPage({
       ) : null}
 
       {readinessPanel}
+
+      {campaignReadiness.platforms
+        .filter((p) => p.platform !== "META")
+        .map((p) => (
+          <ChannelInfoChecklist key={p.platform} platform={p} />
+        ))}
 
       {/* Winning Ads Phase 2B: manual ad metrics + verdict. Self-contained and
           read-only toward everything else on this page (no launch, approval,
@@ -1151,8 +1207,9 @@ export default async function CampaignDetailPage({
                   })}
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Campaign siap dijadwalkan. Peluncuran ke channel akan tersedia setelah koneksi channel
-                  aktif.
+                  Waktu ini hanya rencana jadwal. Tidak ada yang terkirim otomatis: campaign belum berjalan,
+                  dan peluncuran ke channel dilakukan manual setelah disetujui, koneksi aktif, dan syarat
+                  peluncuran terpenuhi.
                 </p>
               </CardContent>
             </Card>
@@ -1178,15 +1235,13 @@ export default async function CampaignDetailPage({
       </DetailDisclosure>
 
       {isDraft && !quickReview ? (
-        <Card className="border-brand/30 bg-brand-muted/40">
+        <Card className="border-border">
           <CardContent className="flex flex-col gap-4 p-5 sm:p-6">
-            <div className="flex flex-col gap-1">
-              <p className="text-base font-semibold text-brand">Semua sudah siap 🚀</p>
-              <p className="text-sm text-foreground">
-                Periksa hasil strategi LINOE di atas. Jika sudah sesuai, setujui untuk menyiapkan campaign
-                Anda.
-              </p>
-            </div>
+            <DraftReadinessBanner readiness={campaignReadiness} />
+            <p className="text-sm text-foreground">
+              Periksa hasil strategi LINOE di atas. Mengajukan campaign hanya meminta persetujuan Owner,
+              belum menerbitkan iklan.
+            </p>
             {/* flex-col-reverse: primary CTA (last in DOM) renders on top,
                 full-width, on mobile — same pattern as Quick Promote's own
                 bottom action bar (features/promote/quick-promote-wizard.tsx)
