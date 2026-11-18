@@ -139,9 +139,9 @@ export function Hero() {
             room from the browser edge without recreating the large empty
             band a previous round removed — the real header still stays
             invisible while unscrolled here (see marketing-header.tsx).
-            Real CTA links are kept for keyboard/screen-reader users (see
-            DESKTOP_HERO_CTA_CLASS above) without duplicating the artwork's
-            own visible text. */}
+            The main CTA is a real navy link (HeroCtaOverlay) painted over the
+            artwork's own button; "Lihat Cara Kerja" is a transparent hotspot.
+            No extra visually-hidden duplicate links are rendered. */}
         <div className="relative mx-auto hidden max-w-7xl px-4 pb-16 pt-24 sm:px-6 sm:pb-20 sm:pt-28 desktop:block desktop:pb-20 desktop:pt-2">
           {/* This inner wrapper has no padding of its own, so its box exactly
               matches the rendered image — the hotspots below are positioned

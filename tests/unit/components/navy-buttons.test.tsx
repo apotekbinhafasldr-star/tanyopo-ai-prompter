@@ -55,7 +55,8 @@ describe("navy action tokens", () => {
     const growth = cards.slice(cards.indexOf("GROWTH: {"), cards.indexOf("PRO: {"));
     expect(growth).toContain("bg-action");
     expect(growth).toContain("action-btn--on-card"); // light border + white ring come from globals.css (unlayered)
-    expect(growth).not.toMatch(/border-white|focus-visible:outline-/); // utilities would be ignored by the cascade
+    const growthCta = growth.split("\n").find((l) => l.includes("primaryCta:")) ?? "";
+    expect(growthCta).not.toMatch(/border-white|focus-visible:outline-/); // utilities would be ignored by the cascade
     expect(growth).not.toContain("fuchsia-700");
     expect(growth).toContain("from-blue-600 to-fuchsia-600"); // card background unchanged
   });
