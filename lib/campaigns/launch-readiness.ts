@@ -28,6 +28,7 @@ export type LaunchReadinessItemId =
   | "AD_ACCOUNT_CONFIRMED"
   | "TOKEN_VALID"
   | "BUDGET_SET"
+  | "PURCHASE_DESTINATION"
   | "APPROVAL_THRESHOLD"
   | "OWNER_APPROVAL"
   | "S1_GATE"
@@ -71,6 +72,13 @@ export interface LaunchReadinessInput {
   connection: Read<LaunchReadinessConnection | null>;
   /** Has an Owner confirmed the stored ad account since the latest (re)connect? */
   adAccountConfirmed: Read<boolean>;
+  /**
+   * Does the campaign have a VALID purchase destination (re-validated by the
+   * caller)? `true` = valid, `false` = none/invalid, `null` = could not be
+   * determined (e.g. a legacy campaign). Only `true` passes: a conversion ad
+   * must never be called ready without knowing where buyers are sent.
+   */
+  purchaseDestination: boolean | null;
   dailyBudget: number | null | undefined;
   currency: string | null | undefined;
   /** Budget policy; `value: null` = tenant has no policy row (no threshold set). */
@@ -93,6 +101,7 @@ const LABELS: Record<LaunchReadinessItemId, string> = {
   AD_ACCOUNT_CONFIRMED: "Akun iklan dikonfirmasi Owner",
   TOKEN_VALID: "Akses (token) Meta",
   BUDGET_SET: "Budget harian",
+  PURCHASE_DESTINATION: "Tujuan pembelian",
   APPROVAL_THRESHOLD: "Ambang persetujuan budget",
   OWNER_APPROVAL: "Persetujuan Owner",
   S1_GATE: "Gerbang keamanan budget (S1)",
@@ -168,6 +177,14 @@ export function evaluateToken(connection: LaunchReadinessInput["connection"], no
     return item("TOKEN_VALID", "PASS", `Akses Meta masih berlaku, tetapi berakhir dalam sekitar ${daysLeft} hari. Sebaiknya sambungkan ulang lebih awal.`);
   }
   return item("TOKEN_VALID", "PASS", "Akses Meta belum kedaluwarsa.");
+}
+
+export function evaluatePurchaseDestination(valid: boolean | null): LaunchReadinessItem {
+  if (valid === true) return item("PURCHASE_DESTINATION", "PASS", "Tujuan pembelian sudah ditentukan dan valid.");
+  if (valid === false) {
+    return item("PURCHASE_DESTINATION", "FAIL", "Tujuan pembelian belum ditentukan. Tentukan ke mana pembeli diarahkan sebelum iklan konversi.");
+  }
+  return item("PURCHASE_DESTINATION", "UNKNOWN", "Tujuan pembelian belum bisa dipastikan. Tentukan atau simpan ulang tujuan pembelian.");
 }
 
 export function evaluateBudget(dailyBudget: unknown, currency: unknown): LaunchReadinessItem {
@@ -323,6 +340,7 @@ export function evaluateLaunchReadiness(input: LaunchReadinessInput): LaunchRead
     evaluateAdAccountConfirmed(input),
     evaluateToken(input.connection, input.now),
     evaluateBudget(input.dailyBudget, input.currency),
+    evaluatePurchaseDestination(input.purchaseDestination),
     evaluateApprovalThreshold(input),
     evaluateOwnerApproval(input.launchApprovals),
     evaluateS1Gate(input.budgetWriteEnabled),

@@ -16,6 +16,7 @@ const INPUT: LaunchReadinessInput = {
   now: NOW,
   connection: { ok: true, value: { status: "CONNECTED", expiresAt: "2026-12-31T00:00:00.000Z", hasAdAccount: true } },
   adAccountConfirmed: { ok: true, value: true },
+  purchaseDestination: true,
   dailyBudget: 100000,
   currency: "IDR",
   approvalPolicy: { ok: true, value: null },

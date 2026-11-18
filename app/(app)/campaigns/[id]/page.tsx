@@ -58,6 +58,7 @@ import { CampaignProposalSchema } from "@/schemas/ai/campaign-proposal";
 import { isQuickReview } from "@/lib/campaigns/review-mode";
 import type { CampaignProposal } from "@/schemas/ai/campaign-proposal";
 import { PurchaseDestinationCard } from "@/features/campaigns/purchase-destination-card";
+import { readStoredDestination, resolveOwnHostsFromEnv } from "@/lib/campaigns/purchase-destination";
 import { RecoverToDraft } from "@/features/campaigns/recover-to-draft";
 import { LaunchReadinessPanel } from "@/features/campaigns/launch-readiness-panel";
 import { evaluateLaunchReadiness, type Read } from "@/lib/campaigns/launch-readiness";
@@ -66,6 +67,8 @@ import { readSelectionConfirmed } from "@/features/connections/meta-selection-co
 import { readEmergencyStopStrict } from "@/services/automation-settings";
 import type { Channel, ConnectorPlatform, OptimizationActionType, RiskLevel } from "@/types/database";
 import { CampaignJourney } from "@/features/campaigns/campaign-journey";
+import { EvidenceLabel } from "@/features/campaigns/evidence-label";
+import { BUDGET_MISSING_NOTE, isBudgetMissing } from "@/lib/campaigns/evidence";
 
 export const metadata: Metadata = { title: "Detail Campaign — LINOE" };
 
@@ -262,6 +265,17 @@ export default async function CampaignDetailPage({
   );
   const hasChannelData = (channelCampaigns ?? []).length > 0;
 
+  // Re-validate the stored purchase destination (never trusted). legacy => unknown (undefined).
+  const storedDestination = readStoredDestination(
+    campaign.ai_proposal,
+    resolveOwnHostsFromEnv({
+      NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
+      META_REDIRECT_URI: process.env.META_REDIRECT_URI,
+      NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
+    }),
+  );
+  const journeyHasDestination = storedDestination.kind === "legacy" ? undefined : storedDestination.kind === "valid";
+
   // Read-only Meta readiness panel. Every source below is a plain read, scoped
   // to the session tenant; none contacts Meta. A failed read becomes
   // `{ ok: false }` so the checklist shows "belum siap", never a guess.
@@ -323,6 +337,7 @@ export default async function CampaignDetailPage({
       now: new Date(),
       connection,
       adAccountConfirmed,
+      purchaseDestination: journeyHasDestination ?? null,
       dailyBudget: campaign.daily_budget,
       currency: campaign.currency,
       approvalPolicy: policyRes.error
@@ -425,7 +440,7 @@ export default async function CampaignDetailPage({
         </div>
       </div>
 
-      <CampaignJourney status={campaign.status} hasProposal={!!proposal} />
+      <CampaignJourney status={campaign.status} hasProposal={!!proposal} hasDestination={journeyHasDestination} />
 
       {banner ? <div className={`rounded-[var(--radius-md)] p-4 text-sm ${bannerClass}`}>{banner.text}</div> : null}
 
@@ -730,7 +745,10 @@ export default async function CampaignDetailPage({
         <>
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0">
-              <CardTitle>Strategi AI</CardTitle>
+              <div className="flex flex-wrap items-center gap-2">
+                <CardTitle>Strategi AI</CardTitle>
+                <EvidenceLabel kind="AI" />
+              </div>
               {isDraft ? <RegenerateProposalButton campaignId={id} /> : null}
             </CardHeader>
             <CardContent className="flex flex-col gap-4 pt-4">
@@ -1015,13 +1033,22 @@ export default async function CampaignDetailPage({
 
           <Card>
             <CardHeader>
-              <CardTitle>Rekomendasi Channel LINOE</CardTitle>
+              <div className="flex flex-wrap items-center gap-2">
+                <CardTitle>Rekomendasi Channel LINOE</CardTitle>
+                <EvidenceLabel kind="HEURISTIC" />
+              </div>
             </CardHeader>
             <CardContent className="flex flex-col gap-3 pt-4">
               <p className="text-xs text-muted-foreground">
-                LINOE memilih channel ini untuk campaign Anda berdasarkan produk, tujuan, audiens, dan
-                budget — bukan pembagian rata ke semua channel.
+                LINOE memilih channel ini untuk campaign Anda berdasarkan produk, tujuan, dan audiens
+                {isBudgetMissing(campaign) ? "" : ", serta budget"} — bukan pembagian rata ke semua channel. Ini perkiraan,
+                bukan data performa dari platform.
               </p>
+              {isBudgetMissing(campaign) ? (
+                <p className="text-xs font-medium text-warning" data-testid="budget-missing-note">
+                  {BUDGET_MISSING_NOTE}
+                </p>
+              ) : null}
               <div className="flex flex-col divide-y divide-border rounded-[var(--radius-lg)] border border-border">
                 {proposal.budget_allocation.map((b) => {
                   const connectorPlatform = CHANNEL_TO_CONNECTOR[b.channel];

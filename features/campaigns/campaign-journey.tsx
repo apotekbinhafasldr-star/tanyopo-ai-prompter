@@ -21,8 +21,16 @@ const STATE_TEXT: Record<JourneyStepState, string> = {
  * of stages behind a native <details> so a 360px screen stays short. Status
  * is carried by text as well as colour.
  */
-export function CampaignJourney({ status, hasProposal }: { status: string; hasProposal: boolean }) {
-  const journey = buildCampaignJourney(status, hasProposal);
+export function CampaignJourney({
+  status,
+  hasProposal,
+  hasDestination,
+}: {
+  status: string;
+  hasProposal: boolean;
+  hasDestination?: boolean;
+}) {
+  const journey = buildCampaignJourney(status, hasProposal, hasDestination);
 
   return (
     <section
