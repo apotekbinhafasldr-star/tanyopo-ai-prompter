@@ -65,6 +65,7 @@ import { buildInternalPreview } from "@/lib/campaigns/internal-preview";
 import { readSelectionConfirmed } from "@/features/connections/meta-selection-confirmation";
 import { readEmergencyStopStrict } from "@/services/automation-settings";
 import type { Channel, ConnectorPlatform, OptimizationActionType, RiskLevel } from "@/types/database";
+import { CampaignJourney } from "@/features/campaigns/campaign-journey";
 
 export const metadata: Metadata = { title: "Detail Campaign — LINOE" };
 
@@ -423,6 +424,8 @@ export default async function CampaignDetailPage({
           </ConfirmForm>
         </div>
       </div>
+
+      <CampaignJourney status={campaign.status} hasProposal={!!proposal} />
 
       {banner ? <div className={`rounded-[var(--radius-md)] p-4 text-sm ${bannerClass}`}>{banner.text}</div> : null}
 
