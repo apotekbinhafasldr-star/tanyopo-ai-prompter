@@ -66,6 +66,8 @@ import { readSelectionConfirmed } from "@/features/connections/meta-selection-co
 import { readEmergencyStopStrict } from "@/services/automation-settings";
 import type { Channel, ConnectorPlatform, OptimizationActionType, RiskLevel } from "@/types/database";
 import { CampaignJourney } from "@/features/campaigns/campaign-journey";
+import { EvidenceLabel } from "@/features/campaigns/evidence-label";
+import { BUDGET_MISSING_NOTE, isBudgetMissing } from "@/lib/campaigns/evidence";
 
 export const metadata: Metadata = { title: "Detail Campaign — LINOE" };
 
@@ -730,7 +732,10 @@ export default async function CampaignDetailPage({
         <>
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0">
-              <CardTitle>Strategi AI</CardTitle>
+              <div className="flex flex-wrap items-center gap-2">
+                <CardTitle>Strategi AI</CardTitle>
+                <EvidenceLabel kind="AI" />
+              </div>
               {isDraft ? <RegenerateProposalButton campaignId={id} /> : null}
             </CardHeader>
             <CardContent className="flex flex-col gap-4 pt-4">
@@ -1015,13 +1020,22 @@ export default async function CampaignDetailPage({
 
           <Card>
             <CardHeader>
-              <CardTitle>Rekomendasi Channel LINOE</CardTitle>
+              <div className="flex flex-wrap items-center gap-2">
+                <CardTitle>Rekomendasi Channel LINOE</CardTitle>
+                <EvidenceLabel kind="HEURISTIC" />
+              </div>
             </CardHeader>
             <CardContent className="flex flex-col gap-3 pt-4">
               <p className="text-xs text-muted-foreground">
-                LINOE memilih channel ini untuk campaign Anda berdasarkan produk, tujuan, audiens, dan
-                budget — bukan pembagian rata ke semua channel.
+                LINOE memilih channel ini untuk campaign Anda berdasarkan produk, tujuan, dan audiens
+                {isBudgetMissing(campaign) ? "" : ", serta budget"} — bukan pembagian rata ke semua channel. Ini perkiraan,
+                bukan data performa dari platform.
               </p>
+              {isBudgetMissing(campaign) ? (
+                <p className="text-xs font-medium text-warning" data-testid="budget-missing-note">
+                  {BUDGET_MISSING_NOTE}
+                </p>
+              ) : null}
               <div className="flex flex-col divide-y divide-border rounded-[var(--radius-lg)] border border-border">
                 {proposal.budget_allocation.map((b) => {
                   const connectorPlatform = CHANNEL_TO_CONNECTOR[b.channel];
