@@ -329,3 +329,24 @@ export async function runAiJob<T>(params: RunAiJobParams<T>): Promise<RunAiJobRe
     return { ok: false, error: message, jobId };
   }
 }
+
+/**
+ * Read-only: the recorded provider/model of one AI job, for the "who made this"
+ * label on a result. Filtered by tenant AND id so another tenant's job id can
+ * never be read. Returns null when there is no such row or the read fails, so
+ * callers report the origin as unknown rather than guessing one.
+ */
+export async function getAiJobProvenance(
+  supabase: SupabaseClient<Database>,
+  tenantId: string,
+  jobId: string,
+): Promise<{ status: string; provider: string | null; model: string | null; fallback_provider: string | null } | null> {
+  const { data, error } = await supabase
+    .from("prompter_ai_jobs")
+    .select("status, provider, model, fallback_provider")
+    .eq("id", jobId)
+    .eq("tenant_id", tenantId)
+    .maybeSingle();
+  if (error || !data) return null;
+  return data;
+}
