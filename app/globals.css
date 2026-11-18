@@ -115,6 +115,82 @@ body {
   color: var(--brand);
 }
 
+/* ============================================================================
+   Navy action buttons — focus ring + border colours.
+   These rules are deliberately OUTSIDE any @layer. The global `:focus-visible`
+   and `* { border-color }` rules above are unlayered, and unlayered CSS beats
+   every Tailwind utility (utilities live in @layer utilities), so a utility
+   such as `focus-visible:outline-action` or `border-white/40` is silently
+   ignored. A scoped class selector with higher specificity wins instead,
+   and the global rules (and --brand) are left untouched.
+   ========================================================================= */
+.action-btn:focus-visible {
+  outline-color: var(--action);
+}
+.action-btn--on-dark {
+  border-color: rgb(255 255 255 / 0.4);
+}
+.action-btn--on-card {
+  border-color: rgb(255 255 255 / 0.7);
+}
+.action-btn--on-dark:focus-visible,
+.action-btn--on-card:focus-visible {
+  outline-color: #ffffff;
+}
+
+/* Desktop hero CTA overlay (features/marketing/components/hero-cta-overlay.tsx).
+   Positioned in percentages of the hero image box; sizes use container-query
+   units of that box (it sets container-type: inline-size). */
+.hero-cta-mask {
+  position: absolute;
+  pointer-events: none;
+  background: #010c25; /* measured mean of the hero image around the baked button */
+  border-radius: 1.6cqw;
+}
+.hero-cta {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4em;
+  box-sizing: border-box;
+  padding-inline: 0.5em;
+  white-space: nowrap;
+  overflow: visible;
+  background: var(--action);
+  color: var(--action-foreground);
+  border-width: 1px;
+  border-style: solid;
+  border-radius: 1.05cqw;
+  font-weight: 600;
+  line-height: 1;
+  font-size: clamp(10px, 0.98cqw, 15px);
+  text-decoration: none;
+}
+.hero-cta:hover {
+  background: var(--action-hover);
+}
+/* Invisible hit area: at least 44px tall, centred on the visible button. */
+.hero-cta::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: max(100%, 44px);
+  transform: translateY(-50%);
+}
+.hero-cta svg {
+  width: 1.1em;
+  height: 1.1em;
+  flex-shrink: 0;
+}
+@container (max-width: 999px) {
+  .hero-cta-long {
+    display: none;
+  }
+}
+
 /* Smooth same-page anchor navigation (e.g. the marketing navbars' section
    links) — instant-jump by default, upgraded to smooth only when the user
    hasn't asked for reduced motion. Section targets already set

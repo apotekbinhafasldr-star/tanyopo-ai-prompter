@@ -4,13 +4,7 @@ import { Sparkles, ArrowRight, PlayCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { HeroVisual } from "@/features/marketing/components/hero-visual";
 import { HeroIntegratedNav } from "@/features/marketing/components/hero-integrated-nav";
-
-// Real CTA links kept for keyboard/screen-reader users on the desktop hero,
-// where the approved final asset already bakes the headline and CTAs into
-// its pixels — visually hidden by default (sr-only) so nothing duplicates
-// the artwork, revealed only when focused so the links stay operable.
-const DESKTOP_HERO_CTA_CLASS =
-  "sr-only focus-visible:not-sr-only focus-visible:absolute focus-visible:left-4 focus-visible:top-4 focus-visible:z-20 focus-visible:rounded-[var(--radius-md)] focus-visible:px-4 focus-visible:py-2 focus-visible:text-sm focus-visible:font-semibold focus-visible:text-white focus-visible:shadow-lg";
+import { HeroCtaOverlay } from "@/features/marketing/components/hero-cta-overlay";
 
 // Transparent, click/keyboard-accessible hotspots aligned over the controls
 // baked into the approved desktop hero image (public/brand/linoe/
@@ -21,9 +15,9 @@ const DESKTOP_HERO_CTA_CLASS =
 // Each targets an existing route/anchor already used elsewhere on this
 // page — nothing new was invented.
 //
-// Only the main CTA row (Mulai Promosikan Sekarang / Lihat Cara Kerja)
-// still uses this invisible-hotspot approach — that row is locked/
-// unchanged. The logo, nav links, and Masuk/Mulai Sekarang are now real,
+// Only "Lihat Cara Kerja" still uses this invisible-hotspot approach.
+// "Mulai Promosikan Sekarang" is now a real navy button (HeroCtaOverlay)
+// painted over the baked-in one. The logo, nav links, and Masuk/Mulai Sekarang are now real,
 // visible elements (HeroIntegratedNav below) instead, since invisible
 // hotspots can't show hover/focus/active states.
 type HeroHotspot = {
@@ -34,12 +28,6 @@ type HeroHotspot = {
 };
 
 const HERO_IMAGE_HOTSPOTS: HeroHotspot[] = [
-  {
-    label: "Mulai Promosikan Sekarang",
-    href: "/register",
-    external: true,
-    rect: { left: 3.78, top: 74.63, width: 18.03, height: 11.95 },
-  },
   { label: "Lihat Cara Kerja", href: "#cara-kerja", rect: { left: 22.98, top: 74.63, width: 10.68, height: 11.95 } },
 ];
 
@@ -160,7 +148,7 @@ export function Hero() {
               in percentages of THIS box, not the padded outer container.
               overflow-hidden lets the left-edge mask strip below clip
               cleanly against the image's own edge. */}
-          <div className="relative overflow-hidden">
+          <div className="relative overflow-hidden" style={{ containerType: "inline-size" }}>
             <Image
               src="/brand/linoe/08-hero-desktop-final.jpg"
               alt="LINOE — AI Marketing & Growth Platform. Marketing Lebih Cepat. Bisnis Melaju Lebih Jauh. Bersama LINOE. LINOE membantu Anda menganalisis produk, menyusun strategi, membuat konten, menyiapkan campaign, memantau hasil, dan mengoptimasi pertumbuhan — semua dengan AI dalam satu platform. Presenter memegang tablet LINOE di samping pratinjau dashboard LINOE."
@@ -193,6 +181,7 @@ export function Hero() {
             <div className="absolute inset-x-0 top-0 h-[42px]">
               <HeroIntegratedNav />
             </div>
+            <HeroCtaOverlay />
             {HERO_IMAGE_HOTSPOTS.map((hotspot) => {
               const style = {
                 left: `${hotspot.rect.left}%`,
@@ -207,15 +196,6 @@ export function Hero() {
               );
             })}
           </div>
-          <Link
-            href="/register"
-            className={`${DESKTOP_HERO_CTA_CLASS} border border-white/40 bg-action`}
-          >
-            Mulai Promosikan
-          </Link>
-          <a href="#cara-kerja" className={`${DESKTOP_HERO_CTA_CLASS} border border-white/25 bg-ink`}>
-            Lihat Cara Kerja
-          </a>
         </div>
       </section>
   );

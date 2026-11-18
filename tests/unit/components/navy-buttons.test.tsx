@@ -54,8 +54,8 @@ describe("navy action tokens", () => {
     const cards = read("features/billing/pricing-cards.tsx");
     const growth = cards.slice(cards.indexOf("GROWTH: {"), cards.indexOf("PRO: {"));
     expect(growth).toContain("bg-action");
-    expect(growth).toContain("border-white/70");
-    expect(growth).toContain("focus-visible:outline-white");
+    expect(growth).toContain("action-btn--on-card"); // light border + white ring come from globals.css (unlayered)
+    expect(growth).not.toMatch(/border-white|focus-visible:outline-/); // utilities would be ignored by the cascade
     expect(growth).not.toContain("fuchsia-700");
     expect(growth).toContain("from-blue-600 to-fuchsia-600"); // card background unchanged
   });
@@ -68,8 +68,8 @@ describe("Button variants", () => {
     expect(cls).toContain("bg-action");
     expect(cls).toContain("text-action-foreground");
     expect(cls).toContain("hover:bg-action-hover");
-    expect(cls).toContain("focus-visible:outline-action");
-    expect(cls).toContain("focus-visible:outline-offset-2");
+    expect(cls).toContain("action-btn");
+    expect(cls).not.toMatch(/focus-visible:outline-/); // would lose to the unlayered global :focus-visible rule
     expect(cls).not.toMatch(/bg-brand|hover:bg-brand/);
   });
 
@@ -77,8 +77,8 @@ describe("Button variants", () => {
     render(<Button variant="primaryOnDark">Mulai</Button>);
     const cls = screen.getByRole("button").className;
     expect(cls).toContain("bg-action");
-    expect(cls).toContain("border-white/40");
-    expect(cls).toContain("focus-visible:outline-white");
+    expect(cls).toContain("action-btn--on-dark");
+    expect(cls).not.toMatch(/border-white|focus-visible:outline-/);
   });
 
   it("disabled and loading keep the navy style and block interaction", () => {
@@ -136,7 +136,7 @@ describe("no purple action buttons remain", () => {
   it("pricing: AGENCY and GROWTH CTAs are navy; STARTER/blue/orange/green keep their colours", () => {
     const cards = read("features/billing/pricing-cards.tsx");
     const agency = cards.slice(cards.indexOf("AGENCY: {"));
-    expect(agency).toContain("primaryCta:\n      \"bg-action");
+    expect(agency).toContain('primaryCta: "action-btn bg-action');
     expect(cards).toContain("bg-sky-600 text-white");
     expect(cards).toContain("bg-blue-600 text-white");
     expect(cards).toContain("bg-orange-600 text-white");

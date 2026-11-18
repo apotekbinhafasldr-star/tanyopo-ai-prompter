@@ -100,8 +100,8 @@ const TIER_VISUALS: Record<PlanTierId, TierVisual> = {
     subtext: "text-white/80",
     price: "text-white",
     actionBar: "bg-white/15 text-white",
-    primaryCta:
-      "border border-white/70 bg-action text-action-foreground shadow-md hover:bg-action-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white",
+    // Navy on a blue-to-fuchsia card is only ~2.7-3.0:1, so `action-btn--on-card` adds a light border and a white focus ring.
+    primaryCta: "action-btn action-btn--on-card border bg-action text-action-foreground shadow-md hover:bg-action-hover",
     badge: "bg-amber-400 text-amber-950",
     divider: "border-white/20",
   },
@@ -135,8 +135,7 @@ const TIER_VISUALS: Record<PlanTierId, TierVisual> = {
     subtext: "text-muted-foreground",
     price: "text-foreground",
     actionBar: "bg-violet-100 text-violet-700",
-    primaryCta:
-      "bg-action text-action-foreground hover:bg-action-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-action",
+    primaryCta: "action-btn bg-action text-action-foreground hover:bg-action-hover",
     badge: "bg-violet-600 text-white",
     divider: "border-black/10",
   },
