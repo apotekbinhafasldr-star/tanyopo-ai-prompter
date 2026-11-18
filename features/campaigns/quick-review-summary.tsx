@@ -61,7 +61,7 @@ export function describeBudget(
 }
 
 /**
- * Compact "Rencana Promosi Anda Siap" card for the DRAFT Quick Promote
+ * Compact "Rencana Promosi Siap Ditinjau" card for the DRAFT Quick Promote
  * review. Presentational only: it reads values the page already loaded and
  * never fetches, mutates, or duplicates an editor — all editing stays in
  * "Lihat Detail Strategi". Carries the #ringkasan-target-budget anchor.
@@ -88,7 +88,7 @@ export function QuickReviewSummary({
   return (
     <Card id="ringkasan-target-budget" className="border-brand/30">
       <CardHeader>
-        <CardTitle>Rencana Promosi Anda Siap</CardTitle>
+        <CardTitle>Rencana Promosi Siap Ditinjau</CardTitle>
         <p className="text-sm text-muted-foreground">
           Periksa ringkasan di bawah. Belum ada yang berjalan — tidak ada yang terkirim sebelum Anda
           menyetujui dan meluncurkan per channel.
