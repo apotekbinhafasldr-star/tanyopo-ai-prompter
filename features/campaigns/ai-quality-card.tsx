@@ -79,3 +79,31 @@ export function AiQualityCard({ provenance, quality }: { provenance: AiProvenanc
     </Card>
   );
 }
+
+/**
+ * Shown instead of the quality card when a strategy exists but could not be
+ * read (typically an older format). It says plainly that no assessment was
+ * made, so a missing card is never mistaken for "no problems".
+ */
+export function QualityUnavailableCard({ canRegenerate }: { canRegenerate: boolean }) {
+  return (
+    <Card data-testid="ai-quality-unavailable">
+      <CardContent className="flex flex-col gap-2 p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="neutral" data-testid="ai-quality-status">
+            Kualitas tidak dapat dinilai
+          </Badge>
+        </div>
+        <p className="text-sm text-foreground">
+          Strategi ini tersimpan dengan format lama atau tidak dikenali, jadi pemeriksaan otomatis tidak dijalankan.
+          Ini bukan berarti tidak ada masalah.
+        </p>
+        {canRegenerate ? (
+          <p className="text-xs text-muted-foreground">Buat ulang strategi dengan tombol &quot;Buat Ulang dengan AI&quot; untuk mendapat penilaian.</p>
+        ) : (
+          <p className="text-xs text-muted-foreground">Penilaian hanya bisa dibuat untuk campaign berstatus draft.</p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}

@@ -1,7 +1,7 @@
 /**
  * Phase-1 gate for the simplified Quick Promote review (PR-A).
  *
- * The simplified "Rencana Promosi Anda Siap" view applies ONLY when the
+ * The simplified "Rencana Promosi Siap Ditinjau" view applies ONLY when the
  * campaign is still a DRAFT *and* the user just arrived from Quick Promote
  * (`?from=quick-promote`). Every other case — AWAITING_APPROVAL, SCHEDULED,
  * ACTIVE, a DRAFT opened from the campaign list, or one from Advanced mode —

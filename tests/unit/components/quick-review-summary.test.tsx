@@ -48,7 +48,7 @@ describe("describeBudget", () => {
 describe("QuickReviewSummary", () => {
   it("renders the title, anchor id, and exactly one primary CTA", () => {
     const { container } = render(<QuickReviewSummary {...base} />);
-    expect(screen.getByText("Rencana Promosi Anda Siap")).toBeInTheDocument();
+    expect(screen.getByText("Rencana Promosi Siap Ditinjau")).toBeInTheDocument();
     expect(container.querySelector("#ringkasan-target-budget")).not.toBeNull();
     expect(screen.getAllByRole("button", { name: /Setujui & Siapkan Campaign/ })).toHaveLength(1);
   });
