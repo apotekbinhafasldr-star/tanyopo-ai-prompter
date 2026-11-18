@@ -122,7 +122,7 @@ export function HeroIntegratedNav() {
         <Button
           asChild
           size="sm"
-          className="bg-gradient-to-r from-[#22d3ee] via-[#3b82f6] to-[#8b5cf6] text-white hover:opacity-95"
+          variant="primaryOnDark"
         >
           <Link href="/register">
             Mulai Sekarang

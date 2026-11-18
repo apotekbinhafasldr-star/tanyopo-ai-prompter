@@ -19,6 +19,12 @@
   --brand-foreground: #ffffff;
   --brand-muted: #eef2ff;
 
+  /* Action buttons only (navy). Deliberately separate from --brand, which still drives links,
+     charts, progress, badges and the global focus ring. */
+  --action: #172b4d;
+  --action-hover: #243f68;
+  --action-foreground: #ffffff;
+
   --success: #15803d;
   --success-muted: #f0fdf4;
   --warning: #b45309;
@@ -65,6 +71,9 @@
   --color-brand-foreground: var(--brand-foreground);
   --color-brand-muted: var(--brand-muted);
   --color-brand-2: var(--brand-2);
+  --color-action: var(--action);
+  --color-action-hover: var(--action-hover);
+  --color-action-foreground: var(--action-foreground);
   --color-ink: var(--ink);
 
   --color-success: var(--success);

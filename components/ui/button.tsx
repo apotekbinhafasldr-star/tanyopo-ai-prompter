@@ -9,8 +9,12 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
+        // Navy action button. The focus ring is navy with a 2px offset (the global ring stays indigo).
         primary:
-          "bg-brand text-brand-foreground hover:bg-brand/90 shadow-[var(--shadow-sm)]",
+          "bg-action text-action-foreground hover:bg-action-hover shadow-[var(--shadow-sm)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-action",
+        // Same navy button on a dark surface (marketing hero): a light border keeps its edge visible and the focus ring is white.
+        primaryOnDark:
+          "border border-white/40 bg-action text-action-foreground hover:bg-action-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white",
         secondary:
           "bg-surface text-foreground border border-border hover:bg-surface-muted",
         ghost: "text-foreground hover:bg-surface-muted",

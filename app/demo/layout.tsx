@@ -30,7 +30,7 @@ export default function DemoLayout({ children }: { children: React.ReactNode }) 
         <p className="text-xs text-muted-foreground">
           Sesi sementara &middot; tidak terhubung ke akun, iklan, atau pembayaran nyata.
         </p>
-        <Button asChild size="sm" className="bg-gradient-to-r from-brand to-brand-2">
+        <Button asChild size="sm">
           <Link href="/register">Mulai Gratis / Buat Akun</Link>
         </Button>
       </div>

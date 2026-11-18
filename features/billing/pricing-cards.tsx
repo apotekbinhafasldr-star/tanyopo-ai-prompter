@@ -100,7 +100,8 @@ const TIER_VISUALS: Record<PlanTierId, TierVisual> = {
     subtext: "text-white/80",
     price: "text-white",
     actionBar: "bg-white/15 text-white",
-    primaryCta: "bg-white text-fuchsia-700 shadow-md hover:bg-white/90",
+    primaryCta:
+      "border border-white/70 bg-action text-action-foreground shadow-md hover:bg-action-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white",
     badge: "bg-amber-400 text-amber-950",
     divider: "border-white/20",
   },
@@ -134,7 +135,8 @@ const TIER_VISUALS: Record<PlanTierId, TierVisual> = {
     subtext: "text-muted-foreground",
     price: "text-foreground",
     actionBar: "bg-violet-100 text-violet-700",
-    primaryCta: "bg-violet-600 text-white hover:bg-violet-700",
+    primaryCta:
+      "bg-action text-action-foreground hover:bg-action-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-action",
     badge: "bg-violet-600 text-white",
     divider: "border-black/10",
   },

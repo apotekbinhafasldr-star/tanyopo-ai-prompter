@@ -157,14 +157,14 @@ export function MarketingHeader() {
           <Button
             asChild
             size="sm"
-            className="bg-gradient-to-r from-brand to-brand-2 shadow-[var(--shadow-glow)] hover:opacity-95"
+            variant={onDark ? "primaryOnDark" : "primary"}
           >
             <Link href="/register">Mulai Promosikan</Link>
           </Button>
         </div>
 
         <div className="flex items-center gap-2 desktop:hidden">
-          <Button asChild size="sm" className="bg-gradient-to-r from-brand to-brand-2">
+          <Button asChild size="sm" variant={onDark ? "primaryOnDark" : "primary"}>
             <Link href="/register">Mulai</Link>
           </Button>
           <button

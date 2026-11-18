@@ -112,7 +112,7 @@ export default async function DemoAnalyticsPage() {
         </CardContent>
       </Card>
 
-      <Button asChild size="lg" className="self-start bg-gradient-to-r from-brand to-brand-2">
+      <Button asChild size="lg" className="self-start">
         <Link href="/register">
           Mulai Gratis dengan Data Anda Sendiri
           <ArrowRight className="size-4" aria-hidden />

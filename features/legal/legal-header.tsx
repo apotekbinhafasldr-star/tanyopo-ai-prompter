@@ -24,7 +24,7 @@ export function LegalHeader() {
           <Button asChild variant="ghost" size="sm">
             <Link href="/login">Masuk</Link>
           </Button>
-          <Button asChild size="sm" className="bg-gradient-to-r from-brand to-brand-2 hover:opacity-95">
+          <Button asChild size="sm">
             <Link href="/register">Daftar</Link>
           </Button>
         </nav>
