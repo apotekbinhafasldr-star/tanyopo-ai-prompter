@@ -19,6 +19,8 @@ export type QualityDimensionId =
   | "relevance"
   | "differentiation"
   | "benefit_clarity"
+  | "hook_strength"
+  | "audience_fit"
   | "cta_strength"
   | "ad_policy"
   | "claim_risk";
@@ -39,10 +41,19 @@ export interface QualityDimensionResult {
   readonly id: QualityDimensionId;
   readonly label: string;
   readonly status: QualityStatus;
+  /** 0-100. 100 minus a fixed deduction per issue (block 40, warn 15), floored at 0. */
+  readonly score: number;
 }
 
 export interface QualityGateResult {
   readonly status: QualityStatus;
+  /**
+   * 0-100 rubric score: mean of the dimension scores, capped at 59 when any
+   * issue is a "block" and at 89 when any issue needs review. A rule-based
+   * measure for comparing proposals over time (regression), NOT a prediction
+   * of sales or ad performance.
+   */
+  readonly score: number;
   readonly dimensions: readonly QualityDimensionResult[];
   readonly issues: readonly QualityIssue[];
 }
@@ -52,6 +63,11 @@ export interface QualityGateContext {
   readonly productName?: string | null;
   /** Free text the user entered about the product. Terms found here are facts. */
   readonly knownFacts?: string | null;
+  /**
+   * True for a simulated product that must never be offered as real or lead
+   * to a transaction (no purchase CTA, no price).
+   */
+  readonly isSimulation?: boolean;
 }
 
 export const GATE_DISCLAIMER =
@@ -61,6 +77,8 @@ export const DIMENSION_LABELS: Record<QualityDimensionId, string> = {
   relevance: "Relevansi produk",
   differentiation: "Diferensiasi",
   benefit_clarity: "Kejelasan manfaat",
+  hook_strength: "Kekuatan hook",
+  audience_fit: "Kejelasan audiens",
   cta_strength: "Kekuatan ajakan (CTA)",
   ad_policy: "Kepatuhan format iklan",
   claim_risk: "Risiko klaim",
@@ -70,6 +88,8 @@ const DIMENSION_ORDER: readonly QualityDimensionId[] = [
   "relevance",
   "differentiation",
   "benefit_clarity",
+  "hook_strength",
+  "audience_fit",
   "cta_strength",
   "ad_policy",
   "claim_risk",
@@ -148,6 +168,14 @@ const TEXT_RULES: readonly TextRule[] = [
   },
 ];
 
+// Specifications and certifications a model is tempted to invent. A hit is
+// only a problem when the SAME text is not in the product facts the user gave.
+const SPEC_PATTERN =
+  /(?:\bRp\s?\d[\d.,]*|\b\d[\d.,]*\s*(?:(?:gram|gr|kg|ml|liter|mdpl|meter|persen|hari|jam|bulan|tahun|pcs|sachet|bungkus)\b|%)|\bgrade\s+\w+|\bsingle\s*origin\b|\borganik\b|\bfair\s*trade\b|\bhalal\b|\bbpom\b|\bbebas\s+(?:pestisida|gula|pengawet)\b|\btanpa\s+(?:pengawet|gula|bahan\s+kimia)\b)/gi;
+
+const BROAD_AUDIENCE = /\b(?:semua\s+(?:orang|kalangan|usia|golongan)|siapa\s*saja|seluruh\s+masyarakat|umum)\b/i;
+const TRANSACTION_PATTERN = /\b(?:beli|pesan|order|checkout|bayar|transfer|buy\s+now|order\s+now)\b/i;
+
 const WEAK_CTA = /^(?:klik\s+(?:di\s+)?sini|click\s+here|selengkapnya|more|lihat|ok)$/i;
 
 function copyOf(proposal: CampaignProposal): { source: string; text: string }[] {
@@ -179,9 +207,13 @@ function jaccard(a: Set<string>, b: Set<string>): number {
   return shared / (a.size + b.size - shared);
 }
 
+function squash(text: string): string {
+  return text.toLowerCase().replace(/\s+/g, "");
+}
+
 function foundInFacts(excerpt: string, facts: string): boolean {
   if (!facts) return false;
-  return facts.toLowerCase().includes(excerpt.toLowerCase());
+  return squash(facts).includes(squash(excerpt));
 }
 
 export function evaluateCampaignQuality(
@@ -209,6 +241,44 @@ export function evaluateCampaignQuality(
         severity: rule.severity,
         message: `${rule.message} (${field.source})`,
         excerpt,
+      });
+    }
+  }
+
+  // Facts: a specification or certification in the copy that is not in the
+  // product data the user entered is treated as invented until proven otherwise.
+  const specSeen = new Set<string>();
+  for (const field of copyOf(proposal)) {
+    for (const m of field.text.matchAll(SPEC_PATTERN)) {
+      const excerpt = m[0].trim();
+      const key = squash(excerpt);
+      if (specSeen.has(key) || foundInFacts(excerpt, facts)) continue;
+      specSeen.add(key);
+      issues.push({
+        code: "UNSUPPORTED_SPEC",
+        dimension: "claim_risk",
+        severity: "warn",
+        message: `Spesifikasi/fakta ini tidak ada di data produk yang Anda isi. Pastikan benar atau hapus. (${field.source})`,
+        excerpt,
+      });
+    }
+  }
+
+  // Simulation: a simulated product must never push toward a transaction.
+  if (context.isSimulation) {
+    const txSeen = new Set<string>();
+    for (const field of copyOf(proposal)) {
+      const m = TRANSACTION_PATTERN.exec(field.text);
+      if (!m) continue;
+      const key = m[0].toLowerCase();
+      if (txSeen.has(key)) continue;
+      txSeen.add(key);
+      issues.push({
+        code: "TRANSACTION_IN_SIMULATION",
+        dimension: "ad_policy",
+        severity: "block",
+        message: `Produk simulasi tidak boleh diarahkan ke transaksi. (${field.source})`,
+        excerpt: m[0],
       });
     }
   }
@@ -246,6 +316,40 @@ export function evaluateCampaignQuality(
       dimension: "benefit_clarity",
       severity: "warn",
       message: "Nilai jual produk belum jelas.",
+    });
+  }
+
+  // Hook strength: a hook must be specific to THIS product/problem, not a slogan.
+  const specific = new Set([
+    ...tokens(`${context.productName ?? ""} ${proposal.customer_pain} ${proposal.value_proposition} ${proposal.positioning}`),
+  ]);
+  for (const [i, c] of proposal.candidates.entries()) {
+    const hook = c.hook.trim();
+    const same = hook.length > 0 && hook.toLowerCase() === c.headline.trim().toLowerCase();
+    const short = hook.length < 15;
+    const shares = [...tokens(hook)].some((t) => specific.has(t));
+    if (short || same || !shares) {
+      issues.push({
+        code: "WEAK_HOOK",
+        dimension: "hook_strength",
+        severity: "warn",
+        message: `Hook kandidat ${i + 1} ${
+          short ? "terlalu pendek" : same ? "sama dengan judul" : "tidak terkait masalah atau produk"
+        }. Hook harus spesifik dan menyentuh masalah pembeli.`,
+        excerpt: hook || undefined,
+      });
+    }
+  }
+
+  // Audience: who it is for must be stated, and not "everyone".
+  const audience = proposal.audience_summary.trim();
+  if (audience.length < 20 || BROAD_AUDIENCE.test(audience)) {
+    issues.push({
+      code: "AUDIENCE_TOO_BROAD",
+      dimension: "audience_fit",
+      severity: "warn",
+      message: "Audiens belum jelas atau terlalu luas (mis. \"semua orang\"). Sebutkan siapa yang paling cocok dan situasinya.",
+      excerpt: audience || undefined,
     });
   }
 
@@ -296,7 +400,8 @@ export function evaluateCampaignQuality(
   const dimensions: QualityDimensionResult[] = DIMENSION_ORDER.map((id) => {
     const own = issues.filter((i) => i.dimension === id);
     const status: QualityStatus = own.some((i) => i.severity === "block") ? "FAIL" : own.length > 0 ? "REVIEW" : "PASS";
-    return { id, label: DIMENSION_LABELS[id], status };
+    const deduction = own.reduce((sum, i) => sum + (i.severity === "block" ? 40 : 15), 0);
+    return { id, label: DIMENSION_LABELS[id], status, score: Math.max(0, 100 - deduction) };
   });
 
   const overall: QualityStatus = dimensions.some((d) => d.status === "FAIL")
@@ -305,5 +410,8 @@ export function evaluateCampaignQuality(
       ? "REVIEW"
       : "PASS";
 
-  return { status: overall, dimensions, issues };
+  const mean = dimensions.reduce((sum, d) => sum + d.score, 0) / dimensions.length;
+  const capped = overall === "FAIL" ? Math.min(mean, 59) : overall === "REVIEW" ? Math.min(mean, 89) : mean;
+
+  return { status: overall, score: Math.round(capped), dimensions, issues };
 }

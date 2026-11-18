@@ -36,6 +36,9 @@ export function AiQualityCard({ provenance, quality }: { provenance: AiProvenanc
           <Badge variant={STATUS_VARIANT[quality.status]} data-testid="ai-quality-status">
             {STATUS_TEXT[quality.status]}
           </Badge>
+          <span className="text-xs text-muted-foreground" data-testid="ai-quality-score">
+            Skor aturan {quality.score}/100
+          </span>
         </div>
         <p className="text-xs text-muted-foreground">{provenance.detail}</p>
 

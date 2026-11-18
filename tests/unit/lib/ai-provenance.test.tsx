@@ -67,6 +67,15 @@ describe("AiQualityCard", () => {
     expect(screen.getByText(/bukan jaminan kepatuhan/i)).toBeTruthy();
   });
 
+  it("shows the rule score next to the status and keeps it within 0-100", () => {
+    const quality = evaluateCampaignQuality(proposal, { productName: "Kopi Arabika Gayo" });
+    render(<AiQualityCard provenance={describeAiProvenance(null)} quality={quality} />);
+    const text = screen.getByTestId("ai-quality-score").textContent ?? "";
+    expect(text).toBe(`Skor aturan ${quality.score}/100`);
+    expect(quality.score).toBeGreaterThanOrEqual(0);
+    expect(quality.score).toBeLessThanOrEqual(59); // proposal has a blocking promise
+  });
+
   it("shows UNKNOWN origin without claiming a model made it", () => {
     const quality = evaluateCampaignQuality(proposal, {});
     render(<AiQualityCard provenance={describeAiProvenance(null)} quality={quality} />);
