@@ -163,3 +163,31 @@ Semua langkah lewat browser Chrome Android. Tidak butuh laptop atau CLI.
 
 - Business Verification, App Review, dan Advanced Access Meta: **EXTERNAL BLOCKED** (menunggu Founder dan Meta).
 - Akun iklan uji dan akses jaringan ke `graph.facebook.com`: tidak tersedia di lingkungan pengembangan. Tidak ada klaim SANDBOX E2E atau REAL E2E.
+
+## 9. PR-1: konektor Meta (validate-only, status, jeda, budget total) — DORMANT
+
+Status: **CODE READY, UNIT TEST (mock) belum dijalankan lokal; CI yang menjalankan.** Semua method baru **dormant**: tidak ada pemanggil di jalur peluncuran, di Autopilot, atau di UI. Gerbang S1 (`BUDGET_WRITE_ENABLED_PLATFORMS`) tetap `[]` dan tidak disentuh. Tidak ada panggilan nyata ke Meta; semua tes memakai `fetch` palsu (mock bukan nyata).
+
+| Kemampuan | Berkas | Perilaku | Label |
+|---|---|---|---|
+| `validateOnly` pada `createCampaign/AdSet/Creative/Ad` | `lib/connectors/meta-connector.ts` | Argumen opsi ke-4 `{ validateOnly: true }` menambah `execution_options: ["validate_only"]`. Jawaban `{ success: true }` tanpa `id` dikembalikan sebagai `{ validated: true }`, bukan objek dibuat. Jawaban dengan `id` atau bentuk tak dikenal dilempar tanpa status HTTP (= `UNCERTAIN`). Tetap tanpa retry. Tanpa opsi, payload identik byte per byte dengan sebelumnya. | DORMANT, UNIT TEST (mock) |
+| `getEntityStatus(token, id)` | idem | `GET /{id}?fields=status,configured_status,effective_status`, read-only, memakai backoff throttle yang ada. Bentuk tak dikenal menghasilkan `null`; galat dilempar tanpa teks penyedia. | DORMANT |
+| `setEntityStatus(token, id, status)` | idem | `PAUSED`, `ACTIVE`, atau `ARCHIVED`. Satu permintaan, **tanpa retry**. Timeout, jaringan, 408, 429, 5xx, kode throttle, atau jawaban tak dikenal menghasilkan `UNCERTAIN` (tidak dilempar, tidak diulang). Penolakan 4xx yang pasti menghasilkan `REJECTED`. Teks galat penyedia tidak pernah dikembalikan atau dicatat. | DORMANT |
+| `pauseObject(token, id)` | idem | `setEntityStatus(..., "PAUSED")` untuk ad, ad set, atau campaign. `pauseCampaign` lama tidak berubah. | DORMANT |
+| `lifetimeBudgetMinorUnits` pada ad set | `lib/connectors/types.ts`, konektor | Eksklusif dengan budget harian (keduanya sekaligus ditolak sebelum permintaan). Wajib disertai `endTimeUnixSeconds` yang valid. Dikirim sebagai `lifetime_budget` + `end_time`, tanpa `daily_budget`. Jalur peluncuran tetap memakai budget harian. | DORMANT |
+| Pemetaan status Meta ke label UI | `lib/campaigns/meta-status-map.ts` | Fungsi murni tanpa I/O. "Aktif di Meta" hanya untuk `effective_status === "ACTIVE"`; nilai lain atau tak dikenal menjadi "Tidak diketahui" (fail-closed). Belum dipakai layar mana pun. | DORMANT |
+
+Tripwire baru (`tests/unit/lib/meta-pr1-dormant-tripwires.test.ts`): tidak ada kode produksi yang memanggil `setEntityStatus` selain dengan literal `"PAUSED"`/`"ARCHIVED"`, dan tidak ada yang memakai `validateOnly` selain `false`. PR berikutnya yang menambah pemanggil harus mengubah tes itu secara sengaja.
+
+**BELUM TERVERIFIKASI** (tidak ada bukti nyata):
+- Apakah `execution_options: ["validate_only"]` dan bentuk jawaban `{ success: true }` benar untuk keempat endpoint pada v25.0.
+- Dokumen Meta (Ad Set) menyatakan `lifetime_budget` wajib disertai `end_time`; apakah itu batas keras, dan apakah satuan minor IDR sesuai asumsi kita (bagian 4), belum terverifikasi.
+- Bentuk jawaban `POST /{id}` untuk perubahan status (`{ success: true }`) dan kode galat 1/2 yang diperlakukan sebagai ambigu.
+- Nilai `effective_status` lain di luar daftar pada `meta-status-map.ts` (dipetakan ke "Tidak diketahui").
+- `validateOnly` pada konektor tidak dijaga S1 di dalam konektor; gerbang ada di pemanggil. Pemanggil di PR berikutnya wajib memeriksa gerbang sebelum memakainya.
+
+**Syarat untuk PR yang kelak menambah pemanggil** (hasil QA independen PR-1):
+- Galat dari `create*` dengan `validateOnly` membawa `error.message` Meta di `ConnectorApiError.message` (sama seperti create biasa). Pemanggil wajib mencatat lewat `safe-error-log`, tidak menampilkan teks itu ke pengguna.
+- `lifetimeBudgetMinorUnits` belum diperiksa oleh External Budget Safety Gate (gerbang hanya membaca budget harian). Pemanggil wajib menambahkan pemeriksaan batas untuk lifetime sebelum dipakai, dan `end_time` di masa lalu belum dicek di konektor.
+- Pemanggil yang meneruskan opsi bertipe `MetaValidateOnlyOption | undefined` dari variabel tidak cocok dengan overload yang ada; ubah overload bersamaan dengan pemanggil pertama.
+- Tes `meta-account-evidence-connector` dan `meta-readiness-readonly` memotong sumber sampai `async createCampaign(`; potongan itu kini memuat baris overload. Saat ini aman, tetapi rapuh jika overload diubah.
