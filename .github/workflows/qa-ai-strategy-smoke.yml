@@ -53,11 +53,23 @@ jobs:
 
       - run: npm ci
 
-      - name: Smoke AI Strategy (satu panggilan nyata)
-        # Input dilewatkan lewat env, bukan disisipkan ke skrip shell. Hanya SATU kredensial: AI_SMOKE_API_KEY.
+      # Dua langkah terpisah, masing-masing hanya membawa SATU secret milik penyedianya. Tidak ada ekspresi "a && secret1 || secret2",
+      # supaya secret satu penyedia tidak pernah bisa terkirim ke penyedia lain. Tepat satu dari dua langkah ini yang berjalan.
+      # Input dilewatkan lewat env, bukan disisipkan ke skrip shell. Hanya SATU kredensial per langkah: AI_SMOKE_API_KEY.
+      - name: Smoke AI Strategy (anthropic, satu panggilan nyata)
+        if: ${{ inputs.provider == 'anthropic' }}
         env:
           AI_SMOKE_CONFIRM: ${{ inputs.confirm }}
           AI_SMOKE_PROVIDER: ${{ inputs.provider }}
           AI_SMOKE_MODEL: ${{ inputs.model }}
-          AI_SMOKE_API_KEY: ${{ inputs.provider == 'anthropic' && secrets.QA_AI_SMOKE_ANTHROPIC_API_KEY || secrets.QA_AI_SMOKE_OPENAI_API_KEY }}
+          AI_SMOKE_API_KEY: ${{ secrets.QA_AI_SMOKE_ANTHROPIC_API_KEY }}
+        run: npx vitest run --config vitest.smoke.config.ts
+
+      - name: Smoke AI Strategy (openai, satu panggilan nyata)
+        if: ${{ inputs.provider == 'openai' }}
+        env:
+          AI_SMOKE_CONFIRM: ${{ inputs.confirm }}
+          AI_SMOKE_PROVIDER: ${{ inputs.provider }}
+          AI_SMOKE_MODEL: ${{ inputs.model }}
+          AI_SMOKE_API_KEY: ${{ secrets.QA_AI_SMOKE_OPENAI_API_KEY }}
         run: npx vitest run --config vitest.smoke.config.ts

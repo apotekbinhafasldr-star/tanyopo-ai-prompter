@@ -93,11 +93,35 @@ describe("secrets: one QA credential, only in the smoke step", () => {
     expect(code.slice(0, smokeStepStart)).not.toMatch(/^\s{4}env:/m);
   });
 
-  it("the smoke step receives exactly the four AI_SMOKE_* variables and nothing else", () => {
-    const step = code.slice(smokeStepStart);
-    const envBlock = step.slice(step.indexOf("env:"), step.indexOf("run:"));
-    const names = [...envBlock.matchAll(/^\s{10}([A-Z0-9_]+):/gm)].map((m) => m[1]);
-    expect(names.sort()).toEqual(["AI_SMOKE_API_KEY", "AI_SMOKE_CONFIRM", "AI_SMOKE_MODEL", "AI_SMOKE_PROVIDER"]);
+  const smokeSteps = code
+    .slice(smokeStepStart)
+    .split(/^\s{6}- name: /m)
+    .filter(Boolean)
+    .map((chunk) => `- name: ${chunk}`);
+
+  it("there are exactly two smoke steps, one per provider, each guarded by the provider input", () => {
+    expect(smokeSteps).toHaveLength(2);
+    expect(smokeSteps[0]).toMatch(/if: \$\{\{ inputs\.provider == 'anthropic' \}\}/);
+    expect(smokeSteps[1]).toMatch(/if: \$\{\{ inputs\.provider == 'openai' \}\}/);
+  });
+
+  it("each smoke step carries ONLY its own provider's secret (a key can never go to the other vendor)", () => {
+    expect([...smokeSteps[0].matchAll(/secrets\.([A-Za-z0-9_]+)/g)].map((m) => m[1])).toEqual(["QA_AI_SMOKE_ANTHROPIC_API_KEY"]);
+    expect([...smokeSteps[1].matchAll(/secrets\.([A-Za-z0-9_]+)/g)].map((m) => m[1])).toEqual(["QA_AI_SMOKE_OPENAI_API_KEY"]);
+  });
+
+  it("no expression picks a secret with && / || (the earlier fallback form let a key land on the wrong vendor)", () => {
+    for (const line of code.split("\n").filter((l) => l.includes("secrets."))) {
+      expect(line, line).not.toMatch(/&&|\|\|/);
+    }
+  });
+
+  it("each smoke step receives exactly the four AI_SMOKE_* variables and nothing else", () => {
+    for (const step of smokeSteps) {
+      const envBlock = step.slice(step.indexOf("env:"), step.indexOf("run:"));
+      const names = [...envBlock.matchAll(/^\s{10}([A-Z0-9_]+):/gm)].map((m) => m[1]);
+      expect(names.sort()).toEqual(["AI_SMOKE_API_KEY", "AI_SMOKE_CONFIRM", "AI_SMOKE_MODEL", "AI_SMOKE_PROVIDER"]);
+    }
   });
 
   it("checkout, setup-node and npm ci get no env or secrets", () => {

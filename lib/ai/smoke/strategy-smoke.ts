@@ -89,6 +89,10 @@ export function validateSmokeConfig(env: Readonly<Record<string, string | undefi
 
   const apiKey = (env.AI_SMOKE_API_KEY ?? "").trim();
   if (!apiKey) reasons.push("AI_SMOKE_API_KEY is missing");
+  // Wrong-vendor guard: a key must never be sent to the other vendor. Anthropic keys start with "sk-ant-"; an OpenAI key never does.
+  // Only the shape is checked and nothing about the key is ever printed.
+  else if (provider === "anthropic" && !apiKey.startsWith("sk-ant-")) reasons.push("AI_SMOKE_API_KEY does not look like an Anthropic key");
+  else if (provider === "openai" && apiKey.startsWith("sk-ant-")) reasons.push("AI_SMOKE_API_KEY looks like an Anthropic key but the provider is openai");
 
   const forbidden = Object.keys(env)
     .filter((name) => (env[name] ?? "") !== "")
@@ -147,11 +151,14 @@ export interface SmokeChecks {
   candidatesCount: number;
   objectiveRecommendationValid: boolean;
   audiencePresent: boolean;
-  /** No numeric-only (Meta-ID-like) entry in interest_suggestions_text, after normalisation. */
-  audienceNoInterestIds: boolean;
+  /**
+   * Informational: the provider's RAW interest_suggestions_text (before normalizeProposalAdditions) held no numeric-only,
+   * Meta-ID-like entry. Not a pass criterion: the product repairs it in code; this only shows how the model behaved.
+   */
+  rawInterestsAreText: boolean;
   missingFactsIsArray: boolean;
   testPlanPresent: boolean;
-  /** No URL or phone-like number in any active copy field (the prompt forbids it). */
+  /** No URL or phone-like number in the active copy: this file's pattern AND the quality gate's URL_IN_COPY / PHONE_IN_COPY. */
   copyHasNoUrlOrPhone: boolean;
 }
 
@@ -167,8 +174,11 @@ export interface SmokeReport {
   checks: SmokeChecks | null;
   /** Quality gate over the ACTIVE copy, the way submit enforces it. Informational for this smoke. */
   gate: { status: string; score: number; blocking: boolean; issueCodes: string[] } | null;
-  /** Set only when the call failed: a coarse category and an HTTP status, never the provider's message. */
-  error: { category: AIErrorCategory | "UNKNOWN"; status: number | null } | null;
+  /**
+   * Set only when the call failed: a coarse category, an HTTP status and, for a non-provider error (e.g. an SDK parse error),
+   * the error CLASS name only when it is a plain identifier. Never a message, so nothing the provider or model wrote.
+   */
+  error: { category: AIErrorCategory | "UNKNOWN"; status: number | null; name: string | null } | null;
 }
 
 // A URL, a bare domain, an Indonesian mobile number or any 10+ digit run. Prices such as "Rp18.000 - 25.000" must NOT match.
@@ -233,7 +243,9 @@ export function createSmokeRunner(deps: { provider: AIProvider; model: string; t
       } catch (err) {
         const category: AIErrorCategory | "UNKNOWN" = err instanceof AIProviderError ? err.category : "UNKNOWN";
         const status = err instanceof AIProviderError && typeof err.status === "number" ? err.status : null;
-        return emptyReport({ provider: deps.provider.name, attempts, error: { category, status } });
+        const rawName = err instanceof Error && !(err instanceof AIProviderError) ? err.name : "";
+        const name = /^[A-Za-z]{1,40}$/.test(rawName) ? rawName : null;
+        return emptyReport({ provider: deps.provider.name, attempts, error: { category, status, name } });
       }
 
       const normalized = normalizeProposalAdditions(result.data);
@@ -254,10 +266,11 @@ export function createSmokeRunner(deps: { provider: AIProvider; model: string; t
           proposal.objective_recommendation == null ||
           (PROPOSAL_OBJECTIVE_VALUES as readonly string[]).includes(proposal.objective_recommendation),
         audiencePresent: proposal.audience != null,
-        audienceNoInterestIds: (proposal.audience?.interest_suggestions_text ?? []).every((i) => !/^\d+$/.test(i.trim())),
+        rawInterestsAreText: (result.data.audience?.interest_suggestions_text ?? []).every((i) => !/^\d+$/.test(String(i).trim())),
         missingFactsIsArray: Array.isArray(proposal.missing_facts) || proposal.missing_facts == null,
         testPlanPresent: proposal.test_plan != null,
-        copyHasNoUrlOrPhone: !URL_OR_PHONE.test(activeCopy(proposal)),
+        copyHasNoUrlOrPhone:
+          !URL_OR_PHONE.test(activeCopy(proposal)) && !gateResult.issues.some((i) => i.code === "URL_IN_COPY" || i.code === "PHONE_IN_COPY"),
       };
 
       const passed =
@@ -266,7 +279,6 @@ export function createSmokeRunner(deps: { provider: AIProvider; model: string; t
         checks.storedSchemaValid &&
         checks.candidatesCount === 3 &&
         checks.objectiveRecommendationValid &&
-        checks.audienceNoInterestIds &&
         checks.missingFactsIsArray &&
         checks.copyHasNoUrlOrPhone;
 
@@ -300,7 +312,11 @@ export function formatSmokeSummary(report: SmokeReport): string {
     `- Attempts: ${report.attempts} (limit ${SMOKE_MAX_ATTEMPTS}, no retry, no fallback)`,
     `- Tokens in/out: ${report.tokensInput ?? "-"} / ${report.tokensOutput ?? "-"}`,
   ];
-  if (report.error) lines.push(`- Error category: ${report.error.category}${report.error.status ? ` (HTTP ${report.error.status})` : ""}`);
+  if (report.error) {
+    lines.push(
+      `- Error category: ${report.error.category}${report.error.status ? ` (HTTP ${report.error.status})` : ""}${report.error.name ? `, class ${report.error.name}` : ""}`,
+    );
+  }
   if (report.checks) {
     lines.push("", "| Check | Value |", "|---|---|");
     for (const [k, v] of Object.entries(report.checks)) lines.push(`| ${k} | ${String(v)} |`);
@@ -311,6 +327,11 @@ export function formatSmokeSummary(report: SmokeReport): string {
       `- Quality gate (active copy, informational): ${report.gate.status}, score ${report.gate.score}, blocking=${report.gate.blocking}, issues=[${report.gate.issueCodes.join(", ")}]`,
     );
   }
-  lines.push("", "_Evidence class: REAL (one provider call). Not a quota, billing or database test._");
+  lines.push(
+    "",
+    report.passed
+      ? "_Evidence class: REAL (one provider call; the provider accepted the schema). Not a quota, billing or database test._"
+      : "_REAL attempt, but NOT proof that the provider accepts the schema. Do not rerun automatically; report the category above._",
+  );
   return lines.join("\n");
 }

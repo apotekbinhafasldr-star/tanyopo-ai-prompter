@@ -25,7 +25,7 @@ import { KOPI_ROBUSTA_IMPROVED } from "@/tests/fixtures/ai/kopi-robusta-aceh-sim
  * the REAL provider acceptance is proven only by the manual workflow (tests/smoke), never here.
  */
 
-const SECRET = "sk-FAKE-SECRET-VALUE-9f8e7d";
+const SECRET = "sk-ant-FAKE-SECRET-VALUE-9f8e7d";
 
 const ENV_OK = {
   AI_SMOKE_CONFIRM: SMOKE_CONFIRM_PHRASE,
@@ -71,6 +71,15 @@ describe("validateSmokeConfig", () => {
     const r = validateSmokeConfig({ ...ENV_OK, [name]: "x" });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reasons.join(" ")).toContain(name);
+  });
+
+  it("never lets a key reach the wrong vendor (shape check, no value printed)", () => {
+    const wrongForAnthropic = validateSmokeConfig({ ...ENV_OK, AI_SMOKE_PROVIDER: "anthropic", AI_SMOKE_API_KEY: "sk-proj-FAKE-OPENAI-LOOKING-KEY" });
+    expect(wrongForAnthropic.ok).toBe(false);
+    const wrongForOpenAi = validateSmokeConfig({ ...ENV_OK, AI_SMOKE_PROVIDER: "openai", AI_SMOKE_API_KEY: "sk-ant-FAKE-ANTHROPIC-LOOKING-KEY" });
+    expect(wrongForOpenAi.ok).toBe(false);
+    expect(JSON.stringify(wrongForAnthropic) + JSON.stringify(wrongForOpenAi)).not.toContain("FAKE");
+    expect(validateSmokeConfig({ ...ENV_OK, AI_SMOKE_PROVIDER: "openai", AI_SMOKE_API_KEY: "sk-proj-FAKE-OPENAI-LOOKING-KEY" }).ok).toBe(true);
   });
 
   it("an EMPTY forbidden variable does not block (only a present value does)", () => {
@@ -176,7 +185,7 @@ describe("exactly one attempt: no retry, no fallback, single-use runner", () => 
     expect(calls).toHaveLength(1);
     expect(report.attempts).toBe(1);
     expect(report.passed).toBe(false);
-    expect(report.error).toEqual({ category, status });
+    expect(report.error).toEqual({ category, status, name: null });
     expect(report.checks).toBeNull();
   });
 
@@ -216,7 +225,7 @@ describe("nothing sensitive reaches the report or the summary", () => {
     const text = JSON.stringify(report) + formatSmokeSummary(report);
     expect(text).not.toContain(SECRET);
     expect(text).not.toContain("Incorrect API key");
-    expect(report.error).toEqual({ category: "AUTH", status: 401 });
+    expect(report.error).toEqual({ category: "AUTH", status: 401, name: null });
   });
 
   it("a non-provider error (e.g. a TypeError with a message) is reported as UNKNOWN without its text", async () => {
@@ -224,7 +233,19 @@ describe("nothing sensitive reaches the report or the summary", () => {
       throw new TypeError(`boom ${SECRET}`);
     });
     const report = await createSmokeRunner({ provider, model: "m" }).run();
-    expect(report.error).toEqual({ category: "UNKNOWN", status: null });
+    // Only the error CLASS name is kept (useful for an SDK parse error), never its message.
+    expect(report.error).toEqual({ category: "UNKNOWN", status: null, name: "TypeError" });
+    expect(JSON.stringify(report)).not.toContain(SECRET);
+  });
+
+  it("an error whose name is not a plain identifier gets no name at all", async () => {
+    const { provider } = fakeProvider(() => {
+      const e = new Error("x");
+      e.name = `bad name ${SECRET}`;
+      throw e;
+    });
+    const report = await createSmokeRunner({ provider, model: "m" }).run();
+    expect(report.error).toEqual({ category: "UNKNOWN", status: null, name: null });
     expect(JSON.stringify(report)).not.toContain(SECRET);
   });
 
@@ -258,7 +279,7 @@ describe("acceptance criteria (what makes the smoke pass)", () => {
       candidatesCount: 3,
       objectiveRecommendationValid: true,
       audiencePresent: true,
-      audienceNoInterestIds: true,
+      rawInterestsAreText: true,
       missingFactsIsArray: true,
       testPlanPresent: true,
       copyHasNoUrlOrPhone: true,
@@ -266,7 +287,7 @@ describe("acceptance criteria (what makes the smoke pass)", () => {
     expect(report.gate).not.toBeNull();
   });
 
-  it("repairs a slightly-off audience in code (swapped ages, numeric 'interest', long list) and still passes", async () => {
+  it("repairs a slightly-off audience in code (swapped ages, numeric 'interest', long list) and still passes; the raw numeric interest is only reported", async () => {
     const out = goodOutput();
     out.audience = {
       countries: ["id", "Indonesia", "SG"],
@@ -278,7 +299,7 @@ describe("acceptance criteria (what makes the smoke pass)", () => {
     const { provider } = fakeProvider(() => okResult(out));
     const report = await createSmokeRunner({ provider, model: "m" }).run();
     expect(report.checks?.storedSchemaValid).toBe(true);
-    expect(report.checks?.audienceNoInterestIds).toBe(true);
+    expect(report.checks?.rawInterestsAreText).toBe(false); // informational: how the model behaved, not a pass criterion
     expect(report.passed).toBe(true);
   });
 
@@ -300,6 +321,31 @@ describe("acceptance criteria (what makes the smoke pass)", () => {
       expect(report.checks?.copyHasNoUrlOrPhone, bad).toBe(false);
       expect(report.passed, bad).toBe(false);
     }
+  });
+
+  it("also FAILS on a link/phone form the local pattern misses but the quality gate catches (one definition, not two)", async () => {
+    for (const bad of ["Beli di tokokopi.shop sekarang", "Pesan di tokokopi.store sekarang"]) {
+      const out = goodOutput() as { candidates: { primary_text: string }[] };
+      out.candidates[0].primary_text = bad;
+      const { provider } = fakeProvider(() => okResult(out));
+      const report = await createSmokeRunner({ provider, model: "m" }).run();
+      expect(report.gate?.issueCodes, bad).toContain("URL_IN_COPY");
+      expect(report.checks?.copyHasNoUrlOrPhone, bad).toBe(false);
+      expect(report.passed, bad).toBe(false);
+    }
+  });
+
+  it("the summary claims REAL evidence only when the smoke passed", async () => {
+    const pass = await createSmokeRunner({ provider: fakeProvider(() => okResult()).provider, model: "m" }).run();
+    expect(formatSmokeSummary(pass)).toContain("provider accepted the schema");
+    const fail = await createSmokeRunner({
+      provider: fakeProvider(() => {
+        throw new AIProviderError("denied", "AUTH", 401);
+      }).provider,
+      model: "m",
+    }).run();
+    expect(formatSmokeSummary(fail)).toContain("NOT proof that the provider accepts the schema");
+    expect(formatSmokeSummary(fail)).not.toContain("provider accepted the schema");
   });
 
   it("does NOT fail on ordinary prices and ranges", async () => {
