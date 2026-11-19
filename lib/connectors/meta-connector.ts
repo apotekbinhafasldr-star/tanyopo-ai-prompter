@@ -14,17 +14,22 @@ import {
   resolveMetaCtaType,
   resolveMetaEndTime,
 } from "@/lib/connectors/meta-connector-contract";
-import { META_READ_MAX_RETRIES, decideMetaRetry } from "@/lib/connectors/meta-rate-limit";
+import { META_READ_MAX_RETRIES, decideMetaRetry, isMetaThrottleError } from "@/lib/connectors/meta-rate-limit";
 import {
   ConnectorApiError,
   ConnectorConfigError,
   type AdInput,
-  type AdSetInput,
   type CampaignInput,
   type ConnectorAccount,
   type ConnectorInsights,
   type ConnectorTokenResult,
   type CreativeInput,
+  type MetaAdSetInput,
+  type MetaEntityStatus,
+  type MetaSetStatusResult,
+  type MetaValidateOnlyOption,
+  type MetaValidateOnlyResult,
+  type MetaWritableStatus,
   type PlatformConnector,
 } from "@/lib/connectors/types";
 
@@ -247,6 +252,82 @@ function toSnapshot(row: RawReadinessAdAccount): Omit<MetaAdAccountSnapshot, "mi
 
 /** optimization_goal -> billing_event pairs verified in Meta's docs (REACH only). Defined in the pure contract module. */
 const VERIFIED_BILLING_EVENTS = META_VERIFIED_BILLING_EVENTS;
+
+/**
+ * PR-1 (DORMANT). Added to a create body ONLY when the caller passes the
+ * validate-only option. Without it the payloads are byte-identical to before.
+ */
+const VALIDATE_ONLY_FIELDS = { execution_options: ["validate_only"] } as const;
+
+/**
+ * A validate-only create must come back as `{ success: true }` WITHOUT an `id`.
+ * Anything else (an `id` would mean the object may really have been created,
+ * or an unrecognised shape) is thrown WITHOUT an HTTP status, which
+ * `classifyCreateFailure` reads as UNCERTAIN. No id is ever invented.
+ */
+function interpretValidateOnly(result: unknown): MetaValidateOnlyResult {
+  const body = typeof result === "object" && result !== null ? (result as { id?: unknown; success?: unknown }) : {};
+  if (body.id === undefined && (body as { success?: unknown }).success === true) return { validated: true };
+  throw new ConnectorApiError("META", "Respons validate_only Meta tidak dikenali; objek mungkin sudah dibuat.", {});
+}
+
+/** Graph object ids (campaign, ad set, ad) are numeric strings. Anything else is never put into a request path. */
+const META_OBJECT_ID_PATTERN = /^\d{1,32}$/;
+const META_WRITABLE_STATUSES: ReadonlySet<string> = new Set(["PAUSED", "ACTIVE", "ARCHIVED"]);
+/** Status fields Meta returns are upper-case tokens such as CAMPAIGN_PAUSED. Anything else is dropped. */
+const META_STATUS_TOKEN_PATTERN = /^[A-Z_]{1,64}$/;
+/**
+ * Graph error codes 1 (unknown) and 2 (temporary service error) do not say
+ * whether a write was applied (UNVERIFIED against Meta's error reference), so
+ * a status write that ends in one is UNCERTAIN, not REJECTED.
+ */
+const META_AMBIGUOUS_ERROR_CODES: ReadonlySet<number> = new Set([1, 2]);
+
+function statusToken(value: unknown): string | null {
+  return typeof value === "string" && META_STATUS_TOKEN_PATTERN.test(value) ? value : null;
+}
+
+/** Structured, non-sensitive fields only. Never the provider message. */
+function safeErrorFields(error: ConnectorApiError): { httpStatus?: number; code?: number; subcode?: number } {
+  const fields: { httpStatus?: number; code?: number; subcode?: number } = {};
+  if (typeof error.status === "number" && Number.isSafeInteger(error.status)) fields.httpStatus = error.status;
+  if (typeof error.code === "number" && Number.isSafeInteger(error.code)) fields.code = error.code;
+  if (typeof error.subcode === "number" && Number.isSafeInteger(error.subcode)) fields.subcode = error.subcode;
+  return fields;
+}
+
+/**
+ * Only a definitive 4xx rejection is REJECTED. A missing HTTP status (timeout,
+ * network failure, unreadable body), 2xx with an error body, 408, 429, 5xx,
+ * a throttle answer or an ambiguous error code is UNCERTAIN.
+ */
+function classifyStatusWriteFailure(error: unknown): MetaSetStatusResult {
+  if (!(error instanceof ConnectorApiError)) return { kind: "UNCERTAIN" };
+  const fields = safeErrorFields(error);
+  const status = error.status;
+  const definitive =
+    typeof status === "number" &&
+    status >= 400 &&
+    status <= 499 &&
+    status !== 408 &&
+    status !== 429 &&
+    !isMetaThrottleError(error) &&
+    !(fields.code !== undefined && META_AMBIGUOUS_ERROR_CODES.has(fields.code));
+  return definitive ? { kind: "REJECTED", ...fields } : { kind: "UNCERTAIN", ...fields };
+}
+
+/** Read failures keep the structured fields (for back-off and logging) but never the provider text. */
+function toSafeReadError(error: unknown): ConnectorApiError {
+  const message = "Gagal membaca status objek Meta.";
+  if (!(error instanceof ConnectorApiError)) return new ConnectorApiError("META", message, {});
+  return new ConnectorApiError("META", message, {
+    status: error.status,
+    code: error.code,
+    subcode: error.subcode,
+    type: error.type,
+    retryAfterSeconds: error.retryAfterSeconds,
+  });
+}
 
 export class MetaConnector implements PlatformConnector {
   readonly platform = "META" as const;
@@ -509,13 +590,17 @@ export class MetaConnector implements PlatformConnector {
     return evaluateMetaAccountCurrencyEvidence(raw, adAccountId);
   }
 
+  createCampaign(accessToken: string, adAccountId: string, input: CampaignInput, options: MetaValidateOnlyOption): Promise<MetaValidateOnlyResult>;
+  createCampaign(accessToken: string, adAccountId: string, input: CampaignInput): Promise<{ id: string }>;
   async createCampaign(
     accessToken: string,
     adAccountId: string,
     input: CampaignInput,
-  ): Promise<{ id: string }> {
+    options?: MetaValidateOnlyOption,
+  ): Promise<{ id: string } | MetaValidateOnlyResult> {
     this.requireConfig();
-    return graphFetch(`/${adAccountId}/campaigns`, {
+    const validateOnly = options?.validateOnly === true;
+    const result = await graphFetch<{ id: string }>(`/${adAccountId}/campaigns`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -529,17 +614,23 @@ export class MetaConnector implements PlatformConnector {
         // developers.facebook.com/documentation/ads-commerce/marketing-api/bidding/guides/adset-budget-sharing,
         // accessed 2026-11-11. Not yet exercised against a live account.
         is_adset_budget_sharing_enabled: false,
+        ...(validateOnly ? VALIDATE_ONLY_FIELDS : {}),
         access_token: accessToken,
       }),
     }, { create: true });
+    return validateOnly ? interpretValidateOnly(result) : result;
   }
 
+  createAdSet(accessToken: string, adAccountId: string, input: MetaAdSetInput, options: MetaValidateOnlyOption): Promise<MetaValidateOnlyResult>;
+  createAdSet(accessToken: string, adAccountId: string, input: MetaAdSetInput): Promise<{ id: string }>;
   async createAdSet(
     accessToken: string,
     adAccountId: string,
-    input: AdSetInput,
-  ): Promise<{ id: string }> {
+    input: MetaAdSetInput,
+    options?: MetaValidateOnlyOption,
+  ): Promise<{ id: string } | MetaValidateOnlyResult> {
     this.requireConfig();
+    const validateOnly = options?.validateOnly === true;
     // No default: the goal must be chosen explicitly by the launch preflight
     // and must have a billing event verified against Meta's documentation.
     const goal = input.optimizationGoal;
@@ -572,22 +663,47 @@ export class MetaConnector implements PlatformConnector {
         "Waktu berakhir ad set tidak valid (harus UNIX timestamp positif). Ad set tidak dibuat.",
       );
     }
-    return graphFetch(`/${adAccountId}/adsets`, {
+    // PR-1 (DORMANT): an optional lifetime budget, mutually exclusive with the daily
+    // budget. Meta's Ad Set reference says lifetime_budget must come with end_time;
+    // whether that is a hard limit, and whether the IDR unit is what we assume, is
+    // UNVERIFIED. The launch path never sets it, so the payload there is unchanged.
+    let budgetFields: { daily_budget: number | undefined } | { lifetime_budget: number };
+    if (input.lifetimeBudgetMinorUnits === undefined) {
+      budgetFields = { daily_budget: input.dailyBudgetMinorUnits };
+    } else {
+      if (input.dailyBudgetMinorUnits !== undefined) {
+        throw new ConnectorConfigError(
+          this.platform,
+          "Budget harian dan budget total tidak boleh dikirim bersamaan. Ad set tidak dibuat.",
+        );
+      }
+      const lifetime = input.lifetimeBudgetMinorUnits;
+      if (typeof lifetime !== "number" || !Number.isSafeInteger(lifetime) || lifetime < 1) {
+        throw new ConnectorConfigError(this.platform, "Budget total ad set tidak valid (harus bilangan bulat positif). Ad set tidak dibuat.");
+      }
+      if (end.value === null) {
+        throw new ConnectorConfigError(this.platform, "Budget total ad set membutuhkan waktu berakhir yang valid. Ad set tidak dibuat.");
+      }
+      budgetFields = { lifetime_budget: lifetime };
+    }
+    const result = await graphFetch<{ id: string }>(`/${adAccountId}/adsets`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         name: input.name,
         campaign_id: input.campaignId,
-        daily_budget: input.dailyBudgetMinorUnits,
+        ...budgetFields,
         ...(end.value !== null ? { end_time: end.value } : {}),
         billing_event: billingEvent,
         optimization_goal: input.optimizationGoal,
         bid_strategy: "LOWEST_COST_WITHOUT_CAP",
         targeting: { geo_locations: { countries: input.targetingCountries }, ...(age.value ?? {}) },
         status: "PAUSED",
+        ...(validateOnly ? VALIDATE_ONLY_FIELDS : {}),
         access_token: accessToken,
       }),
     }, { create: true });
+    return validateOnly ? interpretValidateOnly(result) : result;
   }
 
   /**
@@ -596,12 +712,16 @@ export class MetaConnector implements PlatformConnector {
    * is the documented link_data image field; `image_url` is not one.
    * The link must equal the call-to-action link.
    */
+  createCreative(accessToken: string, adAccountId: string, input: CreativeInput, options: MetaValidateOnlyOption): Promise<MetaValidateOnlyResult>;
+  createCreative(accessToken: string, adAccountId: string, input: CreativeInput): Promise<{ id: string }>;
   async createCreative(
     accessToken: string,
     adAccountId: string,
     input: CreativeInput,
-  ): Promise<{ id: string }> {
+    options?: MetaValidateOnlyOption,
+  ): Promise<{ id: string } | MetaValidateOnlyResult> {
     this.requireConfig();
+    const validateOnly = options?.validateOnly === true;
     if (!input.pageId) {
       throw new ConnectorConfigError(
         this.platform,
@@ -615,7 +735,7 @@ export class MetaConnector implements PlatformConnector {
       throw new ConnectorConfigError(this.platform, `Gambar belum tersedia untuk creative "${input.name}".`);
     }
 
-    return graphFetch(`/${adAccountId}/adcreatives`, {
+    const result = await graphFetch<{ id: string }>(`/${adAccountId}/adcreatives`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -630,14 +750,24 @@ export class MetaConnector implements PlatformConnector {
             call_to_action: { type: resolveMetaCtaType(input.cta), value: { link: input.linkUrl } },
           },
         },
+        ...(validateOnly ? VALIDATE_ONLY_FIELDS : {}),
         access_token: accessToken,
       }),
     }, { create: true });
+    return validateOnly ? interpretValidateOnly(result) : result;
   }
 
-  async createAd(accessToken: string, adAccountId: string, input: AdInput): Promise<{ id: string }> {
+  createAd(accessToken: string, adAccountId: string, input: AdInput, options: MetaValidateOnlyOption): Promise<MetaValidateOnlyResult>;
+  createAd(accessToken: string, adAccountId: string, input: AdInput): Promise<{ id: string }>;
+  async createAd(
+    accessToken: string,
+    adAccountId: string,
+    input: AdInput,
+    options?: MetaValidateOnlyOption,
+  ): Promise<{ id: string } | MetaValidateOnlyResult> {
     this.requireConfig();
-    return graphFetch(`/${adAccountId}/ads`, {
+    const validateOnly = options?.validateOnly === true;
+    const result = await graphFetch<{ id: string }>(`/${adAccountId}/ads`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -645,9 +775,11 @@ export class MetaConnector implements PlatformConnector {
         adset_id: input.adSetId,
         creative: { creative_id: input.creativeId },
         status: "PAUSED",
+        ...(validateOnly ? VALIDATE_ONLY_FIELDS : {}),
         access_token: accessToken,
       }),
     }, { create: true });
+    return validateOnly ? interpretValidateOnly(result) : result;
   }
 
   /** `adAccountId` is unused — Meta's Graph API objects are globally addressable by id alone. */
@@ -678,6 +810,78 @@ export class MetaConnector implements PlatformConnector {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: "PAUSED", access_token: accessToken }),
     });
+  }
+
+  /**
+   * PR-1 (DORMANT, no caller) — READ-ONLY status of one campaign, ad set or ad:
+   * `GET /{id}?fields=status,configured_status,effective_status`. Uses the
+   * existing back-off for throttled reads. Returns null when the id is not a
+   * numeric Graph id (no request is made) or the answer has an unexpected
+   * shape: unknown is never guessed. A failed call throws a ConnectorApiError
+   * carrying only the structured fields, never the provider text.
+   */
+  async getEntityStatus(accessToken: string, id: string): Promise<MetaEntityStatus | null> {
+    this.requireConfig();
+    if (typeof id !== "string" || !META_OBJECT_ID_PATTERN.test(id)) return null;
+    let raw: unknown;
+    try {
+      raw = await graphFetch<unknown>(
+        `/${id}?${new URLSearchParams({ fields: "status,configured_status,effective_status", access_token: accessToken })}`,
+        undefined,
+        { timeoutMs: READINESS_TIMEOUT_MS },
+      );
+    } catch (error) {
+      throw toSafeReadError(error);
+    }
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+    const row = raw as { status?: unknown; configured_status?: unknown; effective_status?: unknown };
+    const parsed: MetaEntityStatus = {
+      status: statusToken(row.status),
+      configuredStatus: statusToken(row.configured_status),
+      effectiveStatus: statusToken(row.effective_status),
+    };
+    return parsed.status === null && parsed.configuredStatus === null && parsed.effectiveStatus === null ? null : parsed;
+  }
+
+  /**
+   * PR-1 (DORMANT, no caller) — sets the status of one campaign, ad set or ad.
+   * NEVER retried: it goes through the same no-retry path as the create calls
+   * (`create: true`: one request, 10 s timeout). A timeout, network failure,
+   * 408/429/5xx or an unrecognised answer is returned as UNCERTAIN (not
+   * thrown, not repeated); a definitive 4xx is REJECTED. The provider message
+   * is never returned or logged. An invalid id or status throws
+   * ConnectorConfigError before any request. Setting ACTIVE starts spending:
+   * a tripwire test forbids any production caller doing that.
+   */
+  async setEntityStatus(accessToken: string, id: string, status: MetaWritableStatus): Promise<MetaSetStatusResult> {
+    this.requireConfig();
+    if (typeof id !== "string" || !META_OBJECT_ID_PATTERN.test(id)) {
+      throw new ConnectorConfigError(this.platform, "ID objek Meta tidak valid. Status tidak diubah.");
+    }
+    if (typeof status !== "string" || !META_WRITABLE_STATUSES.has(status)) {
+      throw new ConnectorConfigError(this.platform, "Status Meta tidak dikenali. Status tidak diubah.");
+    }
+    let body: unknown;
+    try {
+      body = await graphFetch<unknown>(
+        `/${id}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status, access_token: accessToken }),
+        },
+        { create: true },
+      );
+    } catch (error) {
+      return classifyStatusWriteFailure(error);
+    }
+    const applied = typeof body === "object" && body !== null && (body as { success?: unknown }).success === true;
+    return applied ? { kind: "APPLIED" } : { kind: "UNCERTAIN" };
+  }
+
+  /** PR-1 (DORMANT, no caller) — pauses an ad, ad set or campaign by id. Same semantics as `setEntityStatus` with PAUSED. */
+  async pauseObject(accessToken: string, id: string): Promise<MetaSetStatusResult> {
+    return this.setEntityStatus(accessToken, id, "PAUSED");
   }
 
   /** Assumes Campaign Budget Optimization is enabled — sets budget at the campaign level. */

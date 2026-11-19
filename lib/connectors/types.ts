@@ -103,7 +103,22 @@ export interface AdSetInput {
    * daily budget cannot keep spending past it). Omitted = ongoing, as before.
    */
   endTimeUnixSeconds?: number;
+  /**
+   * Meta only (PR-1, DORMANT: no launch path sets it). Lifetime budget in minor
+   * units, mutually exclusive with `dailyBudgetMinorUnits`: both at once is
+   * refused before any request, and a lifetime budget needs a valid
+   * `endTimeUnixSeconds`. Other connectors ignore it. To use it without a daily
+   * budget, call `MetaConnector.createAdSet`, whose input type is `MetaAdSetInput`.
+   */
+  lifetimeBudgetMinorUnits?: number;
 }
+
+/**
+ * Input accepted by `MetaConnector.createAdSet`: an `AdSetInput` whose daily
+ * budget may be left out (only when `lifetimeBudgetMinorUnits` is used). Every
+ * `AdSetInput` is also a valid `MetaAdSetInput`.
+ */
+export type MetaAdSetInput = Omit<AdSetInput, "dailyBudgetMinorUnits"> & { dailyBudgetMinorUnits?: number };
 
 export interface CreativeInput {
   name: string;
@@ -121,6 +136,46 @@ export interface AdInput {
   adSetId: string;
   creativeId: string;
 }
+
+/**
+ * Meta only (PR-1, DORMANT). Pass `{ validateOnly: true }` as the extra argument
+ * of a `MetaConnector.create*` method to send `execution_options: ["validate_only"]`.
+ * Nothing in the launch path passes it.
+ */
+export interface MetaValidateOnlyOption {
+  readonly validateOnly: true;
+}
+
+/**
+ * Result of a validate-only create: Meta answered `{ success: true }` and
+ * created NOTHING. There is deliberately no `id` here, and no id is ever invented.
+ */
+export interface MetaValidateOnlyResult {
+  readonly validated: true;
+}
+
+/** Status values a Meta object may be set to. Nothing in production code may pass "ACTIVE" (tripwire test). */
+export type MetaWritableStatus = "PAUSED" | "ACTIVE" | "ARCHIVED";
+
+/** Raw Meta status fields of one object (campaign, ad set or ad). A field is null when absent or not a plain upper-case token. */
+export interface MetaEntityStatus {
+  status: string | null;
+  configuredStatus: string | null;
+  effectiveStatus: string | null;
+}
+
+/**
+ * Outcome of a status write. Only structured, non-sensitive fields are carried;
+ * the provider's message is never returned.
+ *  - APPLIED: Meta answered `{ success: true }`.
+ *  - REJECTED: Meta definitively refused (4xx other than 408/429); nothing changed.
+ *  - UNCERTAIN: timeout, network failure, 408/429/5xx, or an unrecognised answer.
+ *    The write may or may not have happened; it is NOT retried. Re-read the status.
+ */
+export type MetaSetStatusResult =
+  | { kind: "APPLIED" }
+  | { kind: "REJECTED"; httpStatus?: number; code?: number; subcode?: number }
+  | { kind: "UNCERTAIN"; httpStatus?: number; code?: number; subcode?: number };
 
 /**
  * Implemented today: `lib/connectors/meta-connector.ts`. `TikTokConnector`
@@ -159,6 +214,16 @@ export interface PlatformConnector {
    */
   getInsights(accessToken: string, adAccountId: string, externalCampaignId: string): Promise<ConnectorInsights>;
   pauseCampaign(accessToken: string, adAccountId: string, externalCampaignId: string): Promise<void>;
+
+  /**
+   * Meta only (PR-1, DORMANT, no caller in the launch path). All three are
+   * optional so the TikTok/X connectors and existing mocks stay valid.
+   * `getEntityStatus` is read-only; `setEntityStatus` is never retried;
+   * `pauseObject` works on an ad, ad set or campaign id.
+   */
+  getEntityStatus?(accessToken: string, id: string): Promise<MetaEntityStatus | null>;
+  setEntityStatus?(accessToken: string, id: string, status: MetaWritableStatus): Promise<MetaSetStatusResult>;
+  pauseObject?(accessToken: string, id: string): Promise<MetaSetStatusResult>;
 
   /**
    * Meta only (Phase 1C-B). READ-ONLY currency evidence for one ad account.
