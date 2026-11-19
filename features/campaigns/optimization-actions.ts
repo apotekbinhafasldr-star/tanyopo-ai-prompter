@@ -10,6 +10,14 @@ import { computeProfitEstimate } from "@/lib/profit-estimate";
 import { checkBudgetGuard } from "@/lib/budget-guard";
 import { getOrCreateBudgetPolicy, getMonthToDateSpend } from "@/services/budget-guard";
 import { policyTypeForAction } from "@/lib/autopilot-policy";
+import {
+  assessDataSufficiency,
+  buildInsufficientDataMessage,
+  enforceDataThresholds,
+  summarizeChannelMetrics,
+  type DataSufficiency,
+  type MetricRowInput,
+} from "@/lib/campaigns/optimization-data-sufficiency";
 import type { Channel, Json, OptimizationActionType, RiskLevel } from "@/types/database";
 
 export interface OptimizationActionState {
@@ -73,7 +81,7 @@ export async function generateOptimizationRecommendationsAction(
   const [{ data: metrics }, { data: conversions }, { data: product }] = await Promise.all([
     supabase
       .from("prompter_marketing_metrics")
-      .select("channel_campaign_id, spend")
+      .select("channel_campaign_id, spend, impressions, clicks, reach, date")
       .in("channel_campaign_id", channelCampaignIds)
       .eq("tenant_id", session.tenantId),
     supabase
@@ -116,8 +124,51 @@ export async function generateOptimizationRecommendationsAction(
 
   const hpp = product?.hpp ?? null;
 
+  // Delivery metrics per channel campaign, summarised and the rates (CTR, CPC) computed HERE, in code. The
+  // model is only shown these numbers; it never calculates them.
+  const metricRowsByChannelCampaign = new Map<string, MetricRowInput[]>();
+  for (const m of metrics ?? []) {
+    const key = m.channel_campaign_id!;
+    const rows = metricRowsByChannelCampaign.get(key) ?? [];
+    rows.push(m);
+    metricRowsByChannelCampaign.set(key, rows);
+  }
+  const deliveryByChannelCampaign = new Map(
+    channelCampaigns.map((cc) => {
+      const summary = summarizeChannelMetrics(metricRowsByChannelCampaign.get(cc.id) ?? []);
+      return [cc.id, { summary, sufficiency: assessDataSufficiency(summary) }] as const;
+    }),
+  );
+
+  // Minimum-data gate, BEFORE any AI job exists and before any quota is used. The thresholds are proposals
+  // (UNVERIFIED), see lib/campaigns/optimization-data-sufficiency.ts. A channel is analysable when it has enough
+  // delivery data, OR when it has no delivery data at all (no impressions) but does have spend or conversions
+  // (manually entered / imported numbers): that is what the analysis accepted before the thresholds existed and it
+  // stays accepted. Such a channel still cannot get INCREASE_BUDGET (enforced after the AI answers).
+  // Only when NO channel is analysable is the whole analysis refused.
+  const analysable = channelCampaigns.some((cc) => {
+    const d = deliveryByChannelCampaign.get(cc.id)!;
+    const conv = conversionsByChannelCampaign.get(cc.id);
+    return d.sufficiency.enough || (d.summary.impressions === 0 && (d.summary.spend > 0 || (spendByChannelCampaign.get(cc.id) ?? 0) > 0 || (conv?.count ?? 0) > 0));
+  });
+  if (!analysable) {
+    return {
+      error: buildInsufficientDataMessage(
+        channelCampaigns.map((cc) => ({
+          channel: cc.channel,
+          summary: deliveryByChannelCampaign.get(cc.id)!.summary,
+          sufficiency: deliveryByChannelCampaign.get(cc.id)!.sufficiency,
+        })),
+      ),
+    };
+  }
+  const sufficiencyByChannel = new Map<string, DataSufficiency>(
+    channelCampaigns.map((cc) => [cc.channel, deliveryByChannelCampaign.get(cc.id)!.sufficiency] as const),
+  );
+
   const channelPerformance = channelCampaigns.map((cc) => {
     const spend = spendByChannelCampaign.get(cc.id) ?? 0;
+    const delivery = deliveryByChannelCampaign.get(cc.id)!;
     const conv = conversionsByChannelCampaign.get(cc.id) ?? { count: 0, value: 0 };
     const dailyBudget =
       cc.budget_percentage !== null && campaign.daily_budget !== null
@@ -138,6 +189,14 @@ export async function generateOptimizationRecommendationsAction(
       conversionCount: conv.count,
       conversionValue: conv.value,
       estimatedContribution: estimate.netProfit,
+      impressions: delivery.summary.impressions,
+      clicks: delivery.summary.clicks,
+      reach: delivery.summary.reach,
+      ctrPercent: delivery.summary.ctrPercent,
+      cpc: delivery.summary.cpc,
+      dataDays: delivery.summary.days,
+      dataSufficient: delivery.sufficiency.enough,
+      clickDataSufficient: delivery.sufficiency.clickBasedOk,
     };
   });
 
@@ -162,12 +221,19 @@ export async function generateOptimizationRecommendationsAction(
     return { error: result.error };
   }
 
+  // Whatever the model said, a budget increase is never recommended for a channel whose data is below the
+  // thresholds. Applied before saving and before anything is auto-routed to the Approval Center.
+  const recommendationResult: OptimizationRecommendation = {
+    ...result.data,
+    recommendations: enforceDataThresholds(result.data.recommendations, sufficiencyByChannel),
+  };
+
   const { error: upsertError } = await supabase.from("prompter_optimization_recommendations").upsert(
     {
       tenant_id: session.tenantId,
       master_campaign_id: masterCampaignId,
-      summary: result.data.summary,
-      recommendations: result.data.recommendations as Json,
+      summary: recommendationResult.summary,
+      recommendations: recommendationResult.recommendations as Json,
       ai_job_id: result.jobId,
       model: result.model,
     },
@@ -178,7 +244,7 @@ export async function generateOptimizationRecommendationsAction(
     return { error: "AI berhasil membuat rekomendasi tapi gagal menyimpannya. Silakan coba lagi." };
   }
 
-  await maybeAutoSubmitRecommendations(supabase, session.tenantId, session.userId, masterCampaignId, result.data);
+  await maybeAutoSubmitRecommendations(supabase, session.tenantId, session.userId, masterCampaignId, recommendationResult);
 
   revalidatePath(`/campaigns/${masterCampaignId}`);
   revalidatePath("/approvals");
@@ -292,6 +358,26 @@ async function submitRecommendationCore(
 
   if (channelCampaign.status !== "ACTIVE") {
     return { error: "Hanya channel yang sudah Aktif yang bisa diajukan tindakan optimasi." };
+  }
+
+  // A budget INCREASE is click-based: re-check the minimum data here too (the arguments come from the client, and a
+  // stored recommendation may predate the thresholds). Fail closed when the data cannot be read. Thresholds are
+  // proposals (UNVERIFIED), see lib/campaigns/optimization-data-sufficiency.ts.
+  if (actionType === "INCREASE_BUDGET") {
+    const { data: metricRows, error: metricsError } = await supabase
+      .from("prompter_marketing_metrics")
+      .select("spend, impressions, clicks, reach, date")
+      .eq("channel_campaign_id", channelCampaign.id)
+      .eq("tenant_id", tenantId);
+    if (metricsError) {
+      return { error: "Gagal membaca data iklan untuk memeriksa kecukupan data. Tidak ada yang diajukan, coba lagi." };
+    }
+    const sufficiency = assessDataSufficiency(summarizeChannelMetrics(metricRows ?? []));
+    if (!sufficiency.clickBasedOk) {
+      return {
+        error: `Data belum cukup untuk menaikkan budget (ambang usulan, belum divalidasi): ${sufficiency.shortfalls.join(", ") || "data belum memenuhi ambang"}. Tidak ada yang diajukan.`,
+      };
+    }
   }
 
   if ((actionType === "INCREASE_BUDGET" || actionType === "DECREASE_BUDGET") && suggestedDailyBudget !== null) {

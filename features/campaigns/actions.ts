@@ -6,12 +6,15 @@ import { createClient } from "@/lib/supabase/server";
 import { requireSessionContext } from "@/services/session";
 import {
   CampaignProposalSchema,
+  CampaignProposalGenerationSchema,
+  normalizeProposalAdditions,
   withPrimaryCandidate,
   withRecommendedChannels,
   selectCandidate,
   type CampaignProposal,
 } from "@/schemas/ai/campaign-proposal";
 import { buildSystemPreamble, buildCampaignProposalPrompt } from "@/lib/ai/prompts";
+import { evaluateCampaignQuality, formatBlockingIssuesMessage, scanRawProposalCopy } from "@/lib/ai/campaign-quality-gate";
 import { runAiJob } from "@/services/ai-jobs";
 import {
   syncChannelCampaigns,
@@ -130,7 +133,7 @@ export async function regenerateCampaignProposalAction(campaignId: string): Prom
     tenantId: session.tenantId,
     actorUserId: session.userId,
     jobType: "CAMPAIGN_PROPOSAL",
-    schema: CampaignProposalSchema,
+    schema: CampaignProposalGenerationSchema,
     system: buildSystemPreamble(brandProfile),
     prompt: buildCampaignProposalPrompt(product, inputs, promptDestination),
     inputReference: { product_id: product.id, campaign_id: campaignId, ...inputs },
@@ -140,7 +143,7 @@ export async function regenerateCampaignProposalAction(campaignId: string): Prom
     return { error: result.error };
   }
 
-  const regenerated = withRecommendedChannels(withPrimaryCandidate(result.data));
+  const regenerated = withRecommendedChannels(withPrimaryCandidate(normalizeProposalAdditions(result.data)));
   const proposal =
     existingDestinationRaw === undefined || existingDestinationRaw === null
       ? regenerated
@@ -518,6 +521,43 @@ export async function submitForApprovalAction(campaignId: string): Promise<Campa
   });
   if (!campaignLimit.ok) {
     return { error: campaignLimit.message };
+  }
+
+  // Quality Gate, enforced on the server (PR-5). The campaign page only DISPLAYS the gate; here the same
+  // evaluation (same parse, same product name, same product description as "known facts") decides whether an
+  // approval may be created at all. Nothing has been written yet, so a refusal leaves no approval row and no
+  // status change. Only the ACTIVE copy (the top-level hook/headline/cta/primary_text that the launch sends and
+  // that updateCampaignCopyAction edits) is enforced; the page still shows findings for every candidate as advice.
+  // A stored proposal that cannot be parsed (legacy) is "cannot be assessed" like on the page, except that its
+  // known active copy strings are still scanned for the two blocking rules (financial claim, special category).
+  const parsedProposal = CampaignProposalSchema.safeParse(campaign.ai_proposal);
+  if (parsedProposal.success) {
+    let productName: string | null = null;
+    let productDescription: string | null = null;
+    if (campaign.product_id) {
+      const { data: product, error: productError } = await supabase
+        .from("prompter_products")
+        .select("name, description")
+        .eq("id", campaign.product_id)
+        .eq("tenant_id", session.tenantId)
+        .maybeSingle();
+      if (productError) {
+        return { error: "Gagal membaca data produk untuk pemeriksaan kualitas. Pengajuan tidak dibuat, coba lagi." };
+      }
+      productName = product?.name ?? null;
+      productDescription = product?.description ?? null;
+    }
+    const gateMessage = formatBlockingIssuesMessage(
+      evaluateCampaignQuality(parsedProposal.data, { productName, knownFacts: productDescription, copyScope: "active" }),
+    );
+    if (gateMessage) {
+      return { error: gateMessage };
+    }
+  } else {
+    const rawMessage = formatBlockingIssuesMessage({ issues: scanRawProposalCopy(campaign.ai_proposal) });
+    if (rawMessage) {
+      return { error: rawMessage };
+    }
   }
 
   const { error: approvalError } = await supabase.from("prompter_approvals").insert({

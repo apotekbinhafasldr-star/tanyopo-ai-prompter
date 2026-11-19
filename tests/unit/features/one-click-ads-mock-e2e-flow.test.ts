@@ -118,6 +118,30 @@ const actions: FlowActions = { submit: submitForApprovalAction, decide: decideAp
 const launch = (id: string) => launchChannelCampaignAction(id);
 const writesSince = (n: number) => world.db.log.slice(n).filter((s) => s.op !== "select");
 
+/**
+ * Rekomendasi optimasi sekarang menolak (tanpa memanggil AI) bila data tayang di bawah ambang minimum
+ * (usulan, belum divalidasi: >= 3 hari, >= 1000 impresi, >= 100 klik; lihat lib/campaigns/optimization-data-sufficiency.ts).
+ * Satu kali sync hanya memberi 1 hari, jadi tes yang memang menguji rekomendasi berhasil menambahkan dua hari
+ * sebelumnya untuk channel yang sama (angka sama dengan insight palsu). Asersi tes tidak diubah.
+ */
+function seedTwoEarlierMetricDays(): void {
+  const dayOffset = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10);
+  for (const [i, date] of [dayOffset(1), dayOffset(2)].entries()) {
+    world.db.tables.prompter_marketing_metrics.push({
+      id: `metric-earlier-${i}`,
+      tenant_id: TENANT_A,
+      master_campaign_id: MASTER_A,
+      channel_campaign_id: CHANNEL_A1,
+      platform: "FACEBOOK",
+      date,
+      spend: 5000,
+      impressions: world.ads.insights.impressions,
+      reach: world.ads.insights.reach,
+      clicks: world.ads.insights.clicks,
+    });
+  }
+}
+
 /** Draft -> diajukan oleh Marketing -> disetujui Owner. Hasilnya SCHEDULED. */
 async function approveCampaignA(): Promise<void> {
   const flow = await submitThenOwnerApprove(world, actions, MASTER_A, { submitter: SESSION_A_MARKETING, owner: SESSION_A_OWNER });
@@ -191,6 +215,7 @@ describe("MOCK E2E (in-memory, BUKAN bukti E2E nyata) — urutan alur One-Click"
     });
 
     // 6. Rekomendasi optimasi: tersimpan, tidak membuat approval baru dan tidak menulis budget ke platform.
+    seedTwoEarlierMetricDays();
     const approvalsBefore = world.db.tables.prompter_approvals.length;
     const writesBefore = world.ads.writeCalls().length;
     expect((await generateOptimizationRecommendationsAction(MASTER_A)).error).toBeNull();
@@ -579,6 +604,7 @@ describe("MOCK E2E (in-memory, BUKAN bukti E2E nyata) — sync insight dan rekom
   it("rekomendasi memakai data hasil sync, hanya menyimpan saran, dan tidak menulis budget ke platform", async () => {
     await launchedPaused();
     expect((await syncChannelCampaignInsightsAction(CHANNEL_A1)).error).toBeNull();
+    seedTwoEarlierMetricDays();
     const writesBefore = world.ads.writeCalls().length;
 
     expect((await generateOptimizationRecommendationsAction(MASTER_A)).error).toBeNull();

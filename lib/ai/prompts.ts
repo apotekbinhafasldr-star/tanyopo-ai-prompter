@@ -1,4 +1,5 @@
 import type { Database, Locale } from "@/types/database";
+import { PROPOSAL_OBJECTIVE_VALUES } from "@/schemas/ai/proposal-objectives";
 
 type BrandProfile = Database["public"]["Tables"]["prompter_brand_profiles"]["Row"] | null;
 type Product = Database["public"]["Tables"]["prompter_products"]["Row"];
@@ -257,9 +258,34 @@ export function buildCampaignProposalPrompt(
       "5. recommended_channels harus sama persis dengan daftar channel di budget_allocation.",
       "6. Jangan pernah mengklaim atau menyiratkan bahwa channel yang direkomendasikan sudah terhubung/siap publikasi — ini murni rekomendasi strategi; status koneksi teknis ditangani terpisah oleh sistem dan ditampilkan apa adanya ke pengguna.",
     ].join("\n"),
+    buildProposalAdditionsPrompt(),
   ]
     .filter(Boolean)
     .join("\n\n");
+}
+
+/**
+ * PR-5 block of the campaign proposal prompt: the four advisory fields
+ * (objective_recommendation, audience, missing_facts, test_plan) and what the
+ * model must never produce in them or in the copy. Part of the SAME single
+ * CAMPAIGN_PROPOSAL call; it adds no AI call. Exported so tests can assert
+ * the key sentences without rebuilding a whole product.
+ */
+export function buildProposalAdditionsPrompt(): string {
+  return [
+    "Field tambahan (semuanya saran untuk ditinjau pemilik; tidak ada yang dikirim ke platform iklan). Isi dengan null atau [] bila konteks di atas tidak cukup. Jangan dikarang:",
+    `1. objective_recommendation — pilih HANYA dari daftar ini: ${PROPOSAL_OBJECTIVE_VALUES.join(", ")}. Isi null bila ragu. Ini hanya saran: tidak mengubah tujuan campaign yang dipilih pengguna dan tidak berarti objective itu sudah didukung untuk peluncuran.`,
+    "2. audience — countries (kode negara ISO 2 huruf kapital, hanya negara yang disebut di konteks), age_min dan age_max, advantage_plus (true/false), dan interest_suggestions_text berisi kata kunci minat berupa TEKS biasa saja agar pemilik bisa mencarinya sendiri. Isi null bila konteks audiens tidak cukup.",
+    "3. missing_facts — daftar fakta yang TIDAK diberikan tetapi dibutuhkan (misalnya harga, stok, bukti, tujuan pembelian, area layanan). Tulis di sini; jangan menebak atau mengarangnya di copy. Kosongkan bila tidak ada yang kurang.",
+    "4. test_plan — recommended_variants (nomor kandidat 1-3 yang layak diuji berdampingan), min_duration_days (jumlah hari minimum sebelum hasil dinilai), dan rationale singkat cara membandingkannya. Tanpa angka performa dan tanpa janji hasil.",
+    [
+      "Larangan pada seluruh keluaran:",
+      "- Jangan membuat ID minat, ID perilaku, atau ID targeting Meta apa pun, dan jangan menyebut angka/ID yang menyerupainya.",
+      "- Jangan mengarang angka performa (CTR, CPC, CPM, ROAS, konversi, jangkauan), hasil riset pasar, ukuran audiens, atau minimum budget.",
+      "- Jangan menjanjikan ROI, hasil pasti, atau kata 'pasti winning'.",
+      "- Jangan menghasilkan klaim finansial (pinjaman, kredit cepat, investasi, 'cepat kaya', passive income, 'modal kecil untung besar', 'pasti cuan'), klaim kesehatan/pengobatan, atau iklan kategori khusus (kredit/pinjaman/leasing, lowongan kerja/rekrutmen, properti sewa/KPR/perumahan, isu sosial/politik/pemilu). Bila produk berada di kategori itu, tulis copy yang netral dan informatif tanpa menawarkan kategori tersebut, lalu catat di missing_facts bahwa kategori ini butuh penanganan khusus oleh pemilik.",
+    ].join("\n"),
+  ].join("\n");
 }
 
 /**
@@ -398,6 +424,21 @@ export interface OptimizationChannelPerformance {
   conversionCount: number;
   conversionValue: number;
   estimatedContribution: number | null;
+  /**
+   * Delivery data and the rates derived from it. ALL of these are computed in code
+   * (lib/campaigns/optimization-data-sufficiency.ts), never by the model.
+   */
+  impressions?: number;
+  clicks?: number;
+  /** Sum of daily reach values, not unique reach. */
+  reach?: number;
+  ctrPercent?: number | null;
+  cpc?: number | null;
+  dataDays?: number;
+  /** Meets the minimum days/impressions (proposed thresholds, unverified). */
+  dataSufficient?: boolean;
+  /** Also meets the minimum clicks required for a click-based action such as INCREASE_BUDGET. */
+  clickDataSufficient?: boolean;
 }
 
 export interface OptimizationRecommendationInputs {
@@ -412,7 +453,11 @@ export function buildOptimizationRecommendationPrompt(inputs: OptimizationRecomm
       c.estimatedContribution !== null
         ? `estimasi kontribusi marketing ${c.estimatedContribution}`
         : "estimasi kontribusi marketing tidak dapat dihitung (HPP produk belum diisi)";
-    return `- ${c.channel} (status ${c.status}): budget harian ${c.dailyBudget ?? "belum diatur"}, spend tercatat ${c.spend}, ${c.conversionCount} konversi senilai ${c.conversionValue} (ROAS ~${roas}), ${contribution}`;
+    const delivery =
+      c.impressions !== undefined
+        ? `; data tayang: ${c.impressions} impresi, ${c.clicks ?? 0} klik, ${c.reach ?? 0} reach (jumlah reach harian, bukan reach unik), CTR ${c.ctrPercent ?? "tidak dapat dihitung"}${c.ctrPercent !== null && c.ctrPercent !== undefined ? "%" : ""}, CPC ${c.cpc ?? "tidak dapat dihitung"} (CTR dan CPC dihitung oleh sistem), ${c.dataDays ?? 0} hari data; ${c.dataSufficient ? "data cukup untuk dianalisis" : "DATA BELUM CUKUP"}${c.dataSufficient && !c.clickDataSufficient ? "; data klik BELUM cukup untuk menaikkan budget" : ""}`
+        : "";
+    return `- ${c.channel} (status ${c.status}): budget harian ${c.dailyBudget ?? "belum diatur"}, spend tercatat ${c.spend}, ${c.conversionCount} konversi senilai ${c.conversionValue} (ROAS ~${roas}), ${contribution}${delivery}`;
   });
 
   return [
@@ -420,6 +465,7 @@ export function buildOptimizationRecommendationPrompt(inputs: OptimizationRecomm
     lines.join("\n"),
     "PENTING — pertimbangkan profitabilitas (estimasi kontribusi marketing = pendapatan − HPP − biaya iklan), bukan hanya ROAS. Sebuah channel dengan ROAS tinggi tapi estimasi kontribusi marketing rendah/negatif TIDAK boleh otomatis direkomendasikan untuk dinaikkan budgetnya — jelaskan alasan ini di rationale jika relevan. 'Estimasi kontribusi marketing' bukan laba bersih (belum termasuk biaya operasional lain) — jangan menyebutnya laba bersih.",
     "Hanya gunakan channel dan angka yang benar-benar tercantum di atas — jangan mengarang channel lain atau data yang tidak ada.",
+    "CTR dan CPC di atas dihitung oleh sistem: pakai apa adanya, jangan menghitung ulang atau mengarang angka tayang. Channel bertanda DATA BELUM CUKUP atau data klik belum cukup JANGAN direkomendasikan INCREASE_BUDGET (sistem akan membatalkannya); pilih NO_ACTION dan jelaskan bahwa data belum cukup.",
     "Untuk setiap channel yang tercantum, hasilkan satu rekomendasi: action_type (INCREASE_BUDGET/DECREASE_BUDGET/PAUSE_CHANNEL/NO_ACTION), rationale, suggested_daily_budget (hanya untuk INCREASE_BUDGET/DECREASE_BUDGET, selain itu null), dan risk_level (LOW/MEDIUM/HIGH — seberapa besar risiko jika rekomendasi ini salah/perlu ditinjau lebih hati-hati).",
   ]
     .filter(Boolean)
