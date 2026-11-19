@@ -13,8 +13,10 @@ import {
   SMOKE_MAX_TOKENS,
   SMOKE_PRODUCT,
   buildSmokePrompts,
+  classifyFailure,
   createSmokeRunner,
   formatSmokeSummary,
+  validateApiKeyShape,
   validateSmokeConfig,
 } from "@/lib/ai/smoke/strategy-smoke";
 import { KOPI_ROBUSTA_IMPROVED } from "@/tests/fixtures/ai/kopi-robusta-aceh-simulasi";
@@ -170,14 +172,14 @@ describe("exactly one attempt: no retry, no fallback, single-use runner", () => 
   });
 
   it.each([
-    ["rate limit", new AIProviderError("busy", "RATE_LIMIT"), "RATE_LIMIT", null],
-    ["connection", new AIProviderError("net", "CONNECTION"), "CONNECTION", null],
-    ["vendor 503", new AIProviderError("err", "API", 503), "API", 503],
-    ["vendor 529 overloaded", new AIProviderError("err", "API", 529), "API", 529],
-    ["auth", new AIProviderError("denied", "AUTH"), "AUTH", null],
-    ["invalid output", new AIProviderError("bad", "INVALID_OUTPUT"), "INVALID_OUTPUT", null],
-    ["refusal", new AIProviderError("no", "REFUSAL"), "REFUSAL", null],
-  ])("a %s failure (even a retryable one) is NOT retried: still one call", async (_n, error, category, status) => {
+    ["rate limit", new AIProviderError("busy", "RATE_LIMIT"), "RATE_LIMIT", null, "RATE_LIMIT"],
+    ["connection", new AIProviderError("net", "CONNECTION"), "CONNECTION", null, "CONNECTION_OR_TIMEOUT"],
+    ["vendor 503", new AIProviderError("err", "API", 503), "API", 503, "PROVIDER_SERVER_ERROR"],
+    ["vendor 529 overloaded", new AIProviderError("err", "API", 529), "API", 529, "PROVIDER_SERVER_ERROR"],
+    ["auth", new AIProviderError("denied", "AUTH"), "AUTH", null, "AUTH"],
+    ["invalid output", new AIProviderError("bad", "INVALID_OUTPUT"), "INVALID_OUTPUT", null, "OUTPUT_UNUSABLE_CAUSE_UNKNOWN"],
+    ["refusal", new AIProviderError("no", "REFUSAL"), "REFUSAL", null, "REFUSAL"],
+  ])("a %s failure (even a retryable one) is NOT retried: still one call", async (_n, error, category, status, kind) => {
     const { provider, calls } = fakeProvider(() => {
       throw error;
     });
@@ -185,7 +187,7 @@ describe("exactly one attempt: no retry, no fallback, single-use runner", () => 
     expect(calls).toHaveLength(1);
     expect(report.attempts).toBe(1);
     expect(report.passed).toBe(false);
-    expect(report.error).toEqual({ category, status, name: null });
+    expect(report.error).toEqual({ category, status, name: null, kind });
     expect(report.checks).toBeNull();
   });
 
@@ -225,7 +227,7 @@ describe("nothing sensitive reaches the report or the summary", () => {
     const text = JSON.stringify(report) + formatSmokeSummary(report);
     expect(text).not.toContain(SECRET);
     expect(text).not.toContain("Incorrect API key");
-    expect(report.error).toEqual({ category: "AUTH", status: 401, name: null });
+    expect(report.error).toEqual({ category: "AUTH", status: 401, name: null, kind: "AUTH" });
   });
 
   it("a non-provider error (e.g. a TypeError with a message) is reported as UNKNOWN without its text", async () => {
@@ -234,7 +236,7 @@ describe("nothing sensitive reaches the report or the summary", () => {
     });
     const report = await createSmokeRunner({ provider, model: "m" }).run();
     // Only the error CLASS name is kept (useful for an SDK parse error), never its message.
-    expect(report.error).toEqual({ category: "UNKNOWN", status: null, name: "TypeError" });
+    expect(report.error).toEqual({ category: "UNKNOWN", status: null, name: "TypeError", kind: "UNKNOWN" });
     expect(JSON.stringify(report)).not.toContain(SECRET);
   });
 
@@ -245,7 +247,7 @@ describe("nothing sensitive reaches the report or the summary", () => {
       throw e;
     });
     const report = await createSmokeRunner({ provider, model: "m" }).run();
-    expect(report.error).toEqual({ category: "UNKNOWN", status: null, name: null });
+    expect(report.error).toEqual({ category: "UNKNOWN", status: null, name: null, kind: "UNKNOWN" });
     expect(JSON.stringify(report)).not.toContain(SECRET);
   });
 
@@ -383,6 +385,192 @@ describe("acceptance criteria (what makes the smoke pass)", () => {
     expect(report.gate?.issueCodes).toContain("FINANCIAL_CLAIM");
     // The gate worked on the output; the smoke's question (does the provider accept the schema?) is still answered.
     expect(report.passed).toBe(true);
+  });
+});
+
+// ── PR-177 hardening regressions (one block per audit finding) ───────────────────────────────────────────
+describe("hardening 2: API key validation (official formats only, fail closed, no value ever printed)", () => {
+  const pad = "A1b2C3d4E5f6G7h8I9j0";
+  it.each([
+    ["anthropic", `sk-ant-api03-${pad}`, true],
+    ["anthropic", `sk-ant-api99-${pad}`, true], // version segment is NOT assumed
+    ["anthropic", `sk-ant-${pad}`, true], // no version segment at all is accepted too
+    ["anthropic", `sk-ant-admin01-${pad}`, false], // Admin key (documented prefix)
+    ["anthropic", `SK-ANT-ADMIN01-${pad}`.replace("SK-ANT-ADMIN01", "sk-ant-ADMIN01"), false], // case-insensitive Admin check
+    ["anthropic", `sk-proj-${pad}`, false], // other vendor
+    ["anthropic", `sk-${pad}`, false],
+    ["anthropic", "", false],
+    ["openai", `sk-proj-${pad}`, true],
+    ["openai", `sk-${pad}`, true],
+    ["openai", `sk-ant-api03-${pad}`, false], // Anthropic key to OpenAI
+    ["openai", `SK-ANT-api03-${pad}`.replace("SK-ANT", "sk-Ant"), false], // case-insensitive wrong-vendor check
+    ["openai", `sk-admin-${pad}`, false], // OpenAI Admin key
+    ["openai", `pk-${pad}`, false],
+    ["openai", "", false],
+  ])("%s key: %s -> accepted=%s", (provider, key, accepted) => {
+    expect(validateApiKeyShape(provider, key) === null).toBe(accepted);
+  });
+
+  it.each([
+    ["too short", "sk-ant-short"],
+    ["whitespace inside", `sk-ant-api03-${pad} ${pad}`],
+    ["trailing newline", `sk-ant-api03-${pad}\n`],
+    ["leading space", ` sk-ant-api03-${pad}`],
+    ["control character", `sk-ant-api03-${pad}\u0007`],
+    ["non-ASCII", `sk-ant-api03-${pad}é`],
+    ["absurdly long", `sk-ant-${"a".repeat(600)}`],
+  ])("rejects a malformed key (%s) and never echoes it", (_n, key) => {
+    const r = validateSmokeConfig({ ...ENV_OK, AI_SMOKE_API_KEY: key });
+    expect(r.ok).toBe(false);
+    expect(JSON.stringify(r)).not.toContain(key.trim());
+    expect(JSON.stringify(r)).not.toContain(pad);
+  });
+
+  it("does not trim: a padded provider, model or key is refused instead of silently altered", () => {
+    expect(validateSmokeConfig({ ...ENV_OK, AI_SMOKE_PROVIDER: " anthropic" }).ok).toBe(false);
+    expect(validateSmokeConfig({ ...ENV_OK, AI_SMOKE_PROVIDER: "anthropic\n" }).ok).toBe(false);
+    expect(validateSmokeConfig({ ...ENV_OK, AI_SMOKE_PROVIDER: "Anthropic" }).ok).toBe(false);
+    expect(validateSmokeConfig({ ...ENV_OK, AI_SMOKE_MODEL: " some-model-id-1" }).ok).toBe(false);
+  });
+
+  it("with an invalid provider the run is refused and the reasons stay value-free", () => {
+    const r = validateSmokeConfig({ ...ENV_OK, AI_SMOKE_PROVIDER: "gemini" });
+    expect(r.ok).toBe(false);
+    expect(JSON.stringify(r)).not.toContain(SECRET);
+    expect(JSON.stringify(r)).not.toContain("gemini");
+  });
+
+  it.each([
+    "OPENAI_BASE_URL",
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_AUTH_TOKEN",
+    "OPENAI_ORG_ID",
+    "HTTPS_PROXY",
+    "http_proxy",
+    "NODE_OPTIONS",
+    "GITHUB_TOKEN",
+    "DATABASE_URL",
+  ])("refuses when the redirecting/credential variable %s is present", (name) => {
+    const r = validateSmokeConfig({ ...ENV_OK, [name]: "https://example.invalid" });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reasons.join(" ")).toContain(name);
+    expect(JSON.stringify(r)).not.toContain("example.invalid");
+  });
+});
+
+describe("hardening 3: an exception AFTER the paid call is contained and never leaks", () => {
+  it("a bug while checking the answer (here: a getter that throws with a secret) yields a sanitized report, not a raw exception", async () => {
+    const poisoned = goodOutput();
+    Object.defineProperty(poisoned, "candidates", {
+      get() {
+        throw new RangeError(`explode ${SECRET}`);
+      },
+      enumerable: true,
+    });
+    const { provider, calls } = fakeProvider(() => okResult(poisoned));
+    const report = await createSmokeRunner({ provider, model: "m" }).run();
+    expect(calls).toHaveLength(1);
+    expect(report.passed).toBe(false);
+    expect(report.attempts).toBe(1);
+    expect(report.error).toEqual({ category: "UNKNOWN", status: null, name: "RangeError", kind: "POST_PROCESSING_ERROR" });
+    expect(report.tokensInput).toBe(1500);
+    expect(report.tokensOutput).toBe(1200);
+    const text = JSON.stringify(report) + formatSmokeSummary(report);
+    expect(text).not.toContain(SECRET);
+    expect(text).not.toContain("explode");
+    expect(text).toContain("POST_PROCESSING_ERROR");
+  });
+
+  it("a post-call failure still uses up the runner (no second paid call)", async () => {
+    const poisoned = goodOutput();
+    Object.defineProperty(poisoned, "candidates", {
+      get() {
+        throw new Error("x");
+      },
+      enumerable: true,
+    });
+    const { provider, calls } = fakeProvider(() => okResult(poisoned));
+    const runner = createSmokeRunner({ provider, model: "m" });
+    await runner.run();
+    await expect(runner.run()).rejects.toThrow(/single-use/);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("provider and model strings reported back are kept only if they are plain identifiers (no free text)", async () => {
+    const { provider } = fakeProvider(() => ({ ...okResult(), provider: `leak ${SECRET}`, model: "bad model\nwith text" }));
+    const report = await createSmokeRunner({ provider, model: "m" }).run();
+    expect(report.provider).toBeNull();
+    expect(report.model).toBeNull();
+    expect(JSON.stringify(report) + formatSmokeSummary(report)).not.toContain(SECRET);
+  });
+
+  it("the real smoke test wraps the run so no raw exception text can reach vitest output", () => {
+    const real = readFileSync(path.join(process.cwd(), "tests/smoke/ai-strategy.smoke.test.ts"), "utf8");
+    expect(real).toMatch(/try\s*{[\s\S]*createSmokeRunner[\s\S]*}\s*catch/);
+    expect(real).toContain("withheld on purpose");
+    expect(real).not.toMatch(/\.message|\.stack/);
+  });
+});
+
+describe("hardening 4: schema rejection vs token cap vs unknown cause (only what the SDK result proves)", () => {
+  it.each([
+    ["AUTH", null, "AUTH"],
+    ["RATE_LIMIT", null, "RATE_LIMIT"],
+    ["CONNECTION", null, "CONNECTION_OR_TIMEOUT"],
+    ["REFUSAL", null, "REFUSAL"],
+    ["CONFIG", null, "CONFIG"],
+    ["INVALID_OUTPUT", null, "OUTPUT_UNUSABLE_CAUSE_UNKNOWN"],
+    ["API", 400, "PROVIDER_REJECTED_REQUEST_CAUSE_UNKNOWN"],
+    ["API", 422, "PROVIDER_REJECTED_REQUEST_CAUSE_UNKNOWN"],
+    ["API", 500, "PROVIDER_SERVER_ERROR"],
+    ["API", 529, "PROVIDER_SERVER_ERROR"],
+    ["API", null, "UNKNOWN"],
+    ["UNKNOWN", null, "UNKNOWN"],
+  ] as const)("%s (status %s) is classified %s", (category, status, kind) => {
+    expect(classifyFailure(category, status)).toBe(kind);
+  });
+
+  it("no failure kind is ever named as a proven schema rejection or a proven token cut", () => {
+    const kinds = ["AUTH", "RATE_LIMIT", "CONNECTION", "REFUSAL", "CONFIG", "INVALID_OUTPUT", "API", "UNKNOWN"] as const;
+    for (const c of kinds) for (const st of [null, 400, 500]) expect(classifyFailure(c, st)).not.toMatch(/SCHEMA|TOKEN|TRUNC/i);
+  });
+
+  it("an unproven cause is stated as UNKNOWN in the summary and never as 'schema rejected'", async () => {
+    for (const error of [new AIProviderError("m", "INVALID_OUTPUT"), new AIProviderError("m", "API", 400), new TypeError("m")]) {
+      const { provider } = fakeProvider(() => {
+        throw error;
+      });
+      const text = formatSmokeSummary(await createSmokeRunner({ provider, model: "m" }).run());
+      expect(text).toContain("Cause: **UNKNOWN**");
+      expect(text).toContain("Do NOT read it as proof");
+      expect(text).not.toMatch(/schema (was )?rejected by the provider|provider rejects the schema/i);
+      expect(text).not.toContain("REAL (one provider call");
+    }
+  });
+
+  it("a clear provider cause (auth) is not labelled UNKNOWN", async () => {
+    const { provider } = fakeProvider(() => {
+      throw new AIProviderError("m", "AUTH", 401);
+    });
+    const text = formatSmokeSummary(await createSmokeRunner({ provider, model: "m" }).run());
+    expect(text).toContain("Failure kind: AUTH");
+    expect(text).not.toContain("Cause: **UNKNOWN**");
+  });
+
+  it("success at the 4000-token cap is flagged informationally; below it is not", async () => {
+    const atCap = await createSmokeRunner({ provider: fakeProvider(() => ({ ...okResult(), tokensOutput: SMOKE_MAX_TOKENS })).provider, model: "m" }).run();
+    expect(atCap.outputAtTokenCap).toBe(true);
+    expect(formatSmokeSummary(atCap)).toContain("reached the cap");
+    const below = await createSmokeRunner({ provider: fakeProvider(() => okResult()).provider, model: "m" }).run();
+    expect(below.outputAtTokenCap).toBe(false);
+    expect(formatSmokeSummary(below)).not.toContain("reached the cap");
+  });
+
+  it("a failed call has no token-cap claim", async () => {
+    const { provider } = fakeProvider(() => {
+      throw new AIProviderError("m", "INVALID_OUTPUT");
+    });
+    expect((await createSmokeRunner({ provider, model: "m" }).run()).outputAtTokenCap).toBeNull();
   });
 });
 

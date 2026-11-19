@@ -42,6 +42,13 @@ jobs:
     # TIDAK ada secret pada env tingkat job. Hanya langkah smoke di bawah yang menerimanya; checkout, setup-node, dan npm ci tidak.
     steps:
       # Action dipin ke SHA commit penuh (tag di komentar). persist-credentials: false agar token repo tidak tertinggal di .git.
+      # Penjaga false-green: provider di luar daftar harus GAGAL, bukan selesai hijau tanpa panggilan. Tanpa secret, tanpa npm ci, teks tetap.
+      - name: Guard provider
+        if: ${{ inputs.provider != 'anthropic' && inputs.provider != 'openai' }}
+        run: |
+          echo "Provider tidak valid. Tidak ada panggilan AI dilakukan."
+          exit 1
+
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
@@ -57,6 +64,7 @@ jobs:
       # supaya secret satu penyedia tidak pernah bisa terkirim ke penyedia lain. Tepat satu dari dua langkah ini yang berjalan.
       # Input dilewatkan lewat env, bukan disisipkan ke skrip shell. Hanya SATU kredensial per langkah: AI_SMOKE_API_KEY.
       - name: Smoke AI Strategy (anthropic, satu panggilan nyata)
+        id: smoke_anthropic
         if: ${{ inputs.provider == 'anthropic' }}
         env:
           AI_SMOKE_CONFIRM: ${{ inputs.confirm }}
@@ -66,6 +74,7 @@ jobs:
         run: npx vitest run --config vitest.smoke.config.ts
 
       - name: Smoke AI Strategy (openai, satu panggilan nyata)
+        id: smoke_openai
         if: ${{ inputs.provider == 'openai' }}
         env:
           AI_SMOKE_CONFIRM: ${{ inputs.confirm }}
@@ -73,3 +82,15 @@ jobs:
           AI_SMOKE_MODEL: ${{ inputs.model }}
           AI_SMOKE_API_KEY: ${{ secrets.QA_AI_SMOKE_OPENAI_API_KEY }}
         run: npx vitest run --config vitest.smoke.config.ts
+
+      # Penjaga akhir: job hanya hijau bila TEPAT satu langkah smoke berhasil. Hanya membaca hasil langkah, tanpa secret.
+      - name: Assert exactly one smoke step succeeded
+        if: ${{ always() }}
+        env:
+          ANTHROPIC_STEP: ${{ steps.smoke_anthropic.outcome }}
+          OPENAI_STEP: ${{ steps.smoke_openai.outcome }}
+        run: |
+          if [ "$ANTHROPIC_STEP" = "success" ] && [ "$OPENAI_STEP" != "success" ]; then exit 0; fi
+          if [ "$OPENAI_STEP" = "success" ] && [ "$ANTHROPIC_STEP" != "success" ]; then exit 0; fi
+          echo "Tidak ada langkah smoke yang berhasil. Job dinyatakan GAGAL."
+          exit 1

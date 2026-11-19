@@ -97,7 +97,8 @@ describe("secrets: one QA credential, only in the smoke step", () => {
     .slice(smokeStepStart)
     .split(/^\s{6}- name: /m)
     .filter(Boolean)
-    .map((chunk) => `- name: ${chunk}`);
+    .map((chunk) => `- name: ${chunk}`)
+    .filter((chunk) => chunk.startsWith("- name: Smoke AI Strategy"));
 
   it("there are exactly two smoke steps, one per provider, each guarded by the provider input", () => {
     expect(smokeSteps).toHaveLength(2);
@@ -127,6 +128,36 @@ describe("secrets: one QA credential, only in the smoke step", () => {
   it("checkout, setup-node and npm ci get no env or secrets", () => {
     const before = code.slice(0, smokeStepStart);
     expect(before).not.toMatch(/\benv:/);
+  });
+});
+
+describe("false-green guards (a run can never end green without a real provider call)", () => {
+  it("an invalid provider FAILS in a fixed-text step before checkout, with no secret and no npm", () => {
+    const guard = code.slice(code.indexOf("- name: Guard provider"), code.indexOf("- uses: actions/checkout"));
+    expect(guard).toContain("if: ${{ inputs.provider != 'anthropic' && inputs.provider != 'openai' }}");
+    expect(guard).toMatch(/exit 1/);
+    expect(guard).not.toContain("secrets.");
+    expect(guard).not.toMatch(/npm|npx|vitest/);
+    expect(guard).not.toMatch(/\$\{\{(?!\s*inputs\.provider)/);
+    expect(code.indexOf("- name: Guard provider")).toBeLessThan(code.indexOf("- uses: actions/checkout"));
+  });
+
+  it("the final assert step runs always and fails unless exactly one smoke step succeeded, reading outcomes only", () => {
+    const start = code.indexOf("- name: Assert exactly one smoke step succeeded");
+    expect(start).toBeGreaterThan(code.indexOf("- name: Smoke AI Strategy (openai"));
+    const assertStep = code.slice(start);
+    expect(assertStep).toContain("if: ${{ always() }}");
+    expect(assertStep).toContain("steps.smoke_anthropic.outcome");
+    expect(assertStep).toContain("steps.smoke_openai.outcome");
+    expect(assertStep).not.toContain("secrets.");
+    expect(assertStep).toMatch(/exit 1/);
+    // it is the last step of the file (no further step header after its own)
+    expect(assertStep.match(/^\s{6}- /gm)).toBeNull();
+  });
+
+  it("the smoke steps carry the ids the assert step reads", () => {
+    expect(code).toMatch(/id: smoke_anthropic/);
+    expect(code).toMatch(/id: smoke_openai/);
   });
 });
 
