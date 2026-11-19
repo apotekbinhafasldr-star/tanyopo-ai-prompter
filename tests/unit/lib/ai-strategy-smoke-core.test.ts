@@ -504,6 +504,29 @@ describe("hardening 3: an exception AFTER the paid call is contained and never l
     expect(JSON.stringify(report) + formatSmokeSummary(report)).not.toContain(SECRET);
   });
 
+  it("even a hostile result object (getters that throw) cannot make run() throw", async () => {
+    const hostile = {
+      data: goodOutput(),
+      get provider(): string {
+        throw new Error(`provider ${SECRET}`);
+      },
+      get model(): string {
+        throw new Error("model");
+      },
+      get tokensInput(): number {
+        throw new Error("tin");
+      },
+      tokensOutput: 5,
+    };
+    const { provider } = fakeProvider(() => hostile);
+    const report = await createSmokeRunner({ provider, model: "m" }).run();
+    expect(report.passed).toBe(false);
+    expect(report.error?.kind).toBe("POST_PROCESSING_ERROR");
+    expect(report.provider).toBeNull();
+    expect(report.tokensInput).toBeNull();
+    expect(JSON.stringify(report) + formatSmokeSummary(report)).not.toContain(SECRET);
+  });
+
   it("the real smoke test wraps the run so no raw exception text can reach vitest output", () => {
     const real = readFileSync(path.join(process.cwd(), "tests/smoke/ai-strategy.smoke.test.ts"), "utf8");
     expect(real).toMatch(/try\s*{[\s\S]*createSmokeRunner[\s\S]*}\s*catch/);

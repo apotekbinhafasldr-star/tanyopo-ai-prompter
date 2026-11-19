@@ -421,12 +421,22 @@ export function createSmokeRunner(deps: { provider: AIProvider; model: string; t
           outputAtTokenCap: Number.isFinite(result.tokensOutput) ? result.tokensOutput >= SMOKE_MAX_TOKENS : null,
         };
       } catch (err) {
+        // Reading the result again must not be able to throw out of run() either (e.g. a hostile getter).
+        const safe = <T>(read: () => T): T | null => {
+          try {
+            return read();
+          } catch {
+            return null;
+          }
+        };
+        const tin = safe(() => result.tokensInput);
+        const tout = safe(() => result.tokensOutput);
         return emptyReport({
-          provider: safeIdentifier(result.provider),
-          model: safeIdentifier(result.model),
+          provider: safeIdentifier(safe(() => result.provider)),
+          model: safeIdentifier(safe(() => result.model)),
           attempts,
-          tokensInput: Number.isFinite(result.tokensInput) ? result.tokensInput : null,
-          tokensOutput: Number.isFinite(result.tokensOutput) ? result.tokensOutput : null,
+          tokensInput: typeof tin === "number" && Number.isFinite(tin) ? tin : null,
+          tokensOutput: typeof tout === "number" && Number.isFinite(tout) ? tout : null,
           error: { category: "UNKNOWN", status: null, name: safeErrorName(err), kind: "POST_PROCESSING_ERROR" },
         });
       }

@@ -28,7 +28,7 @@ Yang TIDAK diuji di sini (butuh tahap B): kuota tenant, baris `prompter_ai_jobs`
 | Model | wajib diisi eksplisit, tanpa bawaan, agar biaya dipilih sadar |
 | Kredensial | satu: key QA khusus. Run ditolak bila ada variabel produk/produksi (`OPENAI_API_KEY`, `SUPABASE_*`, `PAYMENT_*`, `META_*`, dll.) |
 | Biaya | tidak bisa dihitung dari kode (tabel harga model kosong). Batas pasti ada di dashboard penyedia. Satu panggilan: keluaran maks. 4.000 token, ditambah token masukan (prompt produk yang panjang, ukurannya tidak dibatasi di sini). Biaya rupiah/dolar tidak diklaim |
-| Validasi key | ditolak sebelum panggilan bila kosong, berspasi/berbaris baru, di luar 20-512 karakter ASCII tercetak, key Admin, atau key vendor lain. Hanya bentuk yang dicek, nilai tidak pernah dicetak. Nilai provider, model, dan key dibaca persis (tanpa dipangkas) |
+| Validasi key | ditolak sebelum panggilan bila kosong, berspasi/berbaris baru, di luar 20-512 karakter ASCII tercetak, key Admin, atau key Anthropic yang dipasangkan dengan OpenAI (dan sebaliknya). Key vendor ketiga berawalan `sk-` tidak bisa dibedakan dan akan lolos untuk OpenAI. Hanya bentuk yang dicek, nilai tidak pernah dicetak. Nilai provider, model, dan key dibaca persis (tanpa dipangkas) |
 
 ## Apa yang diperiksa dari key, dan apa yang TIDAK
 Terverifikasi dari dokumentasi resmi vendor (dicek 19 Nov 2026): key Anthropic diawali `sk-ant-`; key Admin Anthropic diawali `sk-ant-admin`. Bagian versi (misalnya `api03`), panjang, dan karakter TIDAK didokumentasikan, jadi tidak diasumsikan: kode tidak bergantung pada prefix versi tertentu.
@@ -70,7 +70,7 @@ Environment yang belum ada akan dibuat otomatis TANPA proteksi saat workflow ber
 ## Risiko "Re-run jobs" (panggilan berbayar bisa terulang)
 Tombol "Re-run jobs" / "Re-run failed jobs" di GitHub menjalankan ulang job yang sama dengan input dan secret yang sama, sehingga SATU klik = SATU panggilan AI berbayar tambahan. Batas "satu percobaan" di kode berlaku per proses, bukan per run GitHub. Aturan:
 - Jangan klik Re-run pada run smoke. Untuk mencoba lagi, mulai Run workflow BARU dengan persetujuan Founder.
-- Required reviewers (di atas) juga memaksa persetujuan pada tiap re-run.
+- Bila Required reviewers sudah aktif dan terverifikasi, GitHub umumnya meminta persetujuan lagi pada tiap re-run; perilaku ini belum diverifikasi di repo ini, jadi jangan diandalkan. Satu-satunya aturan yang pasti: jangan klik Re-run.
 - Tidak ada otomatisasi rerun di repo ini, dan tidak boleh dibuat. Menambah penjaga `github.run_attempt` adalah opsi yang belum disetujui dan belum dibuat.
 
 ## Cara pakai dari Android (setelah PR di-merge dan Founder menyetujui tiap langkah)
@@ -87,8 +87,8 @@ Tiap langkah menunggu frasa persetujuan terpisah dari Founder. Tidak ada langkah
 Jangan jalankan ulang otomatis dan jangan klik Re-run. Laporkan "Failure kind" dari summary. Deploy PR #176 tetap HOLD sampai ada PASS.
 | Failure kind | Arti yang TERBUKTI |
 |---|---|
-| `AUTH` | key salah, dicabut, atau tanpa kredit |
-| `RATE_LIMIT` | dibatasi penyedia |
+| `AUTH` | penyedia menolak kredensial (HTTP 401). Key tanpa kredit atau kuota habis TIDAK dijamin masuk sini: bisa muncul sebagai `RATE_LIMIT` (429) atau `PROVIDER_REJECTED_REQUEST_CAUSE_UNKNOWN` (400), tergantung penyedia |
+| `RATE_LIMIT` | dibatasi penyedia (HTTP 429). Bisa juga berarti kuota/kredit habis; penyebab pastinya tidak dibedakan di sini |
 | `CONNECTION_OR_TIMEOUT` | jaringan atau timeout 45 detik |
 | `REFUSAL` | penyedia menolak isi |
 | `PROVIDER_SERVER_ERROR` | error server penyedia (5xx) |

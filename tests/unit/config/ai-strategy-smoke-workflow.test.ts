@@ -93,8 +93,9 @@ describe("secrets: one QA credential, only in the smoke step", () => {
     expect(code.slice(0, smokeStepStart)).not.toMatch(/^\s{4}env:/m);
   });
 
+  // Start at the beginning of the line so the first step keeps its 6-space indent and is split like the others.
   const smokeSteps = code
-    .slice(smokeStepStart)
+    .slice(code.lastIndexOf("\n", smokeStepStart) + 1)
     .split(/^\s{6}- name: /m)
     .filter(Boolean)
     .map((chunk) => `- name: ${chunk}`)
