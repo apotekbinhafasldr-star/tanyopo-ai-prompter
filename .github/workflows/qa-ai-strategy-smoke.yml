@@ -1,0 +1,96 @@
+name: QA AI Strategy smoke A (inert, manual)
+
+# AI Strategy smoke, tahap A. INERT sampai Founder menyetujui tiap langkah aktivasi (docs/AI_STRATEGY_SMOKE_A.md).
+#  * Hanya workflow_dispatch manual. Tanpa push / pull_request / schedule.
+#  * Job baru jalan bila: dijalankan dari main, variabel repo AI_SMOKE_ENABLED == 'true', dan frasa konfirmasi benar.
+#  * Satu panggilan AI nyata, tanpa retry dan tanpa fallback (lihat lib/ai/smoke/strategy-smoke.ts).
+#  * Satu-satunya kredensial: key QA khusus di GitHub Environment `qa-ai-smoke`. Bukan secret repo, bukan key produksi.
+#  * Tanpa Supabase, Auth, billing, Netlify, Meta, tenant, atau kuota. Tanpa hosting dan tanpa rilis.
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: "Provider AI untuk satu panggilan ini"
+        required: true
+        type: choice
+        options:
+          - anthropic
+          - openai
+      model:
+        description: "ID model persis (tanpa bawaan, agar biaya dipilih sadar)"
+        required: true
+        type: string
+      confirm:
+        description: "Ketik RUN-AI-STRATEGY-SMOKE-A untuk menjalankan"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qa-ai-strategy-smoke
+  cancel-in-progress: false
+
+jobs:
+  ai-strategy-smoke:
+    # Lapis kedua di samping pembatasan Environment: hanya jalan dari main dan hanya bila sudah "dipersenjatai".
+    if: ${{ github.ref == 'refs/heads/main' && vars.AI_SMOKE_ENABLED == 'true' && inputs.confirm == 'RUN-AI-STRATEGY-SMOKE-A' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: qa-ai-smoke
+    # TIDAK ada secret pada env tingkat job. Hanya langkah smoke di bawah yang menerimanya; checkout, setup-node, dan npm ci tidak.
+    steps:
+      # Action dipin ke SHA commit penuh (tag di komentar). persist-credentials: false agar token repo tidak tertinggal di .git.
+      # Penjaga false-green: provider di luar daftar harus GAGAL, bukan selesai hijau tanpa panggilan. Tanpa secret, tanpa npm ci, teks tetap.
+      - name: Guard provider
+        if: ${{ inputs.provider != 'anthropic' && inputs.provider != 'openai' }}
+        run: |
+          echo "Provider tidak valid. Tidak ada panggilan AI dilakukan."
+          exit 1
+
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - run: npm ci
+
+      # Dua langkah terpisah, masing-masing hanya membawa SATU secret milik penyedianya. Tidak ada ekspresi "a && secret1 || secret2",
+      # supaya secret satu penyedia tidak pernah bisa terkirim ke penyedia lain. Tepat satu dari dua langkah ini yang berjalan.
+      # Input dilewatkan lewat env, bukan disisipkan ke skrip shell. Hanya SATU kredensial per langkah: AI_SMOKE_API_KEY.
+      - name: Smoke AI Strategy (anthropic, satu panggilan nyata)
+        id: smoke_anthropic
+        if: ${{ inputs.provider == 'anthropic' }}
+        env:
+          AI_SMOKE_CONFIRM: ${{ inputs.confirm }}
+          AI_SMOKE_PROVIDER: ${{ inputs.provider }}
+          AI_SMOKE_MODEL: ${{ inputs.model }}
+          AI_SMOKE_API_KEY: ${{ secrets.QA_AI_SMOKE_ANTHROPIC_API_KEY }}
+        run: npx vitest run --config vitest.smoke.config.ts
+
+      - name: Smoke AI Strategy (openai, satu panggilan nyata)
+        id: smoke_openai
+        if: ${{ inputs.provider == 'openai' }}
+        env:
+          AI_SMOKE_CONFIRM: ${{ inputs.confirm }}
+          AI_SMOKE_PROVIDER: ${{ inputs.provider }}
+          AI_SMOKE_MODEL: ${{ inputs.model }}
+          AI_SMOKE_API_KEY: ${{ secrets.QA_AI_SMOKE_OPENAI_API_KEY }}
+        run: npx vitest run --config vitest.smoke.config.ts
+
+      # Penjaga akhir: job hanya hijau bila TEPAT satu langkah smoke berhasil. Hanya membaca hasil langkah, tanpa secret.
+      - name: Assert exactly one smoke step succeeded
+        if: ${{ always() }}
+        env:
+          ANTHROPIC_STEP: ${{ steps.smoke_anthropic.outcome }}
+          OPENAI_STEP: ${{ steps.smoke_openai.outcome }}
+        run: |
+          if [ "$ANTHROPIC_STEP" = "success" ] && [ "$OPENAI_STEP" != "success" ]; then exit 0; fi
+          if [ "$OPENAI_STEP" = "success" ] && [ "$ANTHROPIC_STEP" != "success" ]; then exit 0; fi
+          echo "Tidak ada langkah smoke yang berhasil. Job dinyatakan GAGAL."
+          exit 1
