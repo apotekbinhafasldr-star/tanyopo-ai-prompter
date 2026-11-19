@@ -141,9 +141,17 @@ export async function generateOptimizationRecommendationsAction(
   );
 
   // Minimum-data gate, BEFORE any AI job exists and before any quota is used. The thresholds are proposals
-  // (UNVERIFIED), see lib/campaigns/optimization-data-sufficiency.ts.
-  const anyChannelHasEnoughData = [...deliveryByChannelCampaign.values()].some((d) => d.sufficiency.enough);
-  if (!anyChannelHasEnoughData) {
+  // (UNVERIFIED), see lib/campaigns/optimization-data-sufficiency.ts. A channel is analysable when it has enough
+  // delivery data, OR when it has no delivery data at all (no impressions) but does have spend or conversions
+  // (manually entered / imported numbers): that is what the analysis accepted before the thresholds existed and it
+  // stays accepted. Such a channel still cannot get INCREASE_BUDGET (enforced after the AI answers).
+  // Only when NO channel is analysable is the whole analysis refused.
+  const analysable = channelCampaigns.some((cc) => {
+    const d = deliveryByChannelCampaign.get(cc.id)!;
+    const conv = conversionsByChannelCampaign.get(cc.id);
+    return d.sufficiency.enough || (d.summary.impressions === 0 && (d.summary.spend > 0 || (spendByChannelCampaign.get(cc.id) ?? 0) > 0 || (conv?.count ?? 0) > 0));
+  });
+  if (!analysable) {
     return {
       error: buildInsufficientDataMessage(
         channelCampaigns.map((cc) => ({
@@ -350,6 +358,26 @@ async function submitRecommendationCore(
 
   if (channelCampaign.status !== "ACTIVE") {
     return { error: "Hanya channel yang sudah Aktif yang bisa diajukan tindakan optimasi." };
+  }
+
+  // A budget INCREASE is click-based: re-check the minimum data here too (the arguments come from the client, and a
+  // stored recommendation may predate the thresholds). Fail closed when the data cannot be read. Thresholds are
+  // proposals (UNVERIFIED), see lib/campaigns/optimization-data-sufficiency.ts.
+  if (actionType === "INCREASE_BUDGET") {
+    const { data: metricRows, error: metricsError } = await supabase
+      .from("prompter_marketing_metrics")
+      .select("spend, impressions, clicks, reach, date")
+      .eq("channel_campaign_id", channelCampaign.id)
+      .eq("tenant_id", tenantId);
+    if (metricsError) {
+      return { error: "Gagal membaca data iklan untuk memeriksa kecukupan data. Tidak ada yang diajukan, coba lagi." };
+    }
+    const sufficiency = assessDataSufficiency(summarizeChannelMetrics(metricRows ?? []));
+    if (!sufficiency.clickBasedOk) {
+      return {
+        error: `Data belum cukup untuk menaikkan budget (ambang usulan, belum divalidasi): ${sufficiency.shortfalls.join(", ") || "data belum memenuhi ambang"}. Tidak ada yang diajukan.`,
+      };
+    }
   }
 
   if ((actionType === "INCREASE_BUDGET" || actionType === "DECREASE_BUDGET") && suggestedDailyBudget !== null) {

@@ -3,7 +3,9 @@ import { z } from "zod";
 import {
   CampaignProposalGenerationSchema,
   CampaignProposalSchema,
+  ProposalAudienceGenerationSchema,
   ProposalAudienceSchema,
+  normalizeProposalAdditions,
   ProposalTestPlanSchema,
 } from "@/schemas/ai/campaign-proposal";
 import { PROPOSAL_OBJECTIVE_VALUES } from "@/schemas/ai/proposal-objectives";
@@ -190,5 +192,95 @@ describe("audience and test plan schemas are reusable on their own", () => {
   it("ProposalAudienceSchema parses the sample and ProposalTestPlanSchema parses its sample", () => {
     expect(ProposalAudienceSchema.safeParse(audience).success).toBe(true);
     expect(ProposalTestPlanSchema.safeParse(testPlan).success).toBe(true);
+  });
+});
+
+describe("generation schema is lenient where the stored schema is strict (a slip must not fail the whole generation)", () => {
+  const sloppy = {
+    countries: ["Indonesia", "id", "MY"],
+    age_min: 50,
+    age_max: 20,
+    advantage_plus: true,
+    interest_suggestions_text: ["kopi", "6003139266461", ""],
+  };
+
+  it("accepts inverted ages, country names and a numeric interest at generation time", () => {
+    expect(ProposalAudienceGenerationSchema.safeParse(sloppy).success).toBe(true);
+    const r = CampaignProposalGenerationSchema.safeParse({ ...legacy(), objective_recommendation: null, audience: sloppy, missing_facts: [], test_plan: null });
+    expect(r.success).toBe(true);
+    // ...while the stored schema rejects the same audience.
+    expect(CampaignProposalSchema.safeParse({ ...legacy(), audience: sloppy }).success).toBe(false);
+  });
+
+  it("is still strict about unknown keys, so an interest-ID field is rejected at generation too", () => {
+    expect(ProposalAudienceGenerationSchema.safeParse({ ...sloppy, interest_ids: ["6003139266461"] }).success).toBe(false);
+    expect(ProposalAudienceGenerationSchema.safeParse({ ...sloppy, interest_suggestions_text: [{ id: "1" }] }).success).toBe(false);
+  });
+});
+
+describe("normalizeProposalAdditions", () => {
+  const generated = (audienceOverride: unknown, missing: string[] = []) =>
+    CampaignProposalGenerationSchema.parse({
+      ...legacy(),
+      objective_recommendation: null,
+      audience: audienceOverride,
+      missing_facts: missing,
+      test_plan: null,
+    });
+
+  it("repairs a sloppy audience so that it satisfies the strict stored schema", () => {
+    const fixed = normalizeProposalAdditions(
+      generated({
+        countries: ["Indonesia", " id ", "MY", "my", "X"],
+        age_min: 50,
+        age_max: 20,
+        advantage_plus: true,
+        interest_suggestions_text: ["kopi", " kopi ", "6003139266461", "", "x".repeat(80)],
+      }),
+    );
+    expect(fixed.audience).toEqual({
+      countries: ["ID", "MY"],
+      age_min: 20,
+      age_max: 50,
+      advantage_plus: true,
+      interest_suggestions_text: ["kopi", "x".repeat(60)],
+    });
+    expect(CampaignProposalSchema.safeParse(fixed).success).toBe(true);
+  });
+
+  it("clamps ages to 13-65 and limits list sizes", () => {
+    const fixed = normalizeProposalAdditions(
+      generated({
+        countries: Array.from({ length: 15 }, (_, i) => `A${String.fromCharCode(65 + i)}`),
+        age_min: 3,
+        age_max: 99,
+        advantage_plus: false,
+        interest_suggestions_text: Array.from({ length: 14 }, (_, i) => `kata${i}`),
+      }),
+    );
+    expect(fixed.audience?.age_min).toBe(13);
+    expect(fixed.audience?.age_max).toBe(65);
+    expect(fixed.audience?.countries).toHaveLength(10);
+    expect(fixed.audience?.interest_suggestions_text).toHaveLength(10);
+    expect(CampaignProposalSchema.safeParse(fixed).success).toBe(true);
+  });
+
+  it("trims missing_facts, drops empty entries and caps length and count", () => {
+    const fixed = normalizeProposalAdditions(generated(null, ["  harga  ", "", "y".repeat(300), ...Array.from({ length: 12 }, (_, i) => `f${i}`)]));
+    expect(fixed.missing_facts?.[0]).toBe("harga");
+    expect(fixed.missing_facts?.[1]).toHaveLength(200);
+    expect(fixed.missing_facts).toHaveLength(8);
+    expect(CampaignProposalSchema.safeParse(fixed).success).toBe(true);
+  });
+
+  it("leaves a null audience, a legacy proposal and every other field untouched, and does not mutate its input", () => {
+    const g = generated(null);
+    const snapshot = JSON.stringify(g);
+    const out = normalizeProposalAdditions(g);
+    expect(out.audience).toBeNull();
+    expect(out.headline).toBe(g.headline);
+    expect(JSON.stringify(g)).toBe(snapshot);
+    const old = CampaignProposalSchema.parse(legacy());
+    expect(normalizeProposalAdditions(old)).toEqual(old);
   });
 });

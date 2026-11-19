@@ -113,7 +113,7 @@ describe("below the minimum data: no AI job, nothing saved, no quota used", () =
     ["only 1 day of data", [metric("cc1", 1, { impressions: 5000, clicks: 300 })], /1 dari minimal 3 hari/],
     ["only 2 days of data", [1, 2].map((d) => metric("cc1", d, { impressions: 5000, clicks: 300 })), /2 dari minimal 3 hari/],
     ["3 days but fewer than 1000 impressions", [1, 2, 3].map((d) => metric("cc1", d, { impressions: 300, clicks: 30 })), /900 dari minimal 1000 impresi/],
-    ["rows without impressions at all", [1, 2, 3].map((d) => metric("cc1", d, { impressions: 0, clicks: 0 })), /0 dari minimal 3 hari/],
+    ["rows with no impressions, no spend and no conversions", [1, 2, 3].map((d) => metric("cc1", d, { impressions: 0, clicks: 0, spend: 0 })), /0 dari minimal 3 hari/],
   ];
 
   it.each(cases)("%s", async (_label, rows, shortfall) => {
@@ -144,6 +144,44 @@ describe("below the minimum data: no AI job, nothing saved, no quota used", () =
     const result = await generateOptimizationRecommendationsAction("mc1");
     expect(result.error).toMatch(/tidak memiliki izin/);
     expect(runAiJobMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("a channel with spend but no delivery data (no impressions) is still analysed, as before the thresholds", () => {
+  it("calls the AI once, and still never allows INCREASE_BUDGET for it", async () => {
+    state.metrics = [1, 2].map((d) => metric("cc1", d, { impressions: 0, clicks: 0, reach: 0, spend: 500 }));
+    aiReturns([increase("FACEBOOK")]);
+
+    const result = await generateOptimizationRecommendationsAction("mc1");
+
+    expect(result.error).toBeNull();
+    expect(runAiJobMock).toHaveBeenCalledTimes(1);
+    const saved = state.upserts[0].recommendations as Row[];
+    expect(saved[0].action_type).toBe("NO_ACTION");
+    expect(saved[0].suggested_daily_budget).toBeNull();
+  });
+
+  it("a channel WITH impressions below the threshold is not rescued by its spend: refused, no AI job", async () => {
+    state.metrics = [metric("cc1", 1, { impressions: 200, clicks: 5, spend: 500 })];
+
+    const result = await generateOptimizationRecommendationsAction("mc1");
+
+    expect(result.error).toMatch(/Data belum cukup/);
+    expect(runAiJobMock).not.toHaveBeenCalled();
+  });
+
+  it("two channels: one thin-with-impressions and one enough: analysis runs, only the enough one may increase", async () => {
+    state.channels = [
+      { id: "cc1", channel: "FACEBOOK", status: "ACTIVE", budget_percentage: 50 },
+      { id: "cc2", channel: "INSTAGRAM", status: "ACTIVE", budget_percentage: 50 },
+    ];
+    state.metrics = [...enoughRows("cc1"), metric("cc2", 1, { impressions: 100, clicks: 2 })];
+    aiReturns([increase("FACEBOOK"), increase("INSTAGRAM")]);
+
+    expect((await generateOptimizationRecommendationsAction("mc1")).error).toBeNull();
+
+    const saved = state.upserts[0].recommendations as Row[];
+    expect(saved.map((r) => r.action_type)).toEqual(["INCREASE_BUDGET", "NO_ACTION"]);
   });
 });
 

@@ -4,6 +4,7 @@ import {
   evaluateCampaignQuality,
   formatBlockingIssuesMessage,
   hasBlockingIssue,
+  scanRawProposalCopy,
 } from "@/lib/ai/campaign-quality-gate";
 import { KOPI_ROBUSTA_IMPROVED, KOPI_ROBUSTA_SIMULASI } from "@/tests/fixtures/ai/kopi-robusta-aceh-simulasi";
 import type { CampaignProposal } from "@/schemas/ai/campaign-proposal";
@@ -50,8 +51,8 @@ describe("FINANCIAL_CLAIM (block, claim_risk)", () => {
     // investment
     "Investasi kopi untung besar",
     "Mulai berinvestasi sekarang",
-    "Invest in your future",
-    "Beli saham kopi",
+    "Investasi pasti untung",
+    "Pinjaman cepat cair tanpa jaminan",
     "Trading crypto",
     // get rich / passive income
     "Cepat kaya dengan kopi",
@@ -91,13 +92,20 @@ describe("FINANCIAL_CLAIM (block, claim_risk)", () => {
     "Tidak cepat basi dan kaya aroma",
     "Kopi pagi tanpa perut perih",
     "Beli satu gratis satu cuan",
+    "Investasi jangka panjang untuk dinding rumah Anda",
+    "Beli saham cokelat",
+    "Pinjaman buku gratis",
+    "Invest in quality cookware",
+    "Kami melamar kerja sama",
+    "vote for your favorite flavor",
   ])("does not block ordinary copy %j", (hook) => {
     expect(codesFor(hook)).not.toContain("FINANCIAL_CLAIM");
+    expect(hasBlockingIssue(evaluateCampaignQuality(withHook(hook), ctx))).toBe(false);
   });
 
   it("is NOT excused when the same words are in the product description", () => {
     const facts = "Kami menawarkan pinjaman cepat, passive income dan investasi kopi.";
-    for (const hook of ["Pinjaman cepat untuk usaha kopi", "Passive income dari kopi", "Investasi kopi"]) {
+    for (const hook of ["Pinjaman cepat untuk usaha kopi", "Passive income dari kopi", "Investasi kopi untung besar"]) {
       const r = evaluateCampaignQuality(withHook(hook), { ...ctx, knownFacts: facts });
       expect(r.issues.map((i) => i.code), hook).toContain("FINANCIAL_CLAIM");
       expect(hasBlockingIssue(r)).toBe(true);
@@ -134,7 +142,11 @@ describe("SPECIAL_CATEGORY (block, ad_policy)", () => {
     "Pilkada 2029 coblos nomor 2",
     "Kampanye politik kami",
     "Calon presiden pilihan",
-    "Vote now for change",
+    "Vote for the candidate",
+    "Sedang merekrut barista",
+    "Kredit rumah tanpa DP",
+    "Sewa properti kantor",
+    "Kampanye pemilu 2029",
     "Partai politik baru",
     "Pemilu",
   ])("blocks %j", (hook) => {
@@ -147,12 +159,30 @@ describe("SPECIAL_CATEGORY (block, ad_policy)", () => {
     expect(r.dimensions.find((d) => d.id === "ad_policy")?.status).toBe("FAIL");
   });
 
-  it("explains that Meta requires special_ad_categories, LINOE does not support it yet, and Meta ads are blocked", () => {
+  it("explains the special-category declaration in a platform-neutral way (Meta is only one example) and that LINOE does not support it yet", () => {
     const issue = evaluateCampaignQuality(withHook("Lowongan kerja barista"), ctx).issues.find((i) => i.code === "SPECIAL_CATEGORY");
     expect(issue?.message).toContain("special_ad_categories");
-    expect(issue?.message).toMatch(/Meta mewajibkan/);
+    expect(issue?.message).toMatch(/Banyak platform iklan mewajibkan/);
+    expect(issue?.message).toMatch(/Meta salah satunya/);
+    expect(issue?.message).not.toMatch(/Meta mewajibkan/);
     expect(issue?.message).toMatch(/LINOE belum mendukung/);
     expect(issue?.message).toMatch(/diblokir/);
+  });
+
+  it("an ambiguous single word is only a warning (SPECIAL_CATEGORY_HINT), never a block", () => {
+    for (const hook of ["Perumahan sehat dengan tanaman hias", "Rekrutmen sudah selesai? Kopi kami", "acara politik tradisi", "Pinjaman buku gratis"]) {
+      const r = evaluateCampaignQuality(withHook(hook), ctx);
+      const hint = r.issues.find((i) => i.code === "SPECIAL_CATEGORY_HINT");
+      expect(hint, hook).toBeDefined();
+      expect(hint?.severity).toBe("warn");
+      expect(hasBlockingIssue(r), hook).toBe(false);
+    }
+  });
+
+  it("a block and the weaker hint are not both reported for the same copy", () => {
+    const r = evaluateCampaignQuality(withHook("Pinjaman usaha cepat cair"), ctx);
+    expect(r.issues.map((i) => i.code)).toContain("SPECIAL_CATEGORY");
+    expect(r.issues.map((i) => i.code)).not.toContain("SPECIAL_CATEGORY_HINT");
   });
 
   it.each([
@@ -163,11 +193,19 @@ describe("SPECIAL_CATEGORY (block, ad_policy)", () => {
     "Pinjam gelas gratis",
     "Home brew set",
     "Hiring photographer",
+    "Perumahan sehat dengan tanaman hias",
+    "Rekrutmen sudah selesai? Kopi kami",
+    "acara politik tradisi",
+    "Kami melamar kerja sama",
+    "vote for your favorite flavor",
+    "Beli saham cokelat",
+    "Investasi jangka panjang untuk dinding rumah Anda",
     "Kampanye promo akhir tahun",
     "Partai besar harga grosir",
     "Rumah kopi kami buka setiap hari",
   ])("does not block ordinary copy %j", (hook) => {
     expect(codesFor(hook)).not.toContain("SPECIAL_CATEGORY");
+    expect(hasBlockingIssue(evaluateCampaignQuality(withHook(hook), ctx))).toBe(false);
   });
 
   it("is NOT excused when the same words are in the product description", () => {
@@ -253,5 +291,55 @@ describe("blocking helpers", () => {
     expect(msg).toMatch(/3\)/);
     expect(msg).not.toMatch(/4\)/);
     expect(msg).toMatch(/Masih ada \d+ masalah lain/);
+  });
+});
+
+describe("copy scope: submit enforces only the ACTIVE copy", () => {
+  /** Active copy is clean; candidate 3 (an alternative the owner can neither edit nor see launched) is not. */
+  function problemOnlyInAlternative(): CampaignProposal {
+    const p: CampaignProposal = JSON.parse(JSON.stringify(KOPI_ROBUSTA_IMPROVED));
+    p.candidates[2] = { ...p.candidates[2], hook: "Passive income dari kopi", primary_text: `${p.candidates[2].primary_text} Lowongan kerja barista.` };
+    return p;
+  }
+
+  it("the page view (scope all) still reports the alternative candidate as a block (advisory)", () => {
+    expect(hasBlockingIssue(evaluateCampaignQuality(problemOnlyInAlternative(), ctx))).toBe(true);
+  });
+
+  it("scope active ignores a problem confined to an alternative candidate", () => {
+    const r = evaluateCampaignQuality(problemOnlyInAlternative(), { ...ctx, copyScope: "active" });
+    expect(hasBlockingIssue(r)).toBe(false);
+  });
+
+  it("scope active blocks a problem in each of the four active fields", () => {
+    for (const field of ["hook", "headline", "cta", "primary_text"] as const) {
+      const p: CampaignProposal = JSON.parse(JSON.stringify(KOPI_ROBUSTA_IMPROVED));
+      p[field] = `${p[field]} passive income`;
+      expect(hasBlockingIssue(evaluateCampaignQuality(p, { ...ctx, copyScope: "active" })), field).toBe(true);
+    }
+  });
+});
+
+describe("scanRawProposalCopy (fallback for a proposal that does not parse)", () => {
+  it("blocks a financial claim or special category in a known active string field", () => {
+    expect(hasBlockingIssue({ issues: scanRawProposalCopy({ headline: "Passive income dari rumah" }) })).toBe(true);
+    expect(hasBlockingIssue({ issues: scanRawProposalCopy({ primary_text: "Lowongan kerja barista dibuka" }) })).toBe(true);
+    expect(hasBlockingIssue({ issues: scanRawProposalCopy({ hook: "Cepat kaya", cta: "Daftar" }) })).toBe(true);
+    expect(hasBlockingIssue({ issues: scanRawProposalCopy({ cta: "Ajukan KPR" }) })).toBe(true);
+  });
+
+  it("passes clean copy and ignores warnings and unknown fields", () => {
+    expect(scanRawProposalCopy({ headline: "Kopi Robusta Aceh", primary_text: "Stok terbatas", cta: "Lihat" })).toEqual([]);
+    expect(scanRawProposalCopy({ other: "Passive income", candidates: [{ hook: "Passive income" }] })).toEqual([]);
+  });
+
+  it("is skipped (no issues) for anything that is not an object or has no strings", () => {
+    for (const raw of [null, undefined, "Passive income", 42, ["Passive income"], {}, { headline: 5, cta: null }]) {
+      expect(scanRawProposalCopy(raw)).toEqual([]);
+    }
+  });
+
+  it("does not use the weaker hint rule", () => {
+    expect(scanRawProposalCopy({ headline: "Pinjaman buku gratis" })).toEqual([]);
   });
 });

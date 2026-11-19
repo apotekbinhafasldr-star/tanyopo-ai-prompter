@@ -151,6 +151,21 @@ export const ProposalAudienceSchema = z
 
 export type ProposalAudience = z.infer<typeof ProposalAudienceSchema>;
 
+/**
+ * The audience as the AI is asked to produce it: NO refinements and no numeric/length bounds, so a slightly off
+ * answer (ages swapped, a country name, a numeric "interest") cannot fail the whole proposal generation.
+ * normalizeProposalAdditions() repairs it in code before anything is saved, and the stored schema above stays strict.
+ */
+export const ProposalAudienceGenerationSchema = z.strictObject({
+  countries: z.array(z.string()).describe("Target countries as ISO 3166-1 alpha-2 codes in capitals (e.g. ID), only countries given in the context"),
+  age_min: z.number().int().describe("Lowest suggested age (13-65)"),
+  age_max: z.number().int().describe("Highest suggested age (13-65); 65 means 65 and older"),
+  advantage_plus: z.boolean().describe("Whether broad automated (Advantage+) audience is suggested"),
+  interest_suggestions_text: z
+    .array(z.string())
+    .describe("Plain keyword text ONLY, for the owner to search for by hand. Never a Meta interest or behavior ID or a number"),
+});
+
 export const ProposalTestPlanSchema = z.strictObject({
   recommended_variants: z
     .array(z.number().int().min(1).max(3))
@@ -166,10 +181,9 @@ export const ProposalTestPlanSchema = z.strictObject({
 
 export type ProposalTestPlan = z.infer<typeof ProposalTestPlanSchema>;
 
-const missingFactsField = z
-  .array(z.string().max(200))
-  .max(8)
-  .describe("Facts that were NOT given but would be needed (price, stock, proof, destination, ...). Never invent them; leave empty when nothing is missing");
+const missingFactsDescription =
+  "Facts that were NOT given but would be needed (price, stock, proof, destination, ...). Never invent them; leave empty when nothing is missing";
+const missingFactsField = z.array(z.string().max(200)).max(8).describe(missingFactsDescription);
 
 /**
  * What is STORED in `ai_proposal` and read back by the campaign page, the quality gate and submit.
@@ -194,8 +208,8 @@ export const CampaignProposalSchema = z.object({
 export const CampaignProposalGenerationSchema = z.object({
   ...campaignProposalBaseShape,
   objective_recommendation: objectiveRecommendationField.nullable(),
-  audience: ProposalAudienceSchema.nullable(),
-  missing_facts: missingFactsField,
+  audience: ProposalAudienceGenerationSchema.nullable(),
+  missing_facts: z.array(z.string()).describe(missingFactsDescription),
   test_plan: ProposalTestPlanSchema.nullable(),
 });
 
@@ -264,4 +278,51 @@ export function withRecommendedChannels(proposal: CampaignProposal): CampaignPro
     budget_allocation: activeAllocation,
     recommended_channels: activeAllocation.map((b) => b.channel),
   };
+}
+
+/**
+ * Repairs the PR-5 fields of a freshly generated proposal so that it satisfies the STRICT stored schema, instead of
+ * rejecting the whole generation over a cosmetic slip: swaps age_min/age_max when inverted, clamps ages to 13-65,
+ * keeps only two-letter country codes (upper-cased, at most 10), keeps only text interests (drops numeric-only or
+ * empty strings, trims, truncates to 60 characters, de-duplicates, at most 10), and trims missing_facts to
+ * non-empty strings of at most 200 characters (at most 8). Pure; returns a new object.
+ */
+export function normalizeProposalAdditions<T extends CampaignProposal>(proposal: T): T {
+  const next: CampaignProposal = { ...proposal };
+  const audience = proposal.audience;
+  if (audience) {
+    const clampAge = (n: number) => Math.min(65, Math.max(13, Math.round(Number.isFinite(n) ? n : 13)));
+    const [lo, hi] = [clampAge(audience.age_min), clampAge(audience.age_max)].sort((a, b) => a - b);
+    const countries = [
+      ...new Set(
+        (audience.countries as unknown[])
+          .filter((c): c is string => typeof c === "string")
+          .map((c) => c.trim().toUpperCase())
+          .filter((c) => /^[A-Z]{2}$/.test(c)),
+      ),
+    ].slice(0, 10);
+    const interests = [
+      ...new Set(
+        (audience.interest_suggestions_text as unknown[])
+          .filter((i): i is string => typeof i === "string")
+          .map((i) => i.trim().slice(0, 60).trim())
+          .filter((i) => i.length > 0 && !/^\d+$/.test(i)),
+      ),
+    ].slice(0, 10);
+    next.audience = {
+      countries,
+      age_min: lo,
+      age_max: hi,
+      advantage_plus: audience.advantage_plus === true,
+      interest_suggestions_text: interests,
+    };
+  }
+  if (proposal.missing_facts) {
+    next.missing_facts = proposal.missing_facts
+      .filter((f): f is string => typeof f === "string")
+      .map((f) => f.trim().slice(0, 200))
+      .filter((f) => f.length > 0)
+      .slice(0, 8);
+  }
+  return next as T;
 }

@@ -26,6 +26,25 @@ const { approvalInsert, auditInsert } = vi.hoisted(() => ({
   auditInsert: vi.fn(async () => ({ error: null })),
 }));
 
+// A budget INCREASE re-checks the minimum delivery data (proposed thresholds, UNVERIFIED: >= 3 days, >= 1000 impressions,
+// >= 100 clicks; lib/campaigns/optimization-data-sufficiency.ts). By default the channel has enough; tests override it.
+const { metricsState } = vi.hoisted(() => ({
+  metricsState: {
+    result: {
+      data: [1, 2, 3].map((d) => ({ spend: 10, impressions: 1500, clicks: 60, reach: 1200, date: `2026-10-0${d}` })) as unknown[],
+      error: null as { message: string } | null,
+    },
+  },
+}));
+
+function rowsRead() {
+  const builder: Record<string, unknown> = {};
+  for (const method of ["select", "eq"]) builder[method] = () => builder;
+  builder.then = (resolve: (value: unknown) => unknown, reject: (reason: unknown) => unknown) =>
+    Promise.resolve(metricsState.result).then(resolve, reject);
+  return builder;
+}
+
 function reads(result: unknown) {
   const builder: Record<string, unknown> = {};
   for (const method of ["select", "eq"]) builder[method] = () => builder;
@@ -38,6 +57,7 @@ vi.mock("@/lib/supabase/server", () => ({
     from: (table: string) => {
       if (table === "prompter_channel_campaigns") return reads({ data: { id: "cc1", channel: "FACEBOOK", status: "ACTIVE" }, error: null });
       if (table === "prompter_master_campaigns") return reads({ data: { currency: "IDR" }, error: null });
+      if (table === "prompter_marketing_metrics") return rowsRead();
       if (table === "prompter_approvals") return { insert: approvalInsert };
       if (table === "prompter_audit_logs") return { insert: auditInsert };
       throw new Error(`Unexpected table: ${table}`);
@@ -51,6 +71,10 @@ describe("submitRecommendationAsApprovalAction — re-validates client-supplied 
   beforeEach(() => {
     approvalInsert.mockClear();
     auditInsert.mockClear();
+    metricsState.result = {
+      data: [1, 2, 3].map((d) => ({ spend: 10, impressions: 1500, clicks: 60, reach: 1200, date: `2026-10-0${d}` })),
+      error: null,
+    };
   });
 
   it.each([
@@ -89,5 +113,33 @@ describe("submitRecommendationAsApprovalAction — re-validates client-supplied 
     const result = await submitRecommendationAsApprovalAction("mc1", "FACEBOOK", "PAUSE_CHANNEL", null, "alasan", "LOW");
     expect(result.error).toBeNull();
     expect(approvalInsert).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["only 1 day of data", [{ spend: 10, impressions: 5000, clicks: 300, date: "2026-10-01" }]],
+    ["too few impressions", [1, 2, 3].map((d) => ({ spend: 10, impressions: 100, clicks: 50, date: `2026-10-0${d}` }))],
+    ["too few clicks", [1, 2, 3].map((d) => ({ spend: 10, impressions: 1500, clicks: 10, date: `2026-10-0${d}` }))],
+    ["no metrics at all", []],
+  ])("INCREASE_BUDGET with %s is refused (minimum data, proposed thresholds) and nothing is inserted", async (_label, rows) => {
+    metricsState.result = { data: rows, error: null };
+    const result = await submitRecommendationAsApprovalAction("mc1", "FACEBOOK", "INCREASE_BUDGET", 80000, "alasan", "LOW");
+    expect(result.error).toMatch(/Data belum cukup untuk menaikkan budget/);
+    expect(result.error).toMatch(/usulan, belum divalidasi/);
+    expect(approvalInsert).not.toHaveBeenCalled();
+    expect(auditInsert).not.toHaveBeenCalled();
+  });
+
+  it("INCREASE_BUDGET fails closed when the metrics cannot be read", async () => {
+    metricsState.result = { data: [], error: { message: "rls" } };
+    const result = await submitRecommendationAsApprovalAction("mc1", "FACEBOOK", "INCREASE_BUDGET", 80000, "alasan", "LOW");
+    expect(result.error).toMatch(/Gagal membaca data iklan/);
+    expect(approvalInsert).not.toHaveBeenCalled();
+  });
+
+  it("DECREASE_BUDGET and PAUSE_CHANNEL are not subject to the click threshold", async () => {
+    metricsState.result = { data: [], error: null };
+    expect((await submitRecommendationAsApprovalAction("mc1", "FACEBOOK", "DECREASE_BUDGET", 30000, "alasan", "LOW")).error).toBeNull();
+    expect((await submitRecommendationAsApprovalAction("mc1", "FACEBOOK", "PAUSE_CHANNEL", null, "alasan", "LOW")).error).toBeNull();
+    expect(approvalInsert).toHaveBeenCalledTimes(2);
   });
 });

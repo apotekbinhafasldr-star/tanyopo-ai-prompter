@@ -41,13 +41,24 @@ function buildSupabase(opts: { aiProposal: unknown; product?: Product | null; pr
     duration_days: 7,
     currency: "IDR",
     product_id: "p1",
+    updated_at: "2026-10-25T00:00:00.000000+00:00",
     ai_proposal: opts.aiProposal,
   };
   const campaignSingle = vi.fn(async () => ({ data: campaign, error: null }));
   const campaignEq2 = vi.fn(() => ({ single: campaignSingle }));
   const campaignEq1 = vi.fn(() => ({ eq: campaignEq2 }));
   const campaignSelect = vi.fn(() => ({ eq: campaignEq1 }));
-  const campaignUpdate = vi.fn();
+  // Compare-and-swap update used by updateCampaignCopyAction: applies the patch to the same in-memory row that
+  // submit reads next, so "edit the copy, then submit again" runs through both real actions.
+  const campaignUpdate = vi.fn((patch: Record<string, unknown>) => {
+    const b: Record<string, unknown> = {};
+    b.eq = () => b;
+    b.select = async () => {
+      Object.assign(campaign, patch);
+      return { data: [{ id: "c1" }], error: null };
+    };
+    return b;
+  });
 
   const approvalInsert = vi.fn(async () => ({ error: null }));
   const approvalDelete = vi.fn();
@@ -88,7 +99,7 @@ vi.mock("@/lib/supabase/server", () => ({
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let currentSupabase: any;
 
-import { submitForApprovalAction } from "@/features/campaigns/actions";
+import { submitForApprovalAction, updateCampaignCopyAction } from "@/features/campaigns/actions";
 
 const PRODUCT: Product = {
   id: "p1",
@@ -199,9 +210,9 @@ describe("submitForApprovalAction — Quality Gate enforced on the server (PR-5)
     expect(currentSupabase.approvalInsert).toHaveBeenCalledTimes(1);
   });
 
-  it("a legacy proposal that cannot be parsed is 'cannot be assessed' (as on the page), not refused for a gate reason", async () => {
+  it("a legacy proposal that cannot be parsed is 'cannot be assessed' (as on the page): clean copy is not refused for a gate reason", async () => {
     currentSupabase = buildSupabase({
-      aiProposal: { headline: "Passive income", primary_text: "Pinjaman cepat", cta: "Beli Sekarang" },
+      aiProposal: { headline: "Kopi Robusta Aceh", primary_text: "Kopi sangrai medium 200 gram", cta: "Lihat" },
       product: PRODUCT,
     });
 
@@ -209,6 +220,26 @@ describe("submitForApprovalAction — Quality Gate enforced on the server (PR-5)
 
     expect(result.error).toBeNull();
     expect(currentSupabase.approvalInsert).toHaveBeenCalledTimes(1);
+  });
+
+  it("but an unparsable legacy proposal whose known active copy has a financial claim or special category is still refused", async () => {
+    for (const aiProposal of [
+      { headline: "Passive income", primary_text: "Kopi", cta: "Lihat" },
+      { headline: "Kopi", primary_text: "Lowongan kerja barista", cta: "Lihat" },
+    ]) {
+      currentSupabase = buildSupabase({ aiProposal, product: PRODUCT });
+      const result = await submitForApprovalAction("c1");
+      expect(result.error).toMatch(/belum bisa diajukan/i);
+      expectNothingWritten();
+    }
+  });
+
+  it("an unparsable legacy proposal with a problem only in candidates[] (not editable) is not refused", async () => {
+    currentSupabase = buildSupabase({
+      aiProposal: { headline: "Kopi", primary_text: "Kopi sangrai", cta: "Lihat", candidates: [{ hook: "Passive income" }] },
+      product: PRODUCT,
+    });
+    expect((await submitForApprovalAction("c1")).error).toBeNull();
   });
 
   it("a campaign without any stored proposal is also not refused by the gate", async () => {
@@ -228,5 +259,48 @@ describe("submitForApprovalAction — Quality Gate enforced on the server (PR-5)
     expect(result.error).toMatch(/Gagal membaca data produk/);
     expect(result.error).toMatch(/coba lagi/i);
     expectNothingWritten();
+  });
+
+  it("a problem only in an ALTERNATIVE candidate does not block submit when the active copy is clean", async () => {
+    const p = JSON.parse(JSON.stringify(KOPI_ROBUSTA_IMPROVED));
+    p.candidates[2].hook = "Passive income dari kopi";
+    p.candidates[2].primary_text = `${p.candidates[2].primary_text} Lowongan kerja barista.`;
+    currentSupabase = buildSupabase({ aiProposal: p, product: PRODUCT });
+
+    const result = await submitForApprovalAction("c1");
+
+    expect(result.error).toBeNull();
+    expect(currentSupabase.approvalInsert).toHaveBeenCalledTimes(1);
+  });
+
+  it("a problem in candidates[0] that is also the active copy blocks (the active copy is what is launched)", async () => {
+    currentSupabase = buildSupabase({ aiProposal: proposalWithHook("Passive income dari kopi"), product: PRODUCT });
+    expect((await submitForApprovalAction("c1")).error).toMatch(/belum bisa diajukan/i);
+    expectNothingWritten();
+  });
+
+  it("no dead end: after updateCampaignCopyAction cleans the active copy, the same campaign can be submitted", async () => {
+    const bad = JSON.parse(JSON.stringify(KOPI_ROBUSTA_IMPROVED));
+    bad.hook = "Cepat kaya dengan kopi";
+    bad.headline = "Passive income dari kopi";
+    // candidates stay as generated (clean here); the owner can only edit the active fields.
+    currentSupabase = buildSupabase({ aiProposal: bad, product: PRODUCT });
+
+    const refused = await submitForApprovalAction("c1");
+    expect(refused.error).toMatch(/belum bisa diajukan/i);
+    expectNothingWritten();
+
+    const form = new FormData();
+    form.set("hook", "Kopi robusta untuk pagi yang kuat");
+    form.set("headline", "Kopi Robusta Aceh sangrai medium");
+    form.set("primaryText", bad.primary_text);
+    form.set("cta", bad.cta);
+    const edited = await updateCampaignCopyAction("c1", { error: null }, form);
+    expect(edited.error).toBeNull();
+    expect(currentSupabase.campaignUpdate).toHaveBeenCalledTimes(1);
+
+    const accepted = await submitForApprovalAction("c1");
+    expect(accepted.error).toBeNull();
+    expect(currentSupabase.approvalInsert).toHaveBeenCalledTimes(1);
   });
 });

@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { requireSessionContext } from "@/services/session";
 import { promoteWizardSchema, quickPromoteSchema, channelOptions } from "@/schemas/campaign";
-import { CampaignProposalGenerationSchema, withPrimaryCandidate, withRecommendedChannels } from "@/schemas/ai/campaign-proposal";
+import { CampaignProposalGenerationSchema, normalizeProposalAdditions, withPrimaryCandidate, withRecommendedChannels } from "@/schemas/ai/campaign-proposal";
 import { buildSystemPreamble, buildCampaignProposalPrompt } from "@/lib/ai/prompts";
 import { runAiJob } from "@/services/ai-jobs";
 import { syncChannelCampaigns } from "@/services/channel-campaigns";
@@ -118,7 +118,7 @@ export async function generateCampaignDraftAction(
     return { error: result.error };
   }
 
-  const proposal = withRecommendedChannels(withPrimaryCandidate(result.data));
+  const proposal = withRecommendedChannels(withPrimaryCandidate(normalizeProposalAdditions(result.data)));
 
   const { data: campaign, error: campaignError } = await supabase
     .from("prompter_master_campaigns")
@@ -289,7 +289,7 @@ export async function generateQuickCampaignDraftAction(
   // Promote is the one flow where this choice actually becomes the
   // campaign's channel set (the Advanced Wizard always keeps the user's
   // own picks — see generateCampaignDraftAction above).
-  const proposal = withRecommendedChannels(withPrimaryCandidate(result.data));
+  const proposal = withRecommendedChannels(withPrimaryCandidate(normalizeProposalAdditions(result.data)));
   const recommendedChannels = proposal.recommended_channels as Channel[];
 
   const { data: campaign, error: campaignError } = await supabase
