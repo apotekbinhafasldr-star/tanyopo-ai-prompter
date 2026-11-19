@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { requireSessionContext } from "@/services/session";
 import { promoteWizardSchema, quickPromoteSchema, channelOptions } from "@/schemas/campaign";
-import { CampaignProposalSchema, withPrimaryCandidate, withRecommendedChannels } from "@/schemas/ai/campaign-proposal";
+import { CampaignProposalGenerationSchema, withPrimaryCandidate, withRecommendedChannels } from "@/schemas/ai/campaign-proposal";
 import { buildSystemPreamble, buildCampaignProposalPrompt } from "@/lib/ai/prompts";
 import { runAiJob } from "@/services/ai-jobs";
 import { syncChannelCampaigns } from "@/services/channel-campaigns";
@@ -108,7 +108,7 @@ export async function generateCampaignDraftAction(
     tenantId: session.tenantId,
     actorUserId: session.userId,
     jobType: "CAMPAIGN_PROPOSAL",
-    schema: CampaignProposalSchema,
+    schema: CampaignProposalGenerationSchema,
     system: buildSystemPreamble(brandProfile),
     prompt: buildCampaignProposalPrompt(product, inputs, promptDestinationOf(destination.value)),
     inputReference: { product_id: product.id, ...inputs },
@@ -271,7 +271,7 @@ export async function generateQuickCampaignDraftAction(
     tenantId: session.tenantId,
     actorUserId: session.userId,
     jobType: "CAMPAIGN_PROPOSAL",
-    schema: CampaignProposalSchema,
+    schema: CampaignProposalGenerationSchema,
     system: buildSystemPreamble(brandProfile),
     prompt: buildCampaignProposalPrompt(product, inputs, promptDestinationOf(destination.value)),
     inputReference: { product_id: product.id, quick_promote: true, ...inputs },

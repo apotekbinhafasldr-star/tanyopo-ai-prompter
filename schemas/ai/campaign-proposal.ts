@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PROPOSAL_OBJECTIVE_VALUES } from "@/schemas/ai/proposal-objectives";
 
 const channelEnum = z.enum(["FACEBOOK", "INSTAGRAM", "TIKTOK", "X", "SEO"]);
 
@@ -48,7 +49,7 @@ export type CreativeCandidate = z.infer<typeof CreativeCandidateSchema>;
  * enforces the channel list, not this schema, since only it knows which
  * channels were selected.
  */
-export const CampaignProposalSchema = z.object({
+const campaignProposalBaseShape = {
   customer_pain: z
     .string()
     .max(300)
@@ -112,6 +113,90 @@ export const CampaignProposalSchema = z.object({
       "Channels that were considered from the available list but not recommended (0% — do not also list them in budget_allocation). Empty array only if every available channel was genuinely worth recommending",
     ),
   recommended_channels: z.array(channelEnum).min(1).describe("Must equal the channels listed in budget_allocation"),
+};
+
+/**
+ * PR-5 additions. All of them are advice for the reviewer, never launch input:
+ * nothing here is sent to an ad platform. In particular there is NO field for
+ * a Meta interest/behavior ID — `interest_suggestions_text` is plain keyword
+ * text, and every object below is strict so an unknown key (e.g. `interest_ids`)
+ * is rejected instead of silently stored.
+ */
+const objectiveRecommendationField = z
+  .enum(PROPOSAL_OBJECTIVE_VALUES)
+  .describe(
+    "Recommended objective, chosen ONLY from the listed values. Advice only: it does not change the campaign objective and does not mean the objective is supported for launch",
+  );
+
+export const ProposalAudienceSchema = z
+  .strictObject({
+    countries: z
+      .array(z.string().length(2))
+      .max(10)
+      .describe("Target countries as ISO 3166-1 alpha-2 codes in capitals (e.g. ID), only countries given in the context"),
+    age_min: z.number().int().min(13).max(65).describe("Lowest suggested age"),
+    age_max: z.number().int().min(13).max(65).describe("Highest suggested age; 65 means 65 and older"),
+    advantage_plus: z.boolean().describe("Whether broad automated (Advantage+) audience is suggested"),
+    interest_suggestions_text: z
+      .array(
+        z
+          .string()
+          .max(60)
+          .refine((value) => !/^\d+$/.test(value.trim()), { message: "Interest suggestions are plain keywords, never numeric IDs" }),
+      )
+      .max(10)
+      .describe("Plain keyword text ONLY, for the owner to search for by hand. Never a Meta interest or behavior ID"),
+  })
+  .refine((audience) => audience.age_min <= audience.age_max, { message: "age_min must not be greater than age_max" });
+
+export type ProposalAudience = z.infer<typeof ProposalAudienceSchema>;
+
+export const ProposalTestPlanSchema = z.strictObject({
+  recommended_variants: z
+    .array(z.number().int().min(1).max(3))
+    .min(1)
+    .max(3)
+    .describe("Which copy candidates (1-3, as ordered in candidates) to run against each other"),
+  min_duration_days: z.number().int().min(1).max(60).describe("Minimum number of days to let the test run before judging it"),
+  rationale: z
+    .string()
+    .max(200)
+    .describe("One short sentence on how to compare the variants. No performance numbers, no promised results"),
+});
+
+export type ProposalTestPlan = z.infer<typeof ProposalTestPlanSchema>;
+
+const missingFactsField = z
+  .array(z.string().max(200))
+  .max(8)
+  .describe("Facts that were NOT given but would be needed (price, stock, proof, destination, ...). Never invent them; leave empty when nothing is missing");
+
+/**
+ * What is STORED in `ai_proposal` and read back by the campaign page, the quality gate and submit.
+ * The PR-5 fields are optional (and nullable), so every proposal saved before PR-5 stays valid.
+ */
+export const CampaignProposalSchema = z.object({
+  ...campaignProposalBaseShape,
+  objective_recommendation: objectiveRecommendationField.nullish(),
+  audience: ProposalAudienceSchema.nullish(),
+  missing_facts: missingFactsField.nullish(),
+  test_plan: ProposalTestPlanSchema.nullish(),
+});
+
+/**
+ * What the AI is asked to produce (passed to runAiJob). Same shape, but the
+ * PR-5 fields are REQUIRED-and-nullable instead of optional: the providers'
+ * structured-output APIs reject `.optional()` (see
+ * tests/unit/schemas/ai-discovery-recommendations.test.ts). A model that has
+ * nothing to say returns null / [] for them. Its output is assignable to
+ * CampaignProposal.
+ */
+export const CampaignProposalGenerationSchema = z.object({
+  ...campaignProposalBaseShape,
+  objective_recommendation: objectiveRecommendationField.nullable(),
+  audience: ProposalAudienceSchema.nullable(),
+  missing_facts: missingFactsField,
+  test_plan: ProposalTestPlanSchema.nullable(),
 });
 
 export type CampaignProposal = z.infer<typeof CampaignProposalSchema>;

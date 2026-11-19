@@ -1,0 +1,232 @@
+import { describe, expect, it, vi, beforeEach } from "vitest";
+import { KOPI_ROBUSTA_IMPROVED, KOPI_ROBUSTA_SIMULASI } from "@/tests/fixtures/ai/kopi-robusta-aceh-simulasi";
+
+vi.mock("@/services/session", () => ({
+  requireSessionContext: vi.fn(async () => ({ tenantId: "t1", userId: "u1", role: "owner" })),
+}));
+vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+vi.mock("@/services/budget-guard", () => ({
+  getOrCreateBudgetPolicy: vi.fn(async () => ({})),
+  getMonthToDateSpend: vi.fn(async () => 0),
+  checkBudgetGuard: vi.fn(() => ({ allowed: true, reason: null })),
+}));
+
+const { mirrorChannelCampaignStatusMock } = vi.hoisted(() => ({
+  mirrorChannelCampaignStatusMock: vi.fn(async () => ({ ok: true, updated: 1, consistent: true })),
+}));
+vi.mock("@/services/channel-campaigns", () => ({
+  syncChannelCampaigns: vi.fn(async () => undefined),
+  mirrorChannelCampaignStatus: mirrorChannelCampaignStatusMock,
+  transitionMasterCampaign: vi.fn(async () => "moved"),
+  isMirrorConfirmed: (r: { ok: boolean; consistent: boolean }) => r.ok && r.consistent,
+}));
+
+interface Product {
+  id: string;
+  name: string;
+  description: string | null;
+  website_url: string | null;
+}
+
+/**
+ * Table-dispatching Supabase mock, same shape as campaigns-actions.test.ts, plus a product row that the
+ * submit action reads for the quality gate (name + description) and for the legacy landing-URL snapshot.
+ */
+function buildSupabase(opts: { aiProposal: unknown; product?: Product | null; productReadError?: boolean }) {
+  const campaign = {
+    id: "c1",
+    status: "DRAFT",
+    daily_budget: 100,
+    total_budget: 1000,
+    duration_days: 7,
+    currency: "IDR",
+    product_id: "p1",
+    ai_proposal: opts.aiProposal,
+  };
+  const campaignSingle = vi.fn(async () => ({ data: campaign, error: null }));
+  const campaignEq2 = vi.fn(() => ({ single: campaignSingle }));
+  const campaignEq1 = vi.fn(() => ({ eq: campaignEq2 }));
+  const campaignSelect = vi.fn(() => ({ eq: campaignEq1 }));
+  const campaignUpdate = vi.fn();
+
+  const approvalInsert = vi.fn(async () => ({ error: null }));
+  const approvalDelete = vi.fn();
+  const auditInsert = vi.fn(async () => ({ error: null }));
+
+  // The submit action reads the product twice: first for the legacy landing URL snapshot, then for the gate.
+  // `productReadError` makes only the SECOND read (the gate's) fail, so the gate's own failure path is exercised.
+  let productReads = 0;
+  const productResult = async () => {
+    productReads += 1;
+    return opts.productReadError && productReads >= 2
+      ? { data: null, error: { message: "boom" } }
+      : { data: opts.product ?? null, error: null };
+  };
+  const none = async () => ({ data: null, error: null });
+
+  const from = vi.fn((table: string) => {
+    if (table === "prompter_master_campaigns") return { select: campaignSelect, update: campaignUpdate };
+    if (table === "prompter_approvals") return { insert: approvalInsert, delete: approvalDelete };
+    if (table === "prompter_audit_logs") return { insert: auditInsert };
+    if (table === "prompter_products") {
+      return { select: () => ({ eq: () => ({ maybeSingle: productResult, eq: () => ({ maybeSingle: productResult }) }) }) };
+    }
+    if (table === "prompter_brand_profiles") {
+      return { select: () => ({ eq: () => ({ maybeSingle: none, eq: () => ({ maybeSingle: none }) }) }) };
+    }
+    throw new Error(`unexpected table ${table}`);
+  });
+  const rpc = vi.fn(async () => ({ data: [{ allowed: true, reason: null }], error: null }));
+
+  return { from, rpc, approvalInsert, approvalDelete, auditInsert, campaignUpdate };
+}
+
+vi.mock("@/lib/supabase/server", () => ({
+  createClient: vi.fn(async () => currentSupabase),
+}));
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let currentSupabase: any;
+
+import { submitForApprovalAction } from "@/features/campaigns/actions";
+
+const PRODUCT: Product = {
+  id: "p1",
+  name: KOPI_ROBUSTA_SIMULASI.productName,
+  description: KOPI_ROBUSTA_SIMULASI.knownFacts,
+  website_url: null,
+};
+
+/** The grounded fixture proposal, deep-copied, with its first candidate's hook (and the active hook) replaced. */
+function proposalWithHook(hook: string) {
+  const p = JSON.parse(JSON.stringify(KOPI_ROBUSTA_IMPROVED));
+  p.candidates[0].hook = hook;
+  p.hook = hook;
+  return p;
+}
+
+function expectNothingWritten() {
+  expect(currentSupabase.approvalInsert).not.toHaveBeenCalled();
+  expect(currentSupabase.approvalDelete).not.toHaveBeenCalled();
+  expect(currentSupabase.rpc).not.toHaveBeenCalled();
+  expect(currentSupabase.campaignUpdate).not.toHaveBeenCalled();
+  expect(mirrorChannelCampaignStatusMock).not.toHaveBeenCalled();
+  expect(currentSupabase.auditInsert).not.toHaveBeenCalled();
+}
+
+describe("submitForApprovalAction — Quality Gate enforced on the server (PR-5)", () => {
+  beforeEach(() => {
+    mirrorChannelCampaignStatusMock.mockClear();
+  });
+
+  it("the unmodified fixture proposal is accepted (baseline: the gate has no blocking issue)", async () => {
+    currentSupabase = buildSupabase({ aiProposal: KOPI_ROBUSTA_IMPROVED, product: PRODUCT });
+
+    const result = await submitForApprovalAction("c1");
+
+    expect(result.error).toBeNull();
+    expect(currentSupabase.approvalInsert).toHaveBeenCalledTimes(1);
+    expect(currentSupabase.rpc).toHaveBeenCalledWith("fn_reserve_active_campaign_slot", { p_campaign_id: "c1" });
+  });
+
+  it("refuses a proposal with a financial claim: actionable Indonesian message, no approval, no status change", async () => {
+    currentSupabase = buildSupabase({ aiProposal: proposalWithHook("Passive income dari kopi robusta"), product: PRODUCT });
+
+    const result = await submitForApprovalAction("c1");
+
+    expect(result.error).toMatch(/belum bisa diajukan/i);
+    expect(result.error).toMatch(/merevisi|revisi copy/i);
+    expect(result.error).toMatch(/buat ulang strategi/i);
+    expect(result.error).toMatch(/ajukan lagi/i);
+    expect(result.error).toContain("Passive income");
+    expectNothingWritten();
+  });
+
+  it("refuses a special ad category (Meta special_ad_categories is not supported)", async () => {
+    currentSupabase = buildSupabase({ aiProposal: proposalWithHook("Lowongan kerja barista kopi"), product: PRODUCT });
+
+    const result = await submitForApprovalAction("c1");
+
+    expect(result.error).toMatch(/special_ad_categories/);
+    expect(result.error).toMatch(/belum mendukung/i);
+    expectNothingWritten();
+  });
+
+  it("the product description does NOT excuse a financial claim or a special category", async () => {
+    currentSupabase = buildSupabase({
+      aiProposal: proposalWithHook("Pinjaman cepat untuk usaha kopi"),
+      product: { ...PRODUCT, description: "Kami menawarkan pinjaman cepat dan lowongan kerja barista." },
+    });
+
+    const result = await submitForApprovalAction("c1");
+
+    expect(result.error).toMatch(/belum bisa diajukan/i);
+    expectNothingWritten();
+  });
+
+  it("a blocked proposal can be submitted after the copy is revised (same campaign, same action)", async () => {
+    currentSupabase = buildSupabase({ aiProposal: proposalWithHook("Cepat kaya dengan kopi"), product: PRODUCT });
+    const refused = await submitForApprovalAction("c1");
+    expect(refused.error).toMatch(/belum bisa diajukan/i);
+    expectNothingWritten();
+
+    // The user edits the copy (a fresh read of the campaign returns the revised proposal).
+    currentSupabase = buildSupabase({ aiProposal: proposalWithHook("Kopi pagi tanpa perut perih"), product: PRODUCT });
+    const accepted = await submitForApprovalAction("c1");
+
+    expect(accepted.error).toBeNull();
+    expect(currentSupabase.approvalInsert).toHaveBeenCalledTimes(1);
+    expect(currentSupabase.rpc).toHaveBeenCalledTimes(1);
+  });
+
+  it("also checks the active (top-level) copy the owner may have edited, not only candidates[]", async () => {
+    const p = JSON.parse(JSON.stringify(KOPI_ROBUSTA_IMPROVED));
+    p.headline = "Investasi kopi, untung besar";
+    currentSupabase = buildSupabase({ aiProposal: p, product: PRODUCT });
+
+    const result = await submitForApprovalAction("c1");
+
+    expect(result.error).toMatch(/belum bisa diajukan/i);
+    expectNothingWritten();
+  });
+
+  it("warning-level issues (false urgency, medical claim) do not block submission", async () => {
+    currentSupabase = buildSupabase({ aiProposal: proposalWithHook("Stok terbatas, menyembuhkan lelah"), product: PRODUCT });
+
+    const result = await submitForApprovalAction("c1");
+
+    expect(result.error).toBeNull();
+    expect(currentSupabase.approvalInsert).toHaveBeenCalledTimes(1);
+  });
+
+  it("a legacy proposal that cannot be parsed is 'cannot be assessed' (as on the page), not refused for a gate reason", async () => {
+    currentSupabase = buildSupabase({
+      aiProposal: { headline: "Passive income", primary_text: "Pinjaman cepat", cta: "Beli Sekarang" },
+      product: PRODUCT,
+    });
+
+    const result = await submitForApprovalAction("c1");
+
+    expect(result.error).toBeNull();
+    expect(currentSupabase.approvalInsert).toHaveBeenCalledTimes(1);
+  });
+
+  it("a campaign without any stored proposal is also not refused by the gate", async () => {
+    currentSupabase = buildSupabase({ aiProposal: null, product: PRODUCT });
+
+    const result = await submitForApprovalAction("c1");
+
+    expect(result.error).toBeNull();
+    expect(currentSupabase.approvalInsert).toHaveBeenCalledTimes(1);
+  });
+
+  it("when the product cannot be read, nothing is submitted (fail closed) and the user is told to retry", async () => {
+    currentSupabase = buildSupabase({ aiProposal: KOPI_ROBUSTA_IMPROVED, product: PRODUCT, productReadError: true });
+
+    const result = await submitForApprovalAction("c1");
+
+    expect(result.error).toMatch(/Gagal membaca data produk/);
+    expect(result.error).toMatch(/coba lagi/i);
+    expectNothingWritten();
+  });
+});

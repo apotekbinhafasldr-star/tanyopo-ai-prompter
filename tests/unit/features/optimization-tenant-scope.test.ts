@@ -48,7 +48,16 @@ const RESULTS: Record<string, unknown> = {
     data: [{ id: "cc1", channel: "FACEBOOK", status: "ACTIVE", budget_percentage: 100 }],
     error: null,
   },
-  prompter_marketing_metrics: { data: [{ channel_campaign_id: "cc1", spend: 100 }], error: null },
+  // Three days of delivery, enough for the minimum-data gate (proposed thresholds: >= 3 days, >= 1000 impressions,
+  // >= 100 clicks; lib/campaigns/optimization-data-sufficiency.ts). This file only checks which rows are read.
+  prompter_marketing_metrics: {
+    data: [
+      { channel_campaign_id: "cc1", spend: 40, impressions: 1500, clicks: 60, reach: 1200, date: "2026-10-01" },
+      { channel_campaign_id: "cc1", spend: 30, impressions: 1500, clicks: 60, reach: 1200, date: "2026-10-02" },
+      { channel_campaign_id: "cc1", spend: 30, impressions: 1500, clicks: 60, reach: 1200, date: "2026-10-03" },
+    ],
+    error: null,
+  },
   prompter_conversions: { data: [], error: null },
   prompter_products: { data: { hpp: 10 }, error: null },
   prompter_brand_profiles: { data: null, error: null },

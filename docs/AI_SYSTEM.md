@@ -90,6 +90,27 @@ and to surface (not silently drop) any claim risk it's unsure about — `Marketi
 
 AI output is a draft for human review, not an auto-published artifact. Campaign drafts stay `status = 'DRAFT'` through all of Phase 1 — nothing tells a user a campaign "berhasil tayang" (went live), because nothing publishes yet.
 
+## Quality Gate (campaign proposals)
+
+`lib/ai/campaign-quality-gate.ts` is a pure, rule-based check of a stored campaign proposal. It makes no model call and costs no quota. A PASS means only "none of these rules fired"; it is not a statement that an ad is good or compliant with any platform's policy.
+
+**Blocking rules (severity `block`).** In addition to the earlier rules (`GUARANTEED_RESULT`, `NUMERIC_RESULT_PROMISE`, `URL_IN_COPY`, `PHONE_IN_COPY`, `TRANSACTION_IN_SIMULATION`), PR-5 adds:
+
+- `FINANCIAL_CLAIM` (dimension `claim_risk`): loans/fast credit, investment, "cepat kaya", "passive income", "modal kecil untung besar", "pasti cuan/profit", "bebas riba", in Indonesian and English, case-insensitive, tolerant of extra spaces and punctuation.
+- `SPECIAL_CATEGORY` (dimension `ad_policy`): credit/loan/leasing, employment/recruitment, rental property/KPR/housing, and social issue/election/politics wording. Meta requires advertisers to declare such ads under `special_ad_categories`; LINOE does not support that declaration yet, so Meta ads in these categories stay blocked until it does.
+
+Neither rule is excused by the same words appearing in the product description (that exemption still applies to the proof/claim warnings such as `MEDICAL_CLAIM`, which is still a warning). Wording rules are deliberately narrow, so ordinary uses such as "kredit foto" or "kaya rasa" do not fire; the trade-off is that a rule can still miss a paraphrase or, rarely, fire on a legitimate product (for example an HR-software ad that says "rekrutmen", or "investasi" used as a figure of speech). The gate also reads the active top-level `hook`/`headline`/`cta`, not only `candidates[]`, because those are what the owner can edit and what is launched.
+
+`hasBlockingIssue(result)`, `blockingIssues(result)` and `formatBlockingIssuesMessage(result)` are exported helpers.
+
+**Enforcement on the server.** The campaign page still only displays the gate. `submitForApprovalAction` (`features/campaigns/actions.ts`) re-evaluates it with the same inputs as the page (parsed `ai_proposal`, product name, product description as known facts) after the budget checks and before any approval row is written. A blocking issue returns an Indonesian message (what was found, revise the copy or regenerate the strategy, then submit again); no approval is created and the status does not change. A stored proposal that cannot be parsed (legacy) is "cannot be assessed", exactly as on the page, and is not refused for a gate reason. If the product cannot be read, nothing is submitted and the user is asked to retry.
+
+**Proposal fields added in PR-5.** `objective_recommendation`, `audience` (countries as ISO codes, age range, `advantage_plus`, `interest_suggestions_text` as plain keyword text only; there is no field for Meta interest IDs and the objects are strict), `missing_facts`, and `test_plan` (recommended copy variants and a minimum number of days; no performance numbers). They are optional in `CampaignProposalSchema`, so older stored proposals stay valid, and required-nullable in `CampaignProposalGenerationSchema`, which is what the AI is asked to fill (the providers' structured outputs reject `.optional()`). They are advice for the reviewer; nothing in them is sent to an ad platform. The prompt still makes a single `CAMPAIGN_PROPOSAL` call.
+
+**Optimization data thresholds.** `generateOptimizationRecommendationsAction` now reads impressions, clicks, reach and date from `prompter_marketing_metrics`, computes CTR and CPC in code (never by the model), and, before creating an AI job, requires data per channel. Below the thresholds it returns "Data belum cukup" and uses no AI quota. After the AI answers, `INCREASE_BUDGET` is turned into `NO_ACTION` for any channel below the click threshold.
+
+UNVERIFIED: the thresholds (at least 3 days with delivery, at least 1000 impressions, at least 100 clicks for click-based actions) are proposed starting values ("usulan, belum divalidasi"), set in `lib/campaigns/optimization-data-sufficiency.ts`. They are not derived from Meta documentation or from LINOE data and need founder review. Not covered: the manual path `submitRecommendationAsApprovalAction` takes its arguments from the client and does not re-check these thresholds; the Owner approval and Budget Guard still apply to it.
+
 ## Demo data
 
 Any AI insight or metric shown without real underlying data must be visibly labeled `DEMO`. The dashboard's "Tanyopo Intelligence" card (`features/dashboard/ai-insight-card.tsx`) still always renders its real empty state — Phase 1 added product/campaign/content generation, not an analytics pipeline, so there's still no real insight to show yet.

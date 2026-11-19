@@ -12,7 +12,15 @@ import type { CampaignProposal } from "@/schemas/ai/campaign-proposal";
  *
  * A proof/claim term is not flagged when the same term appears in
  * `knownFacts` (the product description the user entered), because then it
- * is a stated fact, not something the model made up.
+ * is a stated fact, not something the model made up. The two rules marked
+ * `ignoreKnownFacts` (FINANCIAL_CLAIM, SPECIAL_CATEGORY) are the exception:
+ * a financial promise or a special ad category is not made acceptable by the
+ * user having written it in the product description.
+ *
+ * "Advisory" is about THIS module: it only reports. Enforcement is a separate
+ * decision made by the caller. `submitForApprovalAction` (features/campaigns/
+ * actions.ts) refuses to create an approval while `hasBlockingIssue()` is
+ * true; the campaign page still just displays the result.
  */
 
 export type QualityDimensionId =
@@ -101,7 +109,17 @@ interface TextRule {
   readonly severity: "block" | "warn";
   readonly pattern: RegExp;
   readonly message: string;
+  /** True: a match is reported even when the same text is in `knownFacts`. */
+  readonly ignoreKnownFacts?: boolean;
 }
+
+/** Separator between the words of a phrase: tolerates extra spaces, hyphens, dots, commas, slashes and underscores. */
+const SEP = "[\\s\\-_.,/]+";
+/** Joins phrase words with SEP so "cepat kaya", "cepat-kaya" and "cepat   kaya" all match. */
+const phrase = (...words: string[]): string => words.join(SEP);
+
+const SPECIAL_CATEGORY_MESSAGE =
+  "Kategori iklan khusus (special_ad_categories). Meta mewajibkan deklarasi kategori ini dan LINOE belum mendukungnya, sehingga iklan Meta untuk kategori ini diblokir sampai ada dukungan. Ubah copy atau jangan promosikan kategori ini lewat LINOE.";
 
 // Patterns are intentionally narrow: a false alarm only costs the reviewer a
 // glance, but a rule that fires on ordinary copy would train people to ignore
@@ -160,6 +178,171 @@ const TEXT_RULES: readonly TextRule[] = [
     message: "Ada nomor telepon/WhatsApp di teks iklan. Tidak boleh ditulis di teks.",
   },
   {
+    code: "FINANCIAL_CLAIM",
+    dimension: "claim_risk",
+    severity: "block",
+    ignoreKnownFacts: true,
+    pattern: new RegExp(
+      "\\b(?:" +
+        [
+          // quick loans / credit
+          phrase("pinjaman", "(?:cepat|online|instan|kilat|tanpa\\s+(?:agunan|jaminan|bi\\s+checking))"),
+          phrase("kredit", "(?:cepat|instan|kilat|tanpa\\s+(?:agunan|jaminan))"),
+          "pinjol",
+          phrase("dana", "(?:cair|segar)", "(?:cepat|hari\\s+ini|instan)"),
+          phrase("(?:fast|quick|instant|easy|payday|cash)", "loans?"),
+          // investment
+          "invest(?:asi|asikan|ing|ment|ments|or|ors)?",
+          "berinvestasi",
+          "saham",
+          "reksa\\s*dana",
+          "(?:kripto|crypto|bitcoin|forex)",
+          phrase("(?:binary|opsi)", "(?:options?|biner)"),
+          // get rich / passive income
+          phrase("cepat", "kaya"),
+          phrase("kaya", "(?:mendadak|raya)"),
+          phrase("get", "rich", "(?:quick|fast)"),
+          phrase("(?:jadi|menjadi)", "(?:miliarder|milyarder|jutawan|sultan)"),
+          phrase("(?:become|be)", "(?:a\\s+)?(?:millionaire|billionaire)"),
+          phrase("passive", "income"),
+          phrase("(?:penghasilan|pendapatan)", "pasif"),
+          phrase("financial", "freedom"),
+          phrase("(?:kebebasan|bebas)", "finansial"),
+          // no-risk money promises
+          phrase("(?:bebas|tanpa)", "riba"),
+          phrase("modal", "(?:kecil|minim|receh|sedikit|tipis)", "(?:[^\\s]+\\s+){0,3}?(?:untung|cuan|profit|laba|hasil)", "(?:besar|banyak|berlipat|ganda|maksimal)"),
+          phrase("(?:small|low)", "(?:capital|investment)", "(?:[^\\s]+\\s+){0,3}?(?:big|high|huge)", "(?:profits?|returns?|gains?)"),
+          phrase("balik", "modal", "(?:cepat|instan|dalam\\s+\\d+)"),
+          phrase("pasti", "(?:cuan|profit|kaya)"),
+          phrase("(?:cuan|profit|untung|laba|return|imbal\\s+hasil)", "(?:dijamin|pasti|tetap\\s+dijamin)"),
+          phrase("cuan", "(?:jutaan|berlipat|harian|tiap\\s+hari|setiap\\s+hari|terus|besar|ratusan)"),
+          phrase("(?:guaranteed|sure|assured)", "(?:profits?|returns?|income|gains?|money)"),
+        ].join("|") +
+        ")\\b",
+      "i",
+    ),
+    message:
+      "Janji/penawaran keuangan (pinjaman, investasi, cepat kaya, passive income, atau untung pasti). Iklan seperti ini berisiko ditolak platform dan menyesatkan; hapus atau ganti dengan manfaat produk yang nyata.",
+  },
+  {
+    code: "SPECIAL_CATEGORY",
+    dimension: "ad_policy",
+    severity: "block",
+    ignoreKnownFacts: true,
+    // Credit / loans / leasing.
+    pattern: new RegExp(
+      "\\b(?:" +
+        [
+          phrase("kartu", "kredit"),
+          phrase("kredit", "(?:motor|mobil|rumah|usaha|kendaraan|multiguna|konsumer|konsumen|online|syariah|pemilikan|tanpa\\s+(?:agunan|jaminan))"),
+          "pinjaman",
+          phrase("pinjam", "uang"),
+          "pinjol",
+          "leasing",
+          "kpr",
+          phrase("pembiayaan", "(?:kendaraan|motor|mobil|multiguna|konsumen|konsumer|rumah)"),
+          "multi\\s*finance",
+          "loans?",
+          "mortgages?",
+          phrase("credit", "cards?"),
+          phrase("(?:auto|car|home|personal|payday|student|business)", "financing"),
+        ].join("|") +
+        ")\\b",
+      "i",
+    ),
+    message: `Kategori kredit/pinjaman/leasing. ${SPECIAL_CATEGORY_MESSAGE}`,
+  },
+  {
+    code: "SPECIAL_CATEGORY",
+    dimension: "ad_policy",
+    severity: "block",
+    ignoreKnownFacts: true,
+    // Employment / recruitment.
+    pattern: new RegExp(
+      "\\b(?:" +
+        [
+          phrase("(?:lowongan|loker)", "(?:kerja|pekerjaan|karir|karier|magang)"),
+          "rekrutmen",
+          "merekrut",
+          "(?:open|buka)\\s+recruitment",
+          phrase("(?:membuka|dibuka)", "lowongan"),
+          phrase("penerimaan", "(?:karyawan|pegawai|staf|staff)"),
+          phrase("(?:cari|dicari|dibutuhkan)", "(?:karyawan|pegawai|staf|staff)"),
+          phrase("melamar", "(?:kerja|pekerjaan)"),
+          phrase("(?:we(?:'re|\\s+are)|now)", "hiring"),
+          phrase("job", "(?:openings?|vacanc(?:y|ies)|opportunit(?:y|ies))"),
+          "recruitment",
+          "recruiting",
+        ].join("|") +
+        ")\\b",
+      "i",
+    ),
+    message: `Kategori lowongan kerja/rekrutmen. ${SPECIAL_CATEGORY_MESSAGE}`,
+  },
+  {
+    code: "SPECIAL_CATEGORY",
+    dimension: "ad_policy",
+    severity: "block",
+    ignoreKnownFacts: true,
+    // Housing: rentals, listings, mortgages.
+    pattern: new RegExp(
+      "\\b(?:" +
+        [
+          "kpr",
+          "perumahan",
+          phrase("properti", "(?:sewa|disewakan|dijual|subsidi|syariah|strategis|baru)"),
+          phrase("(?:sewa|jual\\s+beli|agen|bisnis|investasi)", "properti"),
+          phrase("sewa", "(?:rumah|apartemen|apartment|kost|kos|kontrakan|ruko|tanah|kamar|kavling)"),
+          phrase("(?:rumah|apartemen|apartment|kost|kos|kontrakan|ruko|kamar|tanah|kavling)", "(?:disewakan|dijual|dikontrakkan)"),
+          "disewakan",
+          "dikontrakkan",
+          phrase("real", "estate"),
+          phrase("(?:house|home|apartment|apartments|room|property|condo)", "for", "(?:rent|sale)"),
+          phrase("for", "rent"),
+          phrase("rental", "propert(?:y|ies)"),
+        ].join("|") +
+        ")\\b",
+      "i",
+    ),
+    message: `Kategori properti sewa/KPR/perumahan. ${SPECIAL_CATEGORY_MESSAGE}`,
+  },
+  {
+    code: "SPECIAL_CATEGORY",
+    dimension: "ad_policy",
+    severity: "block",
+    ignoreKnownFacts: true,
+    // Social issues, elections, politics.
+    pattern: new RegExp(
+      "\\b(?:" +
+        [
+          "pemilu",
+          "pilkada",
+          "pilpres",
+          "pileg",
+          "caleg",
+          "capres",
+          "cawapres",
+          "paslon",
+          "pencoblosan",
+          phrase("calon", "(?:presiden|legislatif|bupati|gubernur|walikota|wali\\s+kota|anggota\\s+dewan)"),
+          phrase("(?:kampanye|iklan)", "(?:politik|pemilu|pilkada|pilpres|capres|caleg)"),
+          phrase("partai", "politik"),
+          phrase("isu", "(?:sosial|politik)"),
+          phrase("nomor", "urut", "\\d+", "(?:pilih|coblos)"),
+          "politik",
+          "politisi",
+          "political",
+          "elections?",
+          phrase("vote", "(?:for|now)"),
+          "referendum",
+          "pemungutan\\s+suara",
+        ].join("|") +
+        ")\\b",
+      "i",
+    ),
+    message: `Kategori isu sosial/politik/pemilu. ${SPECIAL_CATEGORY_MESSAGE}`,
+  },
+  {
     code: "GENERIC_FILLER",
     dimension: "relevance",
     severity: "warn",
@@ -188,6 +371,12 @@ function copyOf(proposal: CampaignProposal): { source: string; text: string }[] 
     fields.push({ source: `Kandidat ${n} · teks utama`, text: c.primary_text });
   });
   fields.push({ source: "Teks utama", text: proposal.primary_text });
+  // The top-level hook/headline/cta are what the launch actually sends, and the owner can edit them
+  // (updateCampaignCopyAction) without touching candidates[]. They are checked too, so an edit cannot
+  // slip past the gate. When they equal candidates[0] the (rule, excerpt) de-duplication reports nothing new.
+  fields.push({ source: "Hook aktif", text: proposal.hook });
+  fields.push({ source: "Judul aktif", text: proposal.headline });
+  fields.push({ source: "CTA aktif", text: proposal.cta });
   return fields;
 }
 
@@ -230,7 +419,8 @@ export function evaluateCampaignQuality(
       if (!match) continue;
       const excerpt = match[0].trim();
       // A term the user wrote in the product facts is a fact, not an invention.
-      if (rule.dimension === "claim_risk" && foundInFacts(excerpt, facts)) continue;
+      // Rules marked ignoreKnownFacts (financial promises, special ad categories) are never excused by it.
+      if (!rule.ignoreKnownFacts && rule.dimension === "claim_risk" && foundInFacts(excerpt, facts)) continue;
       // Report each (rule, excerpt) once, not once per candidate that repeats it.
       const key = `${rule.code}:${excerpt.toLowerCase()}`;
       if (seen.has(key)) continue;
@@ -414,4 +604,39 @@ export function evaluateCampaignQuality(
   const capped = overall === "FAIL" ? Math.min(mean, 59) : overall === "REVIEW" ? Math.min(mean, 89) : mean;
 
   return { status: overall, score: Math.round(capped), dimensions, issues };
+}
+
+
+/** True when at least one issue has severity "block" (must be fixed before the campaign is submitted). */
+export function hasBlockingIssue(result: Pick<QualityGateResult, "issues">): boolean {
+  return result.issues.some((issue) => issue.severity === "block");
+}
+
+/** The issues with severity "block", in the order the gate reported them. */
+export function blockingIssues(result: Pick<QualityGateResult, "issues">): QualityIssue[] {
+  return result.issues.filter((issue) => issue.severity === "block");
+}
+
+const MAX_ISSUES_IN_MESSAGE = 3;
+
+/**
+ * Indonesian, actionable refusal text for a result that has blocking issues
+ * (used by submitForApprovalAction). Returns null when nothing blocks.
+ */
+export function formatBlockingIssuesMessage(result: Pick<QualityGateResult, "issues">): string | null {
+  const blocking = blockingIssues(result);
+  if (blocking.length === 0) return null;
+  const shown = blocking.slice(0, MAX_ISSUES_IN_MESSAGE).map((issue, i) => {
+    const quote = issue.excerpt ? ` Kutipan: "${issue.excerpt}".` : "";
+    return `${i + 1}) ${issue.message}${quote}`;
+  });
+  const rest = blocking.length - shown.length;
+  return [
+    "Campaign belum bisa diajukan: teks iklan memuat hal yang diblokir oleh pemeriksaan kualitas.",
+    shown.join(" "),
+    rest > 0 ? `Masih ada ${rest} masalah lain.` : null,
+    "Revisi copy di halaman campaign atau buat ulang strategi, lalu ajukan lagi. Tidak ada pengajuan yang dibuat.",
+  ]
+    .filter(Boolean)
+    .join(" ");
 }

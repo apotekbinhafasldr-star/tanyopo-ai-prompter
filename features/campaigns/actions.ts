@@ -6,12 +6,14 @@ import { createClient } from "@/lib/supabase/server";
 import { requireSessionContext } from "@/services/session";
 import {
   CampaignProposalSchema,
+  CampaignProposalGenerationSchema,
   withPrimaryCandidate,
   withRecommendedChannels,
   selectCandidate,
   type CampaignProposal,
 } from "@/schemas/ai/campaign-proposal";
 import { buildSystemPreamble, buildCampaignProposalPrompt } from "@/lib/ai/prompts";
+import { evaluateCampaignQuality, formatBlockingIssuesMessage } from "@/lib/ai/campaign-quality-gate";
 import { runAiJob } from "@/services/ai-jobs";
 import {
   syncChannelCampaigns,
@@ -130,7 +132,7 @@ export async function regenerateCampaignProposalAction(campaignId: string): Prom
     tenantId: session.tenantId,
     actorUserId: session.userId,
     jobType: "CAMPAIGN_PROPOSAL",
-    schema: CampaignProposalSchema,
+    schema: CampaignProposalGenerationSchema,
     system: buildSystemPreamble(brandProfile),
     prompt: buildCampaignProposalPrompt(product, inputs, promptDestination),
     inputReference: { product_id: product.id, campaign_id: campaignId, ...inputs },
@@ -518,6 +520,36 @@ export async function submitForApprovalAction(campaignId: string): Promise<Campa
   });
   if (!campaignLimit.ok) {
     return { error: campaignLimit.message };
+  }
+
+  // Quality Gate, enforced on the server (PR-5). The campaign page only DISPLAYS the gate; here the same
+  // evaluation (same parse, same product name, same product description as "known facts") decides whether an
+  // approval may be created at all. Nothing has been written yet, so a refusal leaves no approval row and no
+  // status change. A stored proposal that cannot be parsed (legacy) is "cannot be assessed", exactly as the
+  // page treats it: it is not refused for a gate reason.
+  const parsedProposal = CampaignProposalSchema.safeParse(campaign.ai_proposal);
+  if (parsedProposal.success) {
+    let productName: string | null = null;
+    let productDescription: string | null = null;
+    if (campaign.product_id) {
+      const { data: product, error: productError } = await supabase
+        .from("prompter_products")
+        .select("name, description")
+        .eq("id", campaign.product_id)
+        .eq("tenant_id", session.tenantId)
+        .maybeSingle();
+      if (productError) {
+        return { error: "Gagal membaca data produk untuk pemeriksaan kualitas. Pengajuan tidak dibuat, coba lagi." };
+      }
+      productName = product?.name ?? null;
+      productDescription = product?.description ?? null;
+    }
+    const gateMessage = formatBlockingIssuesMessage(
+      evaluateCampaignQuality(parsedProposal.data, { productName, knownFacts: productDescription }),
+    );
+    if (gateMessage) {
+      return { error: gateMessage };
+    }
   }
 
   const { error: approvalError } = await supabase.from("prompter_approvals").insert({
