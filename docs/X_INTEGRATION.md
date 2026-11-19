@@ -69,6 +69,22 @@ Untuk menyalakan: ubah `X_OAUTH_PKCE_WIRED` ke `true` di `x-connector.ts` (bukan
 
 Hanya bila X ingin diaktifkan: (1) setujui desain 7A dengan frasa persetujuan; (2) lakukan 7D; (3) putuskan apakah iklan X (7B) memang diperlukan — jika tidak, cukup posting organik. Selain itu tidak ada tindakan; PR ini aman digabung karena menutup (fail-closed) jalur yang tadinya tidak bisa bekerja.
 
+## 8A. Verifikasi ulang klaim yang bisa kedaluwarsa (2026-11-11)
+
+| Klaim | Hasil | Sumber (diakses 2026-11-11) |
+|---|---|---|
+| Model harga bayar-per-pakai, tanpa langganan; buat post US$0,015, buat post berisi URL US$0,200, baca post US$0,005, baca data milik sendiri US$0,001, baca user US$0,010, media metadata US$0,005 | MASIH BENAR (snapshot; "Prices are subject to change") | <https://docs.x.com/x-api/getting-started/pricing.md> |
+| Harga baru yang belum tercatat | BARU: "Post: Create (summoned)" US$0,010 per permintaan. Harga unggah media tetap tidak tercantum. Tidak ada tier Free/Basic/Pro di halaman; hanya pay-per-usage (batas 3 juta pembacaan post per siklus) dan "upgrade to an Enterprise plan" untuk volume lebih tinggi | idem |
+| Kutipan post (`quote_tweet_id`) | BARU: butuh Enterprise, "not available on self-serve (pay-per-use) tiers". LINOE tidak memakainya | <https://docs.x.com/x-api/posts/create-post.md> |
+| Otorisasi OAuth 2.0 + PKCE (`code_challenge`, `code_challenge_method` S256/plain), `state` maks 500 karakter, kode kedaluwarsa 30 detik, access token 2 jam tanpa `offline.access` | MASIH BENAR | <https://docs.x.com/fundamentals/authentication/oauth-2-0/authorization-code.md> |
+| Badan penukaran kode dan skema header klien rahasia | TETAP BELUM TERVERIFIKASI: halaman hanya mencontohkan refresh (`grant_type=refresh_token`) dan berkata "You don't need client id for confidential clients with a valid Authorization Header" tanpa menyebut skema | idem |
+| Ads API: host `https://ads-api.x.com`, OAuth 1.0a, butuh aplikasi yang "approved for Ads API access" | MASIH BENAR (halaman hanya membahas OAuth 1.0a; "hanya" tidak dinyatakan eksplisit) | <https://docs.x.com/x-ads-api/fundamentals/making-authenticated-requests.md> |
+| Rate limit `POST /2/tweets`: 10.000/24 jam per app, 100/15 menit per pengguna; `GET /2/users/me` 75/15 menit; media initialize/append/finalize 1.875/15 menit per pengguna | MASIH BENAR | <https://docs.x.com/x-api/fundamentals/rate-limits> |
+| Ketidakkonsistenan 100 vs 200/15 menit | TETAP ADA: halaman manage-tweets/integrate masih menyebut 200 per 15 menit per pengguna dan 300 per 3 jam. Pakai yang paling ketat (100/15 menit) | <https://docs.x.com/x-api/posts/manage-tweets/integrate> |
+| Panjang teks maksimum | TETAP TIDAK TERCANTUM di halaman create-post | <https://docs.x.com/x-api/posts/create-post.md> |
+
+Tautan Founder (Chrome Android): Developer Console <https://console.x.com> (masuk dengan akun X, terima Developer Agreement, **New App**; di sana juga beli kredit, atur batas belanja, dan lihat saldo; sumber <https://docs.x.com/fundamentals/developer-portal.md>). Pengaturan OAuth 2.0 dan callback ada di halaman Create an app: <https://docs.x.com/resources/fundamentals/developer-apps.md> (isinya belum dibaca sesi ini). Status tetap EXTERNAL BLOCKED untuk akun, kredensial, dan kredit; tidak ada klaim LIVE. Matriks gabungan: [INTEGRATIONS_READINESS_MATRIX.md](INTEGRATIONS_READINESS_MATRIX.md).
+
 ## 9. Berkas
 
 `lib/connectors/x-connector.ts`, `lib/connectors/x-api-client.ts`, `lib/connectors/x-pkce.ts`, `tests/unit/connectors/x-{connector,api-client,pkce}.test.ts`. `docs/INTEGRATIONS.md` masih menyebut "X Ads API v12" dan "tanpa PKCE" — pembaruannya ditunda agar tidak berbenturan dengan PR agen lain.
