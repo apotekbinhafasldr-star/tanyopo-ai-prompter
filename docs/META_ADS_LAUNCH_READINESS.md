@@ -185,3 +185,9 @@ Tripwire baru (`tests/unit/lib/meta-pr1-dormant-tripwires.test.ts`): tidak ada k
 - Bentuk jawaban `POST /{id}` untuk perubahan status (`{ success: true }`) dan kode galat 1/2 yang diperlakukan sebagai ambigu.
 - Nilai `effective_status` lain di luar daftar pada `meta-status-map.ts` (dipetakan ke "Tidak diketahui").
 - `validateOnly` pada konektor tidak dijaga S1 di dalam konektor; gerbang ada di pemanggil. Pemanggil di PR berikutnya wajib memeriksa gerbang sebelum memakainya.
+
+**Syarat untuk PR yang kelak menambah pemanggil** (hasil QA independen PR-1):
+- Galat dari `create*` dengan `validateOnly` membawa `error.message` Meta di `ConnectorApiError.message` (sama seperti create biasa). Pemanggil wajib mencatat lewat `safe-error-log`, tidak menampilkan teks itu ke pengguna.
+- `lifetimeBudgetMinorUnits` belum diperiksa oleh External Budget Safety Gate (gerbang hanya membaca budget harian). Pemanggil wajib menambahkan pemeriksaan batas untuk lifetime sebelum dipakai, dan `end_time` di masa lalu belum dicek di konektor.
+- Pemanggil yang meneruskan opsi bertipe `MetaValidateOnlyOption | undefined` dari variabel tidak cocok dengan overload yang ada; ubah overload bersamaan dengan pemanggil pertama.
+- Tes `meta-account-evidence-connector` dan `meta-readiness-readonly` memotong sumber sampai `async createCampaign(`; potongan itu kini memuat baris overload. Saat ini aman, tetapi rapuh jika overload diubah.

@@ -13,15 +13,22 @@ import path from "node:path";
  */
 
 const ROOT = process.cwd();
-const SKIP_DIRS = new Set(["node_modules", ".next", ".git", "tests", "docs", "public", "supabase", ".netlify"]);
+/** Skipped at ANY depth: dependency and build output. */
+const SKIP_ANYWHERE = new Set(["node_modules", ".next", ".git", ".netlify"]);
+/**
+ * Skipped ONLY at the repository root. A folder with one of these names deeper in
+ * the tree (for example lib/supabase) is production code and must be scanned.
+ */
+const SKIP_AT_ROOT = new Set(["tests", "docs", "public", "supabase"]);
 /** The connector and its type declarations define these names; every other production file is scanned. */
 const DEFINING_FILES = new Set(["lib/connectors/meta-connector.ts", "lib/connectors/types.ts"]);
 
-function walk(dir: string, out: string[] = []): string[] {
+function walk(dir: string, out: string[] = [], depth = 0): string[] {
   for (const entry of readdirSync(dir)) {
-    if (SKIP_DIRS.has(entry) || entry.startsWith(".")) continue;
+    if (SKIP_ANYWHERE.has(entry) || entry.startsWith(".")) continue;
+    if (depth === 0 && SKIP_AT_ROOT.has(entry)) continue;
     const full = path.join(dir, entry);
-    if (statSync(full).isDirectory()) walk(full, out);
+    if (statSync(full).isDirectory()) walk(full, out, depth + 1);
     else if (/\.(ts|tsx|js|jsx|mjs|cjs)$/.test(entry)) out.push(full);
   }
   return out;
@@ -146,6 +153,17 @@ describe("PR-1 tripwire (iii): no production caller of validateOnly: true", () =
   it("no production file outside the connector and its types uses validateOnly (other than false)", () => {
     const offenders = productionSources.flatMap(({ file, text }) => validateOnlyUses(text).map((v) => `${file}: ${v}`));
     expect(offenders).toEqual([]);
+  });
+
+  it("no production file outside the connector and its types contains the raw validate-only strings", () => {
+    const offenders = productionSources
+      .filter(({ text }) => /execution_options|validate_only/.test(text))
+      .map(({ file }) => file);
+    expect(offenders).toEqual([]);
+  });
+
+  it("the scan reaches production folders that share a name with a root-level skipped folder (lib/supabase)", () => {
+    expect(sources.some(({ file }) => file.startsWith("lib/supabase/"))).toBe(true);
   });
 
   it("the launch path does not mention validate-only at all", () => {
