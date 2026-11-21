@@ -88,7 +88,7 @@ describe("phone / URL widening (block)", () => {
 describe("new high-risk claim rules", () => {
   const BLOCK: [string, string][] = [
     ["INCOME_CLAIM", "Penghasilan Rp 5 juta per bulan dari rumah"],
-    ["INCOME_CLAIM", "Raih 10 juta/bulan dengan kopi ini"],
+    ["INCOME_CLAIM", "Raih penghasilan 10 juta/bulan dengan kopi ini"],
     ["BEFORE_AFTER_PERSONAL", "Lihat foto sebelum dan sesudah berat badan Anda"],
     ["BEFORE_AFTER_PERSONAL", "Before after kulit wajah jerawat"],
     ["PERSONAL_ATTRIBUTE", "Kamu sedang menderita diabetes? Minum ini"],
@@ -151,6 +151,18 @@ describe("review fixes: facts never excuse result promises; price copy is not in
     for (const t of ["Langganan Rp99.000 per bulan.", "Kost Rp 1,5 juta per bulan, dekat kampus.", "Untung banget, cuma Rp18.000!", "Cicilan 1 juta per bulan."]) {
       expect(codes(t)).not.toContain("INCOME_CLAIM");
     }
+  });
+  it("CTA price copy with 'Dapatkan/Raih ... per bulan' is not an income claim", () => {
+    for (const t of ["Dapatkan langganan Rp99.000 per bulan.", "Dapatkan kamar kost Rp1,5 juta per bulan.", "Raih paket hemat Rp300 ribu per bulan.", "Dapat 2 porsi Rp25.000 per hari ini saja."]) {
+      expect(codes(t)).not.toContain("INCOME_CLAIM");
+    }
+  });
+  it("more income / growth promises block", () => {
+    for (const t of ["Dapat Rp500 ribu per hari dari rumah.", "Komisi Rp2 juta per order.", "Penghasilan jutaan rupiah tiap bulan."]) expect(codes(t)).toContain("INCOME_CLAIM");
+    expect(codes("Omzet melonjak 300%.")).toContain("NUMERIC_RESULT_PROMISE");
+  });
+  it("benign product guarantees are WARN, not block", () => {
+    for (const t of ["Dijamin awet bertahun-tahun.", "Dijamin aman untuk bayi."]) expect(codes(t)).not.toContain("GUARANTEED_RESULT");
   });
   it("real income claims remain BLOCK", () => {
     for (const t of ["Penghasilan Rp10 juta sebulan dari rumah.", "Dapat 5 juta per bulan tanpa modal.", "Untung Rp2 juta sehari!"]) {

@@ -140,7 +140,7 @@ const TEXT_RULES: readonly TextRule[] = [
     dimension: "claim_risk",
     severity: "block",
     pattern:
-      /\b(?:dijamin(?!\s+(?:segar|asli|original|ori|fresh|halal|bersih|higienis|baru|enak|nikmat)\b)|garansi\s+(?:laris|untung|terjual|hasil|sembuh)|pasti\s+(?:laris|untung|terjual|berhasil|sembuh|naik)|100\s*%\s*(?:aman|berhasil|manjur|sembuh|ampuh)|tanpa\s+risiko|guaranteed?|risk[- ]free)\b/i,
+      /\b(?:dijamin(?!\s+(?:segar|asli|original|ori|fresh|halal|bersih|higienis|baru|enak|nikmat|awet|puas|murah|tepat|lembut|aman|berkualitas|kualitas|ongkir|sampai)\b)|garansi\s+(?:laris|untung|terjual|hasil|sembuh)|pasti\s+(?:laris|untung|terjual|berhasil|sembuh|naik)|100\s*%\s*(?:aman|berhasil|manjur|sembuh|ampuh)|tanpa\s+risiko|guaranteed?|risk[- ]free)\b/i,
     ignoreKnownFacts: true,
     message: "Menjanjikan hasil pasti. Hapus atau ganti dengan manfaat yang bisa dibuktikan.",
   },
@@ -150,14 +150,14 @@ const TEXT_RULES: readonly TextRule[] = [
     code: "GUARANTEED_QUALITY",
     dimension: "claim_risk",
     severity: "warn",
-    pattern: /\bdijamin\s+(?:segar|asli|original|ori|fresh|halal|bersih|higienis|baru|enak|nikmat)\b/i,
+    pattern: /\bdijamin\s+(?:segar|asli|original|ori|fresh|halal|bersih|higienis|baru|enak|nikmat|awet|puas|murah|tepat|lembut|aman|berkualitas|kualitas|ongkir|sampai)\b/i,
     message: "Jaminan kualitas produk. Pakai hanya jika benar-benar bisa dipenuhi dan dibuktikan (mis. kebijakan retur).",
   },
   {
     code: "NUMERIC_RESULT_PROMISE",
     dimension: "claim_risk",
     severity: "block",
-    pattern: /\b(?:omzet|penjualan|profit|untung|pembeli)\s+(?:naik|meningkat|bertambah)\s+(?:hingga\s+)?\d/i,
+    pattern: /\b(?:omzet|penjualan|profit|untung|pembeli)\s+(?:naik|meningkat|bertambah|melonjak|meroket)\s+(?:hingga\s+|sampai\s+|drastis\s+)?\d/i,
     ignoreKnownFacts: true,
     message: "Menjanjikan angka hasil penjualan. Tidak boleh tanpa bukti nyata.",
   },
@@ -169,7 +169,7 @@ const TEXT_RULES: readonly TextRule[] = [
     // Earning context + amount. Price-per-period copy ("Langganan Rp99.000 per bulan", "Kost 1,5 juta per bulan") has no
     // earning word and is NOT matched here; "Untung banget, cuma Rp18.000" is excluded by the lookahead.
     pattern:
-      /\b(?:penghasilan|pendapatan|gaji|income|omzet|cuan|profit|untung(?!\s+(?:banget|bgt|sekali|deh|dong|nih)\b))\b[^.!?\n]{0,30}?(?:Rp\s?\d|\d[\d.,]*\s*(?:juta|jt|ribu|rb)\b)|\b(?:dapat|dapatkan|raih|hasilkan|menghasilkan|bisa\s+dapat|passive\s+income|penghasilan\s+pasif)\b[^.!?\n]{0,30}?(?:Rp\s?\d[\d.,]*|\d[\d.,]*\s*(?:juta|jt|ribu|rb))\s*(?:juta|jt|ribu|rb)?\s*(?:\/\s*|per\s+|se)(?:hari|minggu|bulan)\b/i,
+      /\b(?:penghasilan|pendapatan|gaji|income|omzet|cuan|profit|untung(?!\s+(?:banget|bgt|sekali|deh|dong|nih)\b))\b[^.!?\n]{0,30}?(?:Rp\s?\d|\d[\d.,]*\s*(?:juta|jt|ribu|rb)\b)|\b(?:dapat|dapatkan|raih|hasilkan|menghasilkan)\b(?=[^.!?\n]{0,40}?\b(?:penghasilan|cuan|passive\s+income|dari\s+rumah|tanpa\s+modal|kerja\s+\d|jadi\s+reseller|uang)\b)[^.!?\n]{0,40}?(?:Rp\s?\d[\d.,]*|\d[\d.,]*\s*(?:juta|jt|ribu|rb))\s*(?:juta|jt|ribu|rb)?\s*(?:\/\s*|per\s+|se)(?:hari|minggu|bulan)\b(?!\s+ini)|\b(?:dibayar|komisi|bonus)\b[^.!?\n]{0,25}?(?:Rp\s?\d|\d[\d.,]*\s*(?:juta|jt|ribu|rb)\b)|\bpenghasilan\s+(?:jutaan|puluhan\s+juta|ratusan\s+juta)\b/i,
     message: "Janji penghasilan/untung dalam angka. Tidak boleh tanpa bukti nyata dan berisiko ditolak platform.",
   },
   {
