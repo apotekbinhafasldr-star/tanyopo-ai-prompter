@@ -30,7 +30,7 @@ describe("emit helpers", () => {
 
   it("ON: sends hashed tenant only, never the raw tenant id", async () => {
     enable();
-    const send = vi.fn(async () => {});
+    const send = vi.fn(async (_msg: unknown) => {});
     const transport: TelemetryTransport = { send };
     resetTelemetryForTests(async () => transport);
     await emitAiJobFinished({ tenantId: "tenant-raw-id-1", jobId: "j1", jobType: "CONTENT_GENERATION", status: "completed", model: "m", durationMs: 5 });
@@ -42,7 +42,7 @@ describe("emit helpers", () => {
 
   it("two tenants get different hashes", async () => {
     enable();
-    const send = vi.fn(async () => {});
+    const send = vi.fn(async (_msg: unknown) => {});
     resetTelemetryForTests(async () => ({ send }));
     for (const [i, tenant] of ["tenant-a", "tenant-b"].entries()) {
       await emitAiJobFinished({ tenantId: tenant, jobId: `j${i}`, jobType: "CONTENT_GENERATION", status: "completed", model: "m", durationMs: 5 });
@@ -53,7 +53,7 @@ describe("emit helpers", () => {
 
   it("an error name that is not a safe identifier is replaced, never sent", async () => {
     enable();
-    const send = vi.fn(async () => {});
+    const send = vi.fn(async (_msg: unknown) => {});
     resetTelemetryForTests(async () => ({ send }));
     await emitAppError({ tenantId: "t1", occurrenceId: "j9", surface: "ai_job", errorName: "bad: sk-live-SECRET", errorCategory: "API", httpStatus: 500, routeGroup: "ai_jobs" });
     const msg = send.mock.calls[0][0] as { properties: Record<string, unknown> };
@@ -73,7 +73,7 @@ describe("emit helpers", () => {
 
   it("a failed SDK load is not cached: a later emit can recover", async () => {
     enable();
-    const send = vi.fn(async () => {});
+    const send = vi.fn(async (_msg: unknown) => {});
     let calls = 0;
     resetTelemetryForTests(async () => {
       calls += 1;

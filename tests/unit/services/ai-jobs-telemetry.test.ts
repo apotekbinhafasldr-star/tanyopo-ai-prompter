@@ -5,8 +5,8 @@ import { z } from "zod";
 const { routeMock, adminMock, jobFinishedMock, appErrorMock } = vi.hoisted(() => ({
   routeMock: vi.fn(),
   adminMock: vi.fn(),
-  jobFinishedMock: vi.fn(async () => {}),
-  appErrorMock: vi.fn(async () => {}),
+  jobFinishedMock: vi.fn(async (_input: unknown) => {}),
+  appErrorMock: vi.fn(async (_input: unknown) => {}),
 }));
 
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: adminMock }));
