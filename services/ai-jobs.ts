@@ -8,6 +8,7 @@ import { AIProviderError, type AIErrorCategory } from "@/lib/ai/provider";
 import { estimateCostUsd } from "@/lib/ai/pricing";
 import { TASK_CLASS_BY_JOB_TYPE } from "@/lib/ai/task-classes";
 import { getOrCreateSubscription } from "@/services/billing";
+import { emitAiJobFinished, emitAppError, isTelemetryEnabled } from "@/lib/telemetry";
 import type { AiJobType, Database, Json } from "@/types/database";
 
 interface CreateAiJobIfEntitledRow {
@@ -145,6 +146,39 @@ async function closeAiJob(
   return false;
 }
 
+/**
+ * Telemetry-only guard. closeAiJob() returns true when no write errored, which
+ * does not prove a row changed (an RLS-filtered or non-matching UPDATE affects
+ * zero rows without an error). Before an event is sent, confirm with a
+ * read-only, tenant-scoped lookup that the job really is in the expected
+ * terminal state. Does nothing (and reads nothing) when telemetry is OFF; a
+ * failed, slow (>1s) or inconclusive read means "do not emit", so telemetry
+ * can under-count but never reports a job state that was not observed. It does
+ * not touch the prompter_ai_jobs ledger or closeAiJob.
+ */
+async function jobObservedClosed(
+  supabase: SupabaseClient<Database>,
+  tenantId: string,
+  jobId: string,
+  expected: "COMPLETED" | "FAILED",
+): Promise<boolean> {
+  if (!isTelemetryEnabled()) return false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const row = await Promise.race([
+      getAiJobProvenance(supabase, tenantId, jobId),
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), 1000);
+      }),
+    ]);
+    return row?.status === expected;
+  } catch {
+    return false;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 /** User-facing Indonesian text for each `reason` code
  * fn_create_ai_job_if_entitled() (Batch B9) can return. Never tells the
  * user to "pilih paket" to lift a block — no self-service action can
@@ -266,11 +300,12 @@ export async function runAiJob<T>(params: RunAiJobParams<T>): Promise<RunAiJobRe
   }
 
   const jobId = entitlementRow.job_id;
+  const startedAt = Date.now();
 
   try {
     const result = await routeStructuredGeneration(taskClass, schema, { system, prompt });
 
-    await closeAiJob(supabase, tenantId, jobId, {
+    const closedCompleted = await closeAiJob(supabase, tenantId, jobId, {
       status: "COMPLETED",
       provider: result.provider,
       model: result.model,
@@ -289,6 +324,21 @@ export async function runAiJob<T>(params: RunAiJobParams<T>): Promise<RunAiJobRe
       result.tokensInput,
       result.tokensOutput,
     );
+
+    // Telemetry (PostHog Phase 1, default OFF): only when the job row was really
+    // closed (closeAiJob succeeded AND a read-only lookup observes the terminal
+    // status), so a job produces at most one terminal event. Fail-open and
+    // time-bounded; never changes the result or the prompter_ai_jobs ledger.
+    if (closedCompleted && (await jobObservedClosed(supabase, tenantId, jobId, "COMPLETED"))) {
+      await emitAiJobFinished({
+        tenantId,
+        jobId,
+        jobType,
+        status: "completed",
+        model: result.model,
+        durationMs: Date.now() - startedAt,
+      });
+    }
 
     return {
       ok: true,
@@ -319,12 +369,38 @@ export async function runAiJob<T>(params: RunAiJobParams<T>): Promise<RunAiJobRe
       name: err instanceof Error ? err.name : typeof err,
     });
 
-    await closeAiJob(supabase, tenantId, jobId, {
+    const closedFailed = await closeAiJob(supabase, tenantId, jobId, {
       status: "FAILED",
       error: message,
       error_category: category,
       completed_at: new Date().toISOString(),
     });
+
+    // Telemetry (PostHog Phase 1, default OFF). Category and class name only:
+    // never the error message or stack (see lib/telemetry/events.ts).
+    if (closedFailed && (await jobObservedClosed(supabase, tenantId, jobId, "FAILED"))) {
+      // Concurrent, so a slow PostHog costs at most one timeout window (~1s), not two.
+      await Promise.all([
+        emitAiJobFinished({
+          tenantId,
+          jobId,
+          jobType,
+          status: "failed",
+          errorCategory: category,
+          model: null,
+          durationMs: Date.now() - startedAt,
+        }),
+        emitAppError({
+          tenantId,
+          occurrenceId: jobId,
+          surface: "ai_job",
+          errorName: err instanceof Error ? err.name : "UnknownError",
+          errorCategory: category,
+          httpStatus: err instanceof AIProviderError ? err.status : undefined,
+          routeGroup: "ai_jobs",
+        }),
+      ]);
+    }
 
     return { ok: false, error: message, jobId };
   }
