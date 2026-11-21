@@ -165,10 +165,14 @@ describe("review fixes: facts never excuse result promises; price copy is not in
     for (const t of ["Dijamin awet bertahun-tahun.", "Dijamin aman untuk bayi."]) expect(codes(t)).not.toContain("GUARANTEED_RESULT");
   });
   it("final QA gaps: quality word + result claim blocks; adjacent earn-amount-period blocks", () => {
-    for (const t of ["Dijamin asli sembuh total.", "Dijamin halal laris manis.", "Dijamin segar, cuan besar."]) expect(codes(t)).toContain("GUARANTEED_RESULT");
+    for (const t of ["Dijamin asli sembuh total.", "Dijamin halal laris manis.", "Dijamin segar dan cuan besar."]) expect(codes(t)).toContain("GUARANTEED_RESULT");
     for (const t of ["Dapat 5 jt perbulan.", "Dapat 5jt per bulan dari rumah.", "Bisa dapat 3 juta sehari.", "Dapatkan 10 juta/bulan."]) expect(codes(t)).toContain("INCOME_CLAIM");
     expect(codes("Dijamin segar setiap hari.")).not.toContain("GUARANTEED_RESULT");
     expect(codes("Dijamin segar setiap hari.")).toContain("GUARANTEED_QUALITY");
+  });
+  it("QA round 3: more income wording blocks; benign 'dijamin lancar/untung-untungan' does not", () => {
+    for (const t of ["Dapatkan Rp5.000.000/bulan tanpa modal.", "Hasilkan Rp5.000.000 per bulan.", "Dapat 5 jt per bln.", "Dapat 5 juta setiap bulan.", "Dapet 5 jt perbulan."]) expect(codes(t)).toContain("INCOME_CLAIM");
+    for (const t of ["Dijamin segar, bukan untung-untungan."]) expect(codes(t)).not.toContain("GUARANTEED_RESULT");
   });
   it("tenant description is not proof of a medical/financial claim", () => {
     const f = buildKnownFacts({ ...PRODUCT, description: "Menyembuhkan maag. Penghasilan Rp10 juta sebulan." });

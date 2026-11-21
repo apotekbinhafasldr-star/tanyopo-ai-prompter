@@ -140,7 +140,7 @@ const TEXT_RULES: readonly TextRule[] = [
     dimension: "claim_risk",
     severity: "block",
     pattern:
-      /\b(?:dijamin(?!\s+(?:segar|asli|original|ori|fresh|halal|bersih|higienis|baru|enak|nikmat|awet|puas|murah|tepat|lembut|aman|berkualitas|kualitas|ongkir|sampai)\b)|garansi\s+(?:laris|untung|terjual|hasil|sembuh)|pasti\s+(?:laris|untung|terjual|berhasil|sembuh|naik)|100\s*%\s*(?:aman|berhasil|manjur|sembuh|ampuh)|dijamin\s+(?:\S+\s+){0,3}?(?:sembuh|laris|untung|kurus|langsing|viral|cuan|berhasil|ampuh|manjur|terjual|sukses|lancar)|tanpa\s+risiko|guaranteed?|risk[- ]free)\b/i,
+      /\b(?:dijamin(?!\s+(?:segar|asli|original|ori|fresh|halal|bersih|higienis|baru|enak|nikmat|awet|puas|murah|tepat|lembut|aman|berkualitas|kualitas|ongkir|sampai)\b)|garansi\s+(?:laris|untung|terjual|hasil|sembuh)|pasti\s+(?:laris|untung|terjual|berhasil|sembuh|naik)|100\s*%\s*(?:aman|berhasil|manjur|sembuh|ampuh)|dijamin\s+(?:\S+\s+){0,3}?(?:sembuh|laris|untung|kurus|langsing|viral|cuan|berhasil|ampuh|manjur|terjual|sukses)(?![-\w])|tanpa\s+risiko|guaranteed?|risk[- ]free)\b/i,
     ignoreKnownFacts: true,
     message: "Menjanjikan hasil pasti. Hapus atau ganti dengan manfaat yang bisa dibuktikan.",
   },
@@ -169,7 +169,7 @@ const TEXT_RULES: readonly TextRule[] = [
     // Earning context + amount. Price-per-period copy ("Langganan Rp99.000 per bulan", "Kost 1,5 juta per bulan") has no
     // earning word and is NOT matched here; "Untung banget, cuma Rp18.000" is excluded by the lookahead.
     pattern:
-      /\b(?:penghasilan|pendapatan|gaji|income|omzet|cuan|profit|untung(?!\s+(?:banget|bgt|sekali|deh|dong|nih)\b))\b[^.!?\n]{0,30}?(?:Rp\s?\d|\d[\d.,]*\s*(?:juta|jt|ribu|rb)\b)|\b(?:dapat|dapatkan|raih|hasilkan|menghasilkan)\b(?=[^.!?\n]{0,40}?\b(?:penghasilan|cuan|passive\s+income|dari\s+rumah|tanpa\s+modal|kerja\s+\d|jadi\s+reseller|uang)\b)[^.!?\n]{0,40}?(?:Rp\s?\d[\d.,]*|\d[\d.,]*\s*(?:juta|jt|ribu|rb))\s*(?:juta|jt|ribu|rb)?\s*(?:\/\s*|per\s*|se)(?:hari|minggu|bulan)\b(?!\s+ini)|\b(?:dibayar|komisi|bonus)\b[^.!?\n]{0,25}?(?:Rp\s?\d|\d[\d.,]*\s*(?:juta|jt|ribu|rb)\b)|\b(?:dapat|dapatkan|bisa\s+dapat|raih|hasilkan|menghasilkan)\s+(?:Rp\s?)?\d[\d.,]*\s*(?:juta|jt|ribu|rb)\s*(?:\/\s*|per\s*|se)(?:hari|minggu|bulan)\b(?!\s+ini)|\bpenghasilan\s+(?:jutaan|puluhan\s+juta|ratusan\s+juta)\b/i,
+      /\b(?:penghasilan|pendapatan|gaji|income|omzet|cuan|profit|untung(?!\s+(?:banget|bgt|sekali|deh|dong|nih)\b))\b[^.!?\n]{0,30}?(?:Rp\s?\d|\d[\d.,]*\s*(?:juta|jt|ribu|rb)\b)|\b(?:dapat|dapatkan|raih|hasilkan|menghasilkan)\b(?=(?:\.(?=\d)|[^.!?\n]){0,40}?\b(?:penghasilan|cuan|passive\s+income|dari\s+rumah|tanpa\s+modal|kerja\s+\d|jadi\s+reseller|uang)\b)(?:\.(?=\d)|[^.!?\n]){0,40}?(?:Rp\s?\d[\d.,]*|\d[\d.,]*\s*(?:juta|jt|ribu|rb))\s*(?:juta|jt|ribu|rb)?\s*(?:\/\s*|per\s*|se|tiap\s+|setiap\s+)(?:hari|minggu|bulan|bln)\b(?!\s+ini)|\b(?:dibayar|komisi|bonus)\b[^.!?\n]{0,25}?(?:Rp\s?\d|\d[\d.,]*\s*(?:juta|jt|ribu|rb)\b)|\b(?:dapat|dapet|dapatkan|bisa\s+dapat|raih|hasilkan|menghasilkan)\s+(?:Rp\s?)?\d[\d.,]*\s*(?:juta|jt|ribu|rb)\s*(?:\/\s*|per\s*|se|tiap\s+|setiap\s+)(?:hari|minggu|bulan|bln)\b(?!\s+ini)|\b(?:dapat|dapet|dapatkan|bisa\s+dapat|raih|hasilkan|menghasilkan)\s+Rp\s?\d{1,3}(?:\.\d{3}){2,}\s*(?:\/\s*|per\s*|se|tiap\s+|setiap\s+)(?:hari|minggu|bulan|bln)\b|\bpenghasilan\s+(?:jutaan|puluhan\s+juta|ratusan\s+juta)\b/i,
     message: "Janji penghasilan/untung dalam angka. Tidak boleh tanpa bukti nyata dan berisiko ditolak platform.",
   },
   {
