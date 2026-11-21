@@ -22,9 +22,16 @@ function getTelemetry(): Telemetry {
     config,
     getTransport: () => {
       if (!config.enabled) return Promise.reject(new Error("telemetry_disabled"));
-      transport ??= loaderOverride
-        ? loaderOverride(config.apiKey, config.host)
-        : import("./transport-posthog").then((m) => m.createPostHogTransport(config.apiKey, config.host));
+      if (!transport) {
+        const attempt: Promise<TelemetryTransport> = loaderOverride
+          ? loaderOverride(config.apiKey, config.host)
+          : import("./transport-posthog").then((m) => m.createPostHogTransport(config.apiKey, config.host));
+        // Do not cache a failed load: a transient failure must not disable telemetry for the whole instance lifetime.
+        transport = attempt.catch((err) => {
+          transport = null;
+          throw err;
+        });
+      }
       return transport;
     },
   });

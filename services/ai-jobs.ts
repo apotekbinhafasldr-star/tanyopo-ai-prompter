@@ -345,24 +345,27 @@ export async function runAiJob<T>(params: RunAiJobParams<T>): Promise<RunAiJobRe
     // Telemetry (PostHog Phase 1, default OFF). Category and class name only:
     // never the error message or stack (see lib/telemetry/events.ts).
     if (closedFailed) {
-      await emitAiJobFinished({
-        tenantId,
-        jobId,
-        jobType,
-        status: "failed",
-        errorCategory: category,
-        model: null,
-        durationMs: Date.now() - startedAt,
-      });
-      await emitAppError({
-        tenantId,
-        occurrenceId: jobId,
-        surface: "ai_job",
-        errorName: err instanceof Error ? err.name : "UnknownError",
-        errorCategory: category,
-        httpStatus: err instanceof AIProviderError ? err.status : undefined,
-        routeGroup: "ai_jobs",
-      });
+      // Concurrent, so a slow PostHog costs at most one timeout window (~1s), not two.
+      await Promise.all([
+        emitAiJobFinished({
+          tenantId,
+          jobId,
+          jobType,
+          status: "failed",
+          errorCategory: category,
+          model: null,
+          durationMs: Date.now() - startedAt,
+        }),
+        emitAppError({
+          tenantId,
+          occurrenceId: jobId,
+          surface: "ai_job",
+          errorName: err instanceof Error ? err.name : "UnknownError",
+          errorCategory: category,
+          httpStatus: err instanceof AIProviderError ? err.status : undefined,
+          routeGroup: "ai_jobs",
+        }),
+      ]);
     }
 
     return { ok: false, error: message, jobId };

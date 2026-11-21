@@ -70,4 +70,20 @@ describe("emit helpers", () => {
       emitAiJobFinished({ tenantId: "t1", jobId: "j1", jobType: "CONTENT_GENERATION", status: "failed", errorCategory: "API", model: null, durationMs: 5 }),
     ).resolves.toBeUndefined();
   });
+
+  it("a failed SDK load is not cached: a later emit can recover", async () => {
+    enable();
+    const send = vi.fn(async () => {});
+    let calls = 0;
+    resetTelemetryForTests(async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("transient");
+      return { send };
+    });
+    const input = { tenantId: "t1", jobType: "CONTENT_GENERATION" as const, status: "completed" as const, model: "m", durationMs: 5 };
+    await emitAiJobFinished({ ...input, jobId: "r1" });
+    await emitAiJobFinished({ ...input, jobId: "r2" });
+    expect(calls).toBe(2);
+    expect(send).toHaveBeenCalledTimes(1);
+  });
 });

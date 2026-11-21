@@ -20,7 +20,7 @@
 | GeoIP | `disableGeoip: true` di klien dan per event |
 | Validasi | `z.strictObject`: satu properti asing = seluruh event DITOLAK (tidak dibuang sebagian); nama event asing ditolak; log hanya kode isu + path |
 | Pengiriman | `captureImmediate`, `flushAt:1`, `flushInterval:0`, `fetchRetryCount:0`, `requestTimeout:1500`, batas total ~1 detik |
-| Dedup | Maks. satu event per (nama event + job id) per proses; uuid v5 deterministik |
+| Dedup | Maks. satu event per (nama event + job id) per proses; uuid v5 deterministik. Lintas instance: tidak ada penyimpanan bersama; satu job hanya ditutup oleh satu pemanggilan `runAiJob`, jadi duplikat tidak muncul dari alur normal. Dedup di sisi PostHog (uuid + event + distinct_id + timestamp) bersifat eventual dan tidak dijamin |
 | Fail-open | Semua kegagalan ditelan; AI job tidak pernah gagal karena telemetry |
 | Circuit breaker | 3 kegagalan beruntun, lalu lewati 5 menit (per instance) |
 | `proxy.ts` | Tidak boleh memakai telemetry (runtime Edge) |
@@ -38,3 +38,8 @@
 
 ## Mematikan
 L1: kosongkan `POSTHOG_TELEMETRY_ENABLED` (atau hapus env) lalu deploy ulang. L2: cabut/putar key di PostHog (tanpa deploy). L3: revert PR. Circuit breaker menghentikan pengiriman otomatis bila PostHog gagal.
+
+## Catatan audit (21 Nov 2026)
+- `after()`: dokumentasi Netlify menyebut `next/after` didukung penuh. Kode ini tetap tidak bergantung padanya (pengiriman di-await dengan batas ~1 detik); boleh dipertimbangkan setelah uji preview.
+- Gagal memuat SDK tidak di-cache: percobaan berikutnya boleh pulih.
+- Dua event pada jalur gagal dikirim bersamaan (maks. ~1 detik, bukan 2).
