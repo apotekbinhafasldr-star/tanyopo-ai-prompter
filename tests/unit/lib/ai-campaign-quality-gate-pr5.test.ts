@@ -219,12 +219,12 @@ describe("SPECIAL_CATEGORY (block, ad_policy)", () => {
 });
 
 describe("existing rules keep their behaviour", () => {
-  it("MEDICAL_CLAIM is still a warning and is still excused by the product description", () => {
+  it("MEDICAL_CLAIM is still a warning and is NOT excused by the product description (tenant text is not proof of a medical claim)", () => {
     const r = evaluateCampaignQuality(withHook("Menyembuhkan maag"), ctx);
     const issue = r.issues.find((i) => i.code === "MEDICAL_CLAIM");
     expect(issue?.severity).toBe("warn");
     expect(hasBlockingIssue(r)).toBe(false);
-    expect(codesFor("Menyembuhkan maag", "Kopi robusta. Menyembuhkan maag, 200 gram.")).not.toContain("MEDICAL_CLAIM");
+    expect(codesFor("Menyembuhkan maag", "Kopi robusta. Menyembuhkan maag, 200 gram.")).toContain("MEDICAL_CLAIM");
   });
 
   it("a proof term in the product description is still excused (UNVERIFIED_PROOF)", () => {

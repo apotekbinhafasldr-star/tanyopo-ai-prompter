@@ -164,6 +164,17 @@ describe("review fixes: facts never excuse result promises; price copy is not in
   it("benign product guarantees are WARN, not block", () => {
     for (const t of ["Dijamin awet bertahun-tahun.", "Dijamin aman untuk bayi."]) expect(codes(t)).not.toContain("GUARANTEED_RESULT");
   });
+  it("final QA gaps: quality word + result claim blocks; adjacent earn-amount-period blocks", () => {
+    for (const t of ["Dijamin asli sembuh total.", "Dijamin halal laris manis.", "Dijamin segar, cuan besar."]) expect(codes(t)).toContain("GUARANTEED_RESULT");
+    for (const t of ["Dapat 5 jt perbulan.", "Dapat 5jt per bulan dari rumah.", "Bisa dapat 3 juta sehari.", "Dapatkan 10 juta/bulan."]) expect(codes(t)).toContain("INCOME_CLAIM");
+    expect(codes("Dijamin segar setiap hari.")).not.toContain("GUARANTEED_RESULT");
+    expect(codes("Dijamin segar setiap hari.")).toContain("GUARANTEED_QUALITY");
+  });
+  it("tenant description is not proof of a medical/financial claim", () => {
+    const f = buildKnownFacts({ ...PRODUCT, description: "Menyembuhkan maag. Penghasilan Rp10 juta sebulan." });
+    expect(codes("Menyembuhkan maag.", f)).toContain("MEDICAL_CLAIM");
+    expect(codes("Penghasilan Rp10 juta sebulan.", f)).toContain("INCOME_CLAIM");
+  });
   it("real income claims remain BLOCK", () => {
     for (const t of ["Penghasilan Rp10 juta sebulan dari rumah.", "Dapat 5 juta per bulan tanpa modal.", "Untung Rp2 juta sehari!"]) {
       expect(codes(t)).toContain("INCOME_CLAIM");
