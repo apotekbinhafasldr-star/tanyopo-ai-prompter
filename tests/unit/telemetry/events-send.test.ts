@@ -71,7 +71,7 @@ describe("event allowlist (strictObject rejects, never strips)", () => {
 });
 
 function mockTransport(impl?: () => Promise<void>) {
-  const send = vi.fn(impl ?? (async () => {}));
+  const send = vi.fn<TelemetryTransport["send"]>(impl ?? (async () => {}));
   const transport: TelemetryTransport = { send };
   return { transport, send };
 }
