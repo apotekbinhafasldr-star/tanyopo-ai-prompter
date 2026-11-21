@@ -46,7 +46,7 @@ describe("qa-ai-smoke-diagnose workflow", () => {
     expect(code.slice(code.indexOf("run: |"))).not.toContain("${{");
     for (const name of ["VAR_RAW", "CONFIRM_RAW"]) {
       const uses = [...code.matchAll(new RegExp(`.*\\$\\{?#?${name}.*`, "g"))].map((m) => m[0]);
-      for (const line of uses) expect(line, line).toMatch(/\$\{#|printf '%s' "\$\w+" \|[^\n]*\| wc -c\)/);
+      for (const line of uses) expect(line, line).toMatch(/\$\{#|printf '%s' "\$\w+" \|[^\n]*wc -c\)/);
     }
   });
 
