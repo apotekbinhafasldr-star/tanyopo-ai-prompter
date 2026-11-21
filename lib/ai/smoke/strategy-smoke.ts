@@ -1,5 +1,6 @@
 import { buildCampaignProposalPrompt, buildSystemPreamble, type CampaignProposalInputs } from "@/lib/ai/prompts";
 import { evaluateCampaignQuality } from "@/lib/ai/campaign-quality-gate";
+import { buildKnownFacts } from "@/lib/ai/known-facts";
 import { AIProviderError, type AIErrorCategory, type AIProvider } from "@/lib/ai/provider";
 import { AI_REQUEST_TIMEOUT_MS, callWithResilience } from "@/lib/ai/resilience";
 import {
@@ -375,7 +376,7 @@ export function createSmokeRunner(deps: { provider: AIProvider; model: string; t
 
         const gateResult = evaluateCampaignQuality(proposal, {
           productName: (SMOKE_PRODUCT as { name: string }).name,
-          knownFacts: (SMOKE_PRODUCT as { description: string }).description,
+          knownFacts: buildKnownFacts(SMOKE_PRODUCT as unknown as Parameters<typeof buildKnownFacts>[0]),
           copyScope: "active",
         });
 
