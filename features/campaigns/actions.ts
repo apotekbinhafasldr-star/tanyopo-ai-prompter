@@ -15,6 +15,7 @@ import {
 } from "@/schemas/ai/campaign-proposal";
 import { buildSystemPreamble, buildCampaignProposalPrompt } from "@/lib/ai/prompts";
 import { evaluateCampaignQuality, formatBlockingIssuesMessage, scanRawProposalCopy } from "@/lib/ai/campaign-quality-gate";
+import { buildKnownFacts } from "@/lib/ai/known-facts";
 import { runAiJob } from "@/services/ai-jobs";
 import {
   syncChannelCampaigns,
@@ -533,11 +534,11 @@ export async function submitForApprovalAction(campaignId: string): Promise<Campa
   const parsedProposal = CampaignProposalSchema.safeParse(campaign.ai_proposal);
   if (parsedProposal.success) {
     let productName: string | null = null;
-    let productDescription: string | null = null;
+    let productFacts: string | null = null;
     if (campaign.product_id) {
       const { data: product, error: productError } = await supabase
         .from("prompter_products")
-        .select("name, description")
+        .select("name, description, price, category, currency")
         .eq("id", campaign.product_id)
         .eq("tenant_id", session.tenantId)
         .maybeSingle();
@@ -545,10 +546,10 @@ export async function submitForApprovalAction(campaignId: string): Promise<Campa
         return { error: "Gagal membaca data produk untuk pemeriksaan kualitas. Pengajuan tidak dibuat, coba lagi." };
       }
       productName = product?.name ?? null;
-      productDescription = product?.description ?? null;
+      productFacts = buildKnownFacts(product);
     }
     const gateMessage = formatBlockingIssuesMessage(
-      evaluateCampaignQuality(parsedProposal.data, { productName, knownFacts: productDescription, copyScope: "active" }),
+      evaluateCampaignQuality(parsedProposal.data, { productName, knownFacts: productFacts, copyScope: "active" }),
     );
     if (gateMessage) {
       return { error: gateMessage };

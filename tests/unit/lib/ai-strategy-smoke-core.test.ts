@@ -605,6 +605,7 @@ describe("module hygiene: the smoke core cannot reach anything but the AI code i
     expect(imports.sort()).toEqual(
       [
         "@/lib/ai/campaign-quality-gate",
+        "@/lib/ai/known-facts",
         "@/lib/ai/prompts",
         "@/lib/ai/provider",
         "@/lib/ai/resilience",

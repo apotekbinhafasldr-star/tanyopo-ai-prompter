@@ -61,6 +61,7 @@ import {
   type ReadinessQuality,
 } from "@/lib/campaigns/draft-readiness";
 import { evaluateCampaignQuality } from "@/lib/ai/campaign-quality-gate";
+import { buildKnownFacts } from "@/lib/ai/known-facts";
 import { describeAiProvenance } from "@/lib/ai/provenance";
 import { getAiJobProvenance } from "@/services/ai-jobs";
 import { CampaignProposalSchema } from "@/schemas/ai/campaign-proposal";
@@ -198,7 +199,7 @@ export default async function CampaignDetailPage({
     { data: productMedia },
   ] = await Promise.all([
     campaign.product_id
-      ? supabase.from("prompter_products").select("id, name, description, website_url").eq("id", campaign.product_id).single()
+      ? supabase.from("prompter_products").select("id, name, description, website_url, price, category, currency").eq("id", campaign.product_id).single()
       : Promise.resolve({ data: null }),
     supabase
       .from("prompter_channel_campaigns")
@@ -386,7 +387,7 @@ export default async function CampaignDetailPage({
   const aiJob = campaign.ai_job_id ? await getAiJobProvenance(supabase, session.tenantId, campaign.ai_job_id) : null;
   const parsedProposal = CampaignProposalSchema.safeParse(campaign.ai_proposal);
   const aiQuality = parsedProposal.success
-    ? evaluateCampaignQuality(parsedProposal.data, { productName: product?.name, knownFacts: product?.description })
+    ? evaluateCampaignQuality(parsedProposal.data, { productName: product?.name, knownFacts: buildKnownFacts(product) })
     : null;
   const boundCopyAction = updateCampaignCopyAction.bind(null, id);
   const isDraft = campaign.status === "DRAFT";

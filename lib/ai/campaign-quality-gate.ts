@@ -12,10 +12,11 @@ import type { CampaignProposal } from "@/schemas/ai/campaign-proposal";
  *
  * A proof/claim term is not flagged when the same term appears in
  * `knownFacts` (the product description the user entered), because then it
- * is a stated fact, not something the model made up. The two rules marked
- * `ignoreKnownFacts` (FINANCIAL_CLAIM, SPECIAL_CATEGORY) are the exception:
- * a financial promise or a special ad category is not made acceptable by the
- * user having written it in the product description.
+ * is a stated fact, not something the model made up. Rules marked
+ * `ignoreKnownFacts` (guaranteed/numeric results, income, weight-loss, medical cure, before-after on bodies,
+ * personal attributes, gambling, FINANCIAL_CLAIM, SPECIAL_CATEGORY, ...) are the exception: a result promise,
+ * financial promise or special ad category is not made acceptable by the user having written it in the product
+ * description.
  *
  * "Advisory" is about THIS module: it only reports. Enforcement is a separate
  * decision made by the caller. `submitForApprovalAction` (features/campaigns/
@@ -139,21 +140,127 @@ const TEXT_RULES: readonly TextRule[] = [
     dimension: "claim_risk",
     severity: "block",
     pattern:
-      /\b(?:dijamin|garansi\s+(?:laris|untung|terjual|hasil|sembuh)|pasti\s+(?:laris|untung|terjual|berhasil|sembuh|naik)|100\s*%\s*(?:aman|berhasil|manjur|sembuh|ampuh)|tanpa\s+risiko|guaranteed?|risk[- ]free)\b/i,
+      /\b(?:dijamin(?!\s+(?:segar|asli|original|ori|fresh|halal|bersih|higienis|baru|enak|nikmat|awet|puas|murah|tepat|lembut|aman|berkualitas|kualitas|ongkir|sampai)\b)|garansi\s+(?:laris|untung|terjual|hasil|sembuh)|pasti\s+(?:laris|untung|terjual|berhasil|sembuh|naik)|100\s*%\s*(?:aman|berhasil|manjur|sembuh|ampuh)|dijamin\s+(?:\S+\s+){0,3}?(?:sembuh|laris|untung|kurus|langsing|viral|cuan|berhasil|ampuh|manjur|terjual|sukses)(?![-\w])|tanpa\s+risiko|guaranteed?|risk[- ]free)\b/i,
+    ignoreKnownFacts: true,
     message: "Menjanjikan hasil pasti. Hapus atau ganti dengan manfaat yang bisa dibuktikan.",
+  },
+  {
+    // Context-aware: "dijamin segar/asli" assures a product attribute the seller can verify (Meta bans guaranteed
+    // RESULTS, not product-quality statements), so it is a warn. "dijamin laris/sembuh/kurus/..." stays a block above.
+    code: "GUARANTEED_QUALITY",
+    dimension: "claim_risk",
+    severity: "warn",
+    pattern: /\bdijamin\s+(?:segar|asli|original|ori|fresh|halal|bersih|higienis|baru|enak|nikmat|awet|puas|murah|tepat|lembut|aman|berkualitas|kualitas|ongkir|sampai)\b/i,
+    message: "Jaminan kualitas produk. Pakai hanya jika benar-benar bisa dipenuhi dan dibuktikan (mis. kebijakan retur).",
   },
   {
     code: "NUMERIC_RESULT_PROMISE",
     dimension: "claim_risk",
     severity: "block",
-    pattern: /\b(?:omzet|penjualan|profit|untung|pembeli)\s+(?:naik|meningkat|bertambah)\s+(?:hingga\s+)?\d/i,
+    pattern: /\b(?:omzet|penjualan|profit|untung|pembeli)\s+(?:naik|meningkat|bertambah|melonjak|meroket)\s+(?:hingga\s+|sampai\s+|drastis\s+)?\d/i,
+    ignoreKnownFacts: true,
     message: "Menjanjikan angka hasil penjualan. Tidak boleh tanpa bukti nyata.",
+  },
+  {
+    code: "INCOME_CLAIM",
+    dimension: "claim_risk",
+    severity: "block",
+    ignoreKnownFacts: true,
+    // Earning context + amount. Price-per-period copy ("Langganan Rp99.000 per bulan", "Kost 1,5 juta per bulan") has no
+    // earning word and is NOT matched here; "Untung banget, cuma Rp18.000" is excluded by the lookahead.
+    pattern:
+      /\b(?:penghasilan|pendapatan|gaji|income|omzet|cuan|profit|untung(?!\s+(?:banget|bgt|sekali|deh|dong|nih)\b))\b[^.!?\n]{0,30}?(?:Rp\s?\d|\d[\d.,]*\s*(?:juta|jt|ribu|rb)\b)|\b(?:dapat|dapatkan|raih|hasilkan|menghasilkan)\b(?=(?:\.(?=\d)|[^.!?\n]){0,40}?\b(?:penghasilan|cuan|passive\s+income|dari\s+rumah|tanpa\s+modal|kerja\s+\d|jadi\s+reseller|uang)\b)(?:\.(?=\d)|[^.!?\n]){0,40}?(?:Rp\s?\d[\d.,]*|\d[\d.,]*\s*(?:juta|jt|ribu|rb))\s*(?:juta|jt|ribu|rb)?\s*(?:\/\s*|per\s*|se|tiap\s+|setiap\s+)(?:hari|minggu|bulan|bln)\b(?!\s+ini)|\b(?:dibayar|komisi|bonus)\b[^.!?\n]{0,25}?(?:Rp\s?\d|\d[\d.,]*\s*(?:juta|jt|ribu|rb)\b)|\b(?:dapat|dapet|dapatkan|bisa\s+dapat|raih|hasilkan|menghasilkan)\s+(?:Rp\s?)?\d[\d.,]*\s*(?:juta|jt|ribu|rb)\s*(?:\/\s*|per\s*|se|tiap\s+|setiap\s+)(?:hari|minggu|bulan|bln)\b(?!\s+ini)|\b(?:dapat|dapet|dapatkan|bisa\s+dapat|raih|hasilkan|menghasilkan)\s+Rp\s?\d{1,3}(?:\.\d{3}){2,}\s*(?:\/\s*|per\s*|se|tiap\s+|setiap\s+)(?:hari|minggu|bulan|bln)\b|\bpenghasilan\s+(?:jutaan|puluhan\s+juta|ratusan\s+juta)\b/i,
+    message: "Janji penghasilan/untung dalam angka. Tidak boleh tanpa bukti nyata dan berisiko ditolak platform.",
+  },
+  {
+    code: "BEFORE_AFTER_PERSONAL",
+    dimension: "ad_policy",
+    severity: "block",
+    ignoreKnownFacts: true,
+    pattern:
+      /\b(?:before\s*(?:[\/&-]|and|dan)?\s*after|sebelum\s*(?:[\/&-]|dan)\s*sesudah|foto\s+(?:sebelum|before))\b[^.!?\n]{0,40}?\b(?:berat|badan|kulit|wajah|jerawat|flek|lemak|perut|rambut|botak|gigi|payudara|bentuk\s+tubuh|weight|skin|face|acne|hair|body|belly)\b|\b(?:berat|badan|kulit|wajah|jerawat|flek|lemak|perut|rambut|weight|skin|face|acne|hair|body|belly)\b[^.!?\n]{0,40}?\b(?:before\s*(?:[\/&-]|and|dan)?\s*after|sebelum\s*(?:[\/&-]|dan)\s*sesudah)\b/i,
+    message: "Perbandingan sebelum/sesudah pada tubuh, kulit, atau berat badan. Dilarang oleh kebijakan iklan Meta.",
+  },
+  {
+    code: "BEFORE_AFTER",
+    dimension: "ad_policy",
+    severity: "warn",
+    suppressedByBlockCode: "BEFORE_AFTER_PERSONAL",
+    pattern: /\b(?:before\s*(?:[\/&-]|and|dan)?\s*after|sebelum\s*(?:[\/&-]|dan)\s*sesudah)\b/i,
+    message: "Perbandingan sebelum/sesudah. Boleh untuk produk non-personal (mis. pembersih), dilarang untuk tubuh/kesehatan.",
+  },
+  {
+    code: "PERSONAL_ATTRIBUTE",
+    dimension: "ad_policy",
+    severity: "block",
+    ignoreKnownFacts: true,
+    pattern:
+      /\b(?:kamu|anda|kau|lo|you|your)\b\s+(?:\S+\s+){0,3}?(?:gemuk|obesitas|diabetes|depresi|botak|jerawatan|bangkrut|berhutang|mengidap|menderita|overweight|fat|depressed|bankrupt|in\s+debt)\b/i,
+    message: "Teks menyiratkan kondisi pribadi pembaca (kesehatan, berat badan, keuangan). Dilarang oleh kebijakan iklan Meta.",
+  },
+  {
+    code: "WEIGHT_LOSS_CLAIM",
+    dimension: "claim_risk",
+    severity: "block",
+    ignoreKnownFacts: true,
+    pattern:
+      /\b(?:turun(?!\s+harga)|menurunkan|kurus|langsing|melangsingkan|lose)\s*(?:(?!harga\b)\S+\s+){0,2}?\d+\s*(?:kg|kilo|kilogram|lbs?|pounds?)\b/i,
+    message: "Janji penurunan berat badan dalam angka. Dilarang oleh kebijakan iklan Meta.",
+  },
+  {
+    code: "MEDICAL_CURE",
+    dimension: "claim_risk",
+    severity: "block",
+    ignoreKnownFacts: true,
+    pattern:
+      /\b(?:menyembuhkan|sembuhkan|mengobati|obat|cures?|heals?|treats?)\s+(?:\S+\s+){0,3}?(?:kanker|tumor|diabetes|kencing\s+manis|hipertensi|darah\s+tinggi|asam\s+urat|kolesterol|jantung|stroke|covid|corona|hiv|aids|asma|ginjal|hepatitis|tbc|cancer|arthritis|alzheimer)\b/i,
+    message: "Klaim menyembuhkan penyakit tertentu. Dilarang tanpa izin edar dan bukti; ditolak platform.",
+  },
+  {
+    code: "CLINICAL_CLAIM",
+    dimension: "claim_risk",
+    severity: "warn",
+    pattern:
+      /\b(?:terbukti\s+(?:secara\s+)?(?:klinis|ilmiah|khasiat|manjur|ampuh)|teruji\s+klinis|clinically\s+(?:proven|tested)|(?:direkomendasikan|rekomendasi)\s+dokter|detox|detoks|pelangsing|pembakar\s+lemak|fat\s*burner)\b/i,
+    message: "Klaim klinis/kesehatan (terbukti klinis, detox, pelangsing, rekomendasi dokter). Wajib ada bukti dan izin (mis. BPOM).",
+  },
+  {
+    code: "SUPERLATIVE_CLAIM",
+    dimension: "claim_risk",
+    severity: "warn",
+    pattern:
+      /(?:^|\s)#\s?1\b|\bpaling\s+(?:murah|enak|laris|ampuh|bagus|manjur|aman|cepat)\b|\bterbaik\s+(?:se|di)\s*(?:indonesia|dunia|asia)\b|\b(?:the\s+)?(?:best|cheapest|#1)\s+in\s+(?:indonesia|the\s+world)\b/i,
+    message: "Klaim superlatif (#1, paling ...). Pakai hanya jika ada bukti yang bisa ditunjukkan.",
+  },
+  {
+    code: "MONEY_BACK_GUARANTEE",
+    dimension: "claim_risk",
+    severity: "warn",
+    pattern: /\b(?:uang\s+kembali|garansi\s+(?:uang|kembali)|money[- ]back|refund\s+(?:100|penuh))\b/i,
+    message: "Jaminan uang kembali. Pakai hanya jika kebijakan retur memang ada dan bisa dipenuhi.",
+  },
+  {
+    code: "GAMBLING",
+    dimension: "ad_policy",
+    severity: "block",
+    ignoreKnownFacts: true,
+    pattern: /\b(?:judi|judol|slot\s+(?:gacor|online)|togel|casino|kasino|taruhan|betting|poker\s+online|sportsbook|bandar\s+(?:bola|judi))\b/i,
+    message: "Perjudian. Memerlukan izin khusus platform dan tidak didukung LINOE.",
+  },
+  {
+    code: "ALCOHOL",
+    dimension: "ad_policy",
+    severity: "warn",
+    pattern: /\b(?:miras|minuman\s+keras|beer|wine|vodka|whisky|whiskey|soju|tuak|arak|cocktail)\b|(?<!bebas\s)(?<!tanpa\s)\balkohol\b/i,
+    message: "Alkohol. Iklan dibatasi (usia, hukum setempat) oleh platform; tinjau sebelum menerbitkan.",
   },
   {
     code: "MEDICAL_CLAIM",
     dimension: "claim_risk",
     severity: "warn",
+    suppressedByBlockCode: "MEDICAL_CURE",
     pattern: /\b(?:menyembuhkan|sembuhkan|obat\s+ajaib|mengobati|cures?|treats?\s+(?:disease|cancer|diabetes))\b/i,
+    ignoreKnownFacts: true,
     message: "Klaim kesehatan/pengobatan. Wajib punya dasar dan izin sebelum dipakai di iklan.",
   },
   {
@@ -176,14 +283,16 @@ const TEXT_RULES: readonly TextRule[] = [
     code: "URL_IN_COPY",
     dimension: "ad_policy",
     severity: "block",
-    pattern: /(?:https?:\/\/|www\.)\S+|\b[a-z0-9-]+\.(?:com|id|co\.id|net|org|shop|store)\b/i,
+    pattern:
+      /(?:https?:\/\/|www\.)\S+|\b[a-z0-9-]+\.(?:com|id|co\.id|web\.id|my\.id|net|org|shop|store|me|io|co|ly|ee|link|app|xyz|site|online|bio|info|biz|tv|ink)\b/i,
     message: "Ada tautan/domain di teks iklan. Tautan resmi dipasang sistem saat peluncuran.",
   },
   {
     code: "PHONE_IN_COPY",
     dimension: "ad_policy",
     severity: "block",
-    pattern: /(?:\+62|\b0)8\d[\d\s-]{7,}/,
+    // 08xx, +62 8xx, 62 8xx, 0812-3456-7890, 0812.3456.7890 (separators: space, dot, dash).
+    pattern: /(?:\+\s?62|\b62|\b0)[\s.\-()]*8\d(?:[\s.\-]*\d){7,11}/,
     message: "Ada nomor telepon/WhatsApp di teks iklan. Tidak boleh ditulis di teks.",
   },
   {
@@ -522,7 +631,8 @@ export function evaluateCampaignQuality(
   const specSeen = new Set<string>();
   for (const field of copyOf(proposal, scope)) {
     for (const m of field.text.matchAll(SPEC_PATTERN)) {
-      const excerpt = m[0].trim();
+      // "Rp18.000." at the end of a sentence must match the fact "Rp18.000": drop trailing . and , only.
+      const excerpt = m[0].trim().replace(/[.,]+$/, "");
       const key = squash(excerpt);
       if (specSeen.has(key) || foundInFacts(excerpt, facts)) continue;
       specSeen.add(key);
