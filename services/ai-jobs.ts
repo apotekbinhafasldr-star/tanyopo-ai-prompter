@@ -8,6 +8,7 @@ import { AIProviderError, type AIErrorCategory } from "@/lib/ai/provider";
 import { estimateCostUsd } from "@/lib/ai/pricing";
 import { TASK_CLASS_BY_JOB_TYPE } from "@/lib/ai/task-classes";
 import { getOrCreateSubscription } from "@/services/billing";
+import { emitAiJobFinished, emitAppError } from "@/lib/telemetry";
 import type { AiJobType, Database, Json } from "@/types/database";
 
 interface CreateAiJobIfEntitledRow {
@@ -266,11 +267,12 @@ export async function runAiJob<T>(params: RunAiJobParams<T>): Promise<RunAiJobRe
   }
 
   const jobId = entitlementRow.job_id;
+  const startedAt = Date.now();
 
   try {
     const result = await routeStructuredGeneration(taskClass, schema, { system, prompt });
 
-    await closeAiJob(supabase, tenantId, jobId, {
+    const closedCompleted = await closeAiJob(supabase, tenantId, jobId, {
       status: "COMPLETED",
       provider: result.provider,
       model: result.model,
@@ -289,6 +291,20 @@ export async function runAiJob<T>(params: RunAiJobParams<T>): Promise<RunAiJobRe
       result.tokensInput,
       result.tokensOutput,
     );
+
+    // Telemetry (PostHog Phase 1, default OFF): only when the job row was really
+    // closed, so a job produces at most one terminal event. Fail-open and
+    // time-bounded; never changes the result or the prompter_ai_jobs ledger.
+    if (closedCompleted) {
+      await emitAiJobFinished({
+        tenantId,
+        jobId,
+        jobType,
+        status: "completed",
+        model: result.model,
+        durationMs: Date.now() - startedAt,
+      });
+    }
 
     return {
       ok: true,
@@ -319,12 +335,35 @@ export async function runAiJob<T>(params: RunAiJobParams<T>): Promise<RunAiJobRe
       name: err instanceof Error ? err.name : typeof err,
     });
 
-    await closeAiJob(supabase, tenantId, jobId, {
+    const closedFailed = await closeAiJob(supabase, tenantId, jobId, {
       status: "FAILED",
       error: message,
       error_category: category,
       completed_at: new Date().toISOString(),
     });
+
+    // Telemetry (PostHog Phase 1, default OFF). Category and class name only:
+    // never the error message or stack (see lib/telemetry/events.ts).
+    if (closedFailed) {
+      await emitAiJobFinished({
+        tenantId,
+        jobId,
+        jobType,
+        status: "failed",
+        errorCategory: category,
+        model: null,
+        durationMs: Date.now() - startedAt,
+      });
+      await emitAppError({
+        tenantId,
+        occurrenceId: jobId,
+        surface: "ai_job",
+        errorName: err instanceof Error ? err.name : "UnknownError",
+        errorCategory: category,
+        httpStatus: err instanceof AIProviderError ? err.status : undefined,
+        routeGroup: "ai_jobs",
+      });
+    }
 
     return { ok: false, error: message, jobId };
   }
