@@ -33,7 +33,8 @@ export function priceRenderings(price: number | string | null | undefined, curre
   if (n === null) return [];
   const whole = Math.round(n);
   const out = [String(whole), thousands(whole)];
-  if ((currency ?? "IDR").toUpperCase() === "IDR") {
+  const cur = typeof currency === "string" && currency.trim() ? currency.trim().toUpperCase() : "IDR";
+  if (cur === "IDR") {
     out.push(`Rp${whole}`, `Rp${thousands(whole)}`, `Rp ${thousands(whole)}`);
     if (whole >= 1000 && whole % 100 === 0) {
       const k = whole / 1000;
@@ -42,7 +43,7 @@ export function priceRenderings(price: number | string | null | undefined, curre
       }
     }
   } else {
-    out.push(`${currency} ${thousands(whole)}`);
+    out.push(`${cur} ${thousands(whole)}`);
   }
   return out;
 }

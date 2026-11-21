@@ -12,10 +12,11 @@ import type { CampaignProposal } from "@/schemas/ai/campaign-proposal";
  *
  * A proof/claim term is not flagged when the same term appears in
  * `knownFacts` (the product description the user entered), because then it
- * is a stated fact, not something the model made up. The two rules marked
- * `ignoreKnownFacts` (FINANCIAL_CLAIM, SPECIAL_CATEGORY) are the exception:
- * a financial promise or a special ad category is not made acceptable by the
- * user having written it in the product description.
+ * is a stated fact, not something the model made up. Rules marked
+ * `ignoreKnownFacts` (guaranteed/numeric results, income, weight-loss, medical cure, before-after on bodies,
+ * personal attributes, gambling, FINANCIAL_CLAIM, SPECIAL_CATEGORY, ...) are the exception: a result promise,
+ * financial promise or special ad category is not made acceptable by the user having written it in the product
+ * description.
  *
  * "Advisory" is about THIS module: it only reports. Enforcement is a separate
  * decision made by the caller. `submitForApprovalAction` (features/campaigns/
@@ -140,6 +141,7 @@ const TEXT_RULES: readonly TextRule[] = [
     severity: "block",
     pattern:
       /\b(?:dijamin(?!\s+(?:segar|asli|original|ori|fresh|halal|bersih|higienis|baru|enak|nikmat)\b)|garansi\s+(?:laris|untung|terjual|hasil|sembuh)|pasti\s+(?:laris|untung|terjual|berhasil|sembuh|naik)|100\s*%\s*(?:aman|berhasil|manjur|sembuh|ampuh)|tanpa\s+risiko|guaranteed?|risk[- ]free)\b/i,
+    ignoreKnownFacts: true,
     message: "Menjanjikan hasil pasti. Hapus atau ganti dengan manfaat yang bisa dibuktikan.",
   },
   {
@@ -156,6 +158,7 @@ const TEXT_RULES: readonly TextRule[] = [
     dimension: "claim_risk",
     severity: "block",
     pattern: /\b(?:omzet|penjualan|profit|untung|pembeli)\s+(?:naik|meningkat|bertambah)\s+(?:hingga\s+)?\d/i,
+    ignoreKnownFacts: true,
     message: "Menjanjikan angka hasil penjualan. Tidak boleh tanpa bukti nyata.",
   },
   {
@@ -163,8 +166,10 @@ const TEXT_RULES: readonly TextRule[] = [
     dimension: "claim_risk",
     severity: "block",
     ignoreKnownFacts: true,
+    // Earning context + amount. Price-per-period copy ("Langganan Rp99.000 per bulan", "Kost 1,5 juta per bulan") has no
+    // earning word and is NOT matched here; "Untung banget, cuma Rp18.000" is excluded by the lookahead.
     pattern:
-      /\b(?:penghasilan|pendapatan|gaji|income|omzet|cuan|untung|profit)\b[^.!?\n]{0,30}?(?:Rp\s?\d|\d[\d.,]*\s*(?:juta|jt|ribu|rb)\b)|\bRp\s?\d[\d.,]*\s*(?:juta|jt|ribu|rb)?\s*(?:\/\s*|per\s+)(?:hari|minggu|bulan)\b|\b\d[\d.,]*\s*(?:juta|jt)\s*(?:\/\s*|per\s+)?(?:hari|minggu|bulan|sebulan|sehari)\b/i,
+      /\b(?:penghasilan|pendapatan|gaji|income|omzet|cuan|profit|untung(?!\s+(?:banget|bgt|sekali|deh|dong|nih)\b))\b[^.!?\n]{0,30}?(?:Rp\s?\d|\d[\d.,]*\s*(?:juta|jt|ribu|rb)\b)|\b(?:dapat|dapatkan|raih|hasilkan|menghasilkan|bisa\s+dapat|passive\s+income|penghasilan\s+pasif)\b[^.!?\n]{0,30}?(?:Rp\s?\d[\d.,]*|\d[\d.,]*\s*(?:juta|jt|ribu|rb))\s*(?:juta|jt|ribu|rb)?\s*(?:\/\s*|per\s+|se)(?:hari|minggu|bulan)\b/i,
     message: "Janji penghasilan/untung dalam angka. Tidak boleh tanpa bukti nyata dan berisiko ditolak platform.",
   },
   {
@@ -199,7 +204,7 @@ const TEXT_RULES: readonly TextRule[] = [
     severity: "block",
     ignoreKnownFacts: true,
     pattern:
-      /\b(?:turun|menurunkan|kurus|langsing|melangsingkan|lose)\s*(?:\S+\s+){0,2}?\d+\s*(?:kg|kilo|kilogram|lbs?|pounds?)\b/i,
+      /\b(?:turun(?!\s+harga)|menurunkan|kurus|langsing|melangsingkan|lose)\s*(?:(?!harga\b)\S+\s+){0,2}?\d+\s*(?:kg|kilo|kilogram|lbs?|pounds?)\b/i,
     message: "Janji penurunan berat badan dalam angka. Dilarang oleh kebijakan iklan Meta.",
   },
   {

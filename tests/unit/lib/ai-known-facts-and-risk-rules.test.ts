@@ -134,6 +134,39 @@ describe("new high-risk claim rules", () => {
   });
 });
 
+describe("review fixes: facts never excuse result promises; price copy is not income", () => {
+  const poisoned = "Dijamin laris manis. Omzet naik 3 kali. Dijamin sembuh total. Dijamin segar.\n" + buildKnownFacts(PRODUCT);
+  it("result promises stay BLOCK even if the same words are in the facts", () => {
+    expect(codes("Dijamin laris manis untuk usahamu.", poisoned)).toContain("GUARANTEED_RESULT");
+    expect(codes("Dijamin sembuh total dalam seminggu.", poisoned)).toContain("GUARANTEED_RESULT");
+    expect(codes("Omzet naik 3 kali lipat.", poisoned)).toContain("NUMERIC_RESULT_PROMISE");
+    expect(codes("Obat ajaib, menyembuhkan diabetes.", "menyembuhkan diabetes")).toContain("MEDICAL_CURE");
+  });
+  it("dijamin segar stays WARN, not BLOCK", () => {
+    const c = codes("Dijamin segar setiap hari.");
+    expect(c).toContain("GUARANTEED_QUALITY");
+    expect(c).not.toContain("GUARANTEED_RESULT");
+  });
+  it("ordinary price / subscription / rent copy is not an income claim", () => {
+    for (const t of ["Langganan Rp99.000 per bulan.", "Kost Rp 1,5 juta per bulan, dekat kampus.", "Untung banget, cuma Rp18.000!", "Cicilan 1 juta per bulan."]) {
+      expect(codes(t)).not.toContain("INCOME_CLAIM");
+    }
+  });
+  it("real income claims remain BLOCK", () => {
+    for (const t of ["Penghasilan Rp10 juta sebulan dari rumah.", "Dapat 5 juta per bulan tanpa modal.", "Untung Rp2 juta sehari!"]) {
+      expect(codes(t)).toContain("INCOME_CLAIM");
+    }
+  });
+  it("'turun harga' is not weight loss; real weight-loss claims still block", () => {
+    expect(codes("Turun harga 5 kg paket hemat.")).not.toContain("WEIGHT_LOSS_CLAIM");
+    expect(codes("Turun 5 kg dalam seminggu.")).toContain("WEIGHT_LOSS_CLAIM");
+  });
+  it("non-string currency does not throw", () => {
+    expect(() => priceRenderings(18000, 123 as unknown as string)).not.toThrow();
+    expect(priceRenderings(18000, 123 as unknown as string)).toContain("Rp18.000");
+  });
+});
+
 describe("regression: existing fixtures unchanged", () => {
   const ctx = { productName: KOPI_ROBUSTA_SIMULASI.productName, knownFacts: KOPI_ROBUSTA_SIMULASI.knownFacts, isSimulation: true };
   it("IMPROVED still PASS 100, WEAK still FAIL", () => {
