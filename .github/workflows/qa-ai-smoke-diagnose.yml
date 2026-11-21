@@ -1,0 +1,51 @@
+name: QA AI smoke diagnose (manual, no secrets, no cost)
+
+# Diagnostik launch blocker: mengapa job-level `if` pada smoke tahap A bernilai false.
+# Hanya workflow_dispatch manual. Satu job TANPA `if`. Tanpa checkout, npm, secret, Environment, atau panggilan AI.
+# Hanya mencetak tiga boolean (REF_OK, VAR_OK, CONFIRM_OK) dan panjang nilai. Nilai asli TIDAK dicetak.
+# Ketiga boolean memakai ekspresi yang sama persis dengan `if` smoke, jadi hasilnya mencerminkan evaluasi GitHub yang sebenarnya.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Tempel frasa konfirmasi yang sama seperti pada Run workflow smoke"
+        required: true
+        type: string
+
+permissions:
+  contents: none
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Report booleans and lengths only
+        env:
+          REF_OK: ${{ github.ref == 'refs/heads/main' }}
+          VAR_OK: ${{ vars.AI_SMOKE_ENABLED == 'true' }}
+          CONFIRM_OK: ${{ inputs.confirm == 'RUN-AI-STRATEGY-SMOKE-A' }}
+          VAR_RAW: ${{ vars.AI_SMOKE_ENABLED }}
+          CONFIRM_RAW: ${{ inputs.confirm }}
+        run: |
+          export LC_ALL=C.UTF-8
+          var_chars=${#VAR_RAW}
+          var_bytes=$(printf '%s' "$VAR_RAW" | wc -c)
+          confirm_chars=${#CONFIRM_RAW}
+          confirm_bytes=$(printf '%s' "$CONFIRM_RAW" | wc -c)
+          var_odd=$(printf '%s' "$VAR_RAW" | LC_ALL=C tr -d 'a-z' | wc -c)
+          confirm_odd=$(printf '%s' "$CONFIRM_RAW" | LC_ALL=C tr -d 'A-Z-' | wc -c)
+          {
+            echo "## AI smoke diagnose"
+            echo "| Hasil | Nilai |"
+            echo "|---|---|"
+            echo "| REF_OK | $REF_OK |"
+            echo "| VAR_OK | $VAR_OK |"
+            echo "| CONFIRM_OK | $CONFIRM_OK |"
+            echo "| VAR panjang (karakter / byte), harapan 4 / 4 | $var_chars / $var_bytes |"
+            echo "| CONFIRM panjang (karakter / byte), harapan 23 / 23 | $confirm_chars / $confirm_bytes |"
+            echo "| VAR karakter tak terduga (huruf kecil a-z diizinkan), harapan 0 | $var_odd |"
+            echo "| CONFIRM karakter tak terduga (A-Z dan tanda hubung ASCII diizinkan), harapan 0 | $confirm_odd |"
+            echo ""
+            echo "Byte lebih besar dari karakter berarti ada karakter non-ASCII. Panjang lebih besar dari harapan atau karakter tak terduga lebih dari 0 berarti ada spasi atau karakter lain. VAR_OK=false dengan panjang 0 berarti variabel tidak terlihat di tingkat repo (belum dibuat, hanya ada di Environment, nama salah, atau berupa secret). Perbandingan huruf besar-kecil tidak dibedakan oleh GitHub."
+          } | tee -a "$GITHUB_STEP_SUMMARY"
