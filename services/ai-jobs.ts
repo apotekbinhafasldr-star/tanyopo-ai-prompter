@@ -8,7 +8,7 @@ import { AIProviderError, type AIErrorCategory } from "@/lib/ai/provider";
 import { estimateCostUsd } from "@/lib/ai/pricing";
 import { TASK_CLASS_BY_JOB_TYPE } from "@/lib/ai/task-classes";
 import { getOrCreateSubscription } from "@/services/billing";
-import { emitAiJobFinished, emitAppError } from "@/lib/telemetry";
+import { emitAiJobFinished, emitAppError, isTelemetryEnabled } from "@/lib/telemetry";
 import type { AiJobType, Database, Json } from "@/types/database";
 
 interface CreateAiJobIfEntitledRow {
@@ -144,6 +144,39 @@ async function closeAiJob(
 
   console.error("[ai-jobs] could not close job", { jobId, status: patch.status });
   return false;
+}
+
+/**
+ * Telemetry-only guard. closeAiJob() returns true when no write errored, which
+ * does not prove a row changed (an RLS-filtered or non-matching UPDATE affects
+ * zero rows without an error). Before an event is sent, confirm with a
+ * read-only, tenant-scoped lookup that the job really is in the expected
+ * terminal state. Does nothing (and reads nothing) when telemetry is OFF; a
+ * failed, slow (>1s) or inconclusive read means "do not emit", so telemetry
+ * can under-count but never reports a job state that was not observed. It does
+ * not touch the prompter_ai_jobs ledger or closeAiJob.
+ */
+async function jobObservedClosed(
+  supabase: SupabaseClient<Database>,
+  tenantId: string,
+  jobId: string,
+  expected: "COMPLETED" | "FAILED",
+): Promise<boolean> {
+  if (!isTelemetryEnabled()) return false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const row = await Promise.race([
+      getAiJobProvenance(supabase, tenantId, jobId),
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), 1000);
+      }),
+    ]);
+    return row?.status === expected;
+  } catch {
+    return false;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 /** User-facing Indonesian text for each `reason` code
@@ -293,9 +326,10 @@ export async function runAiJob<T>(params: RunAiJobParams<T>): Promise<RunAiJobRe
     );
 
     // Telemetry (PostHog Phase 1, default OFF): only when the job row was really
-    // closed, so a job produces at most one terminal event. Fail-open and
+    // closed (closeAiJob succeeded AND a read-only lookup observes the terminal
+    // status), so a job produces at most one terminal event. Fail-open and
     // time-bounded; never changes the result or the prompter_ai_jobs ledger.
-    if (closedCompleted) {
+    if (closedCompleted && (await jobObservedClosed(supabase, tenantId, jobId, "COMPLETED"))) {
       await emitAiJobFinished({
         tenantId,
         jobId,
@@ -344,7 +378,7 @@ export async function runAiJob<T>(params: RunAiJobParams<T>): Promise<RunAiJobRe
 
     // Telemetry (PostHog Phase 1, default OFF). Category and class name only:
     // never the error message or stack (see lib/telemetry/events.ts).
-    if (closedFailed) {
+    if (closedFailed && (await jobObservedClosed(supabase, tenantId, jobId, "FAILED"))) {
       // Concurrent, so a slow PostHog costs at most one timeout window (~1s), not two.
       await Promise.all([
         emitAiJobFinished({

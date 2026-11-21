@@ -1,10 +1,10 @@
 # PostHog telemetry — Fase 1 (server-only, default OFF)
 
-**Status: DRAFT, integrasi MATI.** Acuan desain: LINOE_POSTHOG_TELEMETRY_DESIGN_v1.0 (dokumen perencanaan Founder). Tidak ada env, secret, PostHog, database, atau production yang diubah oleh kode ini.
+**Status: DRAFT PR, integrasi MATI (default OFF). `posthog-node` 6.0.5 terpasang (exact) dan lockfile sinkron; typecheck, test, build lulus di Vercel Sandbox dan CI GitHub (bukti nyata, bukan mock shim).** Acuan desain: LINOE_POSTHOG_TELEMETRY_DESIGN_v1.0 (dokumen perencanaan Founder). Tidak ada env, secret, PostHog, database, atau production yang diubah oleh kode ini.
 
 ## Cakupan
 - Hanya `posthog-node`, hanya server. Tanpa `posthog-js`, autocapture, session replay, browser telemetry, atau Error Tracking native.
-- Dua event, keduanya dari `services/ai-jobs.ts` (`runAiJob`), hanya setelah baris job benar-benar tertutup (`closeAiJob` mengembalikan `true`):
+- Dua event, keduanya dari `services/ai-jobs.ts` (`runAiJob`), hanya setelah baris job benar-benar tertutup: `closeAiJob` sukses DAN pembacaan read-only (tenant + id) mengamati status akhir yang sesuai (lihat "Keakuratan event"):
   - `ai_job_finished`: `job_type`, `status` (`completed|failed`), `error_category?`, `model`, `duration_bucket`.
   - `app_error`: `surface`, `error_name`, `error_category`, `http_status?`, `route_group`.
 - Properti umum: `env`, `app_version`, `tenant_hash`.
@@ -25,9 +25,14 @@
 | Circuit breaker | 3 kegagalan beruntun, lalu lewati 5 menit (per instance) |
 | `proxy.ts` | Tidak boleh memakai telemetry (runtime Edge) |
 
-## Dependensi (belum terpasang di patch ini)
-`lib/telemetry/transport-posthog.ts` mengimpor `posthog-node`. Pasang dengan versi pasti sebelum build/CI:
-`npm install --save-exact posthog-node` lalu commit `package.json` + `package-lock.json`. Verifikasi di versi terpasang: nama opsi (`flushAt`, `flushInterval`, `fetchRetryCount`, `requestTimeout`, `disableGeoip`), `captureImmediate` menerima `uuid`, dan `$process_person_profile` berlaku untuk event `capture`.
+## Dependensi
+`posthog-node` 6.0.5 (versi pasti) di `package.json` + `package-lock.json`. Nama opsi `flushAt`, `flushInterval`, `fetchRetryCount`, `requestTimeout`, `disableGeoip` dan `captureImmediate` terbukti ada di tipe 6.0.5 (kompilasi `tsc`). Belum diuji dengan event nyata: perilaku `$process_person_profile` pada `capture` (verifikasi saat uji asap preview).
+
+## Keakuratan event (`closeAiJob`)
+`closeAiJob` mengembalikan `true` bila tidak ada write yang error; itu belum membuktikan ada baris yang berubah (UPDATE yang tersaring RLS atau tidak cocok mengubah 0 baris tanpa error). Mekanisme ledger TIDAK diubah (perilaku itu sudah ada sebelum PR ini). Agar event tidak melaporkan status yang tidak terjadi, telemetry hanya mengirim bila pembacaan read-only (`getAiJobProvenance`, tenant + id, batas 1 detik) mengamati status akhir yang diharapkan (`COMPLETED`/`FAILED`). Pembacaan itu tidak dilakukan sama sekali saat telemetry OFF. Bila baca gagal, lambat, atau tidak konklusif: event tidak dikirim (telemetry boleh kurang-hitung, tidak pernah salah-lapor). Temuan terpisah, di luar cakupan PR ini: update 0 baris pada jalur klien juga tidak memicu retry admin sehingga job bisa tertinggal `PROCESSING`; perlu audit regresi dan persetujuan sebelum ledger disentuh.
+
+## Batas waktu
+Satu anggaran waktu (~1 detik) mencakup pemuatan SDK lazy (`getTransport`) DAN pengiriman; rejection terlambat setelah timeout ditangani agar tidak menjadi unhandled. Verifikasi baca status juga dibatasi 1 detik.
 
 ## Mengaktifkan (hanya setelah persetujuan Founder, langkah terpisah)
 1. Putuskan region (D1) dan selesaikan tinjauan hukum + pembaruan `/privacy` + `docs/LEGAL_PSE_CHECKLIST.md`.

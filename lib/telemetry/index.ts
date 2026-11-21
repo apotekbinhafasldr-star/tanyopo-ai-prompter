@@ -38,6 +38,15 @@ function getTelemetry(): Telemetry {
   return cached;
 }
 
+/** True only when the integration is fully configured and ON. No side effects. */
+export function isTelemetryEnabled(): boolean {
+  try {
+    return readTelemetryConfig().enabled;
+  } catch {
+    return false;
+  }
+}
+
 /** Test hook: drop the cached instance so the next call re-reads the environment. */
 export function resetTelemetryForTests(loader?: (apiKey: string, host: string) => Promise<TelemetryTransport>): void {
   cached = null;

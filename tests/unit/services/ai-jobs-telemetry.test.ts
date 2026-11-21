@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 // Provider, database and telemetry are fakes: no SDK, no network, no real Supabase.
-const { routeMock, adminMock, jobFinishedMock, appErrorMock } = vi.hoisted(() => ({
+const { routeMock, adminMock, jobFinishedMock, appErrorMock, enabledMock } = vi.hoisted(() => ({
+  enabledMock: vi.fn(() => true),
   routeMock: vi.fn(),
   adminMock: vi.fn(),
   jobFinishedMock: vi.fn(async (_input: unknown) => {}),
@@ -16,22 +17,43 @@ vi.mock("@/lib/ai/router", async () => {
   return { ...actual, routeStructuredGeneration: routeMock, isAiRoutingConfigured: () => true };
 });
 vi.mock("@/services/billing", () => ({ getOrCreateSubscription: vi.fn(async () => ({})) }));
-vi.mock("@/lib/telemetry", () => ({ emitAiJobFinished: jobFinishedMock, emitAppError: appErrorMock }));
+vi.mock("@/lib/telemetry", () => ({
+  emitAiJobFinished: jobFinishedMock,
+  emitAppError: appErrorMock,
+  isTelemetryEnabled: enabledMock,
+}));
 
 import { runAiJob } from "@/services/ai-jobs";
 import { AIProviderError } from "@/lib/ai/provider";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
 
-function userClient(eqResult: () => Promise<unknown> = async () => ({ error: null })) {
+/**
+ * Fake client. `update().eq()` is the ledger write; `select().eq().eq().maybeSingle()`
+ * is the read-only lookup. By default the lookup reflects what was written, like a
+ * real row; `observe` overrides it to simulate zero-row updates or a hung read.
+ */
+function userClient(
+  eqResult: () => Promise<unknown> = async () => ({ error: null }),
+  observe?: (written: string | null) => Promise<unknown>,
+) {
+  let written: string | null = null;
   const eq = vi.fn(eqResult);
-  const update = vi.fn(() => ({ eq }));
+  const update = vi.fn((patch: { status?: string }) => {
+    written = patch.status ?? null;
+    return { eq };
+  });
+  const maybeSingle = vi.fn(() =>
+    observe ? observe(written) : Promise.resolve({ data: written ? { status: written } : null, error: null }),
+  );
+  const select = vi.fn(() => ({ eq: () => ({ eq: () => ({ maybeSingle }) }) }));
   const rpc = vi.fn(async () => ({
     data: [{ job_id: "job-1", allowed: true, reason: null, used_count: 1, allowance: 30 }],
     error: null,
   }));
-  return { rpc, from: vi.fn(() => ({ update })), update, eq } as unknown as SupabaseClient<Database> & {
+  return { rpc, from: vi.fn(() => ({ update, select })), update, eq, select } as unknown as SupabaseClient<Database> & {
     update: typeof update;
+    select: typeof select;
   };
 }
 
@@ -51,6 +73,8 @@ beforeEach(() => {
   routeMock.mockReset();
   adminMock.mockReset();
   adminMock.mockReturnValue(null);
+  enabledMock.mockReset();
+  enabledMock.mockReturnValue(true);
   jobFinishedMock.mockClear();
   appErrorMock.mockClear();
   vi.spyOn(console, "error").mockImplementation(() => {});
@@ -97,5 +121,53 @@ describe("runAiJob telemetry hook", () => {
     expect(result.ok).toBe(false);
     expect(jobFinishedMock).not.toHaveBeenCalled();
     expect(routeMock).not.toHaveBeenCalled();
+  });
+
+  it("emits nothing when the UPDATE reported no error but changed zero rows (job still PROCESSING)", async () => {
+    routeMock.mockResolvedValue(GOOD);
+    const supabase = userClient(undefined, async () => ({ data: { status: "PROCESSING" }, error: null }));
+    const result = await runAiJob(params(supabase));
+    expect(result.ok).toBe(true); // the user result is unaffected
+    expect(jobFinishedMock).not.toHaveBeenCalled();
+    expect(supabase.update).toHaveBeenCalledTimes(1); // ledger mechanism unchanged: no extra write
+  });
+
+  it("emits nothing when the verification read finds no row or errors", async () => {
+    routeMock.mockResolvedValue(GOOD);
+    await runAiJob(params(userClient(undefined, async () => ({ data: null, error: null }))));
+    await runAiJob(params(userClient(undefined, async () => ({ data: null, error: { message: "x" } }))));
+    await runAiJob(params(userClient(undefined, async () => { throw new Error("boom"); })));
+    expect(jobFinishedMock).not.toHaveBeenCalled();
+  });
+
+  it("a hung verification read cannot hold the AI job beyond ~1s and emits nothing", async () => {
+    vi.useFakeTimers();
+    try {
+      routeMock.mockResolvedValue(GOOD);
+      const pending = runAiJob(params(userClient(undefined, () => new Promise(() => {}))));
+      await vi.advanceTimersByTimeAsync(1100);
+      const result = await pending;
+      expect(result.ok).toBe(true);
+      expect(jobFinishedMock).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("failed job: emits only if FAILED is observed; zero-row update emits nothing", async () => {
+    routeMock.mockRejectedValue(new AIProviderError("x", "RATE_LIMIT", 429));
+    await runAiJob(params(userClient(undefined, async () => ({ data: { status: "PROCESSING" }, error: null }))));
+    expect(jobFinishedMock).not.toHaveBeenCalled();
+    expect(appErrorMock).not.toHaveBeenCalled();
+  });
+
+  it("telemetry OFF: no verification read and no event, job result unchanged", async () => {
+    enabledMock.mockReturnValue(false);
+    routeMock.mockResolvedValue(GOOD);
+    const supabase = userClient();
+    const result = await runAiJob(params(supabase));
+    expect(result.ok).toBe(true);
+    expect(supabase.select).not.toHaveBeenCalled();
+    expect(jobFinishedMock).not.toHaveBeenCalled();
   });
 });

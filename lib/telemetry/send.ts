@@ -94,22 +94,25 @@ export function createTelemetry(opts: TelemetryOptions): Telemetry {
         if (seen.has(key)) return "skipped";
         remember(key);
 
-        const transport = await opts.getTransport();
+        // ONE time budget covers lazy SDK load (getTransport) AND the send, so
+        // nothing here can hold the caller (an AI job) beyond timeoutMs.
+        const work = (async () => {
+          const transport = await opts.getTransport();
+          await transport.send({
+            distinctId,
+            event: validated.value.event,
+            properties: { ...validated.value.properties, $process_person_profile: false },
+            uuid: uuidV5(key),
+            disableGeoip: true,
+          });
+        })();
+        work.catch(() => {}); // a late rejection after the timeout must not become unhandled
         let timer: ReturnType<typeof setTimeout> | undefined;
         const timeout = new Promise<never>((_, reject) => {
           timer = setTimeout(() => reject(new Error("telemetry_timeout")), timeoutMs);
         });
         try {
-          await Promise.race([
-            transport.send({
-              distinctId,
-              event: validated.value.event,
-              properties: { ...validated.value.properties, $process_person_profile: false },
-              uuid: uuidV5(key),
-              disableGeoip: true,
-            }),
-            timeout,
-          ]);
+          await Promise.race([work, timeout]);
         } finally {
           if (timer) clearTimeout(timer);
         }

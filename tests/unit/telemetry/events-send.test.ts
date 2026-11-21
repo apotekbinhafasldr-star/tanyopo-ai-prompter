@@ -164,4 +164,49 @@ describe("telemetry sender", () => {
     expect(await t.emit("ai_job_finished", GOOD_JOB, HASH, "e")).toBe("failed");
     expect(send).toHaveBeenCalledTimes(4);
   });
+
+  it("a transport loader that never resolves is bounded by the same timeout (cannot hold the caller)", async () => {
+    const t = createTelemetry({
+      config: ON,
+      getTransport: () => new Promise<TelemetryTransport>(() => {}),
+      timeoutMs: 50,
+      log: () => {},
+    });
+    const started = Date.now();
+    expect(await t.emit("ai_job_finished", GOOD_JOB, HASH, "job-hang")).toBe("failed");
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+
+  it("slow loader + slow send share ONE budget (not two)", async () => {
+    const slow = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+    const t = createTelemetry({
+      config: ON,
+      getTransport: async () => {
+        await slow(60);
+        return { send: async () => slow(60) };
+      },
+      timeoutMs: 80,
+      log: () => {},
+    });
+    // Two separate budgets would have let this succeed at ~120ms; one shared budget fails it.
+    expect(await t.emit("ai_job_finished", GOOD_JOB, HASH, "job-slow")).toBe("failed");
+  });
+
+  it("a loader that rejects after the timeout does not cause an unhandled rejection", async () => {
+    const unhandled = vi.fn();
+    process.on("unhandledRejection", unhandled);
+    try {
+      const t = createTelemetry({
+        config: ON,
+        getTransport: () => new Promise<TelemetryTransport>((_, rej) => setTimeout(() => rej(new Error("late")), 80)),
+        timeoutMs: 20,
+        log: () => {},
+      });
+      expect(await t.emit("ai_job_finished", GOOD_JOB, HASH, "job-late")).toBe("failed");
+      await new Promise((r) => setTimeout(r, 150));
+      expect(unhandled).not.toHaveBeenCalled();
+    } finally {
+      process.off("unhandledRejection", unhandled);
+    }
+  });
 });
