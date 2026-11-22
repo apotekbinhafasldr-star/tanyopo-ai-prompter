@@ -289,13 +289,24 @@ describe("legal layout (scoped header, landing untouched)", () => {
 describe("remediation guards", () => {
   const ALL = [PrivacyPage, TermsPage, DataDeletionPage];
 
-  it("publishes no effective date until the Founder confirms one", () => {
-    expect(LEGAL.effectiveDate).toBeUndefined();
+  it("shows only the Founder-approved effective date (22 November 2026), no other dates", () => {
+    expect(LEGAL.effectiveDate).toBe("22 November 2026");
     for (const Page of ALL) {
       const text = pageText(Page);
-      expect(text).not.toMatch(/Berlaku sejak/);
-      expect(text).not.toMatch(/(Januari|Februari|Maret|April|Mei|Juni|Juli|Agustus|September|Oktober|November|Desember)\s+\d{4}|\d{1,2}\/\d{1,2}\/\d{4}/i);
+      expect(text).toMatch(/Berlaku sejak: 22 November 2026/);
+      const stripped = text.replace(/22 November 2026/g, "");
+      expect(stripped).not.toMatch(/(Januari|Februari|Maret|April|Mei|Juni|Juli|Agustus|September|Oktober|November|Desember)\s+\d{4}|\d{1,2}\/\d{1,2}\/\d{4}/i);
     }
+  });
+
+  it("privacy states cross-border processing without claiming a server location or legal compliance, and no PostHog", () => {
+    const text = pageText(PrivacyPage).replace(/\s+/g, " ");
+    expect(text).toMatch(/di luar wilayah Indonesia/);
+    expect(text).toMatch(/menunggu tinjauan hukum/);
+    expect(text).toMatch(/dalam peninjauan/);
+    expect(text).not.toMatch(/PostHog/i);
+    expect(text).not.toMatch(/(server|data center|pusat data)\s+(di|berlokasi)\s+(Indonesia|Singapura|Amerika|Eropa|Jerman)/i);
+    expect(text).not.toMatch(/(sesuai|patuh|memenuhi)\s+UU\s+PDP|GDPR/i);
   });
 
   it("shows the Founder-approved location", () => {

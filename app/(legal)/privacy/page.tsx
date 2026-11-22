@@ -112,6 +112,12 @@ export default function PrivacyPage() {
               Kami memakai Netlify (hosting aplikasi), Supabase (basis data, autentikasi, dan penyimpanan berkas), serta
               layanan pengiriman email. Data dapat diproses di sistem penyedia tersebut.
             </>,
+            <>
+              Penyedia di atas adalah perusahaan di luar Indonesia, sehingga data Anda dapat diproses atau disimpan di luar
+              wilayah Indonesia. Kami belum memverifikasi dan tidak menyatakan lokasi server tertentu atau tingkat
+              perlindungan data di negara tujuan, dan kami tidak menyatakan bahwa pemrosesan ini telah memenuhi ketentuan
+              hukum tertentu. Bagian ini masih menunggu tinjauan hukum.
+            </>,
             <>Kami tidak dapat menjamin bahwa data yang sudah diteruskan ke pihak ketiga dihapus dari sistem mereka.</>,
             <>
               Bila pembayaran daring tersedia bagi Anda, data transaksi dapat diproses melalui penyedia pembayaran.
@@ -165,8 +171,9 @@ export default function PrivacyPage() {
 
       <LegalSection id="penyimpanan" title="8. Penyimpanan data">
         <p>
-          Kami belum menetapkan jangka retensi tetap. Saat ini data disimpan selama workspace aktif dan sampai ada
-          permintaan penghapusan yang kami proses. Setelah penghapusan, sebagian catatan (misalnya transaksi, invoice, jejak
+          Kami belum menetapkan jangka retensi tetap. Kebijakan retensi masih dalam peninjauan dan akan ditetapkan serta
+          diumumkan di halaman ini sebelum LINOE dibuka bagi tenant eksternal. Saat ini data disimpan selama workspace
+          aktif dan sampai ada permintaan penghapusan yang kami proses. Setelah penghapusan, sebagian catatan (misalnya transaksi, invoice, jejak
           keamanan, atau catatan pemakaian) dapat dipertahankan bila diperlukan untuk kewajiban hukum, keuangan, atau
           keamanan yang sah. Kami tidak menjanjikan bahwa semua data dapat dihapus atau dianonimkan secara otomatis;
           penghapusan dilakukan secara manual. Bila

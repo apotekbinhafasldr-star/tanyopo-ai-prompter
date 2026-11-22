@@ -16,11 +16,10 @@ export const LEGAL = {
   contactEmail: "tanyopofuturetechnology@gmail.com",
   product: "LINOE by Tanyopo",
   /**
-   * "Berlaku sejak" date. Intentionally unset: set it to the real date on
-   * which the Founder approves publication. While undefined, no effective
-   * date is rendered.
+   * "Berlaku sejak" date, set to the date the Founder approved this text (22 Nov 2026). It does NOT mean the
+   * text is already published: it takes effect for users only once this change is merged and deployed.
    */
-  effectiveDate: undefined as string | undefined,
+  effectiveDate: "22 November 2026" as string | undefined,
 } as const;
 
 export const LEGAL_LINKS = [
