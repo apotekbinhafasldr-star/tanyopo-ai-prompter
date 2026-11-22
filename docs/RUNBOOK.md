@@ -39,7 +39,7 @@ Gejala: pelanggan sudah bayar tapi paket belum aktif, atau status tertahan "pend
 
 Kontak ditetapkan oleh Founder (jangan simpan sandi/kunci di sini).
 
-**Status (22 Nov 2026):** belum ada kontak eskalasi independen. Level 1 dan Level 2 memakai satu email perusahaan yang sama, sehingga bila email itu tidak terpantau tidak ada jalur cadangan. Tunjuk operator cadangan (orang atau email berbeda) sebelum mengundang tenant eksternal, lalu perbarui tabel ini.
+**Keputusan Founder (22 Nov 2026):** email perusahaan di bawah ini menjadi kontak darurat utama LINOE. Belum ada kontak eskalasi independen: Level 1 dan Level 2 memakai satu email yang sama, sehingga email tunggal ini adalah single point of failure (bila tidak terpantau, tidak ada jalur cadangan). Operator cadangan (orang atau email berbeda) harus ditunjuk sebelum mengundang tenant eksternal, lalu tabel ini diperbarui.
 
 | Level | Siapa | Kapan | Kontak |
 |---|---|---|---|
