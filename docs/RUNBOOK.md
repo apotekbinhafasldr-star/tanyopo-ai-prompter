@@ -37,12 +37,14 @@ Gejala: pelanggan sudah bayar tapi paket belum aktif, atau status tertahan "pend
 
 ## 4. Kontak dan urutan eskalasi
 
-Isi kolom kontak sekali oleh Founder (jangan simpan sandi/kunci di sini).
+Kontak ditetapkan oleh Founder (jangan simpan sandi/kunci di sini).
+
+**Status (22 Nov 2026):** belum ada kontak eskalasi independen. Level 1 dan Level 2 memakai satu email perusahaan yang sama, sehingga bila email itu tidak terpantau tidak ada jalur cadangan. Tunjuk operator cadangan (orang atau email berbeda) sebelum mengundang tenant eksternal, lalu perbarui tabel ini.
 
 | Level | Siapa | Kapan | Kontak |
 |---|---|---|---|
-| 1 | Operator/pemantau | Notifikasi uptime atau laporan pelanggan | (isi) |
-| 2 | Founder LINOE | Level 1 tidak selesai 15 menit, atau menyangkut uang/data | (isi) |
+| 1 | Operator/pemantau | Notifikasi uptime atau laporan pelanggan | tanyopofuturetechnology@gmail.com (sementara; pemantau memakai email perusahaan) |
+| 2 | Founder LINOE | Level 1 tidak selesai 15 menit, atau menyangkut uang/data | tanyopofuturetechnology@gmail.com (sementara; sampai operator cadangan ditunjuk) |
 | 3 | Dukungan vendor | Netlify, Supabase, Midtrans sesuai sumber masalah | Dashboard masing-masing -> Support |
 
 Urutan: (1) cek `/api/health`, (2) rollback bila baru deploy, (3) cek Supabase status, (4) eskalasi ke Founder, (5) tiket vendor.
