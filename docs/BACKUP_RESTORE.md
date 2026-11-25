@@ -4,6 +4,10 @@ Semua langkah bisa dikerjakan dari HP: Chrome Android + dashboard web Supabase, 
 
 **Status dokumen: DRAFT, belum pernah diuji.** Prosedur ini disusun dari dokumentasi resmi (lihat bagian 8) dan belum dicoba pada project nyata. Uji restore pertama dicatat di bagian 9. Nama menu dashboard bisa berubah; bila beda, ikuti label yang tampil dan perbarui dokumen ini.
 
+Dokumen terkait: [RUNBOOK.md](RUNBOOK.md) (operasional harian; **bagian 4 adalah satu-satunya sumber kontak eskalasi**), [legal/KEBIJAKAN_RETENSI.md](legal/KEBIJAKAN_RETENSI.md) (retensi dan penghapusan data), dan [legal/SOP_INSIDEN.md](legal/SOP_INSIDEN.md) (insiden data pribadi, lewat RUNBOOK bagian 4).
+
+**Catatan retensi (baca sebelum restore):** data yang sudah dihapus (termasuk atas permintaan subjek data) bisa masih ada di cadangan sampai cadangan tersebut berganti/kedaluwarsa. Karena itu restore tidak boleh dianggap memulihkan data yang sah; lihat prosedur pasca-restore di bagian 3.
+
 ## 0. Larangan mutlak: proyek `umkmpro-ai`
 
 Proyek Supabase **`umkmpro-ai` adalah database produksi yang dipakai bersama LINOE, PUBLOE, MITAPENG, dan UMKMpro**. Satu kesalahan di sana berdampak ke semua produk.
@@ -35,12 +39,15 @@ Langkah (Chrome Android; bila layar sempit, aktifkan "Situs desktop" di menu Chr
 | Hal yang dicek | Hasil (isi saat memeriksa) |
 |---|---|
 | Nama project dan region | (isi) |
-| Paket organisasi (Billing) | (verifikasi di dashboard) |
+| Paket organisasi (Billing) | UNKNOWN / diisi Founder dari dashboard |
 | Backup harian tersedia? Tanggal backup terbaru | (isi) |
-| Berapa hari backup tersimpan | (verifikasi di dashboard) |
-| PITR aktif? Rentang waktu pemulihan (awal-akhir) | (verifikasi di dashboard) |
-| Physical backups aktif? (syarat "Restore to a New Project") | (verifikasi di dashboard) |
+| Berapa hari backup tersimpan (retensi) | UNKNOWN / diisi Founder dari dashboard |
+| PITR aktif? Rentang waktu pemulihan (awal-akhir) | UNKNOWN / diisi Founder dari dashboard |
+| Physical backups aktif? (syarat "Restore to a New Project") | UNKNOWN / diisi Founder dari dashboard |
 | Tanggal dan jam pemeriksaan, nama pemeriksa | (isi) |
+| Status verifikasi | UNKNOWN. Belum ada bukti terverifikasi. Isi kelas bukti di bawah |
+
+Kelas bukti untuk baris "Status verifikasi" (pilih satu per nilai yang diisi): **A** = terlihat langsung di dashboard dan dicatat dengan tanggal/pemeriksa; **B** = hanya dari dokumentasi vendor (bukan konfigurasi project ini); **C** = pernyataan lisan/tertulis tanpa bukti dashboard; **UNKNOWN** = belum diperiksa. Nilai berkelas B, C, atau UNKNOWN tidak boleh dipakai sebagai dasar janji kepada pelanggan.
 
 5. Bila daftar backup kosong atau fitur tidak tersedia di paket yang dipakai: hentikan, catat, dan bawa ke Founder (bagian 2). Jangan mengubah paket atau mengaktifkan add-on atas inisiatif sendiri.
 
@@ -58,10 +65,11 @@ Kolom di bawah **sengaja kosong**. Dokumen ini tidak menentukan angkanya. Setela
 
 | Komponen | RPO (maks. data hilang) | RTO (maks. waktu pulih) | Dicakup oleh | Diputuskan oleh / tanggal |
 |---|---|---|---|---|
-| Database (auth, billing, data tenant) | (isi Founder) | (isi Founder) | Backup/PITR Supabase | (isi) |
-| File Storage (media produk, dll.) | (isi Founder) | (isi Founder) | BUKAN backup database; rencana terpisah | (isi) |
-| Kode aplikasi | n/a (ada di Git) | (isi Founder) | Rollback deploy Netlify (bagian 5) | (isi) |
-| Env/kunci (Netlify, Supabase) | n/a | (isi Founder) | Catatan terpisah milik Founder (jangan ditaruh di repo) | (isi) |
+| Database (auth, billing, data tenant) | UNKNOWN / diisi Founder | UNKNOWN / diisi Founder | Backup/PITR Supabase | (isi) |
+| File Storage (media produk, dll.) | UNKNOWN / diisi Founder | UNKNOWN / diisi Founder | BUKAN backup database; rencana terpisah | (isi) |
+| Kode aplikasi | n/a (ada di Git) | UNKNOWN / diisi Founder | Rollback deploy Netlify (bagian 5) | (isi) |
+| Env/kunci (Netlify, Supabase) | n/a | UNKNOWN / diisi Founder | Catatan terpisah milik Founder (jangan ditaruh di repo) | (isi) |
+| Status verifikasi | UNKNOWN (kelas bukti: lihat bagian 1) | UNKNOWN (kelas bukti: lihat bagian 1) | RTO nyata baru ada setelah uji restore di bagian 9; belum pernah dilakukan | (isi) |
 
 ## 3. Restore ke project BARU (bukan menimpa produksi)
 
@@ -84,6 +92,15 @@ Langkah:
 6. **Verifikasi** dengan checklist bagian 4.
 7. **Pembersihan.** Setelah hasil dicatat, hapus project uji: **Project Settings** -> **General** -> **Delete project** (jalur menu ini belum dicocokkan dengan dokumentasi; ikuti label yang tampil; pada project BARU saja, ketik ulang namanya persis). Periksa dua kali nama sebelum konfirmasi; penghapusan permanen dan tidak bisa dibatalkan. Jangan pernah menghapus `umkmpro-ai`.
 8. Isi log di bagian 9.
+
+### Prosedur pasca-restore: permintaan hapus data subjek
+
+Cadangan menyimpan data sebagaimana adanya pada titik waktunya, sehingga data yang sudah dihapus atas permintaan subjek data bisa muncul kembali setelah restore. Restore tidak boleh memulihkan data tersebut tanpa penghapusan ulang. Setelah restore (uji maupun darurat) dan sebelum project hasil restore dipakai oleh siapa pun atau dihubungkan ke aplikasi:
+
+1. Minta Founder membuka **register permintaan hapus** (lokasi dan format register ditetapkan di [legal/KEBIJAKAN_RETENSI.md](legal/KEBIJAKAN_RETENSI.md); bila belum ada, catat sebagai temuan dan bawa ke Founder).
+2. Bandingkan permintaan hapus yang tercatat dengan tanggal titik pulih: semua permintaan yang selesai **setelah** titik pulih berarti datanya kembali ada di hasil restore.
+3. Jalankan ulang penghapusan untuk setiap permintaan itu mengikuti prosedur penghapusan di kebijakan retensi, lalu catat bahwa penghapusan ulang selesai. Perubahan data di project hasil restore (apalagi produksi) hanya atas persetujuan Founder.
+4. Catat hasilnya di log bagian 9.
 
 Opsional dan butuh persetujuan terpisah: menghubungkan situs Netlify **sandbox** ke project hasil restore untuk uji fungsional. Itu mengubah env Netlify sandbox; jangan lakukan tanpa persetujuan Founder, dan jangan memakai kunci produksi.
 
@@ -124,17 +141,11 @@ Hal yang perlu diwaspadai (verifikasi di dashboard, jangan diasumsikan):
 - Scheduled functions (`payment-pending-sweep`, `payment-alert-notify`) hanya berjalan pada deploy produksi yang terbit; setelah rollback, versi yang berjalan adalah versi dari deploy yang dipublish.
 - Kode lama mungkin tidak cocok dengan skema database yang sudah dimigrasi. Bila migrasi baru dilakukan bersamaan dengan deploy, rencanakan rollback sebagai paket sebelum rilis, bukan saat insiden.
 
-## 6. Kontak eskalasi (placeholder)
+## 6. Kontak eskalasi (merujuk ke RUNBOOK)
 
-Isi sekali oleh Founder. Jangan menyimpan sandi, kunci, atau token di sini.
+Daftar kontak dan urutan eskalasi **hanya disimpan di [RUNBOOK.md](RUNBOOK.md) bagian 4** (sumber tunggal). Dokumen ini sengaja tidak menyimpan kontak sendiri agar tidak bertentangan. Perubahan kontak dilakukan di RUNBOOK bagian 4, bukan di sini. Jangan menyimpan sandi, kunci, atau token di dokumen mana pun di repo.
 
-| Level | Peran | Kapan dihubungi | Nama | Kontak (HP/email) |
-|---|---|---|---|---|
-| 1 | Operator/pemantau | Notifikasi uptime atau laporan pelanggan | (isi) | (isi) |
-| 2 | Founder LINOE | Level 1 tidak selesai dalam 15 menit; menyangkut uang/data | (isi) | (isi) |
-| 3 | Pemilik akun Supabase (bila beda orang) | Perlu tindakan di dashboard Supabase | (isi) | (isi) |
-| 4 | Pemilik akun Netlify (bila beda orang) | Perlu rollback/ubah env | (isi) | (isi) |
-| 5 | Dukungan vendor | Masalah di sisi Supabase/Netlify | Dashboard masing-masing -> Support | tautan tiket (isi) |
+Catatan yang diakui di RUNBOOK bagian 4: kontak tunggal adalah single point of failure, dan kontak cadangan masih [DIISI FOUNDER]. Insiden yang menyangkut data pribadi: ikuti rujukan di RUNBOOK bagian 4 ke [legal/SOP_INSIDEN.md](legal/SOP_INSIDEN.md).
 
 Pembagian wewenang selama insiden:
 - Rollback kode (bagian 5): operator atas persetujuan Founder.
@@ -147,7 +158,8 @@ Pembagian wewenang selama insiden:
 2. Apakah paket Supabase yang dipakai sudah cukup untuk RPO tersebut (bagian 1).
 3. Rencana backup file Storage (di luar backup database).
 4. Izin akses baca untuk baseline produksi (bagian 4) dan izin memulai restore uji dari `umkmpro-ai` (bagian 3, langkah 1).
-5. Kontak eskalasi (bagian 6) dan jadwal uji restore pertama (bagian 9).
+5. Kontak eskalasi dan kontak cadangan (di [RUNBOOK.md](RUNBOOK.md) bagian 4; bagian 6 hanya merujuk) dan jadwal uji restore pertama (bagian 9).
+6. Lokasi register permintaan hapus dan kebijakan retensi cadangan ([legal/KEBIJAKAN_RETENSI.md](legal/KEBIJAKAN_RETENSI.md)), dipakai pada prosedur pasca-restore (bagian 3).
 
 ## 8. Sumber dokumentasi resmi (diakses 2026-11-11)
 

@@ -6,8 +6,8 @@ import { OG_IMAGE } from "@/lib/seo/og";
  * /refund, /data-deletion).
  *
  * Only facts the Founder supplied, or that the code demonstrably does, live
- * here. Do not add retention periods, response-time promises (SLA), certifications or server locations until they are decided and
- * verified.
+ * here. Do not add operational retention periods, response-time promises (SLA), certifications, server locations,
+ * or a formal PDP officer designation until they are decided and verified.
  */
 export const LEGAL = {
   operator: "PT Tanyopo Future Technology",
@@ -16,10 +16,11 @@ export const LEGAL = {
   contactEmail: "tanyopofuturetechnology@gmail.com",
   product: "LINOE by Tanyopo",
   /**
-   * "Berlaku sejak" date, set to the date the Founder approved this text (22 Nov 2026). It does NOT mean the
-   * text is already published: it takes effect for users only once this change is merged and deployed.
+   * "Berlaku sejak" date, set to the date of the Paket 1 draft (25 Nov 2026). The Founder confirms the final
+   * date when merging. It does NOT mean the text is already published: it takes effect for users only once this
+   * change is merged and deployed.
    */
-  effectiveDate: "22 November 2026" as string | undefined,
+  effectiveDate: "25 November 2026" as string | undefined,
 } as const;
 
 export const LEGAL_LINKS = [

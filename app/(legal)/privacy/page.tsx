@@ -19,6 +19,7 @@ const TOC = [
   { id: "keamanan", title: "Keamanan" },
   { id: "penyimpanan", title: "Penyimpanan data" },
   { id: "hak", title: "Hak Anda" },
+  { id: "narahubung", title: "Narahubung Pelindungan Data Pribadi" },
   { id: "perubahan", title: "Perubahan kebijakan" },
   { id: "kontak", title: "Kontak" },
 ];
@@ -114,7 +115,8 @@ export default function PrivacyPage() {
             </>,
             <>
               Penyedia di atas adalah perusahaan di luar Indonesia, sehingga data Anda dapat diproses atau disimpan di luar
-              wilayah Indonesia. Kami belum memverifikasi dan tidak menyatakan lokasi server tertentu atau tingkat
+              wilayah Indonesia. Untuk pengiriman tersebut kami bergantung pada ketentuan pemrosesan masing-masing
+              penyedia. Kami belum memverifikasi dan tidak menyatakan lokasi server tertentu atau tingkat
               perlindungan data di negara tujuan, dan kami tidak menyatakan bahwa pemrosesan ini telah memenuhi ketentuan
               hukum tertentu. Bagian ini masih menunggu tinjauan hukum.
             </>,
@@ -131,8 +133,8 @@ export default function PrivacyPage() {
         <p>
           Koneksi dibuat hanya atas tindakan Owner dan dapat diputus oleh Owner dari halaman Koneksi. Izin yang kami
           minta saat ini: Meta (<code>ads_management</code>, <code>ads_read</code>, <code>business_management</code>,{" "}
-          <code>pages_show_list</code>); X (<code>ads.read</code>, <code>ads.write</code>, <code>offline.access</code>
-          ); TikTok (izin yang tampil pada layar persetujuan TikTok). Data dari platform digunakan untuk menyediakan
+          <code>pages_show_list</code>); X (<code>tweet.read</code>, <code>tweet.write</code>, <code>users.read</code>,{" "}
+          <code>media.write</code>, <code>offline.access</code>); TikTok (izin yang tampil pada layar persetujuan TikTok). Data dari platform digunakan untuk menyediakan
           fitur LINOE yang Anda jalankan.
         </p>
         <p>
@@ -171,14 +173,17 @@ export default function PrivacyPage() {
 
       <LegalSection id="penyimpanan" title="8. Penyimpanan data">
         <p>
-          Kami belum menetapkan jangka retensi tetap. Kebijakan retensi masih dalam peninjauan dan akan ditetapkan serta
-          diumumkan di halaman ini sebelum LINOE dibuka bagi tenant eksternal. Saat ini data disimpan selama workspace
-          aktif dan sampai ada permintaan penghapusan yang kami proses. Setelah penghapusan, sebagian catatan (misalnya transaksi, invoice, jejak
-          keamanan, atau catatan pemakaian) dapat dipertahankan bila diperlukan untuk kewajiban hukum, keuangan, atau
-          keamanan yang sah. Kami tidak menjanjikan bahwa semua data dapat dihapus atau dianonimkan secara otomatis;
-          penghapusan dilakukan secara manual. Bila
-          kami membuat cadangan, cadangan itu dapat masih memuat data yang sudah dihapus sampai cadangan tersebut
-          diganti.
+          Dokumen keuangan dan pajak serta catatan transaksi (termasuk invoice) disimpan sesuai kewajiban hukum yang
+          berlaku, umumnya 10 tahun. Kami belum menetapkan jangka retensi tetap untuk data operasional lain, misalnya
+          data workspace, hasil AI, dan catatan aktivitas. Kebijakan retensi untuk data tersebut masih dalam peninjauan
+          dan akan ditetapkan serta diumumkan di halaman ini sebelum LINOE dibuka bagi tenant eksternal. Saat ini data
+          operasional disimpan selama workspace aktif dan sampai ada permintaan penghapusan yang kami proses.
+        </p>
+        <p>
+          Setelah penghapusan, sebagian catatan (misalnya transaksi, invoice, jejak keamanan, atau catatan pemakaian)
+          dapat dipertahankan bila diperlukan untuk kewajiban hukum, keuangan, atau keamanan yang sah. Penghapusan
+          dilakukan secara manual, dan kami tidak menjanjikan bahwa semua data dapat dihapus atau dianonimkan. Bila kami
+          membuat cadangan, cadangan itu dapat masih memuat data yang sudah dihapus sampai cadangan tersebut diganti.
         </p>
       </LegalSection>
 
@@ -187,8 +192,9 @@ export default function PrivacyPage() {
           Anda dapat mengajukan permintaan akses, koreksi, atau penghapusan data pribadi, atau menarik persetujuan yang
           pernah diberikan, melalui <a href={`mailto:${LEGAL.contactEmail}`}>{LEGAL.contactEmail}</a>. Hak-hak ini dan
           tenggat penanganannya tunduk pada hukum yang berlaku di Indonesia, dan kami menanggapi permintaan sesuai
-          ketentuan tersebut. Kami dapat menolak atau membatasi sebagian permintaan bila ada alasan hukum, dengan
-          penjelasan. Tata cara penghapusan data ada di{" "}
+          ketentuan tersebut. Permintaan diajukan melalui email; LINOE belum menyediakan ekspor data mandiri atau
+          tombol hapus akun otomatis. Kami dapat menolak atau membatasi sebagian permintaan bila ada alasan hukum,
+          dengan penjelasan. Tata cara penghapusan data ada di{" "}
           <Link href="/data-deletion" className="font-medium text-brand hover:underline">
             Penghapusan Data
           </Link>
@@ -196,14 +202,22 @@ export default function PrivacyPage() {
         </p>
       </LegalSection>
 
-      <LegalSection id="perubahan" title="10. Perubahan kebijakan">
+      <LegalSection id="narahubung" title="10. Narahubung Pelindungan Data Pribadi">
+        <p>
+          Kami menunjuk seorang Penanggung Jawab Pelindungan Data Pribadi (sementara) sebagai narahubung untuk
+          pertanyaan dan permintaan terkait data pribadi. Penunjukan ini bersifat sementara. Narahubung dihubungi
+          melalui <a href={`mailto:${LEGAL.contactEmail}`}>{LEGAL.contactEmail}</a>.
+        </p>
+      </LegalSection>
+
+      <LegalSection id="perubahan" title="11. Perubahan kebijakan">
         <p>
           Perubahan kebijakan berlaku setelah diumumkan di halaman ini. Perubahan penting juga diberitahukan melalui
           aplikasi atau email.
         </p>
       </LegalSection>
 
-      <LegalSection id="kontak" title="11. Kontak">
+      <LegalSection id="kontak" title="12. Kontak">
         <p>
           {LEGAL.operator}, <a href={`mailto:${LEGAL.contactEmail}`}>{LEGAL.contactEmail}</a>.
         </p>

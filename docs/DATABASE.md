@@ -75,9 +75,18 @@ RLS: same pattern as `prompter_brand_profiles` (tenant `SELECT`/`INSERT`, `owner
 
 ### `prompter_audit_logs`
 
-Append-only. `tenant_id`, `actor_user_id`, `action`, `resource_type`, `resource_id`, `before_data`/`after_data` (JSONB), `context` (JSONB), `created_at`. Indexed on `(tenant_id, created_at desc)` and `(resource_type, resource_id)`.
+Application-level append-only (see the guarantees and limits below). `tenant_id`, `actor_user_id`, `action`, `resource_type`, `resource_id`, `before_data`/`after_data` (JSONB), `context` (JSONB), `created_at`. Indexed on `(tenant_id, created_at desc)` and `(resource_type, resource_id)`.
 
-RLS: tenant members can `SELECT` and `INSERT` (as themselves — `actor_user_id` must be `auth.uid()` or `null`). **No `UPDATE`/`DELETE` policy exists on purpose** — rows are immutable once written.
+RLS: tenant members can `SELECT` and `INSERT` (as themselves — `actor_user_id` must be `auth.uid()` or `null`). **No `UPDATE`/`DELETE` policy exists on purpose**, so app users (`anon`/`authenticated`) cannot change or delete rows through the API.
+
+What this does **not** guarantee (this table is not tamper-proof and must not be described as immutable):
+
+- `service_role` bypasses RLS and can `UPDATE`/`DELETE` rows; the table owner and database superusers can as well.
+- There is **no trigger** that rejects `UPDATE`/`DELETE`/`TRUNCATE` on this table (unlike `finance_audit_logs`, which has one — migration `20261027100000`).
+- Rows are deleted together with their tenant (`tenant_id ... on delete cascade`).
+- `context` is free-form JSONB and may contain personal data; there is no automatic anonymisation tool.
+
+Status: a guard trigger for this table is a separate database package and **has not been done yet**. The comment in the old migration (`20260829080127`) saying "rows are immutable" is historical and inaccurate; migrations are not edited after the fact, so this document is the corrected statement.
 
 ## Phase 1 schema
 

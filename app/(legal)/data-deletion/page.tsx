@@ -79,7 +79,8 @@ export default function DataDeletionPage() {
             </>,
             <>
               <strong>Dapat dipertahankan:</strong> catatan transaksi, invoice, dan penagihan bila ada, catatan
-              keamanan, serta catatan yang diperlukan untuk kewajiban hukum, keuangan, atau keamanan yang sah. Alasannya kami jelaskan dalam jawaban atas permintaan Anda.
+              keamanan, serta catatan yang diperlukan untuk kewajiban hukum, keuangan, atau keamanan yang sah. Dokumen keuangan dan pajak dipertahankan sesuai kewajiban hukum, umumnya 10 tahun.
+              Alasannya kami jelaskan dalam jawaban atas permintaan Anda.
             </>,
             <>
               <strong>Akun login bersama:</strong> akun login (email dan profil dasar) dipakai bersama oleh produk
@@ -118,8 +119,9 @@ export default function DataDeletionPage() {
               Bila kami membuat cadangan, cadangan itu dapat masih memuat data yang sudah dihapus sampai diganti.
             </>,
             <>
-              Pihak ketiga (penyedia AI, hosting, email, dan platform iklan) menyimpan data menurut kebijakan mereka.
-              Kami tidak dapat menjamin penghapusan dari sistem mereka.
+              Pihak ketiga (penyedia AI, hosting, email, dan platform iklan) menyimpan data menurut kebijakan mereka dan
+              dapat berada atau memproses data di luar Indonesia. Kami tidak dapat menjamin penghapusan dari sistem
+              mereka.
             </>,
             <>Berkas publik dapat masih tersaji dari cache untuk waktu singkat.</>,
           ]}
@@ -128,7 +130,8 @@ export default function DataDeletionPage() {
 
       <LegalSection id="kontak" title="Kontak">
         <p>
-          {LEGAL.operator}, <a href={`mailto:${LEGAL.contactEmail}`}>{LEGAL.contactEmail}</a>. Lihat juga{" "}
+          {LEGAL.operator}, <a href={`mailto:${LEGAL.contactEmail}`}>{LEGAL.contactEmail}</a>. Permintaan diterima oleh
+          Penanggung Jawab Pelindungan Data Pribadi (sementara) sebagai narahubung. Lihat juga{" "}
           <Link href="/privacy" className="font-medium text-brand hover:underline">
             Kebijakan Privasi
           </Link>
