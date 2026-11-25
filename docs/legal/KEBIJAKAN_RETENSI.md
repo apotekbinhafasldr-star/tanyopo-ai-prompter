@@ -83,7 +83,7 @@ Perlindungan berikut dipertahankan, dengan alasan integritas keuangan, keamanan,
 - Job penghapusan/purge otomatis terjadwal: **belum tersedia** (target implementasi, perlu persetujuan sesuai aturan perubahan produksi).
 - Ekspor data mandiri oleh pengguna: **belum tersedia**.
 - Perekaman bukti persetujuan dan penerimaan syarat: **belum tersedia**.
-- Pernyataan di Privasi cukup berbentuk: "Kami menyimpan data selama diperlukan untuk layanan dan kewajiban hukum; dokumen keuangan disimpan sesuai ketentuan peraturan perundang-undangan." Jangan mencantumkan angka sebelum disetujui.
+- Pernyataan di Privasi cukup berbentuk: "Kami menyimpan data selama diperlukan untuk layanan dan kewajiban hukum; dokumen keuangan disimpan sesuai ketentuan peraturan perundang-undangan." Halaman publik boleh menyebut "umumnya 10 tahun" HANYA untuk dokumen keuangan (HUKUM, H1); jangan menyebut dokumen pajak (KONS) dan jangan mencantumkan angka operasional sebelum disetujui Founder.
 
 ## 7. Langkah berikutnya
 

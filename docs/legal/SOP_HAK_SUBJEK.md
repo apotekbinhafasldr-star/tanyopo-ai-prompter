@@ -27,7 +27,7 @@ Dokumen ini tidak memakai PP 33/2026 sebagai dasar.
 | Peran LINOE | Pengendali | Prosesor (KONS); tenant = pengendali |
 | Pemutus | LINOE | Tenant |
 | Pemohon | Pemilik/anggota workspace | Pelanggan akhir, atau tenant atas nama |
-| Tindakan LINOE | Verifikasi, putuskan, laksanakan, balas | Teruskan ke tenant (target internal paling lama 2 hari kerja), bantu teknis atas instruksi tenant; jangan memutuskan sendiri |
+| Tindakan LINOE | Verifikasi, putuskan, laksanakan, balas | Teruskan ke tenant (target internal paling lama 2 hari kalender, di dalam tenggat hukum), bantu teknis atas instruksi tenant; jangan memutuskan sendiri |
 
 Bila peran tidak jelas: perlakukan sebagai pengendali, beri tahu tenant, minta konsultan menilai.
 
@@ -59,7 +59,7 @@ Verifikasi gagal: minta kelengkapan sekali (Template B); bila tetap gagal, tutup
 | Hak | Batas hukum | Target internal (belum publik) | Pelaksanaan |
 |---|---|---|---|
 | Akses dan salinan | Pasal 32: 3 x 24 jam | Tiga hari kalender | Ekspor manual per kategori data oleh Founder dengan persetujuan. **Ekspor mandiri belum tersedia.** Jangan sertakan data tenant lain |
-| Koreksi | Pasal 30: 3 x 24 jam; beri tahu hasil | Dua hari kerja | Lewat aplikasi bila ada; selain itu manual dengan jejak |
+| Koreksi | Pasal 30: 3 x 24 jam; beri tahu hasil | Dua hari kalender (di dalam tenggat hukum 3 x 24 jam) | Lewat aplikasi bila ada; selain itu manual dengan jejak |
 | Tarik persetujuan / hentikan pemrosesan | Pasal 40: 3 x 24 jam | Dua hari | Hanya untuk pemrosesan berbasis persetujuan (saat ini praktis tidak ada). Menarik Syarat berarti penutupan akun |
 | Tunda/batasi | Pasal 41: 3 x 24 jam | Dua hari | Tandai akun: tidak diproses lebih lanjut kecuali disimpan |
 | Hapus/musnahkan | Pasal 43-44: tanpa tenggat 3 x 24 jam | **Ditetapkan Founder** | Lihat urutan di bawah |

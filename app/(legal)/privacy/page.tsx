@@ -133,9 +133,11 @@ export default function PrivacyPage() {
         <p>
           Koneksi dibuat hanya atas tindakan Owner dan dapat diputus oleh Owner dari halaman Koneksi. Izin yang kami
           minta saat ini: Meta (<code>ads_management</code>, <code>ads_read</code>, <code>business_management</code>,{" "}
-          <code>pages_show_list</code>); X (<code>tweet.read</code>, <code>tweet.write</code>, <code>users.read</code>,{" "}
-          <code>media.write</code>, <code>offline.access</code>); TikTok (izin yang tampil pada layar persetujuan TikTok). Data dari platform digunakan untuk menyediakan
-          fitur LINOE yang Anda jalankan.
+          <code>pages_show_list</code>); TikTok (izin yang tampil pada layar persetujuan TikTok). Koneksi X belum
+          tersedia bagi pengguna. Bila nanti diaktifkan, izin yang akan diminta adalah X (<code>tweet.read</code>,{" "}
+          <code>tweet.write</code>, <code>users.read</code>, <code>media.write</code>, <code>offline.access</code>)
+          dan kebijakan ini diperbarui sebelum dipakai. Data dari platform digunakan untuk menyediakan fitur LINOE yang
+          Anda jalankan.
         </p>
         <p>
           Saat ini LINOE membantu Anda menyiapkan rencana pemasaran, materi kreatif, dan kampanye. Penayangan iklan
@@ -173,7 +175,7 @@ export default function PrivacyPage() {
 
       <LegalSection id="penyimpanan" title="8. Penyimpanan data">
         <p>
-          Dokumen keuangan dan pajak serta catatan transaksi (termasuk invoice) disimpan sesuai kewajiban hukum yang
+          Dokumen keuangan serta catatan transaksi (termasuk invoice) disimpan sesuai kewajiban hukum yang
           berlaku, umumnya 10 tahun. Kami belum menetapkan jangka retensi tetap untuk data operasional lain, misalnya
           data workspace, hasil AI, dan catatan aktivitas. Kebijakan retensi untuk data tersebut masih dalam peninjauan
           dan akan ditetapkan serta diumumkan di halaman ini sebelum LINOE dibuka bagi tenant eksternal. Saat ini data
@@ -204,9 +206,9 @@ export default function PrivacyPage() {
 
       <LegalSection id="narahubung" title="10. Narahubung Pelindungan Data Pribadi">
         <p>
-          Kami menunjuk seorang Penanggung Jawab Pelindungan Data Pribadi (sementara) sebagai narahubung untuk
-          pertanyaan dan permintaan terkait data pribadi. Penunjukan ini bersifat sementara. Narahubung dihubungi
-          melalui <a href={`mailto:${LEGAL.contactEmail}`}>{LEGAL.contactEmail}</a>.
+          Pertanyaan dan permintaan terkait data pribadi diterima melalui{" "}
+          <a href={`mailto:${LEGAL.contactEmail}`}>{LEGAL.contactEmail}</a>. Penunjukan narahubung pelindungan data
+          pribadi belum diumumkan di halaman ini.
         </p>
       </LegalSection>
 

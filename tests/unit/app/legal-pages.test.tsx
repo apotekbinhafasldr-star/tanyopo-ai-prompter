@@ -414,17 +414,24 @@ describe("Paket 1 honesty guards (privacy and data deletion)", () => {
     }
   });
 
-  it("PDP contact is only a temporary label: no independence claim, no formal PDP officer title, same contact email", () => {
+  it("PDP contact: no designation is announced before the SK is signed; no independence claim, no formal officer title, same contact email", () => {
     for (const Page of BOTH) {
       const text = pageText(Page).replace(/\s+/g, " ");
-      expect(text).toMatch(/Penanggung Jawab Pelindungan Data Pribadi \(sementara\)/);
+      expect(text).not.toMatch(/Penanggung Jawab/i);
+      expect(text).not.toMatch(/Kami menunjuk/i);
       expect(text).not.toMatch(/independen/i);
       expect(text).not.toMatch(/Pejabat\s+(Pelindungan|Perlindungan)\s+Data/i);
       expect(text).not.toMatch(/Data Protection Officer|\bDPO\b/i);
       expect(text).not.toMatch(/privacy@|dpo@|pdp@/i);
     }
     expect(pageText(PrivacyPage)).toMatch(/Narahubung Pelindungan Data Pribadi/);
-    expect(pageText(PrivacyPage)).toMatch(/Penunjukan ini bersifat sementara/);
+    expect(pageText(PrivacyPage)).toMatch(/belum diumumkan di halaman ini/);
+  });
+
+  it("privacy does not claim the X connection is currently available", () => {
+    const text = pageText(PrivacyPage).replace(/\s+/g, " ");
+    expect(text).toMatch(/Koneksi X belum tersedia bagi pengguna/);
+    expect(text).not.toMatch(/Izin yang kami minta saat ini:[^.]*\bX\s*\(/);
   });
 
   it("no immutability, SLA or time-bound promise anywhere on the three pages", () => {

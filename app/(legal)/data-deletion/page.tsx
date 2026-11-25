@@ -79,7 +79,7 @@ export default function DataDeletionPage() {
             </>,
             <>
               <strong>Dapat dipertahankan:</strong> catatan transaksi, invoice, dan penagihan bila ada, catatan
-              keamanan, serta catatan yang diperlukan untuk kewajiban hukum, keuangan, atau keamanan yang sah. Dokumen keuangan dan pajak dipertahankan sesuai kewajiban hukum, umumnya 10 tahun.
+              keamanan, serta catatan yang diperlukan untuk kewajiban hukum, keuangan, atau keamanan yang sah. Dokumen keuangan dipertahankan sesuai kewajiban hukum, umumnya 10 tahun.
               Alasannya kami jelaskan dalam jawaban atas permintaan Anda.
             </>,
             <>
@@ -130,8 +130,7 @@ export default function DataDeletionPage() {
 
       <LegalSection id="kontak" title="Kontak">
         <p>
-          {LEGAL.operator}, <a href={`mailto:${LEGAL.contactEmail}`}>{LEGAL.contactEmail}</a>. Permintaan diterima oleh
-          Penanggung Jawab Pelindungan Data Pribadi (sementara) sebagai narahubung. Lihat juga{" "}
+          {LEGAL.operator}, <a href={`mailto:${LEGAL.contactEmail}`}>{LEGAL.contactEmail}</a>. Lihat juga{" "}
           <Link href="/privacy" className="font-medium text-brand hover:underline">
             Kebijakan Privasi
           </Link>

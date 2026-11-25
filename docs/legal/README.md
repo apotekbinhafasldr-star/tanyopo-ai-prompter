@@ -26,10 +26,11 @@
 | [DIISI FOUNDER] | Placeholder yang hanya boleh diisi Founder (kontak, nama, tanggal, tanda tangan) |
 
 ## Prinsip dokumen
+- Dokumen ini publik: kontak, nama, dan nilai konfigurasi tidak dicantumkan. Region penyedia dan deskripsi kontrol pada RoPA dan retensi bersifat umum, bersumber dokumentasi, dan UNKNOWN sampai diverifikasi.
 - Hanya ketentuan terverifikasi yang diberi label HUKUM. PP 33/2026 tidak dipakai sebagai dasar. Permenkominfo 20/2016 Pasal 15 (5 tahun) belum dipakai (UNKNOWN). UU KUP Pasal 28(11) pasca-UU HPP belum terverifikasi (KONS).
 - Tenggat 3 x 24 jam hanya untuk UU PDP Pasal 30, 32, 40, 41, dan 46. Tidak berlaku untuk Pasal 43-44.
 - Tidak ada janji layanan (SLA) publik. Hal yang belum tersedia (job penghapusan otomatis, ekspor mandiri, perekaman bukti persetujuan, register hak subjek di basis data) ditulis sebagai "belum tersedia" atau "target".
-- Folder ini berada di repositori yang dapat dibaca publik: tidak memuat kontak pribadi, nama individu, kredensial, identifikasi proyek/vendor internal, atau detail teknis kelemahan keamanan.
+- Folder ini berada di repositori yang dapat dibaca publik: tidak memuat kontak pribadi, nama individu, kredensial, atau identifikasi proyek internal. Nama penyedia dan region dicantumkan secara umum (RoPA), dan keterbatasan audit log dijelaskan di docs/SECURITY.md dan docs/DATABASE.md; detail eksploitasi tidak dicantumkan.
 - Perubahan produksi (basis data, env, penagihan, autentikasi) memerlukan persetujuan tertulis Founder sesuai aturan proyek.
 
 ## Langkah berikutnya (butuh Founder/konsultan)

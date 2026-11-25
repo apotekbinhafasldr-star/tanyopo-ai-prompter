@@ -97,7 +97,7 @@ Langkah:
 
 Cadangan menyimpan data sebagaimana adanya pada titik waktunya, sehingga data yang sudah dihapus atas permintaan subjek data bisa muncul kembali setelah restore. Restore tidak boleh memulihkan data tersebut tanpa penghapusan ulang. Setelah restore (uji maupun darurat) dan sebelum project hasil restore dipakai oleh siapa pun atau dihubungkan ke aplikasi:
 
-1. Minta Founder membuka **register permintaan hapus** (lokasi dan format register ditetapkan di [legal/KEBIJAKAN_RETENSI.md](legal/KEBIJAKAN_RETENSI.md); bila belum ada, catat sebagai temuan dan bawa ke Founder).
+1. Minta Founder membuka **register permintaan hapus** (register dan urutan penghapusan: [legal/SOP_HAK_SUBJEK.md](legal/SOP_HAK_SUBJEK.md) bagian 3 dan 5; bila belum ada, catat sebagai temuan dan bawa ke Founder).
 2. Bandingkan permintaan hapus yang tercatat dengan tanggal titik pulih: semua permintaan yang selesai **setelah** titik pulih berarti datanya kembali ada di hasil restore.
 3. Jalankan ulang penghapusan untuk setiap permintaan itu mengikuti prosedur penghapusan di kebijakan retensi, lalu catat bahwa penghapusan ulang selesai. Perubahan data di project hasil restore (apalagi produksi) hanya atas persetujuan Founder.
 4. Catat hasilnya di log bagian 9.
@@ -159,7 +159,7 @@ Pembagian wewenang selama insiden:
 3. Rencana backup file Storage (di luar backup database).
 4. Izin akses baca untuk baseline produksi (bagian 4) dan izin memulai restore uji dari `umkmpro-ai` (bagian 3, langkah 1).
 5. Kontak eskalasi dan kontak cadangan (di [RUNBOOK.md](RUNBOOK.md) bagian 4; bagian 6 hanya merujuk) dan jadwal uji restore pertama (bagian 9).
-6. Lokasi register permintaan hapus dan kebijakan retensi cadangan ([legal/KEBIJAKAN_RETENSI.md](legal/KEBIJAKAN_RETENSI.md)), dipakai pada prosedur pasca-restore (bagian 3).
+6. Lokasi register permintaan hapus ([legal/SOP_HAK_SUBJEK.md](legal/SOP_HAK_SUBJEK.md)) dan kebijakan retensi cadangan ([legal/KEBIJAKAN_RETENSI.md](legal/KEBIJAKAN_RETENSI.md)), dipakai pada prosedur pasca-restore (bagian 3).
 
 ## 8. Sumber dokumentasi resmi (diakses 2026-11-11)
 
