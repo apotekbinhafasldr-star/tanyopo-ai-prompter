@@ -428,7 +428,7 @@ describe("Paket 1 honesty guards (privacy and data deletion)", () => {
       expect(text).not.toMatch(/privacy@|dpo@|pdp@/i);
     }
     expect(pageText(PrivacyPage)).toMatch(/Narahubung Pelindungan Data Pribadi/);
-    expect(pageText(PrivacyPage)).toMatch(/belum diumumkan di halaman ini/);
+    expect(pageText(PrivacyPage)).toMatch(/belum memuat penunjukan\s+narahubung khusus/);
   });
 
   it("privacy does not claim the X connection is currently available", () => {

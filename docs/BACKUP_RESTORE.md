@@ -4,6 +4,8 @@ Semua langkah bisa dikerjakan dari HP: Chrome Android + dashboard web Supabase, 
 
 **Status dokumen: DRAFT, belum pernah diuji.** Prosedur ini disusun dari dokumentasi resmi (lihat bagian 8) dan belum dicoba pada project nyata. Uji restore pertama dicatat di bagian 9. Nama menu dashboard bisa berubah; bila beda, ikuti label yang tampil dan perbarui dokumen ini.
 
+Catatan: SOP dan kebijakan retensi internal PDP yang dirujuk di bawah disimpan di luar repositori publik (minta Founder).
+
 Dokumen terkait: [RUNBOOK.md](RUNBOOK.md) (operasional harian; **bagian 4 adalah satu-satunya sumber kontak eskalasi**), kebijakan retensi internal (retensi dan penghapusan data), dan SOP insiden internal (insiden data pribadi, lewat RUNBOOK bagian 4).
 
 **Catatan retensi (baca sebelum restore):** data yang sudah dihapus (termasuk atas permintaan subjek data) bisa masih ada di cadangan sampai cadangan tersebut berganti/kedaluwarsa. Karena itu restore tidak boleh dianggap memulihkan data yang sah; lihat prosedur pasca-restore di bagian 3.

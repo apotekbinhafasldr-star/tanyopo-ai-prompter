@@ -32,7 +32,7 @@ export default function DataDeletionPage() {
         <LegalList
           items={[
             <>
-              Memutus koneksi Meta, TikTok, atau X dari halaman Koneksi. Ini menghapus koneksi dan token dari sistem
+              Memutus koneksi Meta atau TikTok (dan X bila nanti tersedia) dari halaman Koneksi. Ini menghapus koneksi dan token dari sistem
               kami dan mencoba mencabut akses di platform. Data kinerja yang sudah diimpor tidak ikut terhapus. Cabut
               juga izin aplikasi dari pengaturan platform Anda (untuk Meta: pengaturan “Aplikasi dan Situs Web” di akun
               Facebook).

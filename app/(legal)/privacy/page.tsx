@@ -207,8 +207,8 @@ export default function PrivacyPage() {
       <LegalSection id="narahubung" title="10. Narahubung Pelindungan Data Pribadi">
         <p>
           Pertanyaan dan permintaan terkait data pribadi diterima melalui{" "}
-          <a href={`mailto:${LEGAL.contactEmail}`}>{LEGAL.contactEmail}</a>. Penunjukan narahubung pelindungan data
-          pribadi belum diumumkan di halaman ini.
+          <a href={`mailto:${LEGAL.contactEmail}`}>{LEGAL.contactEmail}</a>. Halaman ini belum memuat penunjukan
+          narahubung khusus pelindungan data pribadi.
         </p>
       </LegalSection>
 
