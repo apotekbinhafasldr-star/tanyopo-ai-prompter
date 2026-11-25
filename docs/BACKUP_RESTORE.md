@@ -4,7 +4,7 @@ Semua langkah bisa dikerjakan dari HP: Chrome Android + dashboard web Supabase, 
 
 **Status dokumen: DRAFT, belum pernah diuji.** Prosedur ini disusun dari dokumentasi resmi (lihat bagian 8) dan belum dicoba pada project nyata. Uji restore pertama dicatat di bagian 9. Nama menu dashboard bisa berubah; bila beda, ikuti label yang tampil dan perbarui dokumen ini.
 
-Dokumen terkait: [RUNBOOK.md](RUNBOOK.md) (operasional harian; **bagian 4 adalah satu-satunya sumber kontak eskalasi**), [legal/KEBIJAKAN_RETENSI.md](legal/KEBIJAKAN_RETENSI.md) (retensi dan penghapusan data), dan [legal/SOP_INSIDEN.md](legal/SOP_INSIDEN.md) (insiden data pribadi, lewat RUNBOOK bagian 4).
+Dokumen terkait: [RUNBOOK.md](RUNBOOK.md) (operasional harian; **bagian 4 adalah satu-satunya sumber kontak eskalasi**), kebijakan retensi internal (retensi dan penghapusan data), dan SOP insiden internal (insiden data pribadi, lewat RUNBOOK bagian 4).
 
 **Catatan retensi (baca sebelum restore):** data yang sudah dihapus (termasuk atas permintaan subjek data) bisa masih ada di cadangan sampai cadangan tersebut berganti/kedaluwarsa. Karena itu restore tidak boleh dianggap memulihkan data yang sah; lihat prosedur pasca-restore di bagian 3.
 
@@ -97,7 +97,7 @@ Langkah:
 
 Cadangan menyimpan data sebagaimana adanya pada titik waktunya, sehingga data yang sudah dihapus atas permintaan subjek data bisa muncul kembali setelah restore. Restore tidak boleh memulihkan data tersebut tanpa penghapusan ulang. Setelah restore (uji maupun darurat) dan sebelum project hasil restore dipakai oleh siapa pun atau dihubungkan ke aplikasi:
 
-1. Minta Founder membuka **register permintaan hapus** (register dan urutan penghapusan: [legal/SOP_HAK_SUBJEK.md](legal/SOP_HAK_SUBJEK.md) bagian 3 dan 5; bila belum ada, catat sebagai temuan dan bawa ke Founder).
+1. Minta Founder membuka **register permintaan hapus** (register dan urutan penghapusan: SOP hak subjek internal bagian 3 dan 5; bila belum ada, catat sebagai temuan dan bawa ke Founder).
 2. Bandingkan permintaan hapus yang tercatat dengan tanggal titik pulih: semua permintaan yang selesai **setelah** titik pulih berarti datanya kembali ada di hasil restore.
 3. Jalankan ulang penghapusan untuk setiap permintaan itu mengikuti prosedur penghapusan di kebijakan retensi, lalu catat bahwa penghapusan ulang selesai. Perubahan data di project hasil restore (apalagi produksi) hanya atas persetujuan Founder.
 4. Catat hasilnya di log bagian 9.
@@ -145,7 +145,7 @@ Hal yang perlu diwaspadai (verifikasi di dashboard, jangan diasumsikan):
 
 Daftar kontak dan urutan eskalasi **hanya disimpan di [RUNBOOK.md](RUNBOOK.md) bagian 4** (sumber tunggal). Dokumen ini sengaja tidak menyimpan kontak sendiri agar tidak bertentangan. Perubahan kontak dilakukan di RUNBOOK bagian 4, bukan di sini. Jangan menyimpan sandi, kunci, atau token di dokumen mana pun di repo.
 
-Catatan yang diakui di RUNBOOK bagian 4: kontak tunggal adalah single point of failure, dan kontak cadangan masih [DIISI FOUNDER]. Insiden yang menyangkut data pribadi: ikuti rujukan di RUNBOOK bagian 4 ke [legal/SOP_INSIDEN.md](legal/SOP_INSIDEN.md).
+Catatan yang diakui di RUNBOOK bagian 4: kontak tunggal adalah single point of failure, dan kontak cadangan masih [DIISI FOUNDER]. Insiden yang menyangkut data pribadi: ikuti rujukan di RUNBOOK bagian 4 ke SOP insiden internal.
 
 Pembagian wewenang selama insiden:
 - Rollback kode (bagian 5): operator atas persetujuan Founder.
@@ -159,7 +159,7 @@ Pembagian wewenang selama insiden:
 3. Rencana backup file Storage (di luar backup database).
 4. Izin akses baca untuk baseline produksi (bagian 4) dan izin memulai restore uji dari `umkmpro-ai` (bagian 3, langkah 1).
 5. Kontak eskalasi dan kontak cadangan (di [RUNBOOK.md](RUNBOOK.md) bagian 4; bagian 6 hanya merujuk) dan jadwal uji restore pertama (bagian 9).
-6. Lokasi register permintaan hapus ([legal/SOP_HAK_SUBJEK.md](legal/SOP_HAK_SUBJEK.md)) dan kebijakan retensi cadangan ([legal/KEBIJAKAN_RETENSI.md](legal/KEBIJAKAN_RETENSI.md)), dipakai pada prosedur pasca-restore (bagian 3).
+6. Lokasi register permintaan hapus (SOP hak subjek internal) dan kebijakan retensi cadangan (kebijakan retensi internal), dipakai pada prosedur pasca-restore (bagian 3).
 
 ## 8. Sumber dokumentasi resmi (diakses 2026-11-11)
 

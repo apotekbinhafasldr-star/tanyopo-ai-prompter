@@ -22,7 +22,7 @@ Pakai bila setelah deploy baru ada error besar (halaman putih, login gagal, chec
 
 Catatan: rollback hanya mengembalikan kode. Perubahan database (migrasi) TIDAK ikut kembali. Jangan jalankan SQL perbaikan tanpa persetujuan Founder.
 
-Backup, RPO/RTO, dan latihan restore ke project baru: lihat [BACKUP_RESTORE.md](BACKUP_RESTORE.md). Nilai RPO/RTO, retensi backup, PITR, dan paket Supabase saat ini UNKNOWN / diisi Founder dari dashboard; jangan dijanjikan ke pelanggan sebelum terverifikasi. Data yang sudah dihapus bisa masih ada di cadangan sampai cadangan berganti, dan setelah restore penghapusan atas permintaan subjek data harus dijalankan ulang: lihat [BACKUP_RESTORE.md](BACKUP_RESTORE.md) bagian 3 (prosedur pasca-restore) dan [legal/KEBIJAKAN_RETENSI.md](legal/KEBIJAKAN_RETENSI.md).
+Backup, RPO/RTO, dan latihan restore ke project baru: lihat [BACKUP_RESTORE.md](BACKUP_RESTORE.md). Nilai RPO/RTO, retensi backup, PITR, dan paket Supabase saat ini UNKNOWN / diisi Founder dari dashboard; jangan dijanjikan ke pelanggan sebelum terverifikasi. Data yang sudah dihapus bisa masih ada di cadangan sampai cadangan berganti, dan setelah restore penghapusan atas permintaan subjek data harus dijalankan ulang: lihat [BACKUP_RESTORE.md](BACKUP_RESTORE.md) bagian 3 (prosedur pasca-restore) dan kebijakan retensi internal.
 
 ## 3. Pembayaran macet
 
@@ -53,7 +53,7 @@ Urutan: (1) cek `/api/health`, (2) rollback bila baru deploy, (3) cek Supabase s
 
 Aksi yang selalu butuh persetujuan Founder: ubah env/kunci, SQL ke database produksi, ubah billing/auth/RLS, merge/deploy.
 
-**Insiden data pribadi** (dugaan kebocoran, akses tanpa izin, atau data pelanggan terekspos): jangan ditangani hanya dengan urutan di atas. Ikuti [legal/SOP_INSIDEN.md](legal/SOP_INSIDEN.md) dan eskalasikan ke Founder segera lewat kontak di tabel ini. Isi SOP tidak disalin ke runbook ini; rujuk dokumen itu langsung. Terkait cadangan dan penghapusan data: [BACKUP_RESTORE.md](BACKUP_RESTORE.md) dan [legal/KEBIJAKAN_RETENSI.md](legal/KEBIJAKAN_RETENSI.md).
+**Insiden data pribadi** (dugaan kebocoran, akses tanpa izin, atau data pelanggan terekspos): jangan ditangani hanya dengan urutan di atas. Ikuti SOP insiden internal (disimpan di luar repositori publik; minta Founder) dan eskalasikan ke Founder segera lewat kontak di tabel ini. Isi SOP tidak disalin ke runbook ini; rujuk dokumen itu langsung. Terkait cadangan dan penghapusan data: [BACKUP_RESTORE.md](BACKUP_RESTORE.md) dan kebijakan retensi internal.
 
 ## 5. Pantau uptime (UptimeRobot gratis)
 

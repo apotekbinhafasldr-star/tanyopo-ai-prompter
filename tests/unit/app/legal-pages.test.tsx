@@ -289,13 +289,12 @@ describe("legal layout (scoped header, landing untouched)", () => {
 describe("remediation guards", () => {
   const ALL = [PrivacyPage, TermsPage, DataDeletionPage];
 
-  it("shows only the Paket 1 draft effective date (25 November 2026), no other dates", () => {
-    expect(LEGAL.effectiveDate).toBe("25 November 2026");
+  it("shows no effective date until the text is actually live in production (no false date)", () => {
+    expect(LEGAL.effectiveDate).toBeUndefined();
     for (const Page of ALL) {
       const text = pageText(Page);
-      expect(text).toMatch(/Berlaku sejak: 25 November 2026/);
-      const stripped = text.replace(/25 November 2026/g, "");
-      expect(stripped).not.toMatch(/(Januari|Februari|Maret|April|Mei|Juni|Juli|Agustus|September|Oktober|November|Desember)\s+\d{4}|\d{1,2}\/\d{1,2}\/\d{4}/i);
+      expect(text).not.toMatch(/Berlaku sejak/);
+      expect(text).not.toMatch(/(Januari|Februari|Maret|April|Mei|Juni|Juli|Agustus|September|Oktober|November|Desember)\s+\d{4}|\d{1,2}\/\d{1,2}\/\d{4}/i);
     }
   });
 
@@ -397,13 +396,17 @@ describe("Paket 1 honesty guards (privacy and data deletion)", () => {
 
   it("retention: financial/tax records follow the legal duty; other retention is stated as not yet set", () => {
     const text = pageText(PrivacyPage).replace(/\s+/g, " ");
-    expect(text).toMatch(/disimpan sesuai kewajiban hukum yang berlaku, umumnya 10 tahun/);
+    expect(text).toMatch(/disimpan sesuai kewajiban hukum yang berlaku\./);
     expect(text).toMatch(/belum menetapkan jangka retensi tetap untuk data operasional lain/);
     expect(text).toMatch(/sebelum LINOE dibuka bagi tenant eksternal/);
     expect(text).toMatch(/dilakukan secara manual/);
     expect(text).toMatch(/cadangan itu dapat masih memuat data yang sudah dihapus/);
-    expect(pageText(DataDeletionPage)).toMatch(/umumnya 10 tahun/);
-    for (const Page of BOTH) expect(pageText(Page)).not.toMatch(/Pasal\s+\d+|UU\s*(No\.?\s*)?8\/1997/i);
+    expect(pageText(DataDeletionPage)).toMatch(/Dokumen keuangan dipertahankan sesuai kewajiban hukum\./);
+    for (const Page of BOTH) {
+      expect(pageText(Page)).not.toMatch(/Pasal\s+\d+|UU\s*(No\.?\s*)?8\/1997/i);
+      // The legal basis for a specific retention period is not verified for publication: no year counts on public pages.
+      expect(pageText(Page)).not.toMatch(/\d+\s*(\(\w+\)\s*)?tahun/i);
+    }
   });
 
   it("does not claim that acceptance of the Terms or consent is recorded or kept as evidence", () => {

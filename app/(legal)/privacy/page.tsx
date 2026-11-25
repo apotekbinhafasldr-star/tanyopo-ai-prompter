@@ -176,7 +176,7 @@ export default function PrivacyPage() {
       <LegalSection id="penyimpanan" title="8. Penyimpanan data">
         <p>
           Dokumen keuangan serta catatan transaksi (termasuk invoice) disimpan sesuai kewajiban hukum yang
-          berlaku, umumnya 10 tahun. Kami belum menetapkan jangka retensi tetap untuk data operasional lain, misalnya
+          berlaku. Kami belum menetapkan jangka retensi tetap untuk data operasional lain, misalnya
           data workspace, hasil AI, dan catatan aktivitas. Kebijakan retensi untuk data tersebut masih dalam peninjauan
           dan akan ditetapkan serta diumumkan di halaman ini sebelum LINOE dibuka bagi tenant eksternal. Saat ini data
           operasional disimpan selama workspace aktif dan sampai ada permintaan penghapusan yang kami proses.

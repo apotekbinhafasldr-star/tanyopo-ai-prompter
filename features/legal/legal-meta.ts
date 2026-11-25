@@ -16,11 +16,11 @@ export const LEGAL = {
   contactEmail: "tanyopofuturetechnology@gmail.com",
   product: "LINOE by Tanyopo",
   /**
-   * "Berlaku sejak" date, set to the date of the Paket 1 draft (25 Nov 2026). The Founder confirms the final
-   * date when merging. It does NOT mean the text is already published: it takes effect for users only once this
-   * change is merged and deployed.
+   * "Berlaku sejak" date. Deliberately left undefined: it must equal the date the text is actually live in
+   * production, not the date of a merge or draft. While undefined, no date is rendered (no false date).
+   * After the Founder-approved production deploy, a one-line change sets the real publication date.
    */
-  effectiveDate: "25 November 2026" as string | undefined,
+  effectiveDate: undefined as string | undefined,
 } as const;
 
 export const LEGAL_LINKS = [

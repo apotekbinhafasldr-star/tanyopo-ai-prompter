@@ -79,7 +79,7 @@ export default function DataDeletionPage() {
             </>,
             <>
               <strong>Dapat dipertahankan:</strong> catatan transaksi, invoice, dan penagihan bila ada, catatan
-              keamanan, serta catatan yang diperlukan untuk kewajiban hukum, keuangan, atau keamanan yang sah. Dokumen keuangan dipertahankan sesuai kewajiban hukum, umumnya 10 tahun.
+              keamanan, serta catatan yang diperlukan untuk kewajiban hukum, keuangan, atau keamanan yang sah. Dokumen keuangan dipertahankan sesuai kewajiban hukum.
               Alasannya kami jelaskan dalam jawaban atas permintaan Anda.
             </>,
             <>
