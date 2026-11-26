@@ -289,13 +289,12 @@ describe("legal layout (scoped header, landing untouched)", () => {
 describe("remediation guards", () => {
   const ALL = [PrivacyPage, TermsPage, DataDeletionPage];
 
-  it("shows only the Founder-approved effective date (22 November 2026), no other dates", () => {
-    expect(LEGAL.effectiveDate).toBe("22 November 2026");
+  it("shows no effective date until the text is actually live in production (no false date)", () => {
+    expect(LEGAL.effectiveDate).toBeUndefined();
     for (const Page of ALL) {
       const text = pageText(Page);
-      expect(text).toMatch(/Berlaku sejak: 22 November 2026/);
-      const stripped = text.replace(/22 November 2026/g, "");
-      expect(stripped).not.toMatch(/(Januari|Februari|Maret|April|Mei|Juni|Juli|Agustus|September|Oktober|November|Desember)\s+\d{4}|\d{1,2}\/\d{1,2}\/\d{4}/i);
+      expect(text).not.toMatch(/Berlaku sejak/);
+      expect(text).not.toMatch(/(Januari|Februari|Maret|April|Mei|Juni|Juli|Agustus|September|Oktober|November|Desember)\s+\d{4}|\d{1,2}\/\d{1,2}\/\d{4}/i);
     }
   });
 
@@ -304,9 +303,25 @@ describe("remediation guards", () => {
     expect(text).toMatch(/di luar wilayah Indonesia/);
     expect(text).toMatch(/menunggu tinjauan hukum/);
     expect(text).toMatch(/dalam peninjauan/);
+    // New in Paket 1: reliance on provider processing terms is stated without a validated-compliance claim.
+    expect(text).toMatch(/bergantung pada ketentuan pemrosesan masing-masing penyedia/);
+    expect(text).not.toMatch(/Pasal\s+(53|56)/i);
     expect(text).not.toMatch(/PostHog/i);
     expect(text).not.toMatch(/(server|data center|pusat data)\s+(di|berlokasi)\s+(Indonesia|Singapura|Amerika|Eropa|Jerman)/i);
     expect(text).not.toMatch(/(sesuai|patuh|memenuhi)\s+UU\s+PDP|GDPR/i);
+  });
+
+  it("privacy lists exactly the X scopes the code requests (no ads scopes)", () => {
+    const src = readFileSync("lib/connectors/x-api-client.ts", "utf8");
+    const decl = src.match(/X_PUBLISH_SCOPES\s*=\s*\[([^\]]*)\]/);
+    expect(decl).not.toBeNull();
+    const scopes = Array.from(decl![1].matchAll(/"([^"]+)"/g)).map((m) => m[1]);
+    expect(scopes.length).toBeGreaterThan(0);
+    const { container } = render(<PrivacyPage />);
+    const codes = Array.from(container.querySelectorAll("code")).map((c) => c.textContent);
+    for (const sc of scopes) expect(codes, sc).toContain(sc);
+    expect(codes.filter((c) => /^(tweet|users|media|offline|ads)[._]/.test(c ?? "") && c !== "ads_management" && c !== "ads_read")).toHaveLength(scopes.length);
+    expect(pageText(PrivacyPage)).not.toMatch(/ads\.(read|write)/);
   });
 
   it("shows the Founder-approved location", () => {
@@ -372,6 +387,88 @@ describe("remediation guards", () => {
     expect(hero).not.toContain("sebelum tayang");
     // The hero image alt text must not claim automatic campaign execution either.
     expect(hero).not.toContain("menjalankan campaign");
+  });
+});
+
+describe("Paket 1 honesty guards (privacy and data deletion)", () => {
+  const BOTH = [PrivacyPage, DataDeletionPage];
+  const ALL3 = [PrivacyPage, TermsPage, DataDeletionPage];
+
+  it("retention: financial/tax records follow the legal duty; other retention is stated as not yet set", () => {
+    const text = pageText(PrivacyPage).replace(/\s+/g, " ");
+    expect(text).toMatch(/disimpan sesuai kewajiban hukum yang berlaku\./);
+    expect(text).toMatch(/belum menetapkan jangka retensi tetap untuk data operasional lain/);
+    expect(text).toMatch(/sebelum LINOE dibuka bagi tenant eksternal/);
+    expect(text).toMatch(/dilakukan secara manual/);
+    expect(text).toMatch(/cadangan itu dapat masih memuat data yang sudah dihapus/);
+    expect(pageText(DataDeletionPage)).toMatch(/Dokumen keuangan dipertahankan sesuai kewajiban hukum\./);
+    for (const Page of BOTH) {
+      expect(pageText(Page)).not.toMatch(/Pasal\s+\d+|UU\s*(No\.?\s*)?8\/1997/i);
+      // The legal basis for a specific retention period is not verified for publication: no year counts on public pages.
+      expect(pageText(Page)).not.toMatch(/\d+\s*(\(\w+\)\s*)?tahun/i);
+    }
+  });
+
+  it("does not claim that acceptance of the Terms or consent is recorded or kept as evidence", () => {
+    for (const Page of ALL3) {
+      const text = pageText(Page).replace(/\s+/g, " ");
+      expect(text).not.toMatch(/bukti\s+(persetujuan|penerimaan)/i);
+      expect(text).not.toMatch(/(merekam|mencatat|menyimpan|dicatat|direkam)\s+(penerimaan|persetujuan)/i);
+    }
+  });
+
+  it("PDP contact: no designation is announced before the SK is signed; no independence claim, no formal officer title, same contact email", () => {
+    for (const Page of BOTH) {
+      const text = pageText(Page).replace(/\s+/g, " ");
+      expect(text).not.toMatch(/Penanggung Jawab/i);
+      expect(text).not.toMatch(/Kami menunjuk/i);
+      expect(text).not.toMatch(/independen/i);
+      expect(text).not.toMatch(/Pejabat\s+(Pelindungan|Perlindungan)\s+Data/i);
+      expect(text).not.toMatch(/Data Protection Officer|\bDPO\b/i);
+      expect(text).not.toMatch(/privacy@|dpo@|pdp@/i);
+    }
+    expect(pageText(PrivacyPage)).toMatch(/Narahubung Pelindungan Data Pribadi/);
+    expect(pageText(PrivacyPage)).toMatch(/belum memuat penunjukan\s+narahubung khusus/);
+  });
+
+  it("privacy does not claim the X connection is currently available", () => {
+    const text = pageText(PrivacyPage).replace(/\s+/g, " ");
+    expect(text).toMatch(/Koneksi X belum tersedia bagi pengguna/);
+    expect(text).not.toMatch(/Izin yang kami minta saat ini:[^.]*\bX\s*\(/);
+  });
+
+  it("no immutability, SLA or time-bound promise anywhere on the three pages", () => {
+    for (const Page of ALL3) {
+      const text = pageText(Page);
+      expect(text).not.toMatch(/immutable|tidak dapat diubah/i);
+      expect(text).not.toMatch(/\b3\s*x\s*24\b/i);
+    }
+    // The terms page may say it sets no service level (SLA); privacy and deletion must not mention one at all.
+    for (const Page of BOTH) {
+      expect(pageText(Page)).not.toMatch(/\bSLA\b/i);
+      expect(pageText(Page)).not.toMatch(/\b\d+\s*(x\s*24\s*)?(jam|hari|minggu)\b/i);
+      expect(pageText(Page)).not.toMatch(/(segera|secepatnya|paling lambat|selambat-lambatnya)\s+(dalam|dalam waktu|\d)/i);
+    }
+  });
+
+  it("no self-service export or automatic deletion/anonymisation claim", () => {
+    for (const Page of BOTH) {
+      const text = pageText(Page);
+      expect(text).not.toMatch(/(dapat|bisa)\s+(mengekspor|mengunduh|mengunduh salinan)|unduh (data|salinan) Anda/i);
+      expect(text).not.toMatch(/otomatis\s+(dihapus|dianonimkan|dihapuskan)|dihapus\s+secara\s+otomatis/i);
+      expect(text).not.toMatch(/hapus akun (sendiri|mandiri)|klik tombol hapus/i);
+    }
+    expect(pageText(PrivacyPage)).toMatch(/belum menyediakan ekspor data mandiri/);
+    expect(pageText(DataDeletionPage)).toMatch(/belum menyediakan tombol hapus akun otomatis/);
+  });
+
+  it("no certification, blanket-encryption or absolute security claim; token encryption stays stated", () => {
+    const text = pageText(PrivacyPage);
+    expect(text).not.toMatch(/sertifi|terakreditasi|pentest|penetration/i);
+    expect(text).not.toMatch(/(semua|seluruh)\s+data\s+(Anda\s+)?(dienkripsi|terenkripsi)|TLS\s*1\.\d|enkripsi\s+(penuh|tingkat)/i);
+    expect(text).not.toMatch(/\bAES\b/);
+    expect(text).not.toMatch(/\b(aman sepenuhnya|100\s*%\s*aman)\b/i);
+    expect(text).toMatch(/token akses \(disimpan dalam bentuk terenkripsi\)/);
   });
 });
 

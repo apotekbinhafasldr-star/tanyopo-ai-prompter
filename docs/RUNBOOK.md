@@ -22,7 +22,7 @@ Pakai bila setelah deploy baru ada error besar (halaman putih, login gagal, chec
 
 Catatan: rollback hanya mengembalikan kode. Perubahan database (migrasi) TIDAK ikut kembali. Jangan jalankan SQL perbaikan tanpa persetujuan Founder.
 
-Backup, RPO/RTO, dan latihan restore ke project baru: lihat [BACKUP_RESTORE.md](BACKUP_RESTORE.md).
+Backup, RPO/RTO, dan latihan restore ke project baru: lihat [BACKUP_RESTORE.md](BACKUP_RESTORE.md). Nilai RPO/RTO, retensi backup, PITR, dan paket Supabase saat ini UNKNOWN / diisi Founder dari dashboard; jangan dijanjikan ke pelanggan sebelum terverifikasi. Data yang sudah dihapus bisa masih ada di cadangan sampai cadangan berganti, dan setelah restore penghapusan atas permintaan subjek data harus dijalankan ulang: lihat [BACKUP_RESTORE.md](BACKUP_RESTORE.md) bagian 3 (prosedur pasca-restore) dan kebijakan retensi internal.
 
 ## 3. Pembayaran macet
 
@@ -37,7 +37,7 @@ Gejala: pelanggan sudah bayar tapi paket belum aktif, atau status tertahan "pend
 
 ## 4. Kontak dan urutan eskalasi
 
-Kontak ditetapkan oleh Founder (jangan simpan sandi/kunci di sini).
+Kontak ditetapkan oleh Founder (jangan simpan sandi/kunci di sini). **Bagian ini adalah satu-satunya sumber kontak eskalasi**; [BACKUP_RESTORE.md](BACKUP_RESTORE.md) bagian 6 merujuk ke sini dan tidak menyimpan kontak sendiri.
 
 **Keputusan Founder (22 Nov 2026):** email perusahaan di bawah ini menjadi kontak darurat utama LINOE. Belum ada kontak eskalasi independen: Level 1 dan Level 2 memakai satu email yang sama, sehingga email tunggal ini adalah single point of failure (bila tidak terpantau, tidak ada jalur cadangan). Operator cadangan (orang atau email berbeda) harus ditunjuk sebelum mengundang tenant eksternal, lalu tabel ini diperbarui.
 
@@ -45,11 +45,15 @@ Kontak ditetapkan oleh Founder (jangan simpan sandi/kunci di sini).
 |---|---|---|---|
 | 1 | Operator/pemantau | Notifikasi uptime atau laporan pelanggan | tanyopofuturetechnology@gmail.com (sementara; pemantau memakai email perusahaan) |
 | 2 | Founder LINOE | Level 1 tidak selesai 15 menit, atau menyangkut uang/data | tanyopofuturetechnology@gmail.com (sementara; sampai operator cadangan ditunjuk) |
+| 2b | Kontak cadangan (orang/email berbeda dari Level 1-2) | Level 1 dan 2 tidak terjangkau | [DIISI FOUNDER] |
+| 2c | Pemilik akun Supabase / Netlify (bila beda orang) | Perlu tindakan di dashboard Supabase atau Netlify (rollback, ubah env) | [DIISI FOUNDER] |
 | 3 | Dukungan vendor | Netlify, Supabase, Midtrans sesuai sumber masalah | Dashboard masing-masing -> Support |
 
 Urutan: (1) cek `/api/health`, (2) rollback bila baru deploy, (3) cek Supabase status, (4) eskalasi ke Founder, (5) tiket vendor.
 
 Aksi yang selalu butuh persetujuan Founder: ubah env/kunci, SQL ke database produksi, ubah billing/auth/RLS, merge/deploy.
+
+**Insiden data pribadi** (dugaan kebocoran, akses tanpa izin, atau data pelanggan terekspos): jangan ditangani hanya dengan urutan di atas. Ikuti SOP insiden internal (disimpan di luar repositori publik; minta Founder) dan eskalasikan ke Founder segera lewat kontak di tabel ini. Isi SOP tidak disalin ke runbook ini; rujuk dokumen itu langsung. Terkait cadangan dan penghapusan data: [BACKUP_RESTORE.md](BACKUP_RESTORE.md) dan kebijakan retensi internal.
 
 ## 5. Pantau uptime (UptimeRobot gratis)
 
