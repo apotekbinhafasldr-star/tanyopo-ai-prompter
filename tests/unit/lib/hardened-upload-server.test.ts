@@ -3,7 +3,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   evaluateStoredMedia,
   fetchObjectHead,
+  STORAGE_CALL_TIMEOUT_MS,
   parseContentRangeTotal,
+  withTimeout,
   verifyUploadedObject,
   type StorageBucketLike,
 } from "@/lib/media/hardened-upload-server";
@@ -170,5 +172,36 @@ describe("verifyUploadedObject", () => {
     const r = await verifyUploadedObject(b, WEBP_PATH, async () => response(206, WEBP_HEAD));
     expect(r).toMatchObject({ ok: false, code: "UNSUPPORTED_FORMAT" });
     expect(b.remove).toHaveBeenCalled();
+  });
+});
+
+describe("batas waktu pada createSignedUrl dan remove (gagal-tertutup)", () => {
+  it("createSignedUrl yang menggantung ditolak sebagai VERIFY_FAILED setelah 5 detik", async () => {
+    vi.useFakeTimers();
+    try {
+      const b = bucket({ createSignedUrl: vi.fn(() => new Promise(() => undefined)) });
+      const pending = verifyUploadedObject(b, JPG_PATH, async () => response(206, JPEG_HEAD));
+      for (let i = 0; i < 3; i++) await vi.advanceTimersByTimeAsync(STORAGE_CALL_TIMEOUT_MS + 100);
+      expect(await pending).toMatchObject({ ok: false, code: "VERIFY_FAILED" });
+      expect(b.remove).toHaveBeenCalledWith([JPG_PATH]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("remove yang menggantung tidak menahan hasil gagal-tertutup melebihi batas waktu", async () => {
+    vi.useFakeTimers();
+    try {
+      const b = bucket({ remove: vi.fn(() => new Promise(() => undefined)) as unknown as StorageBucketLike["remove"] });
+      const pending = verifyUploadedObject(b, JPG_PATH, async () => response(206, PNG_HEAD));
+      for (let i = 0; i < 3; i++) await vi.advanceTimersByTimeAsync(STORAGE_CALL_TIMEOUT_MS + 100);
+      expect(await pending).toMatchObject({ ok: false, code: "SIGNATURE_MISMATCH" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("withTimeout meneruskan hasil bila selesai tepat waktu", async () => {
+    expect(await withTimeout(Promise.resolve(7), 50)).toBe(7);
   });
 });

@@ -26,6 +26,17 @@ import {
 export const HEAD_BYTES = 12;
 export const VERIFY_TIMEOUT_MS = 5000;
 export const SIGNED_URL_TTL_SECONDS = 60;
+/** Batas waktu pembuatan signed URL dan penghapusan objek (sama dengan batas fetch). */
+export const STORAGE_CALL_TIMEOUT_MS = 5000;
+
+/** Menolak bila `promise` tidak selesai dalam `ms`. Pewaktu selalu dibersihkan. */
+export function withTimeout<T>(promise: Promise<T>, ms: number = STORAGE_CALL_TIMEOUT_MS): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error("TIMEOUT")), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
 
 export type EvaluateResult = { ok: true; mime: StoredImageMime } | { ok: false; code: UploadErrorCode; message: string };
 
@@ -137,7 +148,9 @@ export async function verifyUploadedObject(
 ): Promise<EvaluateResult> {
   let outcome: EvaluateResult;
   try {
-    const { data, error } = await bucket.createSignedUrl(storagePath, SIGNED_URL_TTL_SECONDS);
+    const { data, error } = await withTimeout(
+      bucket.createSignedUrl(storagePath, SIGNED_URL_TTL_SECONDS),
+    );
     if (error || !data?.signedUrl) {
       outcome = reject("VERIFY_FAILED");
     } else {
@@ -152,7 +165,7 @@ export async function verifyUploadedObject(
 
   if (!outcome.ok) {
     try {
-      await bucket.remove([storagePath]);
+      await withTimeout(bucket.remove([storagePath]));
     } catch {
       // Upaya terbaik: objek yatim tetap tidak punya baris media (tidak tampil/terpakai).
     }

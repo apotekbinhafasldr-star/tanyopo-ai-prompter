@@ -17,11 +17,20 @@ const RANDOM_PATH = `t1/p1/${UUID}.jpg`;
 const LEGACY_PATH = "t1/p1/1700000000-foto.jpg";
 const JPEG_HEAD = Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46, 0, 1]);
 
-function buildSupabase(rows: Array<{ position: number; media_type?: string }>, insertError: { message: string } | null = null) {
+function buildSupabase(
+  rows: Array<{ position: number; media_type?: string }>,
+  insertError: { message: string } | null = null,
+  existingRowsForPath: Array<{ id: string }> = [],
+) {
   const limit = vi.fn(async () => ({ data: rows, error: null }));
   const order = vi.fn(() => ({ limit }));
   const eq = vi.fn(() => ({ order }));
-  const select = vi.fn(() => ({ eq }));
+  // Kueri idempotensi: select("id").eq().eq().eq().limit(1)
+  const idChain: { eq: ReturnType<typeof vi.fn>; limit: ReturnType<typeof vi.fn> } = {
+    eq: vi.fn(() => idChain),
+    limit: vi.fn(async () => ({ data: existingRowsForPath, error: null })),
+  };
+  const select = vi.fn((cols: string) => (cols === "id" ? idChain : { eq }));
   const insert = vi.fn(async () => ({ error: insertError }));
   const from = vi.fn(() => ({ select, insert }));
   const createSignedUrl = vi.fn(async () => ({ data: { signedUrl: "https://x/signed" }, error: null }));
@@ -96,9 +105,10 @@ describe("recordProductMediaAction, flag AKTIF", () => {
 
   it("menolak VIDEO dan path berformat lama/WebP tanpa mencatat", async () => {
     currentSupabase = buildSupabase([]);
-    expect(await recordProductMediaAction("p1", RANDOM_PATH, "VIDEO")).toMatchObject({ error: expect.stringMatching(/hanya menerima foto/) });
-    expect(await recordProductMediaAction("p1", LEGACY_PATH, "IMAGE")).toMatchObject({ error: expect.stringMatching(/tidak didukung/) });
-    expect(await recordProductMediaAction("p1", `t1/p1/${UUID}.webp`, "IMAGE")).toMatchObject({ error: expect.stringMatching(/tidak didukung/) });
+    expect(await recordProductMediaAction("p1", RANDOM_PATH, "VIDEO")).toMatchObject({ error: expect.stringMatching(/foto JPG, PNG, atau WebP/) });
+    // path tidak valid memakai pesan INVALID_PATH, bukan "format tidak didukung"
+    expect(await recordProductMediaAction("p1", LEGACY_PATH, "IMAGE")).toEqual({ error: "Media tidak valid untuk produk ini." });
+    expect(await recordProductMediaAction("p1", `t1/p1/${UUID}.webp`, "IMAGE")).toEqual({ error: "Media tidak valid untuk produk ini." });
     expect(currentSupabase.insert).not.toHaveBeenCalled();
   });
 
@@ -133,5 +143,29 @@ describe("recordProductMediaAction, flag AKTIF", () => {
     const r = await recordProductMediaAction("p1", RANDOM_PATH, "IMAGE");
     expect(r.error).toMatch(/tidak sesuai format/);
     expect(currentSupabase.remove).toHaveBeenCalledWith([RANDOM_PATH]);
+  });
+
+  it("idempoten: path yang sudah punya baris tidak dibuat ganda, tidak diverifikasi ulang, objek tidak dihapus", async () => {
+    // verifikasi AKAN gagal bila dijalankan; harus tidak dijalankan sama sekali
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 500 })));
+    currentSupabase = buildSupabase([{ position: 0, media_type: "IMAGE" }], null, [{ id: "m1" }]);
+    expect(await recordProductMediaAction("p1", RANDOM_PATH, "IMAGE")).toEqual({ error: null });
+    expect(currentSupabase.insert).not.toHaveBeenCalled();
+    expect(currentSupabase.remove).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("signed URL yang menggantung melewati batas waktu: gagal-tertutup dengan pesan verifikasi dan tetap tidak dicatat", async () => {
+    vi.useFakeTimers();
+    try {
+      currentSupabase = buildSupabase([]);
+      currentSupabase.createSignedUrl.mockImplementation(() => new Promise(() => undefined));
+      const pending = recordProductMediaAction("p1", RANDOM_PATH, "IMAGE");
+      for (let i = 0; i < 3; i++) await vi.advanceTimersByTimeAsync(5100);
+      expect((await pending).error).toMatch(/belum dapat diverifikasi/);
+      expect(currentSupabase.insert).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

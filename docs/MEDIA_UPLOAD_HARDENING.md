@@ -14,13 +14,15 @@
 | Format masukan klien | JPG, PNG, WebP. HEIC dan lainnya ditolak dengan pesan khusus |
 | Batas masukan | 25 MB (`HARDENED_MAX_INPUT_BYTES`), dicek sebelum encode ulang |
 | Batas hasil | 8 MB, dicek di klien (setelah encode ulang) dan di server (ukuran objek bila diketahui) |
-| Piksel | maks. 150 MP (`MAX_DECODED_PIXELS`), dicek sebelum digambar ke canvas |
+| Piksel | maks. 150 MP (`MAX_DECODED_PIXELS`), dicek **setelah dekode**, sebelum digambar ke canvas. Dekode foto besar sudah memakai memori (150 MP kira-kira 600 MB bitmap RGBA), jadi HP berRAM kecil dapat gagal atau menutup tab sebelum pengecekan tercapai. Uji perangkat nyata sebelum flag ON |
 | EXIF/metadata | Dibuang lewat encode ulang canvas; `createImageBitmap({ imageOrientation: "from-image" })` membenahi orientasi lebih dulu |
 | WebP | Dikonversi ke JPEG di klien (preflight Meta hanya menerima JPG/PNG). Server menolak path/berkas WebP |
 | Nama berkas | `<tenant>/<produk>/<uuid-acak>.<jpg|png>`; nama asli tidak tersimpan |
 | Verifikasi server | Signed URL + `fetch` ber-`Range` 12 byte pertama, `AbortSignal.timeout(5000)`; cek magic bytes. Gagal/timeout = gagal-tertutup dan objek dihapus |
-| Kuota | Maks. 20 foto per produk; hanya baris `media_type = IMAGE` dihitung (video lama tidak memblokir foto baru). Bila hasil pindai mencapai 50 baris, kuota **gagal-terbuka** (unggahan diizinkan) karena hitungan tidak terbukti lengkap |
+| Kuota | Maks. 20 foto per produk; hanya baris `media_type = IMAGE` dihitung (video lama tidak memblokir foto baru). Kuota **gagal-terbuka** (unggahan diizinkan) bila hasil pindai mencapai 50 baris (hitungan tidak terbukti lengkap) **dan bila kueri gagal**. Kuota hanya per produk; **kuota per tenant belum ada** |
 | Video | Tidak diterima pada mode ini (hanya foto). Keputusan produk: bila video harus tetap bisa diunggah, perlu jalur terpisah |
+
+Catatan idempotensi: bila `recordProductMediaAction` dipanggil ulang untuk path yang sudah punya baris, action mengembalikan sukses tanpa verifikasi ulang, tanpa baris ganda, dan tanpa menghapus objek (balapan dua panggilan serentak tetap mungkin karena tidak ada batasan unik di DB; tidak diubah di L2). Video tidak bisa diunggah saat mode ini aktif (UI menyatakannya).
 
 Angka 20 foto per produk dan jendela pindai 50 baris adalah asumsi implementasi, belum diputuskan Founder.
 

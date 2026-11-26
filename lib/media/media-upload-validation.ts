@@ -59,7 +59,7 @@ export const UPLOAD_ERROR_MESSAGES: Record<UploadErrorCode, string> = {
   VERIFY_FAILED: "Foto yang diunggah belum dapat diverifikasi, sehingga dibatalkan. Coba unggah lagi.",
   SIGNATURE_MISMATCH: "Isi berkas tidak sesuai format JPG atau PNG, sehingga dibatalkan. Pilih foto lain.",
   QUOTA_EXCEEDED: `Batas ${HARDENED_MAX_IMAGES_PER_PRODUCT} foto per produk sudah tercapai. Hapus foto yang tidak dipakai, lalu coba lagi.`,
-  VIDEO_NOT_ALLOWED: "Mode unggah foto yang diperkeras hanya menerima foto JPG atau PNG, bukan video.",
+  VIDEO_NOT_ALLOWED: "Mode unggah yang diperkeras hanya menerima foto JPG, PNG, atau WebP. Video belum bisa diunggah saat mode ini aktif.",
   INVALID_PATH: "Media tidak valid untuk produk ini.",
 };
 

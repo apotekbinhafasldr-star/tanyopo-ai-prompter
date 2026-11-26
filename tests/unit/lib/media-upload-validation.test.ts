@@ -101,6 +101,9 @@ describe("pesan galat terpisah per sebab", () => {
     expect(UPLOAD_ERROR_MESSAGES.BROWSER_UNSUPPORTED).not.toBe(UPLOAD_ERROR_MESSAGES.UNREADABLE);
     expect(UPLOAD_ERROR_MESSAGES.UPLOAD_FAILED).toMatch(/jaringan|koneksi/i);
     expect(UPLOAD_ERROR_MESSAGES.TOO_MANY_PIXELS).toContain("150 megapiksel");
+    expect(UPLOAD_ERROR_MESSAGES.VIDEO_NOT_ALLOWED).toContain("foto JPG, PNG, atau WebP");
+    expect(UPLOAD_ERROR_MESSAGES.VIDEO_NOT_ALLOWED).toMatch(/video belum bisa diunggah/i);
+    expect(UPLOAD_ERROR_MESSAGES.INVALID_PATH).not.toBe(UPLOAD_ERROR_MESSAGES.UNSUPPORTED_FORMAT);
   });
 });
 

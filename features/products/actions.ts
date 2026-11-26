@@ -268,12 +268,23 @@ export async function recordProductMediaAction(
     // browser ke Storage dapat melewati action ini. Lihat docs/MEDIA_UPLOAD_HARDENING.md.
     if (mediaType !== "IMAGE") return { error: UPLOAD_ERROR_MESSAGES.VIDEO_NOT_ALLOWED };
     if (!isRandomMediaPath(storagePath, session.tenantId, productId)) {
-      return { error: UPLOAD_ERROR_MESSAGES.UNSUPPORTED_FORMAT };
+      return { error: UPLOAD_ERROR_MESSAGES.INVALID_PATH };
     }
+
+    // Idempoten: path yang sudah punya baris = permintaan diulang. Jangan verifikasi ulang (kegagalan verifikasi
+    // akan menghapus objek yang SUDAH dipakai baris itu), jangan buat baris ganda, dan jangan sentuh objek.
+    const { data: alreadyRecorded } = await supabase
+      .from("prompter_product_media")
+      .select("id")
+      .eq("tenant_id", session.tenantId)
+      .eq("product_id", productId)
+      .eq("storage_path", storagePath)
+      .limit(1);
+    if (alreadyRecorded && alreadyRecorded.length > 0) return { error: null };
 
     // Kuota: hanya baris IMAGE yang dihitung (video lama tidak memblokir foto baru), maka media_type ikut
     // diambil. Bila terpindai >= HARDENED_QUOTA_SCAN_LIMIT (50) baris, hitungan tidak terbukti lengkap dan
-    // kuota GAGAL-TERBUKA (unggahan diizinkan).
+    // kuota GAGAL-TERBUKA (unggahan diizinkan). Kueri gagal (rows kosong/null) juga gagal-terbuka.
     const { data: rows } = await supabase
       .from("prompter_product_media")
       .select("position, media_type")

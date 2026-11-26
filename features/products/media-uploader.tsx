@@ -103,50 +103,75 @@ export function MediaUploader({
 
     startTransition(async () => {
       const supabase = createClient();
+      let succeeded = 0;
+
+      // Berhenti di kegagalan pertama. Bila sebagian sudah berhasil: segarkan daftar media, laporkan "N berhasil,
+      // M gagal", dan buang yang berhasil dari pilihan agar coba ulang tidak mengunggah ganda.
+      function stopWithError(message: string) {
+        setProgress(null);
+        if (succeeded > 0) {
+          const failed = files.length - succeeded;
+          setError(`${succeeded} foto berhasil, ${failed} gagal. ${message}`);
+          keepOnlyFiles(files.slice(succeeded));
+          router.refresh();
+        } else {
+          setError(message);
+        }
+      }
 
       for (let index = 0; index < files.length; index++) {
         const file = files[index];
         const check = validateInputFile(file);
         if (!check.ok) {
-          setError(check.message);
-          setProgress(null);
+          stopWithError(check.message);
           return;
         }
 
         setProgress(`Memproses foto ${index + 1} dari ${files.length}...`);
         const encoded = await reencodeImageStrippingMetadata(file, check.mime);
         if (!encoded.ok) {
-          setError(UPLOAD_ERROR_MESSAGES[encoded.code]);
-          setProgress(null);
+          stopWithError(UPLOAD_ERROR_MESSAGES[encoded.code]);
           return;
         }
 
         const path = buildRandomMediaPath(tenantId, productId, encoded.mime);
         setProgress(`Mengunggah foto ${index + 1} dari ${files.length}...`);
 
+        let failure: string | null = null;
+        let rollbackPath = false;
         try {
           const { error: uploadError } = await supabase.storage
             .from("product-media")
             .upload(path, encoded.blob, { contentType: encoded.mime, upsert: false });
 
           if (uploadError) {
-            setError(UPLOAD_ERROR_MESSAGES.UPLOAD_FAILED);
-            setProgress(null);
-            return;
-          }
-
-          const result = await recordProductMediaAction(productId, path, "IMAGE");
-          if (result.error) {
-            await supabase.storage.from("product-media").remove([path]);
-            setError(result.error);
-            setProgress(null);
-            return;
+            failure = UPLOAD_ERROR_MESSAGES.UPLOAD_FAILED;
+          } else {
+            const result = await recordProductMediaAction(productId, path, "IMAGE");
+            if (result.error) {
+              failure = result.error;
+              rollbackPath = true;
+            }
           }
         } catch {
-          setError(UPLOAD_ERROR_MESSAGES.UPLOAD_FAILED);
-          setProgress(null);
+          // Hasil action tidak diketahui (jaringan putus): objek TIDAK dihapus agar tidak merusak baris yang
+          // mungkin sudah tercatat. Pengguna cukup mencoba lagi.
+          failure = UPLOAD_ERROR_MESSAGES.UPLOAD_FAILED;
+        }
+
+        if (failure) {
+          if (rollbackPath) {
+            // Di luar try di atas agar galat penghapusan tidak menimpa pesan sebab yang sebenarnya.
+            try {
+              await supabase.storage.from("product-media").remove([path]);
+            } catch {
+              // upaya terbaik
+            }
+          }
+          stopWithError(failure);
           return;
         }
+        succeeded++;
       }
 
       formRef.current?.reset();
@@ -156,6 +181,29 @@ export function MediaUploader({
       setSuccess(true);
       router.refresh();
     });
+  }
+
+  /** Menyisakan hanya berkas yang belum terunggah pada input dan pratinjau (DataTransfer; bila tak ada, input dikosongkan). */
+  function keepOnlyFiles(remaining: File[]) {
+    const input = formRef.current?.elements.namedItem("files");
+    if (!(input instanceof HTMLInputElement)) return;
+    try {
+      const dt = new DataTransfer();
+      for (const f of remaining) dt.items.add(f);
+      input.files = dt.files;
+      if (typeof URL !== "undefined" && typeof URL.createObjectURL === "function") {
+        setPreviews(remaining.map((f) => ({ url: URL.createObjectURL(f), name: f.name })));
+      } else {
+        setPreviews([]);
+      }
+    } catch {
+      try {
+        input.value = "";
+      } catch {
+        // abaikan
+      }
+      setPreviews([]);
+    }
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -248,6 +296,7 @@ export function MediaUploader({
         />
         <p className="text-xs text-muted-foreground">{HARDENED_HELP_TEXT}</p>
         <p className="text-xs text-muted-foreground">Format: JPG, PNG, WebP. Maks. 25 MB per foto sebelum diperkecil.</p>
+        <p className="text-xs text-muted-foreground">Video belum bisa diunggah saat mode ini aktif.</p>
         {previews.length > 0 ? (
           <ul className="grid grid-cols-2 gap-2 sm:grid-cols-4" data-testid="product-media-previews">
             {previews.map((p) => (

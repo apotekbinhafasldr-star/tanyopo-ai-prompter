@@ -12,7 +12,8 @@ const recordMock = vi.fn();
 vi.mock("@/features/products/actions", () => ({
   recordProductMediaAction: (...args: unknown[]) => recordMock(...args),
 }));
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+const refreshMock = vi.fn();
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: refreshMock }) }));
 
 const reencodeMock = vi.fn();
 vi.mock("@/lib/media/strip-image-metadata", () => ({
@@ -38,6 +39,7 @@ describe("MediaUploader hardened (flag AKTIF)", () => {
     removeMock.mockReset();
     recordMock.mockReset();
     reencodeMock.mockReset();
+    refreshMock.mockReset();
     reencodeMock.mockResolvedValue({ ok: true, blob: new Blob(["x"]), mime: "image/jpeg", width: 10, height: 10 });
   });
   afterEach(() => cleanup());
@@ -144,6 +146,62 @@ describe("MediaUploader hardened (flag AKTIF)", () => {
     fireEvent.click(uploadButton());
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Batas 20 foto"));
     expect(removeMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keterangan bahwa video belum bisa diunggah saat mode aktif", () => {
+    render(<MediaUploader productId="p1" tenantId="t1" hardened />);
+    expect(screen.getByText("Video belum bisa diunggah saat mode ini aktif.")).toBeInTheDocument();
+  });
+
+  it("sebagian berhasil lalu satu gagal: melaporkan 'N foto berhasil, M gagal', menyegarkan daftar, dan input dikosongkan agar coba ulang tidak ganda", async () => {
+    uploadMock.mockResolvedValueOnce({ error: null }).mockResolvedValueOnce({ error: null });
+    recordMock.mockResolvedValueOnce({ error: null }).mockResolvedValueOnce({ error: "Batas 20 foto per produk sudah tercapai." });
+    render(<MediaUploader productId="p1" tenantId="t1" hardened />);
+    const input = screen.getByTestId("product-media-file-input") as HTMLInputElement;
+    selectFiles(input, [makeFile("a.jpg", "image/jpeg", MB), makeFile("b.jpg", "image/jpeg", MB), makeFile("c.jpg", "image/jpeg", MB)]);
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(uploadButton());
+
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("1 foto berhasil, 2 gagal."));
+    expect(screen.getByRole("alert")).toHaveTextContent("Batas 20 foto");
+    expect(refreshMock).toHaveBeenCalledTimes(1);
+    expect(uploadMock).toHaveBeenCalledTimes(2); // foto ke-3 tidak pernah dicoba
+    expect(removeMock).toHaveBeenCalledTimes(1); // hanya objek yang ditolak server
+  });
+
+  it("kegagalan sejak foto pertama tidak memanggil refresh dan memakai pesan sebab saja", async () => {
+    reencodeMock.mockResolvedValue({ ok: false, code: "UNREADABLE" });
+    render(<MediaUploader productId="p1" tenantId="t1" hardened />);
+    selectFiles(screen.getByTestId("product-media-file-input") as HTMLInputElement, [makeFile("a.jpg", "image/jpeg", MB)]);
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(uploadButton());
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("tidak dapat dibaca"));
+    expect(screen.getByRole("alert")).not.toHaveTextContent("berhasil");
+    expect(refreshMock).not.toHaveBeenCalled();
+  });
+
+  it("galat saat menghapus objek (rollback) tidak menimpa pesan sebab dari server", async () => {
+    uploadMock.mockResolvedValue({ error: null });
+    recordMock.mockResolvedValue({ error: "Foto yang diunggah belum dapat diverifikasi, sehingga dibatalkan. Coba unggah lagi." });
+    removeMock.mockRejectedValue(new Error("remove gagal"));
+    render(<MediaUploader productId="p1" tenantId="t1" hardened />);
+    selectFiles(screen.getByTestId("product-media-file-input") as HTMLInputElement, [makeFile("a.jpg", "image/jpeg", MB)]);
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(uploadButton());
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("belum dapat diverifikasi"));
+    expect(screen.getByRole("alert")).not.toHaveTextContent(/koneksi internet/i);
+    expect(removeMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("galat jaringan saat memanggil action tidak menghapus objek (hasil tak diketahui)", async () => {
+    uploadMock.mockResolvedValue({ error: null });
+    recordMock.mockRejectedValue(new Error("network"));
+    render(<MediaUploader productId="p1" tenantId="t1" hardened />);
+    selectFiles(screen.getByTestId("product-media-file-input") as HTMLInputElement, [makeFile("a.jpg", "image/jpeg", MB)]);
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(uploadButton());
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/koneksi internet/i));
+    expect(removeMock).not.toHaveBeenCalled();
   });
 
   it("menampilkan pratinjau foto terpilih bila URL.createObjectURL tersedia", () => {
