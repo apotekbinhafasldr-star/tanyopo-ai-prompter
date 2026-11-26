@@ -1,5 +1,5 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 const { refreshMock, withdrawMock, grantMock } = vi.hoisted(() => ({ refreshMock: vi.fn(), withdrawMock: vi.fn(), grantMock: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: refreshMock }) }));
@@ -14,6 +14,7 @@ const notGiven: ConsentItemView = { code: "CONNECT_TIKTOK", title: "Koneksi akun
 const optional: ConsentItemView = { code: "MARKETING_COMMS", title: "Email pembaruan", text: "Teks email.", kind: "OPTIONAL", status: "NOT_GIVEN", statusLabel: "Belum diberikan" };
 
 describe("ConsentPanel", () => {
+  afterEach(() => cleanup());
   beforeEach(() => {
     refreshMock.mockReset();
     withdrawMock.mockReset();
