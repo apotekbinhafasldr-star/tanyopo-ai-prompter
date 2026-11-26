@@ -6,6 +6,14 @@ import { createClient } from "@/lib/supabase/server";
 import { requireSessionContext } from "@/services/session";
 import { productSchema } from "@/schemas/products";
 import { isOwnProductMediaPath } from "@/lib/media/product-media-path";
+import { isMediaUploadHardeningEnabled } from "@/lib/media/upload-hardening-flag";
+import {
+  HARDENED_QUOTA_SCAN_LIMIT,
+  UPLOAD_ERROR_MESSAGES,
+  evaluateImageQuota,
+  isRandomMediaPath,
+} from "@/lib/media/media-upload-validation";
+import { verifyUploadedObject } from "@/lib/media/hardened-upload-server";
 import type { MediaType } from "@/types/database";
 import { MarketingBlueprintSchema } from "@/schemas/ai/marketing-blueprint";
 import { buildSystemPreamble, buildMarketingBlueprintPrompt } from "@/lib/ai/prompts";
@@ -253,14 +261,43 @@ export async function recordProductMediaAction(
     return { error: "Media tidak valid untuk produk ini." };
   }
 
-  const { data: existing } = await supabase
-    .from("prompter_product_media")
-    .select("position")
-    .eq("product_id", productId)
-    .order("position", { ascending: false })
-    .limit(1);
+  let nextPosition: number;
 
-  const nextPosition = (existing?.[0]?.position ?? -1) + 1;
+  if (isMediaUploadHardeningEnabled()) {
+    // Paket 2 L2 (flag MEDIA_UPLOAD_HARDENING_ENABLED, default MATI). BUKAN batas keamanan: unggahan langsung
+    // browser ke Storage dapat melewati action ini. Lihat docs/MEDIA_UPLOAD_HARDENING.md.
+    if (mediaType !== "IMAGE") return { error: UPLOAD_ERROR_MESSAGES.VIDEO_NOT_ALLOWED };
+    if (!isRandomMediaPath(storagePath, session.tenantId, productId)) {
+      return { error: UPLOAD_ERROR_MESSAGES.UNSUPPORTED_FORMAT };
+    }
+
+    // Kuota: hanya baris IMAGE yang dihitung (video lama tidak memblokir foto baru), maka media_type ikut
+    // diambil. Bila terpindai >= HARDENED_QUOTA_SCAN_LIMIT (50) baris, hitungan tidak terbukti lengkap dan
+    // kuota GAGAL-TERBUKA (unggahan diizinkan).
+    const { data: rows } = await supabase
+      .from("prompter_product_media")
+      .select("position, media_type")
+      .eq("product_id", productId)
+      .order("position", { ascending: false })
+      .limit(HARDENED_QUOTA_SCAN_LIMIT);
+
+    const quota = evaluateImageQuota(rows);
+    if (!quota.allowed) return { error: UPLOAD_ERROR_MESSAGES.QUOTA_EXCEEDED };
+
+    const verdict = await verifyUploadedObject(supabase.storage.from("product-media"), storagePath);
+    if (!verdict.ok) return { error: verdict.message };
+
+    nextPosition = (rows?.[0]?.position ?? -1) + 1;
+  } else {
+    const { data: existing } = await supabase
+      .from("prompter_product_media")
+      .select("position")
+      .eq("product_id", productId)
+      .order("position", { ascending: false })
+      .limit(1);
+
+    nextPosition = (existing?.[0]?.position ?? -1) + 1;
+  }
 
   const { error: insertError } = await supabase.from("prompter_product_media").insert({
     tenant_id: session.tenantId,
