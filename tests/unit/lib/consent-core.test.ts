@@ -124,6 +124,13 @@ describe("recordSignupLegal (fail-open, tanpa PII di log)", () => {
     expect(log.mock.calls.map((c) => c[0])).toEqual(["rpc_error", "exception", "no_client"]);
     expect(JSON.stringify(log.mock.calls)).not.toMatch(/secret|@/);
   });
+  it("timeout: RPC yang menggantung dilepas (fail-open, log 'timeout') dan tidak menahan pendaftaran", async () => {
+    const log = vi.fn();
+    const t0 = Date.now();
+    expect(await recordSignupLegal("u", { timeoutMs: 20, getClient: async () => ({ rpc: () => new Promise(() => {}) }), logFailure: log })).toBe(false);
+    expect(Date.now() - t0).toBeLessThan(1500);
+    expect(log).toHaveBeenCalledWith("timeout");
+  });
   it("Terms dan Privacy punya konstanta versi terpisah", () => {
     expect(Number.isInteger(TERMS_VERSION)).toBe(true);
     expect(Number.isInteger(PRIVACY_NOTICE_VERSION)).toBe(true);

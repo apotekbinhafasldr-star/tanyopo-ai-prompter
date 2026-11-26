@@ -43,7 +43,7 @@ describe("ConsentPanel", () => {
     const { container } = render(<ConsentPanel items={[granted, notGiven]} />);
     expect(screen.getByText("Aktif")).toBeInTheDocument();
     expect(screen.getByText("Belum diberikan")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Buka halaman Koneksi" })).toHaveAttribute("href", "/connections");
+    expect(screen.getByRole("link", { name: /^Buka halaman Koneksi/ })).toHaveAttribute("href", "/connections");
     expect(container.querySelectorAll('input[type="checkbox"]').length).toBe(0);
   });
 
@@ -55,18 +55,18 @@ describe("ConsentPanel", () => {
 
   it("penarikan koneksi: panel konfirmasi inline, fokus awal pada Batal, Batal menutup tanpa memanggil server", () => {
     render(<ConsentPanel items={[granted]} />);
-    fireEvent.click(screen.getByRole("button", { name: "Putuskan koneksi" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Putuskan koneksi/ }));
     expect(screen.getByText("Tarik persetujuan ini?")).toBeInTheDocument();
     expect(screen.getByText(/menghapus token akses/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Batal" })).toHaveFocus();
-    fireEvent.click(screen.getByRole("button", { name: "Batal" }));
+    expect(screen.getByRole("button", { name: /^Batal/ })).toHaveFocus();
+    fireEvent.click(screen.getByRole("button", { name: /^Batal/ }));
     expect(screen.queryByText("Tarik persetujuan ini?")).toBeNull();
     expect(withdrawMock).not.toHaveBeenCalled();
   });
 
   it("Escape menutup konfirmasi", () => {
     render(<ConsentPanel items={[granted]} />);
-    fireEvent.click(screen.getByRole("button", { name: "Putuskan koneksi" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Putuskan koneksi/ }));
     fireEvent.keyDown(screen.getByRole("group"), { key: "Escape" });
     expect(screen.queryByText("Tarik persetujuan ini?")).toBeNull();
   });
@@ -74,8 +74,8 @@ describe("ConsentPanel", () => {
   it("konfirmasi 'Ya, tarik persetujuan' memanggil server; sukses = pesan + refresh (tanpa pembaruan optimistis)", async () => {
     withdrawMock.mockResolvedValue({ error: null, info: "Persetujuan ditarik." });
     render(<ConsentPanel items={[granted]} />);
-    fireEvent.click(screen.getByRole("button", { name: "Putuskan koneksi" }));
-    fireEvent.click(screen.getByRole("button", { name: "Ya, tarik persetujuan" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Putuskan koneksi/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Ya, tarik persetujuan/ }));
     await waitFor(() => expect(refreshMock).toHaveBeenCalled());
     expect(withdrawMock).toHaveBeenCalledWith("CONNECT_META");
     expect(screen.getByText("Persetujuan ditarik.")).toBeInTheDocument();
@@ -85,8 +85,8 @@ describe("ConsentPanel", () => {
   it("galat dari server ditampilkan sebagai alert dan status tidak berubah", async () => {
     withdrawMock.mockResolvedValue({ error: "Penarikan belum berhasil. Status Anda belum berubah. Coba lagi." });
     render(<ConsentPanel items={[granted]} />);
-    fireEvent.click(screen.getByRole("button", { name: "Putuskan koneksi" }));
-    fireEvent.click(screen.getByRole("button", { name: "Ya, tarik persetujuan" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Putuskan koneksi/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Ya, tarik persetujuan/ }));
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Penarikan belum berhasil"));
     expect(refreshMock).not.toHaveBeenCalled();
   });
@@ -107,6 +107,20 @@ describe("ConsentPanel", () => {
     fireEvent.click(screen.getByRole("switch"));
     await waitFor(() => expect(refreshMock).toHaveBeenCalled());
     expect(grantMock).toHaveBeenCalledWith("MARKETING_COMMS");
+  });
+
+  it("nama aksesibel memuat judul kartu; galat memakai role=alert di LUAR wilayah status; fokus kembali ke judul setelah sukses", async () => {
+    withdrawMock.mockResolvedValueOnce({ error: "Penarikan belum berhasil. Status Anda belum berubah. Coba lagi." });
+    const { container } = render(<ConsentPanel items={[granted]} />);
+    expect(screen.getByRole("button", { name: "Putuskan koneksi: Koneksi akun Meta" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^Putuskan koneksi/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Ya, tarik persetujuan: Koneksi akun Meta" }));
+    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+    expect(container.querySelector('[role="status"] [role="alert"]')).toBeNull();
+    withdrawMock.mockResolvedValueOnce({ error: null, info: "Persetujuan ditarik." });
+    fireEvent.click(screen.getByRole("button", { name: /^Putuskan koneksi/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Ya, tarik persetujuan/ }));
+    await waitFor(() => expect(document.getElementById("consent-CONNECT_META-title")).toHaveFocus());
   });
 
   it("wilayah status memakai aria-live polite", () => {

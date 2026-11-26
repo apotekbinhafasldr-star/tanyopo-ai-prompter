@@ -104,6 +104,7 @@ export const CONSENT_MESSAGES = {
   sessionExpired: "Sesi Anda berakhir. Masuk lagi untuk melanjutkan.",
   saved: "Persetujuan tersimpan.",
   withdrawn: "Persetujuan ditarik.",
+  tooMany: "Terlalu banyak permintaan. Coba lagi sesaat lagi.",
   loadFailed: "Daftar persetujuan belum dapat dimuat. Coba muat ulang halaman.",
   disconnectedNotRecorded: "Koneksi sudah diputus, tetapi penarikan persetujuan belum tercatat. Coba lagi.",
 } as const;

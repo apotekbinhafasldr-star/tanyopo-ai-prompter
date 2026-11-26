@@ -52,6 +52,8 @@ export function ConsentPanel({ items, loadError }: { items: ConsentItemView[]; l
       if (result.error) setMessage({ code, text: result.error, kind: "error" });
       else {
         setMessage({ code, text: result.info ?? "", kind: "info" });
+        // Fokus kembali ke judul kartu (pemicu bisa berganti bentuk setelah data dimuat ulang).
+        document.getElementById(`consent-${code}-title`)?.focus();
         router.refresh();
       }
     });
@@ -104,7 +106,7 @@ export function ConsentPanel({ items, loadError }: { items: ConsentItemView[]; l
                 <Card>
                   <CardContent className="flex flex-col gap-3 p-4">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <h3 id={titleId} className="text-sm font-semibold text-foreground">
+                      <h3 id={titleId} tabIndex={-1} className="text-sm font-semibold text-foreground outline-none focus-visible:underline">
                         {item.title}
                       </h3>
                       <Badge variant={badgeVariant(item.status)}>{item.statusLabel}</Badge>
@@ -135,6 +137,7 @@ export function ConsentPanel({ items, loadError }: { items: ConsentItemView[]; l
                         variant="secondary"
                         className="w-full sm:w-auto"
                         loading={isBusy}
+                        aria-label={`Putuskan koneksi: ${item.title}`}
                         aria-describedby={descId}
                         ref={(el) => {
                           triggerRefs.current[item.code] = el;
@@ -146,6 +149,7 @@ export function ConsentPanel({ items, loadError }: { items: ConsentItemView[]; l
                     ) : (
                       <Link
                         href="/connections"
+                        aria-label={`Buka halaman Koneksi untuk ${item.title}`}
                         className="inline-flex min-h-11 w-full items-center justify-center rounded-[var(--radius-md)] border border-border-strong px-4 text-sm font-medium text-foreground sm:w-auto"
                       >
                         Buka halaman Koneksi
@@ -166,27 +170,24 @@ export function ConsentPanel({ items, loadError }: { items: ConsentItemView[]; l
                         </h4>
                         <p className="text-sm text-muted-foreground">{WITHDRAW_BODY[item.kind]}</p>
                         <div className="flex flex-col gap-2 sm:flex-row">
-                          <Button ref={cancelRef} autoFocus variant="secondary" className="w-full sm:w-auto" onClick={() => closeConfirm(item.code)}>
+                          <Button ref={cancelRef} autoFocus variant="secondary" className="w-full sm:w-auto" aria-label={`Batal menarik persetujuan: ${item.title}`} onClick={() => closeConfirm(item.code)}>
                             Batal
                           </Button>
-                          <Button variant="destructive" className="w-full sm:w-auto" loading={isBusy} onClick={() => run(item.code, withdrawConsentAction)}>
+                          <Button variant="destructive" className="w-full sm:w-auto" loading={isBusy} aria-label={`Ya, tarik persetujuan: ${item.title}`} onClick={() => run(item.code, withdrawConsentAction)}>
                             Ya, tarik persetujuan
                           </Button>
                         </div>
                       </div>
                     ) : null}
 
-                    <div role="status" aria-live="polite" className="min-h-0 text-sm">
-                      {own ? (
-                        own.kind === "error" ? (
-                          <p role="alert" className="text-danger">
-                            {own.text}
-                          </p>
-                        ) : (
-                          <p className="text-success">{own.text}</p>
-                        )
-                      ) : null}
+                    <div role="status" aria-live="polite" className="text-sm">
+                      {own && own.kind === "info" ? <p className="text-success">{own.text}</p> : null}
                     </div>
+                    {own && own.kind === "error" ? (
+                      <p role="alert" className="text-sm text-danger">
+                        {own.text}
+                      </p>
+                    ) : null}
                   </CardContent>
                 </Card>
               </li>

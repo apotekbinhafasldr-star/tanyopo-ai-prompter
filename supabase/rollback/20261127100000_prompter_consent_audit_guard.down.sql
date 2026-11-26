@@ -1,7 +1,8 @@
 -- Rollback untuk 20261127100000_prompter_consent_audit_guard.sql. Idempoten. Hanya objek LINOE bernama eksplisit.
 -- AMAN: menolak (RAISE) bila tabel bukti berisi baris, agar bukti persetujuan tidak hilang tanpa sengaja.
 --   Untuk sengaja membuang bukti (setelah ekspor dan persetujuan Founder): jalankan dengan PGOPTIONS="-c linoe.drop_evidence=YA".
--- Memulihkan hak UPDATE/DELETE/TRUNCATE role klien pada prompter_audit_logs sesuai keadaan SEBELUM migrasi (tertangkap di prompter_audit_guard_state).
+-- Memulihkan ACL UPDATE/DELETE/TRUNCATE prompter_audit_logs (PUBLIC dan role bernama, termasuk grant option) dan komentar tabel sesuai keadaan SEBELUM migrasi
+-- (snapshot aclexplode di prompter_audit_guard_state). Grantor asli yang bukan pemilik tidak ditiru: hak dipulihkan sebagai pemilik.
 -- Tidak menyentuh prompter_audit_logs (baris), auth.users, tenants, atau tabel produk lain.
 begin;
 
@@ -30,12 +31,19 @@ drop trigger if exists trg_prompter_audit_logs_block_truncate on public.prompter
 do $$
 declare
   r record;
+  v_old_comment text;
 begin
   if to_regclass('public.prompter_audit_guard_state') is not null and to_regclass('public.prompter_audit_logs') is not null then
-    for r in select role_name, privilege_type from public.prompter_audit_guard_state s
-              where s.was_granted and exists (select 1 from pg_roles x where x.rolname = s.role_name) loop
-      execute format('grant %s on public.prompter_audit_logs to %I', r.privilege_type, r.role_name);
+    -- ACL asli: PUBLIC dan role bernama, termasuk grant option. Dipulihkan sebagai pemilik tabel (grantor asli lain tidak ditiru).
+    for r in select grantee_name, privilege_type, is_grantable from public.prompter_audit_guard_state s
+              where s.privilege_type in ('UPDATE', 'DELETE', 'TRUNCATE')
+                and (s.grantee_name = 'PUBLIC' or exists (select 1 from pg_roles x where x.rolname = s.grantee_name)) loop
+      execute format('grant %s on public.prompter_audit_logs to %s%s', r.privilege_type,
+                     case when r.grantee_name = 'PUBLIC' then 'PUBLIC' else quote_ident(r.grantee_name) end,
+                     case when r.is_grantable then ' with grant option' else '' end);
     end loop;
+    select s.note into v_old_comment from public.prompter_audit_guard_state s where s.privilege_type = 'MARKER';
+    execute format('comment on table public.prompter_audit_logs is %L', v_old_comment);
   end if;
 end $$;
 

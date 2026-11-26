@@ -78,6 +78,14 @@ describe("server actions persetujuan", () => {
     expect(await withdrawConsentAction("CONNECT_META")).toEqual({ error: CONSENT_MESSAGES.disconnectedNotRecorded });
   });
 
+  it("rem permintaan: lebih dari 30 permintaan per menit per pengguna ditolak tanpa memanggil database", async () => {
+    sessionMock.mockResolvedValue({ userId: "u-rate-limit", tenantId: "t1", role: "owner" });
+    let last: { error: string | null } = { error: null };
+    for (let i = 0; i < 31; i++) last = await grantConnectionConsentAction("META");
+    expect(last).toEqual({ error: CONSENT_MESSAGES.tooMany });
+    expect(rpcMock).toHaveBeenCalledTimes(30);
+  });
+
   it("withdraw kode tidak dikenal ditolak", async () => {
     expect(await withdrawConsentAction("NOPE")).toEqual({ error: CONSENT_MESSAGES.withdrawFailed });
     expect(disconnectMock).not.toHaveBeenCalled();

@@ -59,7 +59,7 @@ create table if not exists public.prompter_consent_events (
   version integer not null,
   action text not null check (action in ('GRANTED', 'WITHDRAWN')),
   source text not null check (source in ('REGISTER', 'SETTINGS', 'CONNECT_FLOW', 'REACCEPT_BANNER', 'NOTICE_BANNER', 'OPERATOR')),
-  occurred_at timestamptz not null default now(),
+  occurred_at timestamptz not null default clock_timestamp(),
   retain_until timestamptz,
   legal_hold boolean not null default false,
   constraint prompter_consent_events_catalog_fkey foreign key (code, version) references public.prompter_consent_catalog (code, version)
@@ -77,7 +77,7 @@ create table if not exists public.prompter_legal_document_events (
   version integer not null check (version between 1 and 10000),
   event text not null check (event in ('ACCEPTED', 'DELIVERED')),
   source text not null check (source in ('REGISTER', 'SETTINGS', 'CONNECT_FLOW', 'REACCEPT_BANNER', 'NOTICE_BANNER', 'OPERATOR')),
-  occurred_at timestamptz not null default now(),
+  occurred_at timestamptz not null default clock_timestamp(),
   retain_until timestamptz,
   legal_hold boolean not null default false,
   -- Terms = penerimaan perjanjian (ACCEPTED); Privacy Notice = pemberitahuan disampaikan (DELIVERED). Bukan persetujuan PDP.
@@ -87,7 +87,7 @@ create table if not exists public.prompter_legal_document_events (
 
 create table if not exists public.prompter_consent_settings (
   key text primary key check (key in ('evidence_retention_months')),
-  value text check (value is null or value ~ '^[0-9]{1,3}$'),
+  value text check (value is null or value ~ '^[1-9][0-9]{0,2}$'),
   updated_at timestamptz not null default now()
 );
 
@@ -101,12 +101,16 @@ create table if not exists public.prompter_consent_purge_runs (
   status text not null check (status in ('NOT_APPROVED', 'DRY_RUN', 'EXECUTED', 'REFUSED'))
 );
 
+-- Snapshot ACL mentah prompter_audit_logs (grantor, grantee termasuk PUBLIC, privilege, grant option) + komentar lama; ditangkap SEKALI
+-- (baris MARKER menandai sudah tertangkap, sehingga menjalankan ulang tidak menimpa keadaan asli dengan keadaan setelah REVOKE).
 create table if not exists public.prompter_audit_guard_state (
-  role_name text not null,
-  privilege_type text not null check (privilege_type in ('UPDATE', 'DELETE', 'TRUNCATE')),
-  was_granted boolean not null,
+  grantor_name text not null,
+  grantee_name text not null,
+  privilege_type text not null check (privilege_type in ('UPDATE', 'DELETE', 'TRUNCATE', 'MARKER')),
+  is_grantable boolean not null default false,
+  note text,
   captured_at timestamptz not null default now(),
-  primary key (role_name, privilege_type)
+  primary key (grantor_name, grantee_name, privilege_type)
 );
 
 comment on table public.prompter_consent_events is
@@ -117,14 +121,21 @@ comment on table public.prompter_legal_document_events is
 -- Parameter retensi: NULL = belum disahkan. Sengaja tanpa angka.
 insert into public.prompter_consent_settings (key, value) values ('evidence_retention_months', null) on conflict (key) do nothing;
 
--- Hak lama role klien pada prompter_audit_logs (hanya yang pertama kali tertangkap; ulang tidak menimpa keadaan asli).
-insert into public.prompter_audit_guard_state (role_name, privilege_type, was_granted)
-select r.role_name, p.privilege_type,
-       case when exists (select 1 from pg_roles x where x.rolname = r.role_name)
-            then has_table_privilege(r.role_name, 'public.prompter_audit_logs', p.privilege_type) else false end
-from (values ('anon'), ('authenticated'), ('service_role')) as r(role_name)
-cross join (values ('UPDATE'), ('DELETE'), ('TRUNCATE')) as p(privilege_type)
-on conflict (role_name, privilege_type) do nothing;
+-- Snapshot ACL asli (aclexplode(relacl): grantor, grantee 0 = PUBLIC, privilege, grant option) dan komentar tabel lama, SEKALI saja.
+do $$
+begin
+  if not exists (select 1 from public.prompter_audit_guard_state where privilege_type = 'MARKER') then
+    insert into public.prompter_audit_guard_state (grantor_name, grantee_name, privilege_type, is_grantable)
+    select coalesce((select r.rolname from pg_roles r where r.oid = a.grantor), a.grantor::text),
+           case when a.grantee = 0 then 'PUBLIC' else coalesce((select r.rolname from pg_roles r where r.oid = a.grantee), a.grantee::text) end,
+           a.privilege_type, a.is_grantable
+      from pg_class c, aclexplode(coalesce(c.relacl, acldefault('r', c.relowner))) a
+     where c.oid = 'public.prompter_audit_logs'::regclass and a.privilege_type in ('UPDATE', 'DELETE', 'TRUNCATE')
+    on conflict do nothing;
+    insert into public.prompter_audit_guard_state (grantor_name, grantee_name, privilege_type, note)
+    values ('-', '-', 'MARKER', obj_description('public.prompter_audit_logs'::regclass, 'pg_class'));
+  end if;
+end $$;
 
 -- ---------------------------------------------------------------------------
 -- 2. Katalog v1 (teks final; hash dihitung dari teks yang sama). Teks versi terbit TIDAK diedit: perubahan = versi baru.
@@ -256,6 +267,8 @@ create trigger trg_prompter_consent_purge_runs_block_truncate
 -- ---------------------------------------------------------------------------
 -- 5. Hak akses dan RLS
 -- ---------------------------------------------------------------------------
+comment on table public.prompter_audit_logs is
+  'LINOE: catatan audit. UPDATE/DELETE/TRUNCATE dicabut dari role klien dan ditolak trigger guard; pemilik tabel/superuser tetap dapat menonaktifkan trigger atau mengubah hak. Baris ikut terhapus bila tenant dihapus (cascade).';
 -- prompter_audit_logs: cabut HANYA UPDATE/DELETE/TRUNCATE dari role klien. INSERT/SELECT dan RLS yang ada tidak diubah.
 revoke update, delete, truncate on public.prompter_audit_logs from public, anon, authenticated, service_role;
 
@@ -329,7 +342,7 @@ begin
   if v_uid is null then
     raise exception 'tidak terautentikasi' using errcode = '28000';
   end if;
-  if p_action not in ('GRANTED', 'WITHDRAWN') or p_source not in ('SETTINGS', 'CONNECT_FLOW') or p_code is null then
+  if p_code is null or p_action is null or p_source is null or p_action not in ('GRANTED', 'WITHDRAWN') or p_source not in ('SETTINGS', 'CONNECT_FLOW') then
     raise exception 'argumen tidak valid' using errcode = '22023';
   end if;
 
@@ -408,12 +421,13 @@ begin
   if p_user_id is null or p_code is null then
     return jsonb_build_object('consented', false, 'reason', 'INVALID_ARGUMENT');
   end if;
-  select * into v_cat from public.prompter_consent_catalog c where c.code = p_code order by c.version desc limit 1;
+  -- Versi acuan = versi AKTIF tertinggi (sama dengan consent_set dan my_status).
+  select * into v_cat from public.prompter_consent_catalog c where c.code = p_code and c.active order by c.version desc limit 1;
   if not found then
+    if exists (select 1 from public.prompter_consent_catalog c where c.code = p_code) then
+      return jsonb_build_object('consented', false, 'reason', 'INACTIVE_CODE');
+    end if;
     return jsonb_build_object('consented', false, 'reason', 'UNKNOWN_CODE');
-  end if;
-  if not v_cat.active then
-    return jsonb_build_object('consented', false, 'reason', 'INACTIVE_CODE');
   end if;
   select * into v_last from public.prompter_consent_events e
    where e.subject_user_id = p_user_id and e.code = p_code
@@ -445,6 +459,9 @@ declare
   v_months integer;
   v_count integer := 0;
 begin
+  if p_dry_run is null then
+    raise exception 'argumen tidak valid' using errcode = '22023';
+  end if;
   select s.value into v_value from public.prompter_consent_settings s where s.key = 'evidence_retention_months';
   if v_value is null then
     return jsonb_build_object('status', 'NOT_APPROVED', 'dry_run', coalesce(p_dry_run, true), 'candidates', 0, 'updated', 0);
@@ -488,9 +505,12 @@ declare
   v_deleted integer := 0;
   v_part integer;
   v_detail jsonb;
-  v_batch integer := least(greatest(coalesce(p_batch, 500), 1), 5000);
-  v_dry boolean := coalesce(p_dry_run, true);
+  v_batch integer := least(coalesce(p_batch, 500), 5000);
+  v_dry boolean := p_dry_run;
 begin
+  if p_dry_run is null or (p_batch is not null and p_batch < 1) then
+    raise exception 'argumen tidak valid' using errcode = '22023';
+  end if;
   select s.value into v_value from public.prompter_consent_settings s where s.key = 'evidence_retention_months';
   if v_value is null then
     insert into public.prompter_consent_purge_runs (dry_run, approval_ref, candidates, deleted, status) values (v_dry, null, 0, 0, 'NOT_APPROVED');

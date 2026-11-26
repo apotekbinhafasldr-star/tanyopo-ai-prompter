@@ -4,7 +4,10 @@ import type { ConsentRpcClient } from "@/lib/consent/rpc";
 export interface SignupLegalDeps {
   getClient?: () => Promise<ConsentRpcClient | null>;
   logFailure?: (stage: string) => void;
+  timeoutMs?: number;
 }
+
+const DEFAULT_TIMEOUT_MS = 3000;
 
 async function defaultGetClient(): Promise<ConsentRpcClient | null> {
   const { createAdminClient } = await import("@/lib/supabase/admin");
@@ -29,11 +32,26 @@ export async function recordSignupLegal(userId: string, deps: SignupLegalDeps = 
       log("no_client");
       return false;
     }
-    const { error } = await client.rpc("fn_prompter_record_signup_legal", {
-      p_user_id: userId,
-      p_terms_version: TERMS_VERSION,
-      p_privacy_version: PRIVACY_NOTICE_VERSION,
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<"TIMEOUT">((resolve) => {
+      timer = setTimeout(() => resolve("TIMEOUT"), deps.timeoutMs ?? DEFAULT_TIMEOUT_MS);
     });
+    const result = await Promise.race([
+      Promise.resolve(
+        client.rpc("fn_prompter_record_signup_legal", {
+          p_user_id: userId,
+          p_terms_version: TERMS_VERSION,
+          p_privacy_version: PRIVACY_NOTICE_VERSION,
+        }),
+      ),
+      timeout,
+    ]);
+    if (timer) clearTimeout(timer);
+    if (result === "TIMEOUT") {
+      log("timeout");
+      return false;
+    }
+    const { error } = result;
     if (error) {
       log("rpc_error");
       return false;

@@ -6,6 +6,7 @@ import { requireSessionContext } from "@/services/session";
 import { disconnectAction } from "@/features/connections/actions";
 import { CONSENT_MESSAGES, getConsentEntry, type ConsentCode } from "@/lib/consent/catalog";
 import { asConsentRpc } from "@/lib/consent/rpc";
+import { checkRateLimit } from "@/lib/rate-limit";
 import type { ConnectorPlatform } from "@/types/database";
 
 export interface ConsentActionState {
@@ -20,6 +21,13 @@ const PLATFORM_BY_CODE: Partial<Record<ConsentCode, ConnectorPlatform>> = {
 };
 
 type Source = "SETTINGS" | "CONNECT_FLOW";
+
+/** Rem sederhana (best effort, memori per instance) terhadap penekanan tombol berulang. 30 permintaan per menit per pengguna. */
+const CONSENT_RATE_LIMIT = 30;
+const CONSENT_RATE_WINDOW_MS = 60 * 1000;
+function allowConsentRequest(userId: string): boolean {
+  return checkRateLimit(`consent:${userId}`, CONSENT_RATE_LIMIT, CONSENT_RATE_WINDOW_MS).allowed;
+}
 
 /** Memanggil fn_prompter_consent_set lewat sesi pengguna (auth.uid()). Versi diambil server dari katalog database, bukan dari klien. */
 async function setConsent(code: ConsentCode, action: "GRANTED" | "WITHDRAWN", source: Source): Promise<boolean> {
@@ -37,9 +45,10 @@ async function setConsent(code: ConsentCode, action: "GRANTED" | "WITHDRAWN", so
  * Hanya kode aktif di katalog. Persetujuan koneksi (CONNECT_*) TIDAK diberikan dari sini: hanya dari alur koneksi.
  */
 export async function grantOptionalConsentAction(code: string): Promise<ConsentActionState> {
-  await requireSessionContext({ allowIncompleteOnboarding: true });
+  const session = await requireSessionContext({ allowIncompleteOnboarding: true });
   const entry = getConsentEntry(code);
   if (!entry || !entry.active || entry.kind !== "OPTIONAL") return { error: CONSENT_MESSAGES.saveFailed };
+  if (!allowConsentRequest(session.userId)) return { error: CONSENT_MESSAGES.tooMany };
   const ok = await setConsent(entry.code, "GRANTED", "SETTINGS");
   if (!ok) return { error: CONSENT_MESSAGES.saveFailed };
   revalidatePath("/settings");
@@ -56,6 +65,7 @@ export async function grantConnectionConsentAction(platform: ConnectorPlatform):
   const code = (Object.keys(PLATFORM_BY_CODE) as ConsentCode[]).find((c) => PLATFORM_BY_CODE[c] === platform);
   const entry = code ? getConsentEntry(code) : null;
   if (!entry || !entry.active) return { error: CONSENT_MESSAGES.saveFailed };
+  if (!allowConsentRequest(session.userId)) return { error: CONSENT_MESSAGES.tooMany };
   const ok = await setConsent(entry.code, "GRANTED", "CONNECT_FLOW");
   if (!ok) return { error: CONSENT_MESSAGES.saveFailed };
   revalidatePath("/connections");
@@ -71,6 +81,7 @@ export async function withdrawConsentAction(code: string): Promise<ConsentAction
   const session = await requireSessionContext({ allowIncompleteOnboarding: true });
   const entry = getConsentEntry(code);
   if (!entry || !entry.withdrawable) return { error: CONSENT_MESSAGES.withdrawFailed };
+  if (!allowConsentRequest(session.userId)) return { error: CONSENT_MESSAGES.tooMany };
 
   if (entry.kind === "CONNECTION") {
     if (session.role !== "owner") return { error: CONSENT_MESSAGES.ownerOnly };

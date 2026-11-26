@@ -247,7 +247,11 @@ export async function registerAction(
   // pernah memblokir pendaftaran (hanya log tanpa data pribadi). Tidak menambah kunci ke options.data milik handle_new_user.
   const newUserId = data?.user?.id;
   if (typeof newUserId === "string" && newUserId.length > 0) {
-    await recordSignupLegal(newUserId);
+    try {
+      await recordSignupLegal(newUserId);
+    } catch {
+      // fail-open: pencatat tidak pernah boleh menggagalkan pendaftaran
+    }
   }
 
   // If the project requires email confirmation, signUp succeeds but no

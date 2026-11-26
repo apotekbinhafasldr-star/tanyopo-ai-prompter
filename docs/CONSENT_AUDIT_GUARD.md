@@ -26,6 +26,9 @@ Terms dan Privacy Notice **tidak** disamakan dengan persetujuan PDP, dan tidak s
 - **Dialog persetujuan pada halaman Koneksi belum ada** (paket UI berikutnya). Server action `grantConnectionConsentAction` sudah tersedia. Selama dialog belum ada, enforcement tidak boleh dihidupkan: Owner tidak punya jalur memberi persetujuan koneksi.
 - **Retensi 3 tahun = usulan internal belum disahkan.** Tidak ada angka di kode, migrasi, atau teks publik. Selama parameter NULL: jadwal dan purge mengembalikan `NOT_APPROVED` dan tidak menghapus apa pun. Tidak ada penjadwal otomatis.
 
+- **Saat flag OFF hanya Terms dan Privacy Notice yang tercatat** (saat pendaftaran). Persetujuan `CONNECT_*` BELUM dicatat oleh siapa pun karena dialog di halaman Koneksi belum ada; panel Privasi & persetujuan hanya tampil bila `CONSENT_UI_ENABLED` hidup. Artinya sebelum aktivasi, koneksi yang sudah ada tidak punya catatan persetujuan sama sekali.
+- **Keterbatasan yang diketahui (tidak diselesaikan di PR ini):** (1) rem permintaan `consent_set` bersifat memori per instance (best effort, 30/menit/pengguna), bukan batas global; (2) tidak ada pembatasan di database terhadap pengguna yang sengaja memanggil fungsi berulang; (3) akurasi `occurred_at` memakai `clock_timestamp()` (waktu server database), bukan jam klien; (4) hak asli grantor selain pemilik tabel tidak ditiru saat rollback (dipulihkan sebagai pemilik); (5) peristiwa persetujuan satu pengguna (`subject_user_id`) tidak mengikuti tenant bila pengguna pindah tenant (tenant_id hanya konteks saat pencatatan); (6) pengaturan retensi diisi langsung oleh operator (CHECK menolak 0, angka bernol di depan, dan nilai negatif; tidak ada catatan siapa yang mengisi selain log operasi).
+
 ## 3. Operator: retensi
 
 Dijalankan pemilik database (tidak ada GRANT ke role mana pun, termasuk `service_role`):
@@ -35,6 +38,19 @@ Dijalankan pemilik database (tidak ada GRANT ke role mana pun, termasuk `service
 
 ## 4. Urutan migrasi dan rollback
 
+**URUTAN WAJIB: terapkan migrasi LEBIH DULU, baru merge/deploy kode.** Kode pendaftaran memanggil `fn_prompter_record_signup_legal`; bila kode live sebelum migrasi, pemanggilan gagal (fail-open: pendaftaran tetap jalan, hanya log `signup_legal_record_failed`) dan pengguna baru pada jeda itu **tidak punya baris Terms/Privacy**. Kueri operator read-only untuk mendeteksi celah (hitungan saja, tanpa PII; ganti tanggal dengan waktu kode live):
+
+```sql
+select count(*) as pengguna_baru_tanpa_catatan_terms
+from auth.users u
+where u.created_at >= timestamptz '<waktu kode live, UTC>'
+  and not exists (select 1 from public.prompter_legal_document_events e
+                  where e.subject_user_id = u.id and e.doc_code = 'TERMS');
+```
+`auth.users` dibagi dengan produk lain: kueri hanya MEMBACA dan hanya menampilkan hitungan. Pengguna yang terlewat ditangani banner penerimaan ulang (paket UI berikutnya) atau keputusan Founder.
+
+**Paket produksi (preflight, apply, verify, rollback) untuk Paket 3 BELUM ada dan dibutuhkan.** Pipeline produksi resmi hanya `p0-2`. PR ini tidak membuat atau mengubah `supabase/prod-packages/`; paket produksi (beserta PRECHECK/POSTCHECK, urutan setelah P0-3 dan Paket 2 L1, serta pemeriksaan ACL `prompter_audit_logs`) harus dibuat dan disetujui terpisah sebelum penerapan.
+
 - Berkas migrasi ini berada **setelah** `20261126100000` (Paket 2 L1). Keduanya belum diterapkan.
 - P0-3 (alert DOKU, `20261111130000`) **belum diterapkan di produksi**. Paket produksi butuh urutan yang benar dan paket baru. Pipeline produksi resmi saat ini hanya paket `p0-2`; **tidak ada paket produksi dibuat atau diubah di PR ini**.
 - Sebelum penerapan: tinjau advisor keamanan, pastikan tidak ada bentrok nama pada proyek bersama `umkmpro-ai` (PUBLOE, MITAPENG, UMKMpro, Apotek), jalankan di jam sepi (lock_timeout 3 detik, statement_timeout 10 detik, transaksi eksplisit).
@@ -43,6 +59,7 @@ Dijalankan pemilik database (tidak ada GRANT ke role mana pun, termasuk `service
 
 ## 5. Checklist sebelum enforcement dihidupkan
 
+0. **Keputusan produk: subjek persetujuan koneksi.** Persetujuan `CONNECT_*` diberikan oleh Owner tenant (hanya Owner yang dapat menghubungkan), tetapi pemakaian token dilakukan juga oleh anggota `marketing` (peluncuran kampanye, sinkron insight). Gerbang memeriksa persetujuan milik PENGGUNA YANG MENJALANKAN. Dengan enforcement ON, anggota marketing yang belum punya catatan akan ditolak (`NO_RECORD`) walau Owner sudah setuju. Putuskan sebelum aktivasi: periksa persetujuan Owner tenant, atau minta tiap pengguna.
 1. Dialog persetujuan di halaman Koneksi tayang dan teruji; teks dialog diselaraskan dengan izin yang benar-benar diminta (UNKNOWN E-8).
 2. Inventaris titik gerbang dilengkapi (bagian 2), termasuk jalur latar belakang.
 3. Jumlah koneksi yang sudah ada tanpa catatan persetujuan diukur (UNKNOWN E-6): mereka akan ditolak sampai Owner memberi persetujuan.
@@ -53,7 +70,7 @@ Dijalankan pemilik database (tidak ada GRANT ke role mana pun, termasuk `service
 
 | Kelas | Isi |
 |---|---|
-| SANDBOX | `supabase/tests/consent-audit-guard/run-local.sh` pada PostgreSQL sementara, data sintetis, skema Supabase berupa stub (job CI `consent-audit-guard-sql`, PG17) |
+| SANDBOX | `supabase/tests/consent-audit-guard/run-local.sh` pada PostgreSQL sementara, data sintetis, skema Supabase berupa stub (job CI `consent-audit-guard-sql`, PG17); log di `docs/consent-audit-guard/SANDBOX_LOG.txt` |
 | CI (vitest) | Tes unit dan statis; dijalankan oleh CI pada PR ini |
 | Simulasi lokal | Logika murni (`lib/consent/*`) diuji dengan tsx pada mesin pengembang |
 | REAL | **Belum ada.** Tidak diterapkan atau diuji di Supabase nyata |

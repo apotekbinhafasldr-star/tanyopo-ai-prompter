@@ -235,6 +235,43 @@ eq "S7 hak audit tidak berubah setelah kegagalan di tengah" "$(PA -d g7c -c "sel
 eq "S7 trigger audit tidak terpasang setelah kegagalan" "$(PA -d g7c -c "select count(*) from pg_trigger where tgname like 'trg_prompter_audit_logs%'")" 0
 psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q -d g7c -c "$(cat "$MIG")" >/dev/null 2>&1; eq "S7 seluruh berkas sebagai SATU query berhasil" "$(PA -d g7c -c "select count(*) from public.prompter_consent_catalog")" 5
 
+# ---------- S9: revisi review (versi katalog konsisten, NULL, retensi >= 1, ACL PUBLIC+grant option, komentar) ----------
+mk g9; up g9
+eq "S9 komentar tabel audit jujur (tanpa kata immutable)" "$(PA -d g9 -c "select (obj_description('public.prompter_audit_logs'::regclass,'pg_class') !~* 'immutable')::text||':'||(obj_description('public.prompter_audit_logs'::regclass,'pg_class') ~ 'pemilik tabel')::text")" "true:true"
+eq "S9 occurred_at memakai clock_timestamp()" "$(PA -d g9 -c "select count(*) from pg_attrdef d join pg_attribute a on a.attrelid=d.adrelid and a.attnum=d.adnum where a.attname='occurred_at' and pg_get_expr(d.adbin,d.adrelid) like '%clock_timestamp%'")" 2
+ERRIS "S9 retensi 0 ditolak" "$(PA -v ON_ERROR_STOP=1 -d g9 -c "update public.prompter_consent_settings set value='0'" 2>/dev/null || echo ERR)"
+ERRIS "S9 retensi '012' ditolak" "$(PA -v ON_ERROR_STOP=1 -d g9 -c "update public.prompter_consent_settings set value='012'" 2>/dev/null || echo ERR)"
+ERRIS "S9 retensi '-5' ditolak" "$(PA -v ON_ERROR_STOP=1 -d g9 -c "update public.prompter_consent_settings set value='-5'" 2>/dev/null || echo ERR)"
+eq "S9 retensi '1' dan NULL diterima" "$(PA -v ON_ERROR_STOP=1 -d g9 -c "update public.prompter_consent_settings set value='1'" -c "update public.prompter_consent_settings set value=null" -c "select 'ok'" 2>/dev/null | tail -1)" ok
+ERRIS "S9 consent_set argumen NULL (code) ditolak" "$(as g9 authenticated $UA "select public.fn_prompter_consent_set(null,'GRANTED','SETTINGS')")"
+ERRIS "S9 consent_set argumen NULL (action) ditolak" "$(as g9 authenticated $UA "select public.fn_prompter_consent_set('CONNECT_META',null,'SETTINGS')")"
+ERRIS "S9 consent_set argumen NULL (source) ditolak" "$(as g9 authenticated $UA "select public.fn_prompter_consent_set('CONNECT_META','GRANTED',null)")"
+eq "S9 kelas galat argumen NULL = 22023" "$(psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q -At -v VERBOSITY=verbose -d g9 -c "set role authenticated" -c "set app.uid='$UA'" -c "select public.fn_prompter_consent_set('CONNECT_META',null,'SETTINGS')" 2>&1 | grep -c '22023')" 1
+ERRIS "S9 signup_legal argumen NULL ditolak" "$(as g9 service_role '' "select public.fn_prompter_record_signup_legal(null,1,1)")"
+ERRIS "S9 purge dengan dry_run NULL ditolak" "$(PA -v ON_ERROR_STOP=1 -d g9 -c "select public.fn_prompter_consent_evidence_purge(null,null,10)" 2>/dev/null || echo ERR)"
+ERRIS "S9 purge dengan batch 0 ditolak" "$(PA -v ON_ERROR_STOP=1 -d g9 -c "select public.fn_prompter_consent_evidence_purge(true,null,0)" 2>/dev/null || echo ERR)"
+ERRIS "S9 schedule dengan dry_run NULL ditolak" "$(PA -v ON_ERROR_STOP=1 -d g9 -c "select public.fn_prompter_consent_schedule_retention(null)" 2>/dev/null || echo ERR)"
+# versi katalog: v2 TIDAK aktif -> acuan tetap v1 aktif di check/set/my_status
+as g9 authenticated $UA "select public.fn_prompter_consent_set('CONNECT_META','GRANTED','SETTINGS')" >/dev/null
+PA -d g9 -c "insert into public.prompter_consent_catalog(code,version,text_id,purpose_id,active,text_sha256) values ('CONNECT_META',2,'Teks versi dua nonaktif yang belum ditawarkan.','Koneksi Meta',false,repeat('b',64))" >/dev/null
+eq "S9 v2 nonaktif: check tetap GRANTED terhadap v1 aktif" "$(as g9 service_role '' "select public.fn_prompter_consent_check('$UA','CONNECT_META')->>'reason'")" GRANTED
+eq "S9 v2 nonaktif: my_status memakai v1" "$(as g9 authenticated $UA "select version||':'||status from public.fn_prompter_consent_my_status() where code='CONNECT_META'")" "1:GRANTED"
+eq "S9 v2 nonaktif: consent_set GRANTED ulang tidak membuat baris" "$(as g9 authenticated $UA "select (public.fn_prompter_consent_set('CONNECT_META','GRANTED','SETTINGS'))->>'changed'")" false
+eq "S9 kode semua versi nonaktif: check = INACTIVE_CODE" "$(as g9 service_role '' "select public.fn_prompter_consent_check('$UA','CONNECT_X')->>'reason'")" INACTIVE_CODE
+# ACL PUBLIC + grant option + komentar lama dipulihkan
+mk g9b
+PA -d g9b -c "comment on table public.prompter_audit_logs is 'Komentar lama sintetis'" -c "grant update, truncate on public.prompter_audit_logs to public" -c "grant delete on public.prompter_audit_logs to anon with grant option" >/dev/null
+ACL_B=$(PA -d g9b -c "select string_agg(coalesce(nullif(a.grantee,0)::regrole::text,'PUBLIC')||':'||a.privilege_type||':'||a.is_grantable::text,',' order by 1) from pg_class c, aclexplode(c.relacl) a where c.oid='public.prompter_audit_logs'::regclass and a.privilege_type in ('UPDATE','DELETE','TRUNCATE')")
+up g9b
+eq "S9 setelah up: tidak ada ACL UPDATE/DELETE/TRUNCATE untuk PUBLIC atau role klien" "$(PA -d g9b -c "select count(*) from pg_class c, aclexplode(c.relacl) a where c.oid='public.prompter_audit_logs'::regclass and a.privilege_type in ('UPDATE','DELETE','TRUNCATE') and (a.grantee=0 or a.grantee::regrole::text in ('anon','authenticated','service_role'))")" 0
+up g9b
+eq "S9 up kedua tidak menimpa snapshot asli" "$(PA -d g9b -c "select count(*) from public.prompter_audit_guard_state where privilege_type='MARKER'")" 1
+down g9b
+ACL_A=$(PA -d g9b -c "select string_agg(coalesce(nullif(a.grantee,0)::regrole::text,'PUBLIC')||':'||a.privilege_type||':'||a.is_grantable::text,',' order by 1) from pg_class c, aclexplode(c.relacl) a where c.oid='public.prompter_audit_logs'::regclass and a.privilege_type in ('UPDATE','DELETE','TRUNCATE')")
+eq "S9 down memulihkan ACL mentah (PUBLIC, grant option, role) persis" "$ACL_A" "$ACL_B"
+eq "S9 ACL asli memuat PUBLIC dan grant option pada role (bukan tautologi)" "$(echo "$ACL_B" | grep -c 'PUBLIC:UPDATE:false')$(echo "$ACL_B" | grep -c 'anon:DELETE:true')" 11
+eq "S9 down memulihkan komentar lama" "$(PA -d g9b -c "select obj_description('public.prompter_audit_logs'::regclass,'pg_class')")" "Komentar lama sintetis"
+
 # ---------- S8: statis ----------
 for f in "$MIG" "$DOWN"; do
   if grep -viE '^\s*--' "$f" | grep -qiE '(auth\.users|user_profiles|handle_new_user|fn_create_ai_job_if_entitled|budget_policies|automation_settings)'; then bad "S8 $(basename "$f") menyebut objek terlarang"; else pass "S8 $(basename "$f") tidak menyebut objek terlarang"; fi

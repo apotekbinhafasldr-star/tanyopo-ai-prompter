@@ -61,11 +61,11 @@ describe("registerAction: pencatatan Terms/Privacy Notice sisi server (Paket 3)"
     expect(result.info).toMatch(/Akun berhasil dibuat/);
   });
 
-  it("pencatat yang melempar pun tidak boleh sampai ke pengguna lewat jalur ini (dijaga di recordSignupLegal)", async () => {
-    // recordSignupLegal sendiri tidak pernah melempar (lihat consent-core.test.ts); aksi hanya menunggunya.
-    recordMock.mockResolvedValue(true);
+  it("pencatat yang MELEMPAR (promise ditolak) tidak menggagalkan pendaftaran (fail-open)", async () => {
+    recordMock.mockRejectedValue(new Error("boom"));
     signUpMock.mockResolvedValue({ data: { user: { id: "uid-4", identities: [{}] }, session: null }, error: null });
-    await expect(registerAction({ error: null }, form())).resolves.toMatchObject({ error: null });
+    await expect(registerAction({ error: null }, form())).resolves.toMatchObject({ error: null, info: expect.stringMatching(/Akun berhasil dibuat/) });
+    expect(recordMock).toHaveBeenCalledWith("uid-4");
   });
 
   it("akun yang sudah ada: TIDAK mencatat (id samaran bukan milik pendaftar baru)", async () => {

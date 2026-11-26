@@ -130,8 +130,11 @@ describe("Paket 3 migrasi: guard audit", () => {
   });
 
   it("hak lama ditangkap hanya sekali (on conflict do nothing) agar rollback memulihkan persis", () => {
-    expect(up).toMatch(/insert into public\.prompter_audit_guard_state[\s\S]*on conflict \(role_name, privilege_type\) do nothing/);
-    expect(down).toContain("execute format('grant %s on public.prompter_audit_logs to %I'");
+    expect(up).toContain("aclexplode(coalesce(c.relacl, acldefault('r', c.relowner)))");
+    expect(up).toContain("if not exists (select 1 from public.prompter_audit_guard_state where privilege_type = 'MARKER')");
+    expect(down).toContain("execute format('grant %s on public.prompter_audit_logs to %s%s'");
+    expect(down).toContain("' with grant option'");
+    expect(down).toContain("execute format('comment on table public.prompter_audit_logs is %L', v_old_comment)");
   });
 
   it("rollback: menolak bila ada bukti kecuali konfirmasi eksplisit; idempoten (if exists); tidak menyentuh baris audit", () => {
@@ -144,6 +147,21 @@ describe("Paket 3 migrasi: guard audit", () => {
   it("fungsi yatim fn_prompter_block_truncate_clients hanya dibuang bila tidak dipakai trigger", () => {
     expect(up).toContain("fn_prompter_block_truncate_clients");
     expect(up).toContain("TIDAK dibuang");
+  });
+
+  it("komentar tabel audit jujur (tanpa kata immutable) dan versi katalog acuan konsisten (aktif tertinggi)", () => {
+    const comment = up.slice(up.indexOf("comment on table public.prompter_audit_logs is"), up.indexOf("revoke update, delete, truncate on public.prompter_audit_logs"));
+    expect(comment).toContain("pemilik tabel/superuser tetap dapat menonaktifkan trigger");
+    expect(comment).not.toMatch(/immutable/i);
+    expect(up).toContain("c.code = p_code and c.active order by c.version desc limit 1");
+    expect(up).toContain("c.version = (select max(m.version) from public.prompter_consent_catalog m where m.code = c.code and m.active)");
+  });
+
+  it("retensi >= 1 (atau NULL), clock_timestamp untuk occurred_at, argumen NULL = 22023", () => {
+    expect(up).toContain("value ~ '^[1-9][0-9]{0,2}$'");
+    expect((up.match(/occurred_at timestamptz not null default clock_timestamp\(\)/g) ?? []).length).toBe(2);
+    expect(up).toContain("if p_code is null or p_action is null or p_source is null or p_action not in");
+    expect(up).toContain("if p_dry_run is null or (p_batch is not null and p_batch < 1)");
   });
 
   it("tidak ada klaim immutable/independen/SLA pada teks aplikasi di berkas migrasi (selain penyangkalan)", () => {
