@@ -179,7 +179,7 @@ describe("batas waktu pada createSignedUrl dan remove (gagal-tertutup)", () => {
   it("createSignedUrl yang menggantung ditolak sebagai VERIFY_FAILED setelah 5 detik", async () => {
     vi.useFakeTimers();
     try {
-      const b = bucket({ createSignedUrl: vi.fn(() => new Promise(() => undefined)) });
+      const b = bucket({ createSignedUrl: vi.fn(() => new Promise(() => undefined)) as unknown as StorageBucketLike["createSignedUrl"] });
       const pending = verifyUploadedObject(b, JPG_PATH, async () => response(206, JPEG_HEAD));
       for (let i = 0; i < 3; i++) await vi.advanceTimersByTimeAsync(STORAGE_CALL_TIMEOUT_MS + 100);
       expect(await pending).toMatchObject({ ok: false, code: "VERIFY_FAILED" });
