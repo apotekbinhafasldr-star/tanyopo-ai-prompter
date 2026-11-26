@@ -14,6 +14,7 @@ import { formatCurrency, formatDate, productTypeLabel, channelLabel, campaignSta
 import { publicStorageUrl } from "@/lib/utils/storage-url";
 import { computeProfitEstimate } from "@/lib/profit-estimate";
 import { MediaUploader } from "@/features/products/media-uploader";
+import { isMediaUploadHardeningEnabled } from "@/lib/media/upload-hardening-flag";
 import { GenerateBlueprintButton } from "@/features/products/generate-blueprint-button";
 import { NextStepsGuidance } from "@/features/products/next-steps-guidance";
 import { deleteProductMediaAction } from "@/features/products/actions";
@@ -141,7 +142,7 @@ export default async function ProductDetailPage({
           <p className="text-sm text-muted-foreground">
             Tambahkan foto atau video produk agar LINOE dapat menyiapkan materi promosi yang lebih relevan.
           </p>
-          <MediaUploader productId={id} tenantId={session.tenantId} />
+          <MediaUploader productId={id} tenantId={session.tenantId} hardened={isMediaUploadHardeningEnabled()} />
 
           {media && media.length > 0 ? (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
