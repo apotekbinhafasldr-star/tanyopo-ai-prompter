@@ -236,6 +236,11 @@
       "file": "20261111130000_prompter_p0_3_doku_alert_coverage.sql",
       "group": "pembayaran",
       "reason": "Cakupan alert webhook DOKU (P0-3)."
+    },
+    {
+      "file": "20261126100000_prompter_storage_bucket_l1.sql",
+      "group": "storage",
+      "reason": "Pengetatan bucket Storage LINOE (Paket 2 L1): menyentuh storage.buckets/storage.objects milik Supabase, bukan skema produk; bundel QA tidak membutuhkannya dan harus tidak menyentuh storage."
     }
   ],
   "forbidden": {

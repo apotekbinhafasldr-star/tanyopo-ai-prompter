@@ -92,7 +92,7 @@ describe("Billing B4.2 — static guards", () => {
     }
   });
 
-  it("B4.2 is the migration right after B4.1 and only P0-2 (payment invoices) and P0-3 (DOKU alert coverage) follow it", () => {
+  it("B4.2 is the migration right after B4.1 and only P0-2 (payment invoices), P0-3 (DOKU alert coverage) and Paket 2 L1 (storage bucket hardening) follow it", () => {
     const migrations = readdirSync(path.join(root, "supabase/migrations")).filter((f) => f.endsWith(".sql")).sort();
     const newer = migrations.filter((m) => m.slice(0, 14) > "20261031100000");
     // exact, ordered list: any further migration must be added here deliberately
@@ -100,6 +100,7 @@ describe("Billing B4.2 — static guards", () => {
       "20261101100000_prompter_b4_2_alert_notifications.sql",
       "20261103170000_prompter_p0_2_payment_invoices.sql",
       "20261111130000_prompter_p0_3_doku_alert_coverage.sql",
+      "20261126100000_prompter_storage_bucket_l1.sql",
     ]);
     expect(read(B41)).not.toMatch(/prompter_payment_alert_notif/);
   });

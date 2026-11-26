@@ -1,0 +1,62 @@
+# BUKTI SANDBOX (bukan REAL): PostgreSQL lokal 16.15 sekali pakai, skema storage = stub (supabase/tests/storage-bucket-l1/stub.sql), data sintetis.
+# Dijalankan: 2026-11-26T12:41Z lewat bash supabase/tests/storage-bucket-l1/run-local.sh. CI menjalankan ulang di PostgreSQL 17.
+# Tidak ada koneksi ke Supabase mana pun.
+SANDBOX: PostgreSQL server_version_num=160015, stub storage schema (bukan Supabase nyata)
+PASS: blok storage Phase 1 diekstrak dari repositori
+PASS: S1 PRECHECK Q0 LANJUT (tidak ada policy pihak lain)
+PASS: S1 PRECHECK Q4 0 objek
+PASS: S1 PRECHECK Q8 keadaan awal benar
+PASS: S1 PRECHECK Q7 UNKNOWN tanpa role linoe_migrator
+PASS: S1 up berhasil (bucket cadangan kosong)
+PASS: S1 tiga bucket cadangan privat
+PASS: S1 product-media tetap publik
+PASS: S1 batas+mime tidak berubah
+PASS: S1 policy lama FOR ALL hilang
+PASS: S1 empat policy baru
+PASS: S1 tenant A unggah ke product-media folder sendiri
+PASS: S1 tenant A DITOLAK unggah ke creative-assets
+PASS: S1 tenant A DITOLAK unggah ke brand-assets
+PASS: S1 tenant A DITOLAK unggah ke generated-content
+PASS: S1 tenant A DITOLAK unggah ke folder tenant B
+PASS: S1 tenant A tidak melihat objek tenant B
+PASS: S1 tenant A melihat objek lama sendiri
+PASS: S1 tenant A ubah objek sendiri (UPDATE sengaja dipertahankan)
+PASS: S1 tenant A tidak bisa ubah objek tenant B
+PASS: S1 tenant A hapus objek sendiri
+PASS: S1 tenant A tidak bisa hapus objek tenant B
+PASS: S1 anon tidak bisa unggah
+PASS: S1 POSTCHECK P1 PASS
+PASS: S1 POSTCHECK P2 PASS
+PASS: S1 POSTCHECK P3 PASS
+PASS: S1 POSTCHECK P4 PASS
+PASS: S1 POSTCHECK P5 PASS
+PASS: S1 POSTCHECK P6 PASS
+PASS: S1 POSTCHECK P7 PASS
+PASS: S1 POSTCHECK P8 PASS
+PASS: S1 POSTCHECK P9 PASS
+PASS: S1 POSTCHECK P10 UNKNOWN (uji manual)
+PASS: S1 POSTCHECK tanpa placeholder terisi -> UNKNOWN, bukan PASS
+PASS: S2 PRECHECK Q4 brand-assets=1 BERHENTI
+PASS: S2 up ditolak dengan pesan L1 BERHENTI
+PASS: S2 tidak ada perubahan setelah penolakan (bucket+policy)
+PASS: S2 objek tetap ada
+PASS: S3 up dua kali = keadaan sama
+PASS: S3 up ketiga kali tetap sama
+PASS: S4 down memulihkan bucket+policy persis seperti Phase 1
+PASS: S4 down idempoten
+PASS: S4 setelah down tenant A bisa menulis ke creative-assets lagi (keadaan semula)
+PASS: S4 up setelah down dan pembersihan sandbox OK
+PASS: S12 PRECHECK Q0 LANJUT-DENGAN-CATATAN (tepat 1 policy tanpa bucket_id)
+PASS: S12 teks catatan eksplisit ada
+PASS: S12 up berhasil dengan policy pihak lain
+PASS: S12 policy pihak lain tidak disentuh
+PASS: S12 tenant A MASIH bisa menulis ke bucket cadangan lewat policy pihak lain (risiko tidak ditutup L1)
+PASS: S12 POSTCHECK P9 PASS-DENGAN-CATATAN (daftar sama dengan Q0)
+PASS: S12 POSTCHECK P9 TINJAU bila policy tanpa bucket_id baru muncul
+PASS: S12 down juga tidak menyentuh policy pihak lain
+PASS: S6 PRECHECK Q0 BERHENTI (pihak lain menyebut bucket LINOE)
+PASS: S7 bucket hilang dilewati, sisanya privat, tidak ada bucket baru dibuat
+PASS: S8 DROP POLICY mengambil AccessExclusiveLock pada storage.objects (hitung objek di bawah kunci yang sama)
+PASS: S9 PRECHECK.sql read-only (tanpa DDL/DML)
+PASS: S9 POSTCHECK.sql read-only (tanpa DDL/DML)
+ALL PASSED
