@@ -58,7 +58,7 @@ Temuan penting: trigger trial memberi nilai ke kolom `cancel_at_period_end` dan 
 
 Pemeriksaan dependensi (nama tabel/fungsi lintas migrasi) dilakukan statis: tidak ada migrasi minimum yang memakai objek yang hanya didefinisikan di migrasi yang dikecualikan.
 
-## 3. TIDAK diperlukan (36 migrasi)
+## 3. TIDAK diperlukan (37 migrasi)
 | Kelompok | Contoh | Catatan |
 |---|---|---|
 | iklan | `manual_ad_metrics`, `meta_page_picker`, `channel_campaigns_*`, `phase6_capabilities`, `master_campaigns_add_selected_media` | kampanye/iklan di luar alur |
@@ -66,6 +66,7 @@ Pemeriksaan dependensi (nama tabel/fungsi lintas migrasi) dilakukan statis: tida
 | pembayaran (DOKU/Midtrans) | `b1`, `b2`, `b4`, `b4_2`, `p0_2`, `p0_3`, cron x2, `payment_lifecycle_remediation` | cron butuh ekstensi pg_cron |
 | ai | `ai_router_usage_columns`, `demo_ai_usage`, `growth_recommendation_*` | AI generation di luar alur |
 | storage | `storage_bucket_l1` (pengetatan bucket Storage LINOE, Paket 2 L1) | menyentuh `storage.*` milik Supabase; bundel QA tidak boleh menyentuh storage |
+| consent | `consent_audit_guard` (bukti persetujuan + guard audit, Paket 3) | belum diterapkan; di luar alur QA-2 sampai disetujui Founder |
 | lain | `job_queue`, `global_marketing_blueprint`, `compliance_flags_*`, `seo_discovery_no_website`, `product_stock_unit`, `phase4` (handoff UMKMpro) | tidak disentuh alur |
 
 Daftar lengkap + alasan per berkas ada di `excluded` pada manifest. Tes memastikan `migrations + excluded` = semua migrasi repo, jadi migrasi baru tidak bisa luput dikaji.

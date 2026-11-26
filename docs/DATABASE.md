@@ -122,6 +122,10 @@ Also created in the Phase 1 migration, all public-read at creation (so they can 
 - **Not closed by L1:** a permissive write policy of another party on `storage.objects` that does not mention `bucket_id` still lets tenants write to the reserved buckets. `supabase/tools/storage-bucket-l1/PRECHECK.sql` (Q0) / `POSTCHECK.sql` (P9) detect it. See `docs/storage-bucket-l1/LAPORAN_RISIKO.md`.
 - Rollback: `supabase/rollback/20261126100000_prompter_storage_bucket_l1.down.sql`; steps in `docs/storage-bucket-l1/ROLLBACK.md`. Evidence so far is SANDBOX (throw-away PostgreSQL with a stub `storage` schema), not REAL.
 
+#### Paket 3 (consent evidence and audit guard) — `20261127100000_prompter_consent_audit_guard.sql`
+
+**Draft, NOT applied to any database.** Adds six `prompter_*` tables (consent catalog, consent events, legal-document events, settings, purge runs, audit-guard state) and `fn_prompter_*` functions, and puts a guard on `prompter_audit_logs`: `UPDATE/DELETE/TRUNCATE` are revoked from `anon`, `authenticated` and `service_role`, and `BEFORE UPDATE/DELETE` (row) and `BEFORE TRUNCATE` (statement) triggers reject them. This is **not** an immutability claim: the table owner or a superuser can still disable the trigger or change grants; a tenant delete still cascades (the DELETE guard lets a row go only when its parent tenant row no longer exists). No FK to `auth.users` or `tenants`; those, `user_profiles`, `handle_new_user` and `fn_create_ai_job_if_entitled` are never touched (`tenants` is only read). Retention is a nullable parameter (no number) with operator-only dry-run-first functions. Enforcement flags default OFF. Details, order, rollback and the legal UNKNOWNs: `docs/CONSENT_AUDIT_GUARD.md`. Rollback: `supabase/rollback/20261127100000_prompter_consent_audit_guard.down.sql`.
+
 ## Phase 2 schema
 
 Migration: `supabase/migrations/20260829095447_prompter_phase2_schema.sql`. Same additive-only rule as Phase 0/1.

@@ -8,6 +8,8 @@ import { getConnector } from "@/lib/connectors/get-connector";
 import { canSyncInsights } from "@/lib/campaigns/launched-status";
 import { CHANNEL_TO_CONNECTOR } from "@/lib/connectors/channel-map";
 import { decryptToken } from "@/lib/crypto/token-cipher";
+import { connectConsentCode } from "@/lib/consent/catalog";
+import { consentGateMessage } from "@/lib/consent/require-consent";
 import type { Json } from "@/types/database";
 
 export interface SyncInsightsState {
@@ -87,6 +89,13 @@ export async function syncChannelCampaignInsightsAction(
 
   if (!credentials) {
     return { error: "Kredensial koneksi tidak ditemukan. Hubungkan ulang akun di halaman Connections; koneksi Anda tidak dihapus." };
+  }
+
+  // Paket 3: gerbang persetujuan koneksi (no-op saat enforcement MATI; fail-closed saat HIDUP, sebelum token dibuka).
+  const consentCode = connectConsentCode(connectorPlatform);
+  if (consentCode) {
+    const consentMessage = await consentGateMessage(consentCode, session.userId);
+    if (consentMessage) return { error: consentMessage };
   }
 
   let accessToken: string;

@@ -28,6 +28,7 @@ const ERROR_LABEL: Record<string, string> = {
   encryption_not_configured: "Penyimpanan koneksi yang aman belum siap. Koneksi belum aktif; hubungi admin LINOE.",
   server_not_configured: "Layanan penyimpanan koneksi belum siap. Koneksi belum aktif; hubungi admin LINOE.",
   connect_failed: "Gagal menghubungkan akun. Silakan coba lagi.",
+  consent_required: "Fitur ini memerlukan persetujuan Anda. Buka Privasi & persetujuan untuk mengaturnya.",
   provider_pending: "Koneksi ini belum dibuka: aplikasi LINOE masih menunggu persetujuan dari penyedia.",
 };
 

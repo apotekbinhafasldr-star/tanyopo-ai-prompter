@@ -16,6 +16,8 @@ import {
 import { isPkceConnector } from "@/lib/connectors/pkce-connector";
 import { generatePkcePair, type XPkcePair } from "@/lib/connectors/x-pkce";
 import type { ConnectorPlatform } from "@/types/database";
+import { connectConsentCode } from "@/lib/consent/catalog";
+import { requireConsent } from "@/lib/consent/require-consent";
 
 /**
  * Shared "start OAuth" handler for every ad-platform connector
@@ -40,6 +42,16 @@ export async function handleConnectorOauthAuthorize(
   const connector = getConnector(platform);
   if (!connector) {
     return NextResponse.redirect(new URL("/connections?error=not_available", request.url));
+  }
+
+  // Paket 3: gerbang persetujuan koneksi. Enforcement MATI (default) = no-op murni. HIDUP = fail-closed: tanpa persetujuan aktif OAuth
+  // tidak dimulai. (Dialog persetujuan pada halaman Koneksi menyusul di paket UI berikutnya; aktivasi enforcement menunggu itu.)
+  const consentCode = connectConsentCode(platform);
+  if (consentCode) {
+    const decision = await requireConsent(consentCode, session.userId);
+    if (!decision.allowed) {
+      return NextResponse.redirect(new URL("/connections?error=consent_required", request.url));
+    }
   }
 
   // Fail before sending the owner to the platform: if tokens cannot be

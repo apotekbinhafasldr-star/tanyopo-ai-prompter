@@ -8,6 +8,7 @@ import { getConnector } from "@/lib/connectors/get-connector";
 import { MetaConnector } from "@/lib/connectors/meta-connector";
 import { ConnectorConfigError } from "@/lib/connectors/types";
 import { decryptToken } from "@/lib/crypto/token-cipher";
+import { consentGateMessage } from "@/lib/consent/require-consent";
 import { describeSafeError } from "@/lib/connectors/safe-error-log";
 import { runMetaReadinessCheck, type MetaReadinessActionResult } from "@/features/connections/meta-readiness-core";
 import {
@@ -41,6 +42,7 @@ export type ListMetaPagesResult = { pages: MetaPage[]; error: null } | { pages: 
  */
 async function fetchOwnMetaPagesOrError(
   tenantId: string,
+  userId: string,
 ): Promise<{ pages: MetaPage[] } | { error: string }> {
   const supabase = await createClient();
 
@@ -70,6 +72,10 @@ async function fetchOwnMetaPagesOrError(
   if (!credentials) {
     return { error: "Kredensial koneksi tidak ditemukan. Hubungkan ulang akun Meta di halaman Connections; koneksi Anda tidak dihapus." };
   }
+
+  // Paket 3: gerbang persetujuan koneksi (no-op saat enforcement MATI; fail-closed saat HIDUP, sebelum token dibuka).
+  const consentMessage = await consentGateMessage("CONNECT_META", userId);
+  if (consentMessage) return { error: consentMessage };
 
   let accessToken: string;
   try {
@@ -104,7 +110,7 @@ export async function listMetaPagesAction(): Promise<ListMetaPagesResult> {
     return { pages: null, error: "Hanya Owner yang dapat mengelola Page Meta." };
   }
 
-  const result = await fetchOwnMetaPagesOrError(session.tenantId);
+  const result = await fetchOwnMetaPagesOrError(session.tenantId, session.userId);
   if ("error" in result) {
     return { pages: null, error: result.error };
   }
@@ -133,7 +139,7 @@ export async function selectMetaPageAction(pageId: string): Promise<ConnectionAc
     return { error: "Page tidak valid." };
   }
 
-  const result = await fetchOwnMetaPagesOrError(session.tenantId);
+  const result = await fetchOwnMetaPagesOrError(session.tenantId, session.userId);
   if ("error" in result) {
     return { error: result.error };
   }
