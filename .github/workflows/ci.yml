@@ -288,6 +288,47 @@ jobs:
           grep -E '^(FAIL|SOME|REFUSED)|ERROR' "$RUNNER_TEMP/p02.txt" | head -20 | sed 's/^/::error::/' || true
           grep -q '^ALL PASSED' "$RUNNER_TEMP/p02.txt"
 
+  # Paket 2 L1 (storage bucket hardening) on PostgreSQL 17, synthetic data and a STUB storage schema only (SANDBOX evidence, not the real
+  # Supabase storage). Proves: reserved buckets turn private only when empty (otherwise the migration aborts and changes nothing), writes are
+  # limited to product-media in the tenant's own folder, other products' policies are untouched (and the unclosed cross-bucket risk is
+  # detected by PRECHECK/POSTCHECK), idempotency, and that the down script restores Phase 1 exactly. Never applies anything to Supabase.
+  storage-bucket-l1-sql:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: linoe_ci
+          POSTGRES_PASSWORD: linoe_ci_password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U linoe_ci -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: linoe_ci
+      PGPASSWORD: linoe_ci_password
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ensure psql client
+        run: command -v psql || (sudo apt-get update && sudo apt-get install -y postgresql-client)
+
+      - name: Storage bucket L1 SQL tests (PostgreSQL 17 required)
+        env:
+          REQUIRE_PG_MAJOR: "17"
+        run: |
+          set -o pipefail
+          bash supabase/tests/storage-bucket-l1/run-local.sh 2>&1 | tee "$RUNNER_TEMP/l1.txt" || true
+          # surface failures as annotations (job logs are not always downloadable)
+          grep -E '^(FAIL|SOME|REFUSED)|ERROR' "$RUNNER_TEMP/l1.txt" | head -20 | sed 's/^/::error::/' || true
+          grep -q '^ALL PASSED' "$RUNNER_TEMP/l1.txt"
+
   billing-b4-sql:
     runs-on: ubuntu-latest
     services:

@@ -103,7 +103,7 @@ Migration: `supabase/migrations/20260829092303_prompter_phase1_schema.sql`. Same
 
 ### Storage buckets
 
-Also created in the Phase 1 migration, all public-read (so they can be embedded in ad previews and social posts) with object paths namespaced `{tenant_id}/...` and a `storage.objects` RLS policy restricting writes to the caller's own tenant folder:
+Also created in the Phase 1 migration, all public-read at creation (so they can be embedded in ad previews and social posts; the three reserved ones become private with L1, below) with object paths namespaced `{tenant_id}/...` and a `storage.objects` RLS policy restricting writes to the caller's own tenant folder:
 
 | Bucket | Limit | Status |
 |---|---|---|
@@ -111,6 +111,16 @@ Also created in the Phase 1 migration, all public-read (so they can be embedded 
 | `creative-assets` | 100 MB, image/video | Reserved — Phase 3+ |
 | `brand-assets` | 5 MB, image/svg | Reserved — logo upload, not yet built |
 | `generated-content` | 100 MB, image/video | Reserved — AI-generated creative, not yet built |
+
+#### Paket 2 L1 (storage bucket hardening) — `20261126100000_prompter_storage_bucket_l1.sql`
+
+**Draft, NOT applied to any database** (production needs a separate approval and a new package beside `p0-2`; see `docs/storage-bucket-l1/`). Once applied:
+
+- The three reserved buckets (`creative-assets`, `brand-assets`, `generated-content`) become **private** (`public = false`), and only if they exist, hold **no objects**, and are **proven LINOE's** (size limit and mime list equal the Phase 1 literals, no owner); a same-named bucket that does not match aborts the migration. It runs in one explicit transaction (`begin; ... commit;`) with `lock_timeout` 3s / `statement_timeout` 10s, so run it off-peak; any object aborts the whole migration (Jalur C = quarantine/delete only with a special approval per class and count).
+- The Phase 1 `FOR ALL` policy is replaced by four per-command policies: `SELECT` on the four LINOE buckets (own tenant folder), and `INSERT`/`UPDATE`/`DELETE` **only on `product-media`** (own tenant folder). `UPDATE` on `product-media` is kept deliberately in L1 (the code uses `upsert: false` and no update/move); closing it is L1b/L3.
+- Only policies recognised by name are touched; policies of other products on the shared project are never dropped or changed. File size and mime limits are unchanged (L1b).
+- **Not closed by L1:** a permissive write policy of another party on `storage.objects` that does not mention `bucket_id` still lets tenants write to the reserved buckets. `supabase/tools/storage-bucket-l1/PRECHECK.sql` (Q0) / `POSTCHECK.sql` (P9) detect it. See `docs/storage-bucket-l1/LAPORAN_RISIKO.md`.
+- Rollback: `supabase/rollback/20261126100000_prompter_storage_bucket_l1.down.sql`; steps in `docs/storage-bucket-l1/ROLLBACK.md`. Evidence so far is SANDBOX (throw-away PostgreSQL with a stub `storage` schema), not REAL.
 
 ## Phase 2 schema
 
