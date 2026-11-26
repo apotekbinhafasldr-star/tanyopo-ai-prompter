@@ -20,8 +20,30 @@ fw as (  -- policy PERMISSIVE tulis untuk public/authenticated/anon milik PIHAK 
     and p.roles && array['public', 'authenticated', 'anon']::name[]
     and p.policyname not in (select n from lin)
 ),
-fw_stop as (select * from fw where ekspr ~ '(product-media|creative-assets|brand-assets|generated-content)'),
+fw_any as (  -- SEMUA policy pihak lain (perintah apa pun, PERMISSIVE/RESTRICTIVE) yang berlaku untuk public/authenticated/anon
+  select p.*, coalesce(p.qual, '') || ' ' || coalesce(p.with_check, '') as ekspr
+  from pol p
+  where p.roles && array['public', 'authenticated', 'anon']::name[]
+    and p.policyname not in (select n from lin)
+),
+fw_stop as (  -- pihak lain menyebut bucket cadangan (SELECT/ALL/tulis) atau menulis ke product-media: wajib ditinjau sebelum L1
+  select * from fw_any
+  where ekspr ~ '(creative-assets|brand-assets|generated-content)'
+     or (cmd in ('ALL', 'INSERT', 'UPDATE', 'DELETE') and ekspr ~ 'product-media')
+),
 fw_note as (select * from fw where ekspr !~ 'bucket_id'),
+p1ref as (select * from (values
+    ('creative-assets', 104857600::bigint, array['image/jpeg', 'image/png', 'image/webp', 'video/mp4', 'video/quicktime']::text[]),
+    ('brand-assets', 5242880::bigint, array['image/jpeg', 'image/png', 'image/webp', 'image/svg+xml']::text[]),
+    ('generated-content', 104857600::bigint, array['image/jpeg', 'image/png', 'image/webp', 'video/mp4']::text[])
+  ) as t(id, lim, mimes)),
+bk as (  -- bucket cadangan yang ada + apakah sidiknya = literal Phase 1 (batas, mime, tanpa owner/owner_id)
+  select r.id, r.lim, r.mimes, b.id is not null as ada, b.public, b.file_size_limit, b.allowed_mime_types,
+    to_jsonb(b) ->> 'created_at' as dibuat, coalesce(to_jsonb(b) ->> 'owner', '') || '/' || coalesce(to_jsonb(b) ->> 'owner_id', '') as pemilik,
+    coalesce(b.file_size_limit is not distinct from r.lim and coalesce(b.allowed_mime_types @> r.mimes and b.allowed_mime_types <@ r.mimes, false)
+      and (to_jsonb(b) ->> 'owner') is null and (to_jsonb(b) ->> 'owner_id') is null, false) as cocok
+  from p1ref r left join storage.buckets b on b.id = r.id
+),
 cnt as (select r.b, (select count(*) from storage.objects o where o.bucket_id = r.b) as n from res r),
 fp as (  -- sidik product-media: baris bucket + perintah (ALL dipecah) yang diizinkan policy LINOE dengan batas folder tenant
   select md5(
@@ -38,7 +60,7 @@ fp as (  -- sidik product-media: baris bucket + perintah (ALL dipecah) yang diiz
 )
 select kode, uraian, nilai, status from (
   select 0 as o, 'Q0' as kode,
-    'Policy PERMISSIVE tulis pihak lain TANPA bucket_id (L1 TIDAK menutup/menyentuh policy itu; tenant masih bisa menulis ke bucket cadangan lewat policy itu). BERHENTI bila policy pihak lain menyebut bucket LINOE.' as uraian,
+    'Policy PERMISSIVE tulis pihak lain TANPA bucket_id (L1 TIDAK menutup/menyentuh policy itu; tenant masih bisa menulis ke bucket cadangan lewat policy itu). BERHENTI bila policy pihak lain (SELECT/ALL/tulis) menyebut bucket cadangan atau menulis ke product-media. Ini PERINGATAN TEKS saja, bukan penutup. Untuk POSTCHECK salin HANYA 32 karakter heksadesimal setelah md5_daftar= (atau kata KOSONG) ke ref.q0, tanpa tanda titik koma.' as uraian,
     'tanpa_bucket_id=' || (select count(*) from fw_note) || '; menyebut_bucket_linoe=' || (select count(*) from fw_stop)
       || '; md5_daftar=' || coalesce((select md5(string_agg(policyname || '/' || cmd, '|' order by policyname)) from fw_note), 'KOSONG')
       || '; daftar=' || coalesce((select string_agg(policyname || '/' || cmd, ' | ' order by policyname) from fw_note), '-') as nilai,
@@ -53,6 +75,11 @@ select kode, uraian, nilai, status from (
         from storage.buckets where id in ('product-media','creative-assets','brand-assets','generated-content')), 'KOSONG')
       || '; semua=' || coalesce((select string_agg(id || ':' || public::text, ' | ' order by id) from storage.buckets), '-'),
     'CATAT'
+  union all
+  select 2, 'Q2:' || id, 'Bucket cadangan vs sidik Phase 1 LINOE (batas, mime, tanpa owner/owner_id). Tidak cocok = bucket bukan terbukti milik LINOE: BERHENTI.',
+    case when ada then 'public=' || public::text || '; batas=' || coalesce(file_size_limit::text, 'NULL') || '; mime=' || coalesce(array_to_string(allowed_mime_types, ','), 'NULL')
+      || '; dibuat=' || coalesce(dibuat, 'NULL') || '; owner/owner_id=' || pemilik else 'tidak ada' end,
+    case when not ada then 'TIDAK-ADA-DILEWATI' when cocok then 'LANJUT' else 'BERHENTI' end from bk
   union all
   select 3, 'Q3', 'Policy pada storage.objects (nama/perintah/permissive/role).',
     coalesce((select string_agg(policyname || '/' || cmd || '/' || permissive || '/' || array_to_string(roles, ','), ' | ' order by policyname) from pol), '-'), 'CATAT'
@@ -69,7 +96,7 @@ select kode, uraian, nilai, status from (
     coalesce((select md5(string_agg(policyname || '/' || cmd || '/' || permissive || '/' || array_to_string(roles, ',') || '/' || coalesce(qual, '') || '/' || coalesce(with_check, ''), '|' order by policyname))
       from pol where policyname not in (select n from lin)), 'KOSONG'), 'CATAT'
   union all
-  select 7, 'Q7', 'Pemilik storage.objects/buckets dan hak role migrasi (linoe_migrator bila ada). mengubah storage.buckets dan policy storage.objects butuh kepemilikan; tanpa itu migrasi gagal (tidak ada perubahan).',
+  select 7, 'Q7', 'Pemilik storage.objects/buckets dan KEANGGOTAAN role migrasi (linoe_migrator bila ada). Ini BUKAN bukti hak mengubah policy/bucket; hak sebenarnya baru terbukti saat migrasi dicoba (gagal = tidak ada perubahan).',
     'pemilik_objects=' || (select pg_get_userbyid(relowner) from pg_class where oid = 'storage.objects'::regclass)
       || '; pemilik_buckets=' || (select pg_get_userbyid(relowner) from pg_class where oid = 'storage.buckets'::regclass)
       || '; sesi=' || current_user

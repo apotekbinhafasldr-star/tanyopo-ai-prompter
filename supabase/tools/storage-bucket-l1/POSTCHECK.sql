@@ -1,7 +1,8 @@
 -- LINOE Paket 2 L1 - POSTCHECK (HANYA SELECT, read-only). Dijalankan Founder SETELAH L1 diterapkan (dengan persetujuan terpisah).
 -- Isi lima placeholder di CTE "ref" dengan nilai dari PRECHECK (BUKAN nilai tertanam). Placeholder tak diisi = status UNKNOWN, bukan PASS.
---   q1  = nilai Q1 (sidik product-media)             q0  = md5_daftar dari baris Q0 ("KOSONG" bila tidak ada)
+--   q1  = nilai Q1 (sidik product-media)             q0  = HANYA 32 karakter heksadesimal setelah "md5_daftar=" pada Q0 (atau kata KOSONG); jangan salin tanda titik koma/teks lain
 --   q2  = md5_batas_mime_empat_bucket dari baris Q2        q5  = nilai Q5                    q6 = nilai Q6
+-- Catatan: sidik Q1/P3 hanya memeriksa kata kunci (product-media, fn_current_tenant_id, perintah), bukan predikat penuh; P11 menambah pemeriksaan predikat folder tenant.
 -- Status: PASS | PASS-DENGAN-CATATAN | TINJAU | GAGAL | UNKNOWN
 with
 ref as (select 'ISI_Q1'::text as q1, 'ISI_Q0'::text as q0, 'ISI_Q2'::text as q2, 'ISI_Q5'::text as q5, 'ISI_Q6'::text as q6),
@@ -95,4 +96,11 @@ select kode, uraian, nilai, status from (
   union all
   select 10, 'P10', 'UJI MANUAL (tidak bisa dari SQL): unggah file uji ke bucket cadangan lewat API Storage memakai akun QA TETAP; harus DITOLAK (HTTP 400/403, "row-level security"). Lalu unggah ke product-media folder tenant akun itu; harus BERHASIL. Token JANGAN ditempel di chat.',
     'dijalankan_Founder=belum', 'UNKNOWN (bila tak bisa dari HP)'
+  union all
+  select 11, 'P11', 'Setiap policy baru LINOE memuat predikat folder tenant (storage.foldername(name))[1] = fn_current_tenant_id()::text (sidik Q1/P3 hanya memeriksa kata kunci, bukan predikat; ini pemeriksaan tambahan).',
+    'tanpa_predikat_folder=' || (select count(*) from pol where policyname in (select n from lin) and policyname <> 'Tenant kelola file marketing miliknya sendiri'
+        and (coalesce(qual, '') || ' ' || coalesce(with_check, '')) !~ 'foldername\(name\)\)\[1\] = \((public\.)?fn_current_tenant_id\(\)\)::text'),
+    case when (select count(*) from pol where policyname in (select n from lin) and policyname <> 'Tenant kelola file marketing miliknya sendiri') = 4
+          and (select count(*) from pol where policyname in (select n from lin) and policyname <> 'Tenant kelola file marketing miliknya sendiri'
+        and (coalesce(qual, '') || ' ' || coalesce(with_check, '')) !~ 'foldername\(name\)\)\[1\] = \((public\.)?fn_current_tenant_id\(\)\)::text') = 0 then 'PASS' else 'GAGAL' end
 ) q order by o;

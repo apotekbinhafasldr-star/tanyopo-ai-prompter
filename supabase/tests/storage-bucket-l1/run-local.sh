@@ -41,8 +41,10 @@ PY
 
 TA=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa; TB=bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb
 mk() { P -d postgres -c "drop database if exists $1" -c "create database $1" >/dev/null && P -d "$1" -f "$here/stub.sql" >/dev/null && P -d "$1" -f "$W/phase1_storage.sql" >/dev/null; }
-up() { P -1 -d "$1" -f "$MIG" >/dev/null 2>"$W/err.txt"; }
-down() { P -1 -d "$1" -f "$DOWN" >/dev/null; }
+up() { P -d "$1" -f "$MIG" >/dev/null 2>"$W/err.txt"; }   # sengaja TANPA psql -1: begin/commit ada di berkas
+down() { P -d "$1" -f "$DOWN" >/dev/null 2>"$W/err_down.txt"; }
+LM="select md5(string_agg(concat_ws(':',id,file_size_limit::text,array_to_string(allowed_mime_types,',')),'|' order by id)) from storage.buckets"
+WRITE_POL="select count(*) from pg_policies where schemaname='storage' and tablename='objects' and cmd in ('ALL','INSERT') and policyname like 'Tenant %'"
 STATE="select md5(coalesce((select string_agg(concat_ws(':',id,public::text,file_size_limit::text,array_to_string(allowed_mime_types,',')),'|' order by id) from storage.buckets),'') || '#' || coalesce((select string_agg(concat_ws('/',policyname,cmd,permissive,array_to_string(roles,','),coalesce(qual,''),coalesce(with_check,'')),'|' order by policyname) from pg_policies where schemaname='storage' and tablename='objects'),''))"
 # run as tenant: stmt returns row count (RLS-filtered DML) or "ERR" when RLS rejects an INSERT
 as_tenant() { local db="$1" t="$2" sql="$3"; PA -v ON_ERROR_STOP=1 -d "$db" -c "set role authenticated" -c "set app.tenant='$t'" -c "$sql" 2>/dev/null || echo ERR; }
@@ -54,9 +56,10 @@ eq() { [ "$2" = "$3" ] && pass "$1" || bad "$1 (got '$2', want '$3')"; }
 
 # ---------- S1: bucket kosong -> up ----------
 mk l1_s1 || bad "S1 setup"
-BEFORE=$(PA -d l1_s1 -c "$STATE")
+BEFORE=$(PA -d l1_s1 -c "$STATE"); LM_BEFORE=$(PA -d l1_s1 -c "$LM")
 PA -d l1_s1 -F'|' -f "$PRE" > "$W/pre_s1.txt"
 grep -q '^Q0|.*|LANJUT$' "$W/pre_s1.txt" && pass "S1 PRECHECK Q0 LANJUT (tidak ada policy pihak lain)" || bad "S1 Q0: $(grep '^Q0' "$W/pre_s1.txt")"
+for b in creative-assets brand-assets generated-content; do grep -q "^Q2:$b|.*|LANJUT$" "$W/pre_s1.txt" && pass "S1 PRECHECK Q2:$b cocok sidik Phase 1" || bad "S1 Q2:$b: $(grep "^Q2:$b" "$W/pre_s1.txt")"; done
 grep -q '^Q4:creative-assets|.*|0|LANJUT$' "$W/pre_s1.txt" && pass "S1 PRECHECK Q4 0 objek" || bad "S1 Q4"
 grep -q '^Q8|.*|LANJUT$' "$W/pre_s1.txt" && pass "S1 PRECHECK Q8 keadaan awal benar" || bad "S1 Q8: $(grep '^Q8' "$W/pre_s1.txt")"
 grep -q '^Q7|.*|UNKNOWN$' "$W/pre_s1.txt" && pass "S1 PRECHECK Q7 UNKNOWN tanpa role linoe_migrator" || bad "S1 Q7: $(grep '^Q7' "$W/pre_s1.txt")"
@@ -65,7 +68,8 @@ PA -d l1_s1 -c "insert into storage.objects(bucket_id,name) values ('product-med
 up l1_s1 && pass "S1 up berhasil (bucket cadangan kosong)" || bad "S1 up: $(cat "$W/err.txt")"
 eq "S1 tiga bucket cadangan privat" "$(PA -d l1_s1 -c "select count(*) from storage.buckets where id in ('creative-assets','brand-assets','generated-content') and public=false")" 3
 eq "S1 product-media tetap publik" "$(PA -d l1_s1 -c "select public from storage.buckets where id='product-media'")" t
-eq "S1 batas+mime tidak berubah" "$(PA -d l1_s1 -c "select md5(string_agg(concat_ws(':',id,file_size_limit::text,array_to_string(allowed_mime_types,',')),'|' order by id)) from storage.buckets")" "$(PA -d l1_s1 -c "select md5(string_agg(concat_ws(':',id,file_size_limit::text,array_to_string(allowed_mime_types,',')),'|' order by id)) from storage.buckets")"
+eq "S1 batas+mime tidak berubah (dibanding nilai SEBELUM up)" "$(PA -d l1_s1 -c "$LM")" "$LM_BEFORE"
+eq "S1 nilai batas+mime SEBELUM tidak kosong (bukan tautologi)" "$([ -n "$LM_BEFORE" ] && echo ada)" ada
 eq "S1 policy lama FOR ALL hilang" "$(PA -d l1_s1 -c "select count(*) from pg_policies where schemaname='storage' and cmd='ALL'")" 0
 eq "S1 empat policy baru" "$(PA -d l1_s1 -c "select string_agg(cmd,',' order by cmd) from pg_policies where schemaname='storage' and tablename='objects'")" "DELETE,INSERT,SELECT,UPDATE"
 eq "S1 tenant A unggah ke product-media folder sendiri" "$(ins l1_s1 $TA product-media "$TA/baru.png")" 1
@@ -86,7 +90,7 @@ val() { grep "^$1|" "$W/pre_s1.txt" | awk -F'|' '{print $3}'; }
 Q1=$(val Q1); Q2=$(val Q2 | sed -E 's/.*md5_batas_mime_empat_bucket=([0-9a-f]{32}).*/\1/'); Q5=$(val Q5); Q6=$(val Q6); Q0=$(val Q0 | sed -E 's/.*md5_daftar=([^;]*);.*/\1/')
 sed -e "s/'ISI_Q1'/'$Q1'/" -e "s/'ISI_Q0'/'$Q0'/" -e "s/'ISI_Q2'/'$Q2'/" -e "s/'ISI_Q5'/'$Q5'/" -e "s/'ISI_Q6'/'$Q6'/" "$POST" > "$W/post_s1.sql"
 PA -d l1_s1 -F'|' -f "$W/post_s1.sql" > "$W/post_s1.txt"
-for p in P1 P2 P3 P4 P5 P6 P7 P8 P9; do grep -q "^$p|.*|PASS$" "$W/post_s1.txt" && pass "S1 POSTCHECK $p PASS" || bad "S1 POSTCHECK $p: $(grep "^$p|" "$W/post_s1.txt")"; done
+for p in P1 P2 P3 P4 P5 P6 P7 P8 P9 P11; do grep -q "^$p|.*|PASS$" "$W/post_s1.txt" && pass "S1 POSTCHECK $p PASS" || bad "S1 POSTCHECK $p: $(grep "^$p|" "$W/post_s1.txt")"; done
 grep -q '^P10|.*|UNKNOWN' "$W/post_s1.txt" && pass "S1 POSTCHECK P10 UNKNOWN (uji manual)" || bad "S1 P10"
 PA -d l1_s1 -F'|' -f "$POST" | grep -q '^P3|.*|UNKNOWN$' && pass "S1 POSTCHECK tanpa placeholder terisi -> UNKNOWN, bukan PASS" || bad "S1 placeholder"
 
@@ -142,6 +146,51 @@ LOCKS=$(PA -d l1_s8 -c "begin; set local lock_timeout='3s'; drop policy if exist
 for f in "$PRE" "$POST"; do
   grep -viE '^\s*--' "$f" | grep -qiE '\b(insert into|update [a-z_."]+ set|delete from|drop |create |alter |truncate|grant |revoke )' && bad "S9 $(basename "$f") mengandung DDL/DML" || pass "S9 $(basename "$f") read-only (tanpa DDL/DML)"
 done
+
+for f in "$PRE" "$POST"; do
+  grep -viE '^\s*--' "$f" | grep -qiE '\b(execute|set_config|pg_advisory[a-z_]*|dblink|pg_sleep|pg_read_file|lo_import|copy)\b' && bad "S9 $(basename "$f") memakai fungsi/pernyataan terlarang" || pass "S9 $(basename "$f") tanpa execute/set_config/pg_advisory"
+done
+
+# ---------- S2b: bucket senama tetapi bukan sidik Phase 1 (pihak lain) ----------
+mk l1_s2b; PA -d l1_s2b -c "update storage.buckets set file_size_limit=1000 where id='brand-assets'" >/dev/null
+S2BB=$(PA -d l1_s2b -c "$STATE"); PA -d l1_s2b -F'|' -f "$PRE" > "$W/pre_s2b.txt"
+grep -q '^Q2:brand-assets|.*|BERHENTI$' "$W/pre_s2b.txt" && pass "S2b PRECHECK Q2:brand-assets BERHENTI (batas beda)" || bad "S2b Q2"
+up l1_s2b && bad "S2b up seharusnya ditolak" || { grep -q "tidak cocok sidik Phase 1" "$W/err.txt" && pass "S2b up ditolak: bucket tidak terbukti milik LINOE" || bad "S2b pesan: $(cat "$W/err.txt")"; }
+eq "S2b tidak ada perubahan (bucket+policy)" "$(PA -d l1_s2b -c "$STATE")" "$S2BB"
+mk l1_s2c; PA -d l1_s2c -c "update storage.buckets set allowed_mime_types=array['application/pdf'] where id='creative-assets'" >/dev/null
+up l1_s2c && bad "S2c mime beda harus ditolak" || pass "S2c up ditolak: mime beda"
+# down: bucket yang tidak cocok tidak disentuh (NOTICE), bucket cocok dipulihkan
+mk l1_s2d; up l1_s2d; PA -d l1_s2d -c "update storage.buckets set file_size_limit=1000 where id='brand-assets'" >/dev/null
+P -d l1_s2d -f "$DOWN" 2>"$W/dn.txt" >/dev/null; PGOPTIONS="-c client_min_messages=notice" P -d l1_s2d -f "$DOWN" 2>&1 | grep -q "brand-assets tidak cocok sidik Phase 1 LINOE, TIDAK disentuh" && pass "S2d down: NOTICE untuk bucket tidak cocok" || bad "S2d notice"
+eq "S2d down: bucket tak cocok tetap privat (tidak disentuh), yang cocok dipulihkan publik" "$(PA -d l1_s2d -c "select string_agg(id||':'||public::text,',' order by id) from storage.buckets where id<>'product-media'")" "brand-assets:false,creative-assets:true,generated-content:true"
+eq "S2d down: policy FOR ALL tetap dipulihkan" "$(PA -d l1_s2d -c "select count(*) from pg_policies where schemaname='storage' and cmd='ALL'")" 1
+
+# ---------- S6b: policy SELECT pihak lain menyebut bucket cadangan -> BERHENTI ----------
+mk l1_s6b; PA -d l1_s6b -c "create policy \"pihak lain baca brand\" on storage.objects for select using (bucket_id = 'brand-assets')" >/dev/null
+PA -d l1_s6b -F'|' -f "$PRE" | grep -q '^Q0|.*|BERHENTI$' && pass "S6b PRECHECK Q0 BERHENTI (policy SELECT pihak lain menyebut bucket cadangan)" || bad "S6b Q0"
+
+# ---------- S10: TANPA psql -1 dan TANPA ON_ERROR_STOP: tidak pernah ada keadaan tanpa policy tulis ----------
+RAW() { psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q -d "$1" -f "$2" >/dev/null 2>&1; }
+mk l1_s10; PA -d l1_s10 -c "insert into storage.objects(bucket_id,name) values ('generated-content','$TA/a.png')" >/dev/null
+S10B=$(PA -d l1_s10 -c "$STATE")
+RAW l1_s10 "$MIG"; eq "S10 objek ada, psql biasa (tanpa -1, tanpa ON_ERROR_STOP): keadaan tidak berubah" "$(PA -d l1_s10 -c "$STATE")" "$S10B"
+eq "S10 policy tulis LINOE tetap ada (FOR ALL lama) setelah penolakan" "$(PA -d l1_s10 -c "$WRITE_POL")" 1
+psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q -d l1_s10 -c "$(cat "$MIG")" >/dev/null 2>&1; eq "S10 seluruh berkas sebagai SATU query (SQL Editor): keadaan tidak berubah" "$(PA -d l1_s10 -c "$STATE")" "$S10B"
+mk l1_s10b; S10C=$(PA -d l1_s10b -c "$STATE")
+python3 - "$MIG" "$W/mig_fail.sql" <<'PY'
+import sys
+s = open(sys.argv[1]).read().rstrip()
+assert s.endswith("commit;")
+open(sys.argv[2], "w").write(s[:-len("commit;")] + "select 1/0;\ncommit;\n")
+PY
+RAW l1_s10b "$W/mig_fail.sql"; eq "S10 kegagalan DI TENGAH sesudah DROP POLICY (psql biasa): semuanya dibatalkan, keadaan awal utuh" "$(PA -d l1_s10b -c "$STATE")" "$S10C"
+eq "S10 policy tulis lama tetap ada setelah kegagalan di tengah" "$(PA -d l1_s10b -c "$WRITE_POL")" 1
+eq "S10 tenant A masih bisa menulis ke product-media setelah kegagalan di tengah" "$(ins l1_s10b $TA product-media "$TA/s10.png")" 1
+# sampler: sesi lain tidak pernah melihat nol policy tulis selama up/down berulang
+rm -f "$W/samp.txt"; ( for i in $(seq 1 60); do PA -d l1_s10b -c "$WRITE_POL" >> "$W/samp.txt" 2>/dev/null; done ) &
+SP=$!; for i in 1 2 3 4 5; do up l1_s10b; down l1_s10b; done; wait $SP
+MINW=$(sort -n "$W/samp.txt" | head -1); NS=$(wc -l < "$W/samp.txt")
+[ "${MINW:-0}" -ge 1 ] && pass "S10 sampler ($NS sampel selama 5x up+down): jumlah policy tulis LINOE tidak pernah 0 (min=$MINW)" || bad "S10 sampler min=$MINW"
 
 [ "$fail" = 0 ] && echo "ALL PASSED" || echo "SOME FAILED"
 exit $fail

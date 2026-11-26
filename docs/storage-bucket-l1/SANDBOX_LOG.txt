@@ -1,16 +1,21 @@
 # BUKTI SANDBOX (bukan REAL): PostgreSQL lokal 16.15 sekali pakai, skema storage = stub (supabase/tests/storage-bucket-l1/stub.sql), data sintetis.
-# Dijalankan: 2026-11-26T12:41Z lewat bash supabase/tests/storage-bucket-l1/run-local.sh. CI menjalankan ulang di PostgreSQL 17.
+# Dijalankan: 2026-11-26T12:54Z lewat bash supabase/tests/storage-bucket-l1/run-local.sh. CI menjalankan ulang di PostgreSQL 17.
+# Revisi 2: migrasi/down dalam begin..commit eksplisit, up/down dijalankan TANPA psql -1 (S10: tanpa ON_ERROR_STOP, satu query, kegagalan di tengah, sampler 60 sampel: policy tulis LINOE tidak pernah 0).
 # Tidak ada koneksi ke Supabase mana pun.
 SANDBOX: PostgreSQL server_version_num=160015, stub storage schema (bukan Supabase nyata)
 PASS: blok storage Phase 1 diekstrak dari repositori
 PASS: S1 PRECHECK Q0 LANJUT (tidak ada policy pihak lain)
+PASS: S1 PRECHECK Q2:creative-assets cocok sidik Phase 1
+PASS: S1 PRECHECK Q2:brand-assets cocok sidik Phase 1
+PASS: S1 PRECHECK Q2:generated-content cocok sidik Phase 1
 PASS: S1 PRECHECK Q4 0 objek
 PASS: S1 PRECHECK Q8 keadaan awal benar
 PASS: S1 PRECHECK Q7 UNKNOWN tanpa role linoe_migrator
 PASS: S1 up berhasil (bucket cadangan kosong)
 PASS: S1 tiga bucket cadangan privat
 PASS: S1 product-media tetap publik
-PASS: S1 batas+mime tidak berubah
+PASS: S1 batas+mime tidak berubah (dibanding nilai SEBELUM up)
+PASS: S1 nilai batas+mime SEBELUM tidak kosong (bukan tautologi)
 PASS: S1 policy lama FOR ALL hilang
 PASS: S1 empat policy baru
 PASS: S1 tenant A unggah ke product-media folder sendiri
@@ -34,6 +39,7 @@ PASS: S1 POSTCHECK P6 PASS
 PASS: S1 POSTCHECK P7 PASS
 PASS: S1 POSTCHECK P8 PASS
 PASS: S1 POSTCHECK P9 PASS
+PASS: S1 POSTCHECK P11 PASS
 PASS: S1 POSTCHECK P10 UNKNOWN (uji manual)
 PASS: S1 POSTCHECK tanpa placeholder terisi -> UNKNOWN, bukan PASS
 PASS: S2 PRECHECK Q4 brand-assets=1 BERHENTI
@@ -59,4 +65,21 @@ PASS: S7 bucket hilang dilewati, sisanya privat, tidak ada bucket baru dibuat
 PASS: S8 DROP POLICY mengambil AccessExclusiveLock pada storage.objects (hitung objek di bawah kunci yang sama)
 PASS: S9 PRECHECK.sql read-only (tanpa DDL/DML)
 PASS: S9 POSTCHECK.sql read-only (tanpa DDL/DML)
+PASS: S9 PRECHECK.sql tanpa execute/set_config/pg_advisory
+PASS: S9 POSTCHECK.sql tanpa execute/set_config/pg_advisory
+PASS: S2b PRECHECK Q2:brand-assets BERHENTI (batas beda)
+PASS: S2b up ditolak: bucket tidak terbukti milik LINOE
+PASS: S2b tidak ada perubahan (bucket+policy)
+PASS: S2c up ditolak: mime beda
+PASS: S2d down: NOTICE untuk bucket tidak cocok
+PASS: S2d down: bucket tak cocok tetap privat (tidak disentuh), yang cocok dipulihkan publik
+PASS: S2d down: policy FOR ALL tetap dipulihkan
+PASS: S6b PRECHECK Q0 BERHENTI (policy SELECT pihak lain menyebut bucket cadangan)
+PASS: S10 objek ada, psql biasa (tanpa -1, tanpa ON_ERROR_STOP): keadaan tidak berubah
+PASS: S10 policy tulis LINOE tetap ada (FOR ALL lama) setelah penolakan
+PASS: S10 seluruh berkas sebagai SATU query (SQL Editor): keadaan tidak berubah
+PASS: S10 kegagalan DI TENGAH sesudah DROP POLICY (psql biasa): semuanya dibatalkan, keadaan awal utuh
+PASS: S10 policy tulis lama tetap ada setelah kegagalan di tengah
+PASS: S10 tenant A masih bisa menulis ke product-media setelah kegagalan di tengah
+PASS: S10 sampler (60 sampel selama 5x up+down): jumlah policy tulis LINOE tidak pernah 0 (min=1)
 ALL PASSED
