@@ -698,3 +698,52 @@ jobs:
           bash supabase/prod-packages/tests/rehearsal.sh 2>&1 | tee "$RUNNER_TEMP/pm.txt" || true
           grep -E '^(FAIL|SOME|REFUSED)|ERROR' "$RUNNER_TEMP/pm.txt" | head -20 | sed 's/^/::error::/' || true
           grep -q '^ALL PASSED' "$RUNNER_TEMP/pm.txt"
+
+  # 4r (Opsi A, retention vault): migrasi + rollback pada PostgreSQL 16 dan 17 SEMENTARA (data sintetis; skema Supabase = stub, bukan REAL).
+  # Membuktikan penyalinan allowlist sebelum DELETE (cascade tenants dan langsung), fail-closed LR001 (vault rusak, hak dicabut, CHECK gagal, timeout),
+  # penolak TRUNCATE, mode replica, isolasi tenant/RLS/privilege, idempotensi, down-soft/down/down paksa, prasyarat, kunci, konkurensi, dan suite lama
+  # (skenario P0-2 dan B2 tanpa diubah) tetap hijau dengan 4r terpasang. Tidak pernah menerapkan apa pun ke Supabase.
+  retention-vault-sql:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        pg: ["16", "17"]
+    services:
+      postgres:
+        image: postgres:${{ matrix.pg }}
+        env:
+          POSTGRES_USER: linoe_ci
+          POSTGRES_PASSWORD: linoe_ci_password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U linoe_ci -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: linoe_ci
+      PGPASSWORD: linoe_ci_password
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Ensure psql client
+        run: command -v psql || (sudo apt-get update && sudo apt-get install -y postgresql-client)
+
+      - name: Retention vault SQL tests (PostgreSQL ${{ matrix.pg }} required)
+        env:
+          REQUIRE_PG_MAJOR: ${{ matrix.pg }}
+        run: |
+          set -o pipefail
+          bash supabase/tests/retention-vault/run-local.sh 2>&1 | tee "$RUNNER_TEMP/rv.txt" || true
+          # surface failures as annotations (job logs are not always downloadable)
+          grep -E '^(FAIL|SOME|REFUSED)|ERROR' "$RUNNER_TEMP/rv.txt" | head -20 | sed 's/^/::error::/' || true
+          grep -q '^ALL PASSED' "$RUNNER_TEMP/rv.txt"
