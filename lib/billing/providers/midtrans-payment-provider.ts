@@ -1,7 +1,9 @@
 import "server-only";
 
 import { createHash, timingSafeEqual } from "node:crypto";
-import { serverEnv } from "@/lib/env";
+import { publicEnv, serverEnv } from "@/lib/env";
+import { evaluatePaymentEnvironment } from "@/lib/billing/providers/payment-env-guard";
+import type { PaymentEnvStamp } from "@/lib/billing/payment-env-stamp";
 import {
   PaymentProviderConfigError,
   type CheckoutSessionInput,
@@ -60,6 +62,30 @@ export function resolveMidtransMode(
   if (flag !== "") return null; // any other non-empty flag value ("TRUE", "1", "yes", typo): refuse rather than guess
   // No flag: behaviour is exactly the previous sandbox-only one. A production env without the flag is inconsistent.
   return env === "" || env === "sandbox" ? SANDBOX_MODE : null;
+}
+
+export interface MidtransRuntime extends MidtransModeConfig {
+  /** Supabase project ref this server has PROVEN it is connected to (D3 guard). */
+  dbRef: string;
+}
+
+/**
+ * D3 — the mode from resolveMidtransMode() (unchanged) plus the two-way database guard. Order, all fail-closed:
+ * switches -> server-key prefix for the mode -> database identity (sandbox needs an allow-listed non-production project,
+ * live needs a known production project). null = the adapter is unconfigured: no checkout, no verification, 503 on webhook.
+ */
+export function resolveMidtransRuntime(): MidtransRuntime | null {
+  const mode = resolveMidtransMode();
+  const { apiKey } = serverEnv.payment;
+  if (!mode || !apiKey || !apiKey.startsWith(mode.keyPrefix)) return null;
+  const guard = evaluatePaymentEnvironment({
+    mode: mode.mode,
+    supabaseUrl: publicEnv.supabaseUrl,
+    sandboxRefs: serverEnv.payment.sandboxDbRefs,
+    serviceKey: serverEnv.supabaseSecretKey,
+  });
+  if (!guard.ok || guard.env !== mode.mode) return null;
+  return { ...mode, dbRef: guard.ref };
 }
 
 /** Snap payment page lifetime (C4). Conservative: an unpaid invoice never stays payable for more than a day. */
@@ -211,16 +237,22 @@ export class MidtransPaymentProvider implements PaymentProvider {
   readonly name = "midtrans";
 
   isConfigured(): boolean {
-    const mode = resolveMidtransMode();
-    const { apiKey } = serverEnv.payment;
-    return !!mode && !!apiKey && apiKey.startsWith(mode.keyPrefix);
+    return resolveMidtransRuntime() !== null;
   }
 
-  private requireConfig(): { apiKey: string; mode: MidtransModeConfig } {
-    const mode = resolveMidtransMode();
+  runtimeEnvironment(): PaymentEnvStamp | null {
+    const runtime = resolveMidtransRuntime();
+    return runtime ? { env: runtime.mode, dbRef: runtime.dbRef } : null;
+  }
+
+  private requireConfig(): { apiKey: string; mode: MidtransRuntime } {
+    const mode = resolveMidtransRuntime();
     const { apiKey } = serverEnv.payment;
-    if (!mode || !apiKey || !apiKey.startsWith(mode.keyPrefix)) {
-      throw new PaymentProviderConfigError(this.name, "Midtrans belum dikonfigurasi dengan server key yang sesuai mode.");
+    if (!mode || !apiKey) {
+      throw new PaymentProviderConfigError(
+        this.name,
+        "Midtrans belum dikonfigurasi dengan server key dan database yang sesuai mode.",
+      );
     }
     return { apiKey, mode };
   }

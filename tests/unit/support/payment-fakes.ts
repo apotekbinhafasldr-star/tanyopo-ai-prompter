@@ -3,6 +3,10 @@ import { vi } from "vitest";
 import { computeMidtransSignature } from "@/lib/billing/providers/midtrans-payment-provider";
 
 export const SERVER_KEY = "SB-Mid-server-TESTKEY123";
+/** Fictitious 20-char Supabase project ref used by the sandbox environment mocks (never a real project). */
+export const SANDBOX_REF = "abcdefghij0123456789";
+/** A different fictitious ref (e.g. a restored copy of the database). */
+export const OTHER_REF = "zyxwvutsrq9876543210";
 export const TENANT_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 export const TENANT_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 export const TXN_A = "11111111-1111-4111-8111-111111111111";
@@ -161,6 +165,8 @@ export function addTxn(db: FakeDb, over: Row = {}): Row {
     currency: "IDR",
     plan: "PRO",
     provider_payment_id: null,
+    // D3: transactions are stamped at checkout; the default fixture is a normal sandbox transaction of the sandbox mock DB.
+    metadata: { pg_env: "sandbox", pg_db_ref: SANDBOX_REF },
     ...over,
   };
   db.txns.push(row);

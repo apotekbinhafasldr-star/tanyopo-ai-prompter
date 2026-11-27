@@ -3,7 +3,8 @@ import "server-only";
 import { findPlanTier } from "@/lib/billing/plans";
 import { getPaymentProvider } from "@/lib/billing/get-payment-provider";
 import { createAdminClient } from "@/lib/supabase/admin";
-import type { SubscriptionPlan } from "@/types/database";
+import { readEnvStamp, withEnvStamp, type PaymentEnvStamp } from "@/lib/billing/payment-env-stamp";
+import type { Json, SubscriptionPlan } from "@/types/database";
 
 export interface StartCheckoutInput {
   tenantId: string;
@@ -115,6 +116,21 @@ export async function startCheckout(input: StartCheckoutInput): Promise<StartChe
     return { ok: false, error: "Harga paket sedang diperbarui. Silakan coba lagi nanti." };
   }
 
+  // D3: stamp the transaction with the payment environment and database project BEFORE any gateway session exists. If the
+  // stamp cannot be proven and written, close the transaction and never open a session (no unstamped payment can start).
+  let stampedMetadata: Record<string, Json> | null = null;
+  if (provider.runtimeEnvironment) {
+    stampedMetadata = await stampTransaction(admin, txnId, input.tenantId, provider.runtimeEnvironment());
+    if (!stampedMetadata) {
+      await admin
+        .from("prompter_payment_transactions")
+        .update({ status: "FAILED", failure_reason: "ENV_STAMP_FAILED" })
+        .eq("id", txnId)
+        .eq("status", "PENDING");
+      return { ok: false, error: "Pembayaran online sedang dipersiapkan. Silakan coba lagi nanti." };
+    }
+  }
+
   try {
     const session = await provider.createCheckoutSession({
       tenantId: input.tenantId,
@@ -132,7 +148,7 @@ export async function startCheckout(input: StartCheckoutInput): Promise<StartChe
     // write this table. Best-effort — the webhook remains the sole path that ever activates anything.
     await admin
       .from("prompter_payment_transactions")
-      .update({ provider_payment_id: session.externalSessionId, metadata: { checkout_url: session.checkoutUrl } })
+      .update({ provider_payment_id: session.externalSessionId, metadata: { ...(stampedMetadata ?? {}), checkout_url: session.checkoutUrl } })
       .eq("id", txnId)
       .eq("status", "PENDING");
 
@@ -154,4 +170,45 @@ export async function startCheckout(input: StartCheckoutInput): Promise<StartChe
 function appendTxnParam(url: string, transactionId: string): string {
   const separator = url.includes("?") ? "&" : "?";
   return `${url}${separator}txn=${encodeURIComponent(transactionId)}`;
+}
+
+/**
+ * D3: merges `pg_env` / `pg_db_ref` into the (just created, still PENDING) transaction's metadata without overwriting
+ * anything else, then reads it back to prove the stamp is really stored. Returns the stored metadata, or null on any
+ * failure (including an unprovable runtime), so the caller can fail closed.
+ */
+async function stampTransaction(
+  admin: NonNullable<ReturnType<typeof createAdminClient>>,
+  txnId: string,
+  tenantId: string,
+  runtime: PaymentEnvStamp | null,
+): Promise<Record<string, Json> | null> {
+  if (!runtime) return null;
+  try {
+    const { data: current } = await admin
+      .from("prompter_payment_transactions")
+      .select("metadata")
+      .eq("id", txnId)
+      .eq("tenant_id", tenantId)
+      .maybeSingle();
+    if (!current) return null;
+    const merged = withEnvStamp(current.metadata, runtime);
+    const { error } = await admin
+      .from("prompter_payment_transactions")
+      .update({ metadata: merged })
+      .eq("id", txnId)
+      .eq("tenant_id", tenantId)
+      .eq("status", "PENDING");
+    if (error) return null;
+    const { data: after } = await admin
+      .from("prompter_payment_transactions")
+      .select("metadata")
+      .eq("id", txnId)
+      .eq("tenant_id", tenantId)
+      .maybeSingle();
+    const stored = readEnvStamp(after?.metadata);
+    return stored && stored.env === runtime.env && stored.dbRef === runtime.dbRef ? merged : null;
+  } catch {
+    return null;
+  }
 }

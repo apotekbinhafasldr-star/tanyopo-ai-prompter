@@ -73,3 +73,20 @@ Tujuan: berhenti menerima pembayaran baru secara aman.
 3. Pelanggan yang sudah bayar tapi belum aktif: jangan aktifkan manual; tunggu sinkronisasi / sweeper, atau eskalasi ke Founder.
 4. Jika Server Key diduga bocor: regenerasi di dashboard Midtrans, perbarui env, deploy, lalu cek tidak ada transaksi asing.
 5. Catat waktu, penyebab, dan tindakan di catatan insiden.
+
+## D3. Guard sandbox/live terhadap database (fase A-C, tanpa migrasi)
+
+Perilaku baru (flag tetap OFF; tidak ada env yang berubah oleh kode ini):
+- Midtrans dan Xendit sandbox hanya jalan bila database yang tersambung (diturunkan dari URL Supabase server) adalah proyek
+  non-produksi yang tercantum di `PAYMENT_SANDBOX_DB_PROJECT_REFS`. Env kosong = OFF. Ini sengaja: Midtrans sandbox yang
+  sebelumnya otomatis aktif di database mana pun kini OFF sampai env itu diisi di situs sandbox terisolasi.
+- Midtrans live hanya jalan bila database adalah proyek produksi yang dikenal dan TIDAK ada di daftar sandbox.
+- Tiap transaksi checkout diberi stempel `pg_env` dan `pg_db_ref` di `metadata` sebelum sesi gateway dibuat. Saat settle,
+  stempel dibandingkan dengan runtime. Beda environment, beda proyek database, atau stempel hilang = `ENV_MISMATCH`: tanpa
+  panggilan gateway, tanpa aktivasi; webhook dibalas 200 dan event ditandai `ENV_MISMATCH:<alasan>`.
+- Transaksi yang dibuat sebelum guard ini (tanpa stempel) tidak akan diaktifkan oleh adapter berguard; tinjau manual.
+- Xendit kini diverifikasi server-ke-server (GET invoice menurut `external_id`) sebelum aktivasi, bukan dari body webhook.
+  Nama bidang (`paid_amount`, status `SETTLED`) dan filter `external_id` BELUM terbukti di sandbox Xendit.
+
+Batas: guard membuktikan DB MANA yang tersambung, bukan bahwa isinya salinan buangan. Atestasi sisi database (fase E) butuh
+migrasi dan persetujuan terpisah. Mengisi `PAYMENT_SANDBOX_DB_PROJECT_REFS` adalah langkah env terpisah.

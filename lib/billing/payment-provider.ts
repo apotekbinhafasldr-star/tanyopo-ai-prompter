@@ -21,6 +21,7 @@
  * provider is configured.
  */
 
+import type { PaymentEnvStamp } from "@/lib/billing/payment-env-stamp";
 import type { SubscriptionPlan } from "@/types/database";
 
 /**
@@ -151,6 +152,14 @@ export interface PaymentProvider {
   readonly name: string;
 
   isConfigured(): boolean;
+
+  /**
+   * D3 (optional, additive): the payment environment this adapter runs in right now ("sandbox" | "live") and the database
+   * project it has proven it is connected to, or null when that cannot be proven. When an adapter implements it,
+   * checkout stamps every new transaction with it and verifyAndSettle() refuses to settle a transaction whose stamp does
+   * not match (ENV_MISMATCH: no gateway call, no activation). Adapters that do not implement it behave exactly as before.
+   */
+  runtimeEnvironment?(): PaymentEnvStamp | null;
 
   /** Starts a real hosted checkout for a plan purchase/upgrade. */
   createCheckoutSession(input: CheckoutSessionInput): Promise<CheckoutSessionResult>;

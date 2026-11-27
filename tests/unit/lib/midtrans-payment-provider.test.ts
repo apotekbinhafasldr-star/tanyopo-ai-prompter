@@ -1,16 +1,20 @@
 // @vitest-environment node
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
-const { serverEnvMock } = vi.hoisted(() => ({
+const { serverEnvMock, publicEnvMock } = vi.hoisted(() => ({
   serverEnvMock: {
+    supabaseSecretKey: undefined as string | undefined,
     payment: {
       providerName: "midtrans" as string | undefined,
       apiKey: "SB-Mid-server-TESTKEY123" as string | undefined,
       webhookSecret: undefined as string | undefined,
+      // D3: the sandbox adapter only runs against an explicitly allow-listed (fictitious) non-production project.
+      sandboxDbRefs: "abcdefghij0123456789" as string | undefined,
     },
   },
+  publicEnvMock: { supabaseUrl: "https://abcdefghij0123456789.supabase.co" },
 }));
-vi.mock("@/lib/env", () => ({ serverEnv: serverEnvMock }));
+vi.mock("@/lib/env", () => ({ serverEnv: serverEnvMock, publicEnv: publicEnvMock }));
 
 import {
   MidtransPaymentProvider,
