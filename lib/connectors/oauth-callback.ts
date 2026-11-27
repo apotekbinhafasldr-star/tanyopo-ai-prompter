@@ -74,7 +74,10 @@ export async function handleConnectorOauthCallback(
   }
 
   if (oauthError) {
-    return redirectWith(request, { error: "denied" });
+    // Only an explicit refusal is "you cancelled". Any other provider error
+    // (server_error, invalid_scope, ...) must not be shown as a user cancel.
+    // Neither error_description nor any provider text is echoed or logged.
+    return redirectWith(request, { error: oauthError === "access_denied" ? "denied" : "provider_error" });
   }
 
   // Same accept/reject decision as before; the only addition is WHY it was

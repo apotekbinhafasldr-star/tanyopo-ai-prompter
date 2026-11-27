@@ -28,6 +28,9 @@ const ERROR_LABEL: Record<string, string> = {
   encryption_not_configured: "Penyimpanan koneksi yang aman belum siap. Koneksi belum aktif; hubungi admin LINOE.",
   server_not_configured: "Layanan penyimpanan koneksi belum siap. Koneksi belum aktif; hubungi admin LINOE.",
   connect_failed: "Gagal menghubungkan akun. Silakan coba lagi.",
+  provider_error: "Penyedia (TikTok/Meta/X) menolak atau gagal memproses izin. Koneksi belum aktif; coba lagi nanti.",
+  redirect_uri_invalid:
+    "Redirect URI TikTok di server tidak valid (harus https, tanpa query, path /api/connections/tiktok/callback). Hubungi admin.",
   provider_pending: "Koneksi ini belum dibuka: aplikasi LINOE masih menunggu persetujuan dari penyedia.",
 };
 

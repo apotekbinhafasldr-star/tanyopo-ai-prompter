@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
 const h = vi.hoisted(() => ({
-  connector: null as null | { isConfigured: () => boolean },
+  connector: null as null | { isConfigured: () => boolean; configProblem?: () => string | null },
   sharedHandler: vi.fn(),
 }));
 
@@ -30,6 +30,12 @@ describe("TikTok authorize route gate (fail-closed)", () => {
   it("reports not_configured without credentials", async () => {
     h.connector = { isConfigured: () => false };
     expect(errorOf(await call())).toBe("not_configured");
+    expect(h.sharedHandler).not.toHaveBeenCalled();
+  });
+
+  it("reports redirect_uri_invalid (not 'credentials missing') when the redirect URI is rejected", async () => {
+    h.connector = { isConfigured: () => false, configProblem: () => "redirect_uri_wrong_path" } as never;
+    expect(errorOf(await call())).toBe("redirect_uri_invalid");
     expect(h.sharedHandler).not.toHaveBeenCalled();
   });
 

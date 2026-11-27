@@ -1,6 +1,7 @@
 import "server-only";
 
 import { serverEnv, isConnectorConfigured } from "@/lib/env";
+import { tiktokRedirectUriProblem, type TikTokRedirectProblem } from "@/lib/connectors/tiktok-redirect";
 import { TikTokApiError, tiktokHttp, unwrapMarketing, type TikTokHttpOptions } from "@/lib/connectors/tiktok-http";
 import {
   ConnectorConfigError,
@@ -108,12 +109,21 @@ export class TikTokConnector implements PlatformConnector {
     return { ...this.http, idempotent: false };
   }
 
+  /** Credentials present AND the redirect URI is exactly what TikTok/LINOE accept (fail-closed). */
   isConfigured(): boolean {
-    return isConnectorConfigured({
+    return this.configProblem() === null;
+  }
+
+  /** Why the connector is not usable: lets the route give an honest reason. */
+  configProblem(): "missing_credentials" | `redirect_uri_${TikTokRedirectProblem}` | null {
+    const present = isConnectorConfigured({
       appId: serverEnv.tiktok.appId,
       appSecret: serverEnv.tiktok.appSecret,
       redirectUri: serverEnv.tiktok.redirectUri,
     });
+    if (!present) return "missing_credentials";
+    const problem = tiktokRedirectUriProblem(serverEnv.tiktok.redirectUri);
+    return problem ? `redirect_uri_${problem}` : null;
   }
 
   private requireConfig() {

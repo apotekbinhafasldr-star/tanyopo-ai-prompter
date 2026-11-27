@@ -2,6 +2,30 @@
 
 Tanggal audit: 2026-11-11. Dokumen resmi dibaca lewat `developers.tiktok.com` pada tanggal yang sama (daftar sumber di bagian akhir). Bagian yang tidak bisa dibaca dari dokumen resmi ditandai **BELUM TERVERIFIKASI** — tidak ditebak.
 
+## 0. Status & blocker (audit ulang 2026-11-15, basis main d19232a)
+
+Koneksi TikTok **tetap tertutup** (fail-closed): `PROVIDER_GATES.TIKTOK` = `PENDING`, tombol Hubungkan nonaktif, route authorize menolak. Alasan jujur: belum ada persetujuan TikTok dan belum ada panggilan nyata. Sumber resmi dibaca 2026-11-15 (`developers.tiktok.com/doc/login-kit-web`, `oauth-error-handling`, `getting-started-faq`); halaman token/refresh/revoke tidak terbaca sesi ini (batas pemakaian), jadi bagian itu mengandalkan audit 2026-11-11 (bagian 9).
+
+| Kode | Temuan | Status |
+|---|---|---|
+| A | Callback menandai SEMUA `?error=` penyedia sebagai "Anda membatalkan" (`lib/connectors/oauth-callback.ts`, blok `if (oauthError)`). TikTok memakai `error`/`error_description`; hanya `access_denied` berarti ditolak/dibatalkan. | DIPERBAIKI: `access_denied` -> `denied`; lainnya -> `provider_error` (pesan Indonesia). `error_description` tidak pernah di-echo/dilog. |
+| A | `TIKTOK_REDIRECT_URI` tidak divalidasi; URI salah baru ketahuan di halaman TikTok. Aturan resmi: https, absolut, tanpa query/fragment, <512 karakter, terdaftar persis. | DIPERBAIKI: `lib/connectors/tiktok-redirect.ts`; `TikTokConnector.isConfigured()` false bila bukan `https://<host>/api/connections/tiktok/callback`; route memberi `redirect_uri_invalid`. |
+| A | Sudah benar (diverifikasi dari kode, dikunci tes `oauth-flow.test.ts`): state 24 byte acak, cookie httpOnly/SameSite=Lax 300 dtk terikat tenant, sekali pakai (dihapus di callback), owner-only, token AES-256-GCM lewat klien service-role, filter `tenant_id` pada setiap baca kredensial (#49 sudah ada di main), tidak ada token ke klien/log, konektor Ads membuat objek `DISABLE` (tanpa iklan/konten otomatis). | Tidak perlu perubahan |
+| A (tidak diubah) | `refreshable: true` dan `last_refreshed_at` selalu diisi di callback bersama; state belum terikat `userId` (hanya tenant + cookie browser). Menyentuh Meta/X juga. | Dicatat, butuh persetujuan (bagian 7) |
+| B | App review TikTok (Login Kit + scope `user.info.basic`/`video.*`): "beberapa hari sampai dua minggu setelah submit" (getting-started-faq); tanpa persetujuan tidak ada akses API; app baru dapat diminta audit tambahan, keputusan sepenuhnya TikTok. | EXTERNAL BLOCKED |
+| B | Content Posting audit: sebelum diaudit hanya posting privat (`SELF_ONLY`). Lama audit: **UNKNOWN** (tidak ada angka resmi terbaca). | EXTERNAL BLOCKED |
+| B | Marketing API (iklan): akses advertiser/TikTok for Business. Lama: **UNKNOWN** (dokumen tidak terjangkau). | EXTERNAL BLOCKED |
+| C | Env `TIKTOK_APP_ID`, `TIKTOK_APP_SECRET`, `TIKTOK_REDIRECT_URI` (Netlify) dan Redirect URI di portal TikTok harus sama persis. | Founder; tidak diubah di PR ini |
+| D | Marketing API: parameter callback (`auth_code` vs `code`), umur token, refresh. Callback bersama hanya membaca `code`; bila Marketing API mengirim `auth_code`, koneksi gagal `invalid_state`. Tidak bisa dibuktikan tanpa panggilan nyata/dokumen. | UNKNOWN |
+| D | Login Kit: lama berlaku kode otorisasi, perilaku pasti saat pengguna membatalkan (dokumen tidak menyebut nilai). | UNKNOWN |
+
+Konektor Login Kit (Open API v2, `tiktok-content-posting.ts`) belum dipasang ke route; PR #24 tidak digabung (lihat temuan 8). #137 (matriks) dan #133 (pesan UI) adalah PR lain dan tidak diduplikasi.
+
+### Tindakan Founder minimal (dari HP, browser)
+1. developers.tiktok.com -> Manage apps -> buat app; tambah produk **Login Kit** (web) dan isi Redirect URI: `https://<domain LINOE>/api/connections/tiktok/callback` (persis, tanpa `/` di akhir).
+2. Isi ikon, deskripsi, URL privasi dan ketentuan; lengkapi demo video (rekam layar HP) lalu **Submit for review**.
+3. Setelah disetujui: kirim frasa persetujuan eksplisit agar env diisi dan gerbang dibuka. Sampai itu, jangan isi env.
+
 ## 1. Status ringkas (label jujur)
 
 | Area | Label |

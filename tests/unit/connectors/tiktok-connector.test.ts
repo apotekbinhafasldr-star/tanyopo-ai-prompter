@@ -67,6 +67,17 @@ describe("TikTokConnector (Marketing API) — authorization", () => {
     expect(url.searchParams.has("client_key")).toBe(false);
   });
 
+  it("is not configured (fail-closed) when the redirect URI is not the exact https callback", () => {
+    tiktokEnv.redirectUri = "https://app.example.com/other";
+    expect(connector().isConfigured()).toBe(false);
+    expect(connector().configProblem()).toBe("redirect_uri_wrong_path");
+    tiktokEnv.redirectUri = "http://app.example.com/api/connections/tiktok/callback";
+    expect(connector().isConfigured()).toBe(false);
+    tiktokEnv.redirectUri = undefined;
+    expect(connector().configProblem()).toBe("missing_credentials");
+    expect(() => connector().getAuthorizationUrl("s")).toThrow();
+  });
+
   it("is NOT_CONFIGURED and refuses every call, without touching the network, when credentials are missing", async () => {
     tiktokEnv.appSecret = undefined;
     const fetchMock = stubFetch();
