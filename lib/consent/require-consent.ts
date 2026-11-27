@@ -8,6 +8,9 @@ export type ConsentDenyReason =
   | "NO_RECORD"
   | "WITHDRAWN"
   | "VERSION_OUTDATED"
+  | "NOT_IN_TENANT"
+  | "GRANTOR_NOT_OWNER"
+  | "NOT_TENANT_CODE"
   | "CHECK_FAILED"
   | "NO_CLIENT";
 
@@ -24,7 +27,16 @@ export interface RequireConsentDeps {
 }
 
 const DEFAULT_TIMEOUT_MS = 3000;
-const DENY_REASONS: readonly ConsentDenyReason[] = ["NO_RECORD", "WITHDRAWN", "VERSION_OUTDATED", "INACTIVE_CODE", "UNKNOWN_CODE"];
+const DENY_REASONS: readonly ConsentDenyReason[] = [
+  "NO_RECORD",
+  "WITHDRAWN",
+  "VERSION_OUTDATED",
+  "INACTIVE_CODE",
+  "UNKNOWN_CODE",
+  "NOT_IN_TENANT",
+  "GRANTOR_NOT_OWNER",
+  "NOT_TENANT_CODE",
+];
 
 async function defaultGetClient(): Promise<ConsentRpcClient | null> {
   const { createAdminClient } = await import("@/lib/supabase/admin");
@@ -34,12 +46,16 @@ async function defaultGetClient(): Promise<ConsentRpcClient | null> {
 /**
  * Pemeriksaan persetujuan di sisi server untuk pemrosesan OPSIONAL.
  *
+ *  - Kode koneksi (CONNECT_*): persetujuan adalah milik TENANT dan harus diberikan oleh Owner tenant itu (keputusan Founder Opsi A). Pemeriksaan
+ *    memakai tenantId sesi (fn_prompter_consent_check_tenant): persetujuan Owner tenant lain tidak berlaku; tanpa tenantId = ditolak (fail-closed).
+ *    Persetujuan Owner TIDAK otomatis mewakili semua subjek data dan bukan dasar hukum untuk semua pemrosesan.
+ *
  *  - Enforcement MATI (default): langsung allowed, tanpa menyentuh database, tanpa memuat modul lain. Perilaku identik dengan sebelum Paket 3.
  *  - Enforcement HIDUP: fail-CLOSED. Tanpa persetujuan aktif untuk versi katalog terbaru, atau bila pemeriksaan gagal/timeout/tanpa klien,
  *    hasilnya ditolak. Koneksi lama tanpa catatan (NO_RECORD) TIDAK dianggap setuju.
  *  - Fungsi inti (login, daftar, billing, dasbor) tidak boleh memanggil ini: tidak pernah diblokir karena persetujuan.
  */
-export async function requireConsent(code: ConsentCode, userId: string, deps: RequireConsentDeps = {}): Promise<ConsentDecision> {
+export async function requireConsent(code: ConsentCode, userId: string, tenantId: string | null, deps: RequireConsentDeps = {}): Promise<ConsentDecision> {
   const enabled = (deps.isEnabled ?? isConsentEnforcementEnabled)();
   if (!enabled) return { allowed: true, reason: "ENFORCEMENT_OFF" };
 
@@ -48,6 +64,8 @@ export async function requireConsent(code: ConsentCode, userId: string, deps: Re
   if (!entry.serverGated) return { allowed: true, reason: "NOT_GATED" };
   if (!entry.active) return { allowed: false, reason: "INACTIVE_CODE" };
   if (!userId) return { allowed: false, reason: "CHECK_FAILED" };
+  const tenantScoped = entry.kind === "CONNECTION";
+  if (tenantScoped && !tenantId) return { allowed: false, reason: "CHECK_FAILED" };
 
   try {
     const client = await (deps.getClient ?? defaultGetClient)();
@@ -57,7 +75,10 @@ export async function requireConsent(code: ConsentCode, userId: string, deps: Re
     const timeout = new Promise<"TIMEOUT">((resolve) => {
       timer = setTimeout(() => resolve("TIMEOUT"), timeoutMs);
     });
-    const result = await Promise.race([Promise.resolve(client.rpc("fn_prompter_consent_check", { p_user_id: userId, p_code: code })), timeout]);
+    const call = tenantScoped
+      ? client.rpc("fn_prompter_consent_check_tenant", { p_user_id: userId, p_code: code, p_tenant_id: tenantId })
+      : client.rpc("fn_prompter_consent_check", { p_user_id: userId, p_code: code });
+    const result = await Promise.race([Promise.resolve(call), timeout]);
     if (timer) clearTimeout(timer);
     if (result === "TIMEOUT" || result.error) return { allowed: false, reason: "CHECK_FAILED" };
     const data = result.data as { consented?: unknown; reason?: unknown } | null;
@@ -70,7 +91,7 @@ export async function requireConsent(code: ConsentCode, userId: string, deps: Re
 }
 
 /** Pesan galat untuk pengguna bila ditolak; null bila boleh lanjut. Tanpa detail internal. */
-export async function consentGateMessage(code: ConsentCode, userId: string, deps: RequireConsentDeps = {}): Promise<string | null> {
-  const decision = await requireConsent(code, userId, deps);
+export async function consentGateMessage(code: ConsentCode, userId: string, tenantId: string | null, deps: RequireConsentDeps = {}): Promise<string | null> {
+  const decision = await requireConsent(code, userId, tenantId, deps);
   return decision.allowed ? null : CONSENT_MESSAGES.required;
 }

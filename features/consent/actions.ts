@@ -30,10 +30,16 @@ function allowConsentRequest(userId: string): boolean {
 }
 
 /** Memanggil fn_prompter_consent_set lewat sesi pengguna (auth.uid()). Versi diambil server dari katalog database, bukan dari klien. */
-async function setConsent(code: ConsentCode, action: "GRANTED" | "WITHDRAWN", source: Source): Promise<boolean> {
+async function setConsent(code: ConsentCode, action: "GRANTED" | "WITHDRAWN", source: Source, tenantId?: string): Promise<boolean> {
   try {
     const supabase = await createClient();
-    const { error } = await asConsentRpc(supabase).rpc("fn_prompter_consent_set", { p_code: code, p_action: action, p_source: source });
+    const { error } = await asConsentRpc(supabase).rpc("fn_prompter_consent_set", {
+      p_code: code,
+      p_action: action,
+      p_source: source,
+      // Persetujuan koneksi milik TENANT: database memvalidasi bahwa tenant ini = tenant pemanggil DAN pemanggil adalah Owner.
+      ...(tenantId ? { p_tenant_id: tenantId } : {}),
+    });
     return !error;
   } catch {
     return false;
@@ -66,7 +72,7 @@ export async function grantConnectionConsentAction(platform: ConnectorPlatform):
   const entry = code ? getConsentEntry(code) : null;
   if (!entry || !entry.active) return { error: CONSENT_MESSAGES.saveFailed };
   if (!allowConsentRequest(session.userId)) return { error: CONSENT_MESSAGES.tooMany };
-  const ok = await setConsent(entry.code, "GRANTED", "CONNECT_FLOW");
+  const ok = await setConsent(entry.code, "GRANTED", "CONNECT_FLOW", session.tenantId);
   if (!ok) return { error: CONSENT_MESSAGES.saveFailed };
   revalidatePath("/connections");
   return { error: null, info: CONSENT_MESSAGES.saved };
@@ -74,7 +80,7 @@ export async function grantConnectionConsentAction(platform: ConnectorPlatform):
 
 /**
  * Menarik persetujuan. Opsional: langsung dicatat WITHDRAWN. Koneksi: memutus koneksi lewat disconnectAction yang ada (hanya Owner),
- * lalu mencatat WITHDRAWN. Status berubah hanya setelah server mengonfirmasi (tanpa pembaruan optimistis). Data yang sudah diimpor
+ * lalu mencatat WITHDRAWN. Pencabutan di sisi platform (Meta/TikTok) adalah BEST EFFORT, tidak dijamin selesai. Status berubah hanya setelah server mengonfirmasi (tanpa pembaruan optimistis). Data yang sudah diimpor
  * tidak otomatis terhapus.
  */
 export async function withdrawConsentAction(code: string): Promise<ConsentActionState> {
@@ -89,7 +95,7 @@ export async function withdrawConsentAction(code: string): Promise<ConsentAction
     if (!platform) return { error: CONSENT_MESSAGES.withdrawFailed };
     const disconnected = await disconnectAction(platform);
     if (disconnected.error) return { error: disconnected.error };
-    const ok = await setConsent(entry.code, "WITHDRAWN", "SETTINGS");
+    const ok = await setConsent(entry.code, "WITHDRAWN", "SETTINGS", session.tenantId);
     if (!ok) return { error: CONSENT_MESSAGES.disconnectedNotRecorded };
   } else {
     const ok = await setConsent(entry.code, "WITHDRAWN", "SETTINGS");

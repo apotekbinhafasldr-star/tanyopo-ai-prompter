@@ -96,7 +96,9 @@ describe("ConsentPanel", () => {
     const sw = screen.getByRole("switch");
     expect(sw).toHaveAttribute("aria-checked", "false");
     expect(sw).toHaveClass("min-h-11");
-    expect(sw.getAttribute("aria-labelledby")).toBe("consent-MARKETING_COMMS-title");
+    expect(sw.getAttribute("aria-labelledby")).toBe("consent-MARKETING_COMMS-title consent-MARKETING_COMMS-title-action");
+    // Label in Name: nama aksesibel memuat judul DAN teks yang terlihat pada tombol.
+    expect(sw).toHaveAccessibleName("Email pembaruan Aktifkan");
     expect(sw.getAttribute("aria-describedby")).toBe("consent-MARKETING_COMMS-desc");
     expect(document.getElementById("consent-MARKETING_COMMS-title")).not.toBeNull();
   });

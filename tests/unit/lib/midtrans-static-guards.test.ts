@@ -82,7 +82,7 @@ describe("Billing B3 — static guards (sandbox only, secrets stay on the server
   it("B3 adds no database migration and does not touch the proxy allowlist", () => {
     const migrations = readdirSync(path.join(root, "supabase/migrations"));
     // B3 itself added none; the only later migrations allowed are B4.1, B4.2, P0-2, P0-3, Paket 2 L1 storage hardening and Paket 3 consent/audit guard (each reviewed separately).
-    expect(migrations.filter((m) => m.slice(0, 14) > "20261030140000" && !["20261031100000", "20261101100000", "20261103170000", "20261111130000", "20261126100000", "20261127100000"].includes(m.slice(0, 14)))).toEqual([]);
+    expect(migrations.filter((m) => m.slice(0, 14) > "20261030140000" && !["20261031100000", "20261101100000", "20261103170000", "20261111130000", "20261126100000", "20261127100000", "20261127110000"].includes(m.slice(0, 14)))).toEqual([]);
     expect(read("proxy.ts")).toContain('pathname === "/api/webhooks/payment"');
   });
 });

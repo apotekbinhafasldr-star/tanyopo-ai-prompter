@@ -11,8 +11,10 @@ for k in SUPABASE_SECRET_KEY SUPABASE_SERVICE_ROLE_KEY DATABASE_URL POSTGRES_URL
 done
 case "${PGDATABASE:-}" in *supabase*|*prod*) echo "REFUSED: PGDATABASE looks like a shared database" >&2; exit 2;; esac
 here="$(cd "$(dirname "$0")" && pwd)"; root="$(cd "$here/../../.." && pwd)"
-MIG="$root/supabase/migrations/20261127100000_prompter_consent_audit_guard.sql"
-DOWN="$root/supabase/rollback/20261127100000_prompter_consent_audit_guard.down.sql"
+MIG1="$root/supabase/migrations/20261127100000_prompter_consent_audit_guard.sql"
+DOWN1="$root/supabase/rollback/20261127100000_prompter_consent_audit_guard.down.sql"
+MIG2="$root/supabase/migrations/20261127110000_prompter_consent_owner_audit_redaction.sql"
+DOWN2="$root/supabase/rollback/20261127110000_prompter_consent_owner_audit_redaction.down.sql"
 FOUND="$root/supabase/migrations/20260829080127_prompter_foundation_schema.sql"
 export PGOPTIONS="-c client_min_messages=warning"
 PS() { psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q "$@"; }
@@ -39,6 +41,7 @@ PY
 
 TA=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa; TB=bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb
 UA=11111111-1111-1111-1111-111111111111; UB=22222222-2222-2222-2222-222222222222
+UC=33333333-3333-3333-3333-333333333333; UE=55555555-5555-5555-5555-555555555555; UF=66666666-6666-6666-6666-666666666666
 # mk: DB baru + stub + tabel audit asli + hak default gaya Supabase (ALL untuk role klien) + data sintetis
 mk() {
   P -d postgres -c "drop database if exists $1" -c "create database $1" >/dev/null || return 1
@@ -46,12 +49,18 @@ mk() {
   P -d "$1" -f "$W/audit_table.sql" >/dev/null || return 1
   P -d "$1" -c "grant all on public.prompter_audit_logs to anon, authenticated, service_role" \
     -c "insert into public.tenants(id,nama_usaha) values ('$TA','A'),('$TB','B')" \
-    -c "insert into auth.users(id,email) values ('$UA','a@x.test'),('$UB','b@x.test')" \
-    -c "insert into public.user_profiles(id,tenant_id) values ('$UA','$TA'),('$UB','$TB')" \
+    -c "insert into auth.users(id,email) values ('$UA','a@x.test'),('$UB','b@x.test'),('$UC','c@x.test'),('$UE','e@x.test'),('$UF','f@x.test')" \
+    -c "insert into public.user_profiles(id,tenant_id,role) values ('$UA','$TA','owner'),('$UB','$TB','owner'),('$UC','$TA','marketing'),('$UF','$TA','owner')" \
     -c "insert into public.prompter_audit_logs(tenant_id,actor_user_id,action,resource_type) values ('$TA','$UA','t.a1','x'),('$TA','$UA','t.a2','x'),('$TB','$UB','t.b1','x')" >/dev/null
 }
-up() { P -d "$1" -f "$MIG" >/dev/null 2>"$W/err.txt"; }
-down() { P -d "$1" -f "$DOWN" >/dev/null 2>"$W/err_down.txt"; }
+up1() { P -d "$1" -f "$MIG1" >/dev/null 2>"$W/err.txt"; }
+up2() { P -d "$1" -f "$MIG2" >/dev/null 2>"$W/err.txt"; }
+down2() { P -d "$1" -f "$DOWN2" >/dev/null 2>"$W/err_down.txt"; }
+down1() { P -d "$1" -f "$DOWN1" >/dev/null 2>"$W/err_down.txt"; }
+# up = kedua migrasi berurutan; down = rollback berurutan terbalik
+up() { up1 "$1" && up2 "$1"; }
+down() { down2 "$1" && down1 "$1"; }
+op() { PA -v ON_ERROR_STOP=1 -d "$1" -c "$2" 2>"$W/op_err.txt" || echo ERR; }
 # jalankan sebagai role + pengguna; keluaran = hasil atau ERR
 as() { local db="$1" role="$2" uid="$3" sql="$4"; PA -v ON_ERROR_STOP=1 -d "$db" -c "set role $role" -c "set app.uid='$uid'" -c "set app.tenant='${TEN:-}'" -c "$sql" 2>"$W/as_err.txt" || echo ERR; }
 asr() { local out; out=$(as "$@"); [ -n "$out" ] && echo "$out" || echo OK; }   # OK bila tanpa keluaran dan tanpa galat
@@ -103,7 +112,7 @@ eq "S2 audit tenant A utuh" "$(PA -d g1 -c "select count(*) from public.prompter
 mk g3; up g3
 eq "S3 pengguna A memberi CONNECT_META: changed" "$(as g3 authenticated $UA "select (public.fn_prompter_consent_set('CONNECT_META','GRANTED','SETTINGS'))->>'changed'")" true
 eq "S3 pemberian ulang tidak membuat baris baru" "$(as g3 authenticated $UA "select (public.fn_prompter_consent_set('CONNECT_META','GRANTED','SETTINGS'))->>'changed'")" false
-eq "S3 satu baris GRANTED tersimpan" "$(PA -d g3 -c "select count(*)||':'||min(version)||':'||coalesce(min(tenant_id::text),'null') from public.prompter_consent_events")" "1:1:null"
+eq "S3 satu baris GRANTED tersimpan" "$(PA -d g3 -c "select count(*)||':'||min(version)||':'||coalesce(min(tenant_id::text),'null') from public.prompter_consent_events")" "1:1:$TA"
 eq "S3 pengguna B tidak melihat peristiwa A (RLS)" "$(as g3 authenticated $UB "select count(*) from public.prompter_consent_events")" 0
 eq "S3 pengguna A melihat peristiwa miliknya" "$(as g3 authenticated $UA "select count(*) from public.prompter_consent_events")" 1
 eq "S3 status A" "$(as g3 authenticated $UA "select string_agg(code||'='||status,',' order by code) from public.fn_prompter_consent_my_status()")" "CONNECT_META=GRANTED,CONNECT_TIKTOK=NOT_GIVEN"
@@ -202,7 +211,7 @@ down g6 && R=DOWN || { grep -q 'ROLLBACK BERHENTI' "$W/err_down.txt" && R=REFUSE
 eq "S6 down ditolak bila ada bukti (data aman)" "$R" REFUSED
 eq "S6 tabel bukti masih utuh" "$(PA -d g6 -c "select count(*) from public.prompter_consent_events")" 1
 eq "S6 guard audit masih terpasang" "$(PA -d g6 -c "select count(*) from pg_trigger where tgname like 'trg_prompter_audit_logs%'")" 2
-PGOPTIONS="-c client_min_messages=warning -c linoe.drop_evidence=YA" P -d g6 -f "$DOWN" >/dev/null 2>"$W/err_down.txt" && pass "S6 down dengan konfirmasi eksplisit berhasil" || bad "S6 down paksa: $(cat "$W/err_down.txt")"
+PGOPTIONS="-c client_min_messages=warning -c linoe.drop_evidence=YA" bash -c 'psql -h "$0" -p "$1" -U "$2" -X -q -v ON_ERROR_STOP=1 -d g6 -f "$3" >/dev/null && psql -h "$0" -p "$1" -U "$2" -X -q -v ON_ERROR_STOP=1 -d g6 -f "$4" >/dev/null' "$HOST" "$PORT" "$USER_" "$DOWN2" "$DOWN1" 2>"$W/err_down.txt" && pass "S6 down dengan konfirmasi eksplisit berhasil" || bad "S6 down paksa: $(cat "$W/err_down.txt")"
 eq "S6 tabel Paket 3 hilang" "$(PA -d g6 -c "select count(*) from pg_class where relname like 'prompter_consent%' or relname like 'prompter_legal_document%' or relname='prompter_audit_guard_state'")" 0
 eq "S6 fungsi Paket 3 hilang" "$(PA -d g6 -c "select count(*) from pg_proc where proname in ('fn_prompter_consent_set','fn_prompter_consent_check','fn_prompter_consent_my_status','fn_prompter_record_signup_legal','fn_prompter_consent_evidence_purge','fn_prompter_consent_schedule_retention','fn_prompter_evidence_guard','fn_prompter_audit_logs_guard','fn_prompter_block_truncate_guard')")" 0
 eq "S6 trigger guard hilang" "$(PA -d g6 -c "select count(*) from pg_trigger where not tgisinternal and tgname like 'trg_prompter_%'")" 0
@@ -223,7 +232,7 @@ up g7; eq "S7 fungsi yatim dibersihkan" "$(PA -d g7 -c "select count(*) from pg_
 mk g7b; PA -d g7b -c "create table public.dummy_t(a int)" -c "create function public.fn_prompter_block_truncate_clients() returns trigger language plpgsql as \$\$ begin raise exception 'x'; end \$\$" -c "create trigger trg_dummy before truncate on public.dummy_t for each statement execute function public.fn_prompter_block_truncate_clients()" >/dev/null
 up g7b; eq "S7 fungsi yatim yang dipakai trigger TIDAK dibuang" "$(PA -d g7b -c "select count(*) from pg_proc where proname='fn_prompter_block_truncate_clients'")" 1
 mk g7c
-python3 - "$MIG" "$W/mig_fail.sql" <<'PY'
+python3 - "$MIG1" "$W/mig_fail.sql" <<'PY'
 import sys
 s = open(sys.argv[1]).read().rstrip()
 assert s.endswith("commit;")
@@ -233,7 +242,7 @@ psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q -d g7c -f "$W/mig_fail.sql" >/dev/n
 eq "S7 kegagalan di tengah (psql biasa): semua dibatalkan" "$(PA -d g7c -c "select count(*) from pg_class where relname like 'prompter_consent%'")" 0
 eq "S7 hak audit tidak berubah setelah kegagalan di tengah" "$(PA -d g7c -c "select count(*) from information_schema.role_table_grants where table_name='prompter_audit_logs' and grantee in ('anon','authenticated','service_role') and privilege_type in ('UPDATE','DELETE','TRUNCATE')")" 9
 eq "S7 trigger audit tidak terpasang setelah kegagalan" "$(PA -d g7c -c "select count(*) from pg_trigger where tgname like 'trg_prompter_audit_logs%'")" 0
-psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q -d g7c -c "$(cat "$MIG")" >/dev/null 2>&1; eq "S7 seluruh berkas sebagai SATU query berhasil" "$(PA -d g7c -c "select count(*) from public.prompter_consent_catalog")" 5
+psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q -d g7c -c "$(cat "$MIG1")" >/dev/null 2>&1; eq "S7 seluruh berkas sebagai SATU query berhasil" "$(PA -d g7c -c "select count(*) from public.prompter_consent_catalog")" 5
 
 # ---------- S9: revisi review (versi katalog konsisten, NULL, retensi >= 1, ACL PUBLIC+grant option, komentar) ----------
 mk g9; up g9
@@ -272,11 +281,156 @@ eq "S9 down memulihkan ACL mentah (PUBLIC, grant option, role) persis" "$ACL_A" 
 eq "S9 ACL asli memuat PUBLIC dan grant option pada role (bukan tautologi)" "$(echo "$ACL_B" | grep -c 'PUBLIC:UPDATE:false')$(echo "$ACL_B" | grep -c 'anon:DELETE:true')" 11
 eq "S9 down memulihkan komentar lama" "$(PA -d g9b -c "select obj_description('public.prompter_audit_logs'::regclass,'pg_class')")" "Komentar lama sintetis"
 
+# ---------- S10: persetujuan koneksi hanya OWNER tenant (Opsi A), divalidasi di RPC langsung ----------
+mk g10; up g10
+HASH1=$(PA -d g10 -c "select text_sha256 from public.prompter_consent_catalog where code='CONNECT_META' and version=1")
+eq "S10 Owner A memberi CONNECT_META (tenant dari profil, bukan klien)" "$(as g10 authenticated $UA "select (public.fn_prompter_consent_set('CONNECT_META','GRANTED','CONNECT_FLOW'))->>'changed'")" true
+eq "S10 peristiwa Owner membawa tenant A dan text_sha256 katalog" "$(PA -d g10 -c "select tenant_id||':'||(text_sha256='$HASH1')::text from public.prompter_consent_events where subject_user_id='$UA'")" "$TA:true"
+ERRIS "S10 non-Owner (marketing) tidak dapat memberi" "$(as g10 authenticated $UC "select public.fn_prompter_consent_set('CONNECT_META','GRANTED','SETTINGS')")"
+ERRIS "S10 non-Owner tidak dapat menarik" "$(as g10 authenticated $UC "select public.fn_prompter_consent_set('CONNECT_META','WITHDRAWN','SETTINGS')")"
+ERRIS "S10 pengguna tanpa profil/tenant ditolak" "$(as g10 authenticated $UE "select public.fn_prompter_consent_set('CONNECT_META','GRANTED','SETTINGS')")"
+ERRIS "S10 anon ditolak" "$(as g10 anon '' "select public.fn_prompter_consent_set('CONNECT_META','GRANTED','SETTINGS')")"
+ERRIS "S10 Owner tenant B tidak dapat bertindak atas tenant A (p_tenant_id)" "$(as g10 authenticated $UB "select public.fn_prompter_consent_set('CONNECT_META','GRANTED','CONNECT_FLOW','$TA')")"
+ERRIS "S10 Owner A dengan p_tenant_id tenant B ditolak" "$(as g10 authenticated $UA "select public.fn_prompter_consent_set('CONNECT_TIKTOK','GRANTED','CONNECT_FLOW','$TB')")"
+eq "S10 Owner A dengan p_tenant_id tenant sendiri diterima" "$(as g10 authenticated $UA "select (public.fn_prompter_consent_set('CONNECT_TIKTOK','GRANTED','CONNECT_FLOW','$TA'))->>'changed'")" true
+eq "S10 ditolak tidak membuat baris (hanya 2 peristiwa Owner A)" "$(PA -d g10 -c "select count(*) from public.prompter_consent_events")" 2
+chkt() { as g10 service_role '' "select public.fn_prompter_consent_check_tenant('$1','$2','$3')->>'reason'"; }
+eq "S10 check_tenant: Owner A di tenant A" "$(chkt $UA CONNECT_META $TA)" GRANTED
+eq "S10 check_tenant: anggota non-Owner memakai persetujuan Owner tenant" "$(chkt $UC CONNECT_META $TA)" GRANTED
+eq "S10 check_tenant: Owner B tidak anggota tenant A" "$(chkt $UB CONNECT_META $TA)" NOT_IN_TENANT
+eq "S10 check_tenant: Owner A pada tenant B" "$(chkt $UA CONNECT_META $TB)" NOT_IN_TENANT
+eq "S10 check_tenant: tenant B belum punya persetujuan (milik A tidak berlaku)" "$(chkt $UB CONNECT_META $TB)" NO_RECORD
+eq "S10 check_tenant: tanpa profil" "$(chkt $UE CONNECT_META $TA)" NOT_IN_TENANT
+eq "S10 check_tenant: kode non-CONNECT" "$(chkt $UA MARKETING_COMMS $TA)" NOT_TENANT_CODE
+eq "S10 check_tenant: tenant NULL tidak valid" "$(as g10 service_role '' "select public.fn_prompter_consent_check_tenant('$UA','CONNECT_META',null)->>'reason'")" INVALID_ARGUMENT
+ERRIS "S10 authenticated tidak dapat memanggil check_tenant" "$(as g10 authenticated $UA "select public.fn_prompter_consent_check_tenant('$UA','CONNECT_META','$TA')")"
+eq "S10 status tenant: Owner kedua (UF) melihat persetujuan tenant" "$(as g10 authenticated $UF "select status from public.fn_prompter_consent_my_status() where code='CONNECT_META'")" GRANTED
+eq "S10 status tenant: non-Owner melihat status tenant" "$(as g10 authenticated $UC "select status from public.fn_prompter_consent_my_status() where code='CONNECT_META'")" GRANTED
+eq "S10 status tenant B tidak terpengaruh tenant A" "$(as g10 authenticated $UB "select status from public.fn_prompter_consent_my_status() where code='CONNECT_META'")" NOT_GIVEN
+ERRIS "S10 anon tidak dapat memanggil my_status" "$(as g10 anon '' "select count(*) from public.fn_prompter_consent_my_status()")"
+PA -d g10 -c "update public.user_profiles set role='marketing' where id='$UA'" >/dev/null
+eq "S10 pemberi persetujuan diturunkan dari Owner: persetujuan tidak berlaku" "$(chkt $UC CONNECT_META $TA)" GRANTOR_NOT_OWNER
+PA -d g10 -c "update public.user_profiles set role='owner' where id='$UA'" >/dev/null
+eq "S10 Owner kedua (UF) menarik persetujuan tenant: changed" "$(as g10 authenticated $UF "select (public.fn_prompter_consent_set('CONNECT_META','WITHDRAWN','SETTINGS'))->>'changed'")" true
+eq "S10 setelah penarikan: check_tenant WITHDRAWN" "$(chkt $UC CONNECT_META $TA)" WITHDRAWN
+eq "S10 penarikan membawa text_sha256 versi yang ditarik" "$(PA -d g10 -c "select (text_sha256='$HASH1')::text from public.prompter_consent_events where subject_user_id='$UF' and action='WITHDRAWN'")" true
+eq "S10 penarikan ulang oleh Owner A: tidak ada perubahan" "$(as g10 authenticated $UA "select (public.fn_prompter_consent_set('CONNECT_META','WITHDRAWN','SETTINGS'))->>'changed'")" false
+eq "S10 consent_check lama (2 argumen) masih ada untuk kompatibilitas" "$(PA -d g10 -c "select count(*) from pg_proc where proname='fn_prompter_consent_check' and pronargs=2")" 1
+eq "S10 fungsi consent_set 3 argumen lama sudah tidak ada (tanpa overload ambigu)" "$(PA -d g10 -c "select count(*) from pg_proc where proname='fn_prompter_consent_set' and pronargs=3")" 0
+
+# ---------- S11: pendaftaran hukum (Privacy hanya bila versi dikirim) ----------
+LEG() { PA -d g10 -c "select string_agg(doc_code||':'||event,',' order by doc_code) from public.prompter_legal_document_events where subject_user_id='$1'"; }
+eq "S11 versi privacy NULL: hanya Terms ACCEPTED" "$(as g10 service_role '' "select public.fn_prompter_record_signup_legal('$UE',1,null)::text")" '{"terms_recorded": true, "privacy_notice_recorded": false}'
+eq "S11 baris: hanya TERMS" "$(LEG $UE)" "TERMS:ACCEPTED"
+eq "S11 versi privacy dikirim: DELIVERED dicatat, Terms tidak dobel" "$(as g10 service_role '' "select public.fn_prompter_record_signup_legal('$UE',1,1)::text")" '{"terms_recorded": false, "privacy_notice_recorded": true}'
+eq "S11 baris: TERMS + PRIVACY DELIVERED" "$(LEG $UE)" "PRIVACY_NOTICE:DELIVERED,TERMS:ACCEPTED"
+eq "S11 ulang idempoten" "$(as g10 service_role '' "select public.fn_prompter_record_signup_legal('$UE',1,1)::text")" '{"terms_recorded": false, "privacy_notice_recorded": false}'
+ERRIS "S11 versi Terms NULL ditolak" "$(as g10 service_role '' "select public.fn_prompter_record_signup_legal('$UE',null,1)")"
+ERRIS "S11 versi privacy 0 ditolak" "$(as g10 service_role '' "select public.fn_prompter_record_signup_legal('$UE',1,0)")"
+ERRIS "S11 authenticated tidak dapat memanggil" "$(as g10 authenticated $UA "select public.fn_prompter_record_signup_legal('$UA',1,1)")"
+
+# ---------- S12: anonimisasi PII audit (jalur sempit operator) ----------
+mk g12; up g12
+PA -d g12 -c "create table public.finance_audit_logs(id int primary key, note text)" -c "insert into public.finance_audit_logs values (1,'sintetis')" \
+  -c "create table public.budget_policies(id int primary key, v int)" -c "insert into public.budget_policies values (1,5)" >/dev/null
+MD="'{\"entered_by\":\"$UA\",\"updated_by\":\"$UA\",\"spend\":5}'::jsonb"
+PA -d g12 -c "insert into public.prompter_audit_logs(tenant_id,actor_user_id,action,resource_type,before_data,after_data,context) select '$TA','$UA','manual_metrics.update','prompter_manual_ad_metrics',$MD,$MD,'{\"source\":\"manual\"}' from generate_series(1,3)" \
+  -c "insert into public.prompter_audit_logs(tenant_id,actor_user_id,action,resource_type,before_data) values ('$TA','$UA','x.other','prompter_other_thing',$MD)" \
+  -c "insert into public.prompter_audit_logs(tenant_id,actor_user_id,action,resource_type,before_data) values ('$TA','$UA','fin.row','finance_ledger_entry',$MD)" \
+  -c "insert into public.prompter_audit_logs(tenant_id,actor_user_id,action,resource_type,before_data,after_data) values ('$TB','$UB','manual_metrics.update','prompter_manual_ad_metrics',$MD,$MD)" >/dev/null
+ROWID="select md5(string_agg(concat_ws('|',id,tenant_id,actor_user_id,action,resource_type,resource_id,created_at),',' order by id)) from public.prompter_audit_logs where action in ('manual_metrics.update','x.other','fin.row')"
+OTHER="select md5(string_agg(id::text||coalesce(before_data::text,'')||coalesce(after_data::text,'')||context::text,',' order by id)) from public.prompter_audit_logs where (resource_type<>'prompter_manual_ad_metrics' or tenant_id='$TB') and action in ('manual_metrics.update','x.other','fin.row')"
+SAFE="select md5((select string_agg(note,',') from public.finance_audit_logs)||(select string_agg(v::text,',') from public.budget_policies))"
+ID_B=$(PA -d g12 -c "$ROWID"); OT_B=$(PA -d g12 -c "$OTHER"); SF_B=$(PA -d g12 -c "$SAFE"); PR_B=$(PA -d g12 -c "$PROT")
+RED="select public.fn_prompter_audit_redact"
+for r in anon authenticated service_role; do
+  eq "S12 $r tidak punya EXECUTE pada fungsi anonimisasi dan canary" "$(PA -d g12 -c "select has_function_privilege('$r','public.fn_prompter_audit_redact(text,uuid,boolean,integer)','execute')::text||has_function_privilege('$r','public.fn_prompter_audit_pii_canary_scan(uuid)','execute')::text")" falsefalse
+done
+ERRIS "S12 service_role tidak dapat memanggil" "$(as g12 service_role '' "$RED('REQ-0001','$TA',true,500)")"
+ERRIS "S12 authenticated tidak dapat memanggil" "$(as g12 authenticated $UA "$RED('REQ-0001','$TA',true,500)")"
+ERRIS "S12 eksekusi tanpa dry-run ditolak" "$(op g12 "$RED('REQ-0001','$TA',false,500)")"
+ERRIS "S12 request_ref terlalu pendek ditolak" "$(op g12 "$RED('ab','$TA',true,500)")"
+ERRIS "S12 tenant NULL ditolak" "$(op g12 "$RED('REQ-0001',null,true,500)")"
+ERRIS "S12 tenant tidak ada ditolak" "$(op g12 "$RED('REQ-0001','99999999-9999-9999-9999-999999999999',true,500)")"
+ERRIS "S12 batch 0 ditolak" "$(op g12 "$RED('REQ-0001','$TA',true,0)")"
+ERRIS "S12 dry_run NULL ditolak" "$(op g12 "$RED('REQ-0001','$TA',null,500)")"
+eq "S12 canary sebelum: PII allowlist belum dianonimkan (3 baris x 2 kunci x 2 lokasi)" "$(PA -d g12 -c "select coalesce(sum(row_count),0) from public.fn_prompter_audit_pii_canary_scan('$TA') where kind='ALLOWLISTED_UNREDACTED'")" 12
+eq "S12 canary: kandidat di luar allowlist terlaporkan (tipe lain)" "$(PA -d g12 -c "select count(*)>0 from public.fn_prompter_audit_pii_canary_scan('$TA') where kind='UNLISTED_CANDIDATE' and resource_type='prompter_other_thing'")" t
+eq "S12 dry-run: cocok 3, nol diubah" "$(op g12 "$RED('REQ-0001','$TA',true,500)")" '{"dry_run": true, "remaining": 3, "rows_matched": 3, "rows_redacted": 0}'
+eq "S12 dry-run tidak mengubah baris sumber" "$(PA -d g12 -c "select count(*) from public.prompter_audit_logs where before_data->>'entered_by'='$UA'")" 6
+eq "S12 dry-run menulis SATU entri audit berisi hitungan saja" "$(PA -d g12 -c "select count(*)||':'||min(after_data::text) from public.prompter_audit_logs where action='AUDIT_PII_REDACTION_DRYRUN'")" '1:{"rows_matched": 3}'
+ERRIS "S12 ref lain tanpa dry-run ditolak" "$(op g12 "$RED('REQ-0002','$TA',false,500)")"
+eq "S12 eksekusi batch 2: 2 diubah, sisa 1" "$(op g12 "$RED('REQ-0001','$TA',false,2)")" '{"dry_run": false, "remaining": 1, "rows_matched": 3, "rows_redacted": 2}'
+eq "S12 eksekusi lanjutan: sisa 0" "$(op g12 "$RED('REQ-0001','$TA',false,500)")" '{"dry_run": false, "remaining": 0, "rows_matched": 1, "rows_redacted": 1}'
+eq "S12 eksekusi ulang idempoten (0 diubah)" "$(op g12 "$RED('REQ-0001','$TA',false,500)")" '{"dry_run": false, "remaining": 0, "rows_matched": 0, "rows_redacted": 0}'
+eq "S12 PII diganti penanda; data non-PII (spend) tetap" "$(PA -d g12 -c "select count(*)||':'||min(before_data->>'entered_by')||':'||min(after_data->>'updated_by')||':'||min(after_data->>'spend') from public.prompter_audit_logs where action='manual_metrics.update' and tenant_id='$TA' and resource_type='prompter_manual_ad_metrics'")" "3:[DIHAPUS-PII]:[DIHAPUS-PII]:5"
+eq "S12 id/tenant/aktor/action/tipe/waktu tidak berubah" "$(PA -d g12 -c "$ROWID")" "$ID_B"
+eq "S12 baris tipe lain, tipe finansial (finance_ledger_entry), dan tenant lain tidak tersentuh" "$(PA -d g12 -c "$OTHER")" "$OT_B"
+eq "S12 tabel finance_audit_logs dan budget_policies tidak berubah" "$(PA -d g12 -c "$SAFE")" "$SF_B"
+eq "S12 auth.users/tenants/user_profiles tidak berubah" "$(PA -d g12 -c "$PROT")" "$PR_B"
+eq "S12 entri audit hanya berisi hitungan (kunci terbatas)" "$(PA -d g12 -c "select string_agg(distinct k,',' order by k) from public.prompter_audit_logs a, jsonb_object_keys(a.after_data) k where a.action in ('AUDIT_PII_REDACTION','AUDIT_PII_REDACTION_DRYRUN')")" "remaining,rows_matched,rows_redacted"
+eq "S12 konteks entri audit tanpa PII" "$(PA -d g12 -c "select string_agg(distinct k,',' order by k) from public.prompter_audit_logs a, jsonb_object_keys(a.context) k where a.action like 'AUDIT_PII_REDACTION%'")" "dry_run,recorded_by,request_ref"
+eq "S12 canary sesudah: tidak ada PII allowlist tersisa" "$(PA -d g12 -c "select count(*) from public.fn_prompter_audit_pii_canary_scan('$TA') where kind='ALLOWLISTED_UNREDACTED'")" 0
+eq "S12 nonce dibersihkan setelah eksekusi" "$(PA -d g12 -c "select count(*) from public.prompter_audit_redact_nonce")" 0
+eq "S12 tenant B tetap utuh (bukan target)" "$(PA -d g12 -c "select count(*) from public.prompter_audit_logs where tenant_id='$TB' and before_data->>'entered_by'='$UA'")" 1
+# guard tetap menolak semua jalur lain, termasuk percobaan bypass
+PA -d g12 -c "grant update, delete, truncate on public.prompter_audit_logs to service_role, authenticated" >/dev/null
+ERRIS "S12 service_role UPDATE kolom data ditolak (hak dikembalikan, trigger menolak)" "$(as g12 service_role '' "update public.prompter_audit_logs set before_data='{}'::jsonb")"
+ERRIS "S12 UPDATE action ditolak" "$(as g12 service_role '' "update public.prompter_audit_logs set action='x'")"
+ERRIS "S12 bypass: set_config nonce tebakan dari klien lalu UPDATE ditolak" "$(PA -v ON_ERROR_STOP=1 -d g12 -c "set role service_role" -c "select set_config('linoe.audit_redact','00000000-0000-0000-0000-000000000000',false)" -c "update public.prompter_audit_logs set before_data='{}'::jsonb" 2>/dev/null || echo ERR)"
+ERRIS "S12 bypass: GUC retensi/purge lama tidak membuka audit" "$(PA -v ON_ERROR_STOP=1 -d g12 -c "set role service_role" -c "select set_config('linoe.consent_purge','on',false), set_config('linoe.consent_retention','on',false)" -c "update public.prompter_audit_logs set before_data='{}'::jsonb" 2>/dev/null || echo ERR)"
+ERRIS "S12 bypass: pemilik dengan nonce tebakan juga ditolak" "$(PA -v ON_ERROR_STOP=1 -d g12 -c "select set_config('linoe.audit_redact','11111111-1111-1111-1111-111111111111',false)" -c "update public.prompter_audit_logs set before_data='{}'::jsonb" 2>/dev/null || echo ERR)"
+ERRIS "S12 bypass: klien tidak dapat menulis tabel nonce" "$(as g12 service_role '' "insert into public.prompter_audit_redact_nonce(txid,nonce) values (1, gen_random_uuid())")"
+ERRIS "S12 klien tidak dapat membaca allowlist" "$(as g12 authenticated $UA "select * from public.prompter_audit_redaction_allowlist")"
+ERRIS "S12 klien tidak dapat mengubah allowlist" "$(as g12 service_role '' "insert into public.prompter_audit_redaction_allowlist(resource_type,json_key) values ('prompter_x_thing','email')")"
+ERRIS "S12 allowlist menolak tipe finansial (CHECK)" "$(op g12 "insert into public.prompter_audit_redaction_allowlist(resource_type,json_key) values ('finance_audit_logs','note')")"
+ERRIS "S12 allowlist tidak dapat diubah lewat UPDATE (trigger), walau oleh pemilik" "$(op g12 "update public.prompter_audit_redaction_allowlist set note='x'")"
+ERRIS "S12 allowlist tidak dapat dihapus (trigger)" "$(op g12 "delete from public.prompter_audit_redaction_allowlist")"
+ERRIS "S12 bypass: session_replication_role=replica oleh klien ditolak" "$(PA -v ON_ERROR_STOP=1 -d g12 -c "set role service_role" -c "set session_replication_role = replica" 2>/dev/null || echo ERR)"
+ERRIS "S12 TRUNCATE tetap ditolak trigger" "$(as g12 service_role '' "truncate public.prompter_audit_logs")"
+eq "S12 semua fungsi DEFINER memakai search_path terpasang (bypass search_path)" "$(PA -d g12 -c "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname like 'fn_prompter_%' and p.prosecdef and not exists (select 1 from unnest(coalesce(p.proconfig,'{}')) c where c like 'search_path=pg_catalog, public')")" 0
+eq "S12 baris sumber tidak berubah setelah percobaan klien" "$(PA -d g12 -c "$ROWID")" "$ID_B"
+
+# ---------- S13: idempotensi migrasi kedua + rollback berurutan memulihkan keadaan ----------
+mk g13; up1 g13
+S13A=$(PA -d g13 -c "$SNAP")
+up2 g13 && pass "S13 migrasi kedua berhasil" || bad "S13 up2: $(cat "$W/err.txt")"
+S13B=$(PA -d g13 -c "$SNAP")
+up2 g13 && eq "S13 up kedua kali = keadaan sama (idempoten)" "$(PA -d g13 -c "$SNAP")" "$S13B" || bad "S13 up2 ulang"
+up2 g13 && eq "S13 up ketiga kali = keadaan sama" "$(PA -d g13 -c "$SNAP")" "$S13B" || bad "S13 up2 ketiga"
+[ "$S13A" != "$S13B" ] && pass "S13 migrasi kedua memang mengubah keadaan (bukan tautologi)" || bad "S13 snapshot sama sebelum/sesudah up2"
+eq "S13 seed allowlist (2 kunci)" "$(PA -d g13 -c "select count(*) from public.prompter_audit_redaction_allowlist")" 2
+down2 g13 && pass "S13 down kedua berhasil" || bad "S13 down2: $(cat "$W/err_down.txt")"
+eq "S13 down memulihkan keadaan persis seperti setelah migrasi pertama" "$(PA -d g13 -c "$SNAP")" "$S13A"
+down2 g13 && pass "S13 down kedua kali idempoten" || bad "S13 down2 ulang"
+eq "S13 setelah down: consent_set 3 argumen kembali, 4 argumen hilang" "$(PA -d g13 -c "select count(*) filter (where pronargs=3)||':'||count(*) filter (where pronargs=4) from pg_proc where proname='fn_prompter_consent_set'")" "1:0"
+eq "S13 setelah down: kolom text_sha256 hilang" "$(PA -d g13 -c "select count(*) from information_schema.columns where table_name='prompter_consent_events' and column_name='text_sha256'")" 0
+ERRIS "S13 setelah down: nonce tebakan tetap tidak membuka UPDATE audit" "$(PA -v ON_ERROR_STOP=1 -d g13 -c "select set_config('linoe.audit_redact','11111111-1111-1111-1111-111111111111',false)" -c "update public.prompter_audit_logs set before_data='{}'::jsonb" 2>/dev/null || echo ERR)"
+up2 g13 && pass "S13 up kembali setelah down berhasil" || bad "S13 up2 setelah down"
+eq "S13 up setelah down = keadaan sama dengan up pertama" "$(PA -d g13 -c "$SNAP")" "$S13B"
+as g13 authenticated $UA "select public.fn_prompter_consent_set('CONNECT_META','GRANTED','SETTINGS')" >/dev/null
+down2 g13 && R2=DOWN || { grep -q 'ROLLBACK BERHENTI' "$W/err_down.txt" && R2=REFUSED || R2=OTHER; }
+eq "S13 down kedua ditolak bila ada bukti ber-hash" "$R2" REFUSED
+mk g13b; up1 g13b
+python3 -c 'import sys; s=open(sys.argv[1]).read().rstrip(); assert s.endswith("commit;"); open(sys.argv[2],"w").write(s[:-7]+"select 1/0;\ncommit;\n")' "$MIG2" "$W/mig2_fail.sql"
+S13C=$(PA -d g13b -c "$SNAP")
+psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q -d g13b -f "$W/mig2_fail.sql" >/dev/null 2>&1
+eq "S13 kegagalan di tengah migrasi kedua: seluruhnya dibatalkan" "$(PA -d g13b -c "$SNAP")" "$S13C"
+psql -h "$HOST" -p "$PORT" -U "$USER_" -X -q -d g13b -c "$(cat "$MIG2")" >/dev/null 2>&1; eq "S13 migrasi kedua sebagai SATU query berhasil" "$(PA -d g13b -c "select count(*) from public.prompter_audit_redaction_allowlist")" 2
+
+# ---------- S14: statis migrasi kedua ----------
+for f in "$MIG2" "$DOWN2"; do
+  if grep -viE '^\s*--' "$f" | grep -qiE '(auth\.users|handle_new_user|fn_create_ai_job_if_entitled|budget_policies|automation_settings|finance_audit_logs|ledger_|payment_alert|emergency_stop)'; then bad "S14 $(basename "$f") menyebut objek terlarang"; else pass "S14 $(basename "$f") tidak menyebut objek terlarang"; fi
+  if grep -viE '^\s*--' "$f" | grep -iE '(insert into|update|delete from|alter table|drop table|truncate)[^;]*(public\.tenants|user_profiles|public\.prompter_(manual|master|channel|ai)[a-z_]*)' >/dev/null; then bad "S14 $(basename "$f") mengubah tabel produk"; else pass "S14 $(basename "$f") tidak mengubah tabel produk lain (user_profiles/tenants hanya dibaca)"; fi
+done
+if grep -viE '^\s*--' "$MIG2" | grep -qiE 'grant execute on function public\.fn_prompter_audit_'; then bad "S14 fungsi operator diberi GRANT"; else pass "S14 fungsi operator tanpa GRANT"; fi
+if grep -viE '^\s*--' "$MIG2" | grep -qiE 'trigger[^;]*on public\.(prompter_manual|prompter_master|prompter_channel)'; then bad "S14 trigger produk lain diubah"; else pass "S14 trigger produk lain tidak diubah"; fi
+
 # ---------- S8: statis ----------
-for f in "$MIG" "$DOWN"; do
+for f in "$MIG1" "$DOWN1"; do
   if grep -viE '^\s*--' "$f" | grep -qiE '(auth\.users|user_profiles|handle_new_user|fn_create_ai_job_if_entitled|budget_policies|automation_settings)'; then bad "S8 $(basename "$f") menyebut objek terlarang"; else pass "S8 $(basename "$f") tidak menyebut objek terlarang"; fi
 done
-if grep -viE '^\s*--' "$MIG" | grep -iE '(insert into|update|delete from|alter table|drop table|truncate)[^;]*public\.tenants' >/dev/null; then bad "S8 migrasi mengubah tenants"; else pass "S8 migrasi tidak mengubah tenants (hanya membaca)"; fi
+if grep -viE '^\s*--' "$MIG1" | grep -iE '(insert into|update|delete from|alter table|drop table|truncate)[^;]*public\.tenants' >/dev/null; then bad "S8 migrasi mengubah tenants"; else pass "S8 migrasi tidak mengubah tenants (hanya membaca)"; fi
 
 [ "$fail" = 0 ] && echo "ALL PASSED" || echo "SOME FAILED"
 exit $fail

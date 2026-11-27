@@ -21,8 +21,9 @@ describe("Paket 3 migrasi: lingkup", () => {
     expect(existsSync(path.join(root, DOWN))).toBe(true);
     const files = readdirSync(path.join(root, "supabase/migrations")).sort();
     expect(files.some((f) => f.endsWith(".down.sql"))).toBe(false);
-    expect(files[files.length - 1]).toBe("20261127100000_prompter_consent_audit_guard.sql");
-    expect(files[files.length - 2]).toBe("20261126100000_prompter_storage_bucket_l1.sql");
+    expect(files[files.length - 1]).toBe("20261127110000_prompter_consent_owner_audit_redaction.sql");
+    expect(files[files.length - 2]).toBe("20261127100000_prompter_consent_audit_guard.sql");
+    expect(files[files.length - 3]).toBe("20261126100000_prompter_storage_bucket_l1.sql");
   });
 
   it("transaksi eksplisit dengan lock_timeout dan statement_timeout (up dan down)", () => {
@@ -190,7 +191,7 @@ describe("Paket 3: lingkup aplikasi", () => {
       expect(gate, f).toBeGreaterThan(-1);
       expect(gate, f).toBeLessThan(s.indexOf("decryptToken(credentials.encrypted_access_token)", gate));
     }
-    expect(read("lib/connectors/oauth-authorize.ts")).toContain("requireConsent(consentCode, session.userId)");
+    expect(read("lib/connectors/oauth-authorize.ts")).toContain("requireConsent(consentCode, session.userId, session.tenantId)");
   });
 
   it("fungsi inti (login, daftar, billing, dasbor) tidak memanggil gerbang persetujuan", () => {
@@ -207,5 +208,100 @@ describe("Paket 3: lingkup aplikasi", () => {
     const env = read(".env.example");
     expect(env).toMatch(/^CONSENT_ENFORCEMENT_ENABLED=$/m);
     expect(env).toMatch(/^CONSENT_UI_ENABLED=$/m);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Revisi aditif Jalur 1: Owner-only + anonimisasi audit (20261127110000). Pemeriksaan statis; perilaku diuji di sandbox PG (run-local.sh S10-S14).
+// ---------------------------------------------------------------------------------------------------------------------
+const MIG2 = "supabase/migrations/20261127110000_prompter_consent_owner_audit_redaction.sql";
+const DOWN2 = "supabase/rollback/20261127110000_prompter_consent_owner_audit_redaction.down.sql";
+const up2 = flat(read(MIG2));
+const down2 = flat(read(DOWN2));
+
+describe("Paket 3 revisi: migrasi tambahan 20261127110000", () => {
+  it("migrasi pertama TIDAK diedit (hash paket di PR terkunci); revisi hanya berkas baru + rollback di luar migrations", () => {
+    expect(existsSync(path.join(root, MIG2))).toBe(true);
+    expect(existsSync(path.join(root, DOWN2))).toBe(true);
+    expect(readdirSync(path.join(root, "supabase/migrations")).some((f) => f.endsWith(".down.sql"))).toBe(false);
+  });
+
+  it("transaksi eksplisit, timeout, tidak menyebut objek terlarang atau tabel finansial/keamanan/Emergency Stop", () => {
+    for (const [n, sql] of [["up2", up2], ["down2", down2]] as const) {
+      expect(sql.trim(), n).toMatch(/^begin; set local lock_timeout = '3s'; set local statement_timeout = '10s';/);
+      expect(sql.trim(), n).toMatch(/commit;$/);
+      expect(sql, n).not.toMatch(/auth\.users|handle_new_user|fn_create_ai_job_if_entitled|budget_policies|automation_settings|finance_audit_logs|ledger_entries|payment_alert|emergency_stop|publoe|mitapeng|umkmpro|apotek/i);
+    }
+  });
+
+  it("user_profiles dan tenants hanya DIBACA (tidak pernah insert/update/delete/alter)", () => {
+    expect(up2).not.toMatch(/(insert into|update|delete from|alter table|drop table|truncate( table)?|references)\s+public\.(tenants|user_profiles)/);
+    expect(up2).toMatch(/from public\.user_profiles up where up\.id = v_uid/);
+  });
+
+  it("persetujuan koneksi: Owner saja dan tenant dari profil pemanggil (p_tenant_id opsional harus sama), di dalam RPC", () => {
+    expect(up2).toContain("v_role is distinct from 'owner'");
+    expect(up2).toContain("p_tenant_id is not null and p_tenant_id is distinct from v_tenant");
+    expect(up2).toContain("fn_prompter_consent_set(p_code text, p_action text, p_source text, p_tenant_id uuid default null)");
+    expect(up2).toContain("drop function if exists public.fn_prompter_consent_set(text, text, text);");
+    expect(up2).toContain("grant execute on function public.fn_prompter_consent_check_tenant(uuid, text, uuid) to service_role;");
+    expect(up2).not.toMatch(/grant [^;]* to (anon|public)\b/);
+  });
+
+  it("Privacy Notice DELIVERED hanya bila versi dikirim; Terms selalu", () => {
+    expect(up2).toContain("if p_privacy_version is not null then");
+    expect(up2).toMatch(/'TERMS', p_terms_version, 'ACCEPTED'/);
+  });
+
+  it("fungsi operator anonimisasi: TANPA GRANT, session_user dijaga, dry-run wajib, allowlist, tabel finansial dikecualikan, hitungan saja", () => {
+    for (const fn of ["fn_prompter_audit_redact(text, uuid, boolean, integer)", "fn_prompter_audit_pii_canary_scan(uuid)", "fn_prompter_audit_row_needs_redaction(text, jsonb, jsonb, jsonb)", "fn_prompter_audit_redact_doc(jsonb, text)"]) {
+      expect(up2).toContain(`revoke all on function public.${fn} from public, anon, authenticated, service_role;`);
+      expect(up2).not.toContain(`grant execute on function public.${fn}`);
+    }
+    expect(up2).toContain("session_user in ('anon', 'authenticated', 'service_role', 'authenticator')");
+    expect(up2).toContain("p_dry_run boolean default true");
+    expect(up2).toContain("dry-run dengan request_ref ini wajib dijalankan lebih dulu");
+    expect(up2).toContain("(finance|ledger|payment|billing|security|budget|automation|emergency|auth|tenant|profile)");
+    expect(up2).toContain("[DIHAPUS-PII]");
+    expect(up2).toContain("revoke all on public.prompter_audit_redaction_allowlist, public.prompter_audit_redact_nonce from public, anon, authenticated, service_role;");
+  });
+
+  it("fungsi anonimisasi hanya menyentuh prompter_audit_logs (UPDATE), dan hanya kolom before_data/after_data/context", () => {
+    const updates = [...up2.matchAll(/update (public\.[a-z_]+)/g)].map((m) => m[1]);
+    expect(new Set(updates)).toEqual(new Set(["public.prompter_audit_logs"]));
+    expect(up2).toContain("(to_jsonb(new) - 'before_data' - 'after_data' - 'context') = (to_jsonb(old) - 'before_data' - 'after_data' - 'context')");
+  });
+
+  it("guard: nonce acak per transaksi dari tabel privat (bukan GUC yang bisa diset klien); DELETE cascade tetap", () => {
+    expect(up2).toContain("n.txid = txid_current() and n.nonce::text = v_nonce");
+    expect(up2).toContain("not exists (select 1 from public.tenants t where t.id = old.tenant_id)");
+    expect(up2).toMatch(/fn_prompter_audit_logs_guard\(\) returns trigger language plpgsql security definer set search_path = pg_catalog, public/);
+  });
+
+  it("trigger audit produk lain (manual_ad_metrics dst.) tidak diubah; tidak ada create trigger pada tabel produk", () => {
+    for (const m of up2.matchAll(/create trigger [a-z_]+ before [a-z ]+ on (public\.[a-z_]+)/g)) {
+      expect(["public.prompter_audit_redaction_allowlist"]).toContain(m[1]);
+    }
+  });
+
+  it("rollback: menolak bila ada hash teks tersimpan kecuali konfirmasi; idempoten; memulihkan isi fungsi lama", () => {
+    expect(down2).toContain("ROLLBACK BERHENTI");
+    expect(down2).toContain("linoe.drop_evidence");
+    expect(down2).toContain("alter table if exists public.prompter_consent_events drop column if exists text_sha256;");
+    expect(down2).toMatch(/create or replace function public\.fn_prompter_consent_set\(p_code text, p_action text, p_source text\)/);
+    expect(down2).not.toMatch(/delete from public\.prompter_audit_logs|truncate/);
+  });
+
+  it("server memakai tenant sesi dan Privacy hanya bila versi cocok persis", () => {
+    expect(read("lib/consent/require-consent.ts")).toContain("fn_prompter_consent_check_tenant");
+    expect(read("features/auth/actions.ts")).toContain('formData.get("privacyNoticeVersion") === String(PRIVACY_NOTICE_VERSION)');
+  });
+});
+
+describe("Paket 3 revisi: dasar hukum belum terverifikasi tidak lagi dirujuk dengan nomor", () => {
+  it("tidak ada rujukan 'PP 33/2026' di dokumen/kode (diganti penanda UNKNOWN)", () => {
+    const files = ["docs/LEGAL_PSE_CHECKLIST.md", "docs/SOFT_LAUNCH_10_TENANTS.md", "docs/CONSENT_AUDIT_GUARD.md", "docs/DATABASE.md"];
+    for (const f of files) expect(read(f), f).not.toMatch(/PP\s*33\s*\/\s*2026|33\/2026/);
+    expect(read("docs/LEGAL_PSE_CHECKLIST.md")).toContain("dasar hukum belum terverifikasi (UNKNOWN)");
   });
 });

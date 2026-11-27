@@ -14,7 +14,7 @@ const INTRO =
 
 const WITHDRAW_BODY: Record<ConsentItemView["kind"], string> = {
   CONNECTION:
-    "LINOE akan berhenti mengakses akun ini dan menghapus token akses dari sistem kami. Data kinerja yang sudah diimpor tidak otomatis terhapus; lihat Penghapusan Data. Penarikan tidak memengaruhi pemrosesan yang sudah berlangsung sebelumnya.",
+    "LINOE akan berhenti mengakses akun ini dan menghapus token akses dari sistem kami. Pencabutan akses di sisi platform (Meta/TikTok) kami upayakan sebaik mungkin, tetapi tidak dapat dijamin; Anda juga dapat mencabutnya langsung di pengaturan akun platform tersebut. Data kinerja yang sudah diimpor tidak otomatis terhapus; lihat Penghapusan Data. Penarikan tidak memengaruhi pemrosesan yang sudah berlangsung sebelumnya.",
   OPTIONAL: "Anda tidak akan menerima komunikasi opsional ini lagi. Pesan layanan tetap dikirim. Penarikan tidak memengaruhi pemrosesan yang sudah berlangsung sebelumnya.",
 };
 
@@ -120,17 +120,21 @@ export function ConsentPanel({ items, loadError }: { items: ConsentItemView[]; l
                         type="button"
                         role="switch"
                         aria-checked={item.status === "GRANTED"}
-                        aria-labelledby={titleId}
+                        // Nama aksesibel = judul + teks yang terlihat pada tombol (Label in Name, WCAG 2.5.3).
+                        aria-labelledby={`${titleId} ${titleId}-action`}
                         aria-describedby={descId}
                         disabled={isBusy}
                         ref={(el) => {
                           triggerRefs.current[item.code] = el;
                         }}
                         onClick={() => (item.status === "GRANTED" ? setConfirming(item.code) : run(item.code, grantOptionalConsentAction))}
-                        className="inline-flex min-h-11 w-full items-center justify-between gap-3 rounded-[var(--radius-md)] border border-border-strong px-4 text-sm font-medium text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 sm:w-auto"
+                        className="inline-flex min-h-11 w-full items-center justify-between gap-3 rounded-[var(--radius-md)] border border-muted-foreground px-4 text-sm font-medium text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 sm:w-auto"
                       >
-                        <span>{item.status === "GRANTED" ? "Matikan" : "Aktifkan"}</span>
-                        <span aria-hidden className={`inline-block h-6 w-11 rounded-full ${item.status === "GRANTED" ? "bg-brand" : "bg-border-strong"}`} />
+                        <span id={`${titleId}-action`}>{item.status === "GRANTED" ? "Matikan" : "Aktifkan"}</span>
+                        {/* Trek sakelar: kontras >= 3:1 terhadap latar putih pada kedua keadaan (muted-foreground #71717a = 4.8:1; brand #4338ca = 7.9:1); kenop putih. */}
+                        <span aria-hidden className={`relative inline-block h-6 w-11 shrink-0 rounded-full ${item.status === "GRANTED" ? "bg-brand" : "bg-muted-foreground"}`}>
+                          <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white ${item.status === "GRANTED" ? "left-[22px]" : "left-0.5"}`} />
+                        </span>
                       </button>
                     ) : item.status === "GRANTED" ? (
                       <Button
@@ -168,7 +172,8 @@ export function ConsentPanel({ items, loadError }: { items: ConsentItemView[]; l
                         <h4 id={`${titleId}-confirm`} tabIndex={-1} className="text-sm font-semibold text-foreground">
                           Tarik persetujuan ini?
                         </h4>
-                        <p className="text-sm text-muted-foreground">{WITHDRAW_BODY[item.kind]}</p>
+                        {/* Di atas surface-muted (#f4f4f5): teks abu #71717a hanya 4.4:1, jadi memakai foreground (>= 4.5:1). */}
+                        <p className="text-sm text-foreground">{WITHDRAW_BODY[item.kind]}</p>
                         <div className="flex flex-col gap-2 sm:flex-row">
                           <Button ref={cancelRef} autoFocus variant="secondary" className="w-full sm:w-auto" aria-label={`Batal menarik persetujuan: ${item.title}`} onClick={() => closeConfirm(item.code)}>
                             Batal

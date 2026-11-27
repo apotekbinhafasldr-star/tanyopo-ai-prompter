@@ -94,7 +94,7 @@ export async function syncChannelCampaignInsightsAction(
   // Paket 3: gerbang persetujuan koneksi (no-op saat enforcement MATI; fail-closed saat HIDUP, sebelum token dibuka).
   const consentCode = connectConsentCode(connectorPlatform);
   if (consentCode) {
-    const consentMessage = await consentGateMessage(consentCode, session.userId);
+    const consentMessage = await consentGateMessage(consentCode, session.userId, session.tenantId);
     if (consentMessage) return { error: consentMessage };
   }
 

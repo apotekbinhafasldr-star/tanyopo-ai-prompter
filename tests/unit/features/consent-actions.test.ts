@@ -37,7 +37,7 @@ describe("server actions persetujuan", () => {
     expect(rpcMock).not.toHaveBeenCalled();
     sessionMock.mockResolvedValue({ userId: "u1", tenantId: "t1", role: "owner" });
     expect((await grantConnectionConsentAction("META")).error).toBeNull();
-    expect(rpcMock).toHaveBeenCalledWith("fn_prompter_consent_set", { p_code: "CONNECT_META", p_action: "GRANTED", p_source: "CONNECT_FLOW" });
+    expect(rpcMock).toHaveBeenCalledWith("fn_prompter_consent_set", { p_code: "CONNECT_META", p_action: "GRANTED", p_source: "CONNECT_FLOW", p_tenant_id: "t1" });
   });
 
   it("grantConnection: platform X (nonaktif) ditolak", async () => {
@@ -56,7 +56,7 @@ describe("server actions persetujuan", () => {
     const result = await withdrawConsentAction("CONNECT_META");
     expect(result.error).toBeNull();
     expect(disconnectMock).toHaveBeenCalledWith("META");
-    expect(rpcMock).toHaveBeenCalledWith("fn_prompter_consent_set", { p_code: "CONNECT_META", p_action: "WITHDRAWN", p_source: "SETTINGS" });
+    expect(rpcMock).toHaveBeenCalledWith("fn_prompter_consent_set", { p_code: "CONNECT_META", p_action: "WITHDRAWN", p_source: "SETTINGS", p_tenant_id: "t1" });
     expect(disconnectMock.mock.invocationCallOrder[0]).toBeLessThan(rpcMock.mock.invocationCallOrder[0]);
   });
 

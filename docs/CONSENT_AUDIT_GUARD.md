@@ -6,9 +6,9 @@ Status: **Draft PR, BELUM diterapkan ke database mana pun, enforcement dan UI de
 
 | Bagian | Isi |
 |---|---|
-| Migrasi | `supabase/migrations/20261127100000_prompter_consent_audit_guard.sql`; rollback `supabase/rollback/20261127100000_prompter_consent_audit_guard.down.sql` |
+| Migrasi | `supabase/migrations/20261127100000_prompter_consent_audit_guard.sql` (+ revisi aditif `20261127110000_prompter_consent_owner_audit_redaction.sql`, bagian 8); rollback di `supabase/rollback/` (urutan terbalik: 110000 dulu) |
 | Penerimaan Terms | Dicatat server-side saat pendaftaran akun BARU: versi dari `features/legal/legal-versions.ts`, waktu dari server database (`occurred_at default now()`) |
-| Privacy Notice | Dicatat TERPISAH sebagai `DELIVERED` (pemberitahuan telah disampaikan). Bukan persetujuan |
+| Privacy Notice | Dicatat TERPISAH sebagai `DELIVERED` (pemberitahuan telah disampaikan), **hanya bila formulir mengirim `privacyNoticeVersion` yang sama PERSIS dengan `PRIVACY_NOTICE_VERSION`** (bagian 8). Bukan persetujuan |
 | Persetujuan opsional | Katalog `prompter_consent_catalog` (v1: CONNECT_META dan CONNECT_TIKTOK aktif; CONNECT_X, MARKETING_COMMS, ANALYTICS_TELEMETRY terdaftar tetapi tidak aktif). Peristiwa `GRANTED` / `WITHDRAWN` per tujuan, versi, waktu, sumber |
 | Retensi | `retain_until` nullable; parameter `evidence_retention_months` = NULL. Fungsi jadwal dan purge hanya operator |
 | Guard audit | `prompter_audit_logs`: hak UPDATE/DELETE/TRUNCATE dicabut dari role klien + trigger penolak |
@@ -26,7 +26,7 @@ Terms dan Privacy Notice **tidak** disamakan dengan persetujuan PDP, dan tidak s
 - **Dialog persetujuan pada halaman Koneksi belum ada** (paket UI berikutnya). Server action `grantConnectionConsentAction` sudah tersedia. Selama dialog belum ada, enforcement tidak boleh dihidupkan: Owner tidak punya jalur memberi persetujuan koneksi.
 - **Retensi 3 tahun = usulan internal belum disahkan.** Tidak ada angka di kode, migrasi, atau teks publik. Selama parameter NULL: jadwal dan purge mengembalikan `NOT_APPROVED` dan tidak menghapus apa pun. Tidak ada penjadwal otomatis.
 
-- **Saat flag OFF hanya Terms dan Privacy Notice yang tercatat** (saat pendaftaran). Persetujuan `CONNECT_*` BELUM dicatat oleh siapa pun karena dialog di halaman Koneksi belum ada; panel Privasi & persetujuan hanya tampil bila `CONSENT_UI_ENABLED` hidup. Artinya sebelum aktivasi, koneksi yang sudah ada tidak punya catatan persetujuan sama sekali.
+- **Saat flag OFF hanya Terms (selalu) dan Privacy Notice (bila formulir mengirim versinya; Jalur 2 yang menambah kolom itu di UI) yang tercatat** (saat pendaftaran). Persetujuan `CONNECT_*` BELUM dicatat oleh siapa pun karena dialog di halaman Koneksi belum ada; panel Privasi & persetujuan hanya tampil bila `CONSENT_UI_ENABLED` hidup. Artinya sebelum aktivasi, koneksi yang sudah ada tidak punya catatan persetujuan sama sekali.
 - **Keterbatasan yang diketahui (tidak diselesaikan di PR ini):** (1) rem permintaan `consent_set` bersifat memori per instance (best effort, 30/menit/pengguna), bukan batas global; (2) tidak ada pembatasan di database terhadap pengguna yang sengaja memanggil fungsi berulang; (3) akurasi `occurred_at` memakai `clock_timestamp()` (waktu server database), bukan jam klien; (4) hak asli grantor selain pemilik tabel tidak ditiru saat rollback (dipulihkan sebagai pemilik); (5) peristiwa persetujuan satu pengguna (`subject_user_id`) tidak mengikuti tenant bila pengguna pindah tenant (tenant_id hanya konteks saat pencatatan); (6) pengaturan retensi diisi langsung oleh operator (CHECK menolak 0, angka bernol di depan, dan nilai negatif; tidak ada catatan siapa yang mengisi selain log operasi).
 
 ## 3. Operator: retensi
@@ -59,7 +59,7 @@ where u.created_at >= timestamptz '<waktu kode live, UTC>'
 
 ## 5. Checklist sebelum enforcement dihidupkan
 
-0. **Keputusan produk: subjek persetujuan koneksi.** Persetujuan `CONNECT_*` diberikan oleh Owner tenant (hanya Owner yang dapat menghubungkan), tetapi pemakaian token dilakukan juga oleh anggota `marketing` (peluncuran kampanye, sinkron insight). Gerbang memeriksa persetujuan milik PENGGUNA YANG MENJALANKAN. Dengan enforcement ON, anggota marketing yang belum punya catatan akan ditolak (`NO_RECORD`) walau Owner sudah setuju. Putuskan sebelum aktivasi: periksa persetujuan Owner tenant, atau minta tiap pengguna.
+0. **Keputusan produk: subjek persetujuan koneksi, SUDAH diputuskan Founder (Opsi A).** Persetujuan `CONNECT_*` diberikan oleh Owner tenant dan diperiksa per TENANT (bagian 8): anggota marketing memakai persetujuan Owner tenantnya. Persetujuan Owner TIDAK otomatis mewakili semua subjek data dan BUKAN dasar hukum untuk semua pemrosesan (lihat UNKNOWN E-11).
 1. Dialog persetujuan di halaman Koneksi tayang dan teruji; teks dialog diselaraskan dengan izin yang benar-benar diminta (UNKNOWN E-8).
 2. Inventaris titik gerbang dilengkapi (bagian 2), termasuk jalur latar belakang.
 3. Jumlah koneksi yang sudah ada tanpa catatan persetujuan diukur (UNKNOWN E-6): mereka akan ditolak sampai Owner memberi persetujuan.
@@ -78,3 +78,41 @@ where u.created_at >= timestamptz '<waktu kode live, UTC>'
 ## 7. UNKNOWN hukum (butuh konsultan)
 
 Dasar pemrosesan koneksi platform (kontrak vs persetujuan) dan peran LINOE (E-3); dasar fitur AI (E-2); lama dan titik mulai retensi bukti serta apakah bukti Terms berbeda dari bukti persetujuan (E-7); perlu tidaknya IP/perangkat sebagai bukti (E-4, default tidak disimpan); aturan pemasaran langsung (E-9) dan telemetri (E-10); apakah penerimaan ulang Terms harus blocking (E-5); persetujuan Owner untuk anggota tim lain (E-11); kecukupan teks penarikan (E-12); jalur pendaftaran lain di proyek bersama (E-14); bentrok objek dengan produk lain (E-15). Daftar huruf dasar pemrosesan UU PDP belum diverifikasi ulang (E-1): klasifikasi dasar bersifat usulan.
+
+## 8. Revisi Jalur 1 (migrasi tambahan 20261127110000)
+
+**Pilihan: berkas BARU, bukan menyunting 20261127100000.** Hash paket migrasi pertama sudah terkunci di PR #186 dan jalur produksi (preflight/POSTCHECK) mengacu ke isinya; menyunting berkas yang sudah ditinjau mengubah hash dan membatalkan tinjauan. Migrasi kedua bersifat aditif dan idempoten (`create or replace`, `if not exists`, `on conflict do nothing`), dengan rollback sendiri yang memulihkan isi fungsi lama persis (diuji: keadaan setelah down = keadaan setelah migrasi pertama). Keduanya BELUM diterapkan di mana pun; urutan terapan: 100000 lalu 110000.
+
+### 8.1 Persetujuan koneksi hanya Owner (Opsi A)
+- `fn_prompter_consent_set(p_code, p_action, p_source, p_tenant_id default null)`: untuk kode `CONNECT_*` tenant dan peran diambil dari `user_profiles` milik `auth.uid()` (bukan dari klien). Ditolak (42501) bila pemanggil bukan `owner`, tidak punya tenant, atau `p_tenant_id` berbeda dari tenant pemanggil (Owner tenant lain). `anon` tidak punya EXECUTE. Berlaku juga bila RPC dipanggil langsung, tidak hanya lewat server action. Fungsi 3 argumen lama dibuang agar tidak ada overload ambigu.
+- Status koneksi milik TENANT: Owner kedua dan non-Owner melihat persetujuan tenant (`fn_prompter_consent_my_status`, SECURITY DEFINER terbatas pada tenant pemanggil); penarikan oleh Owner mana pun berlaku untuk tenant.
+- `fn_prompter_consent_check_tenant(user, code, tenant)` (hanya `service_role`): pengguna harus anggota tenant; persetujuan = peristiwa terakhir tenant; pemberinya HARUS masih Owner tenant itu (`GRANTOR_NOT_OWNER` bila diturunkan); persetujuan Owner tenant lain tidak berlaku (`NOT_IN_TENANT`/`NO_RECORD`). `requireConsent(code, userId, tenantId)` memakai ini; tanpa `tenantId` = ditolak (fail-closed saat enforcement ON, no-op saat OFF).
+- Batas: persetujuan Owner BUKAN persetujuan setiap subjek data (mis. pelanggan/anggota tim) dan BUKAN dasar hukum seluruh pemrosesan. Dasar hukum pemrosesan koneksi tetap UNKNOWN (E-3, E-11).
+- Penarikan persetujuan koneksi: pencabutan akses di sisi platform (Meta/TikTok) adalah **best effort**; LINOE memutus koneksi dan menghapus token sendiri, tetapi tidak dapat menjamin platform mencabut izin di sisinya. Teks di layar menyatakan ini.
+- `prompter_consent_events.text_sha256` menyimpan hash teks versi yang disetujui/ditarik (baris sebelum revisi NULL).
+
+### 8.2 Privacy Notice DELIVERED: kontrak formulir
+`registerAction` mencatat `PRIVACY_NOTICE`/`DELIVERED` hanya bila `FormData` memuat `privacyNoticeVersion` yang **sama persis** (string) dengan `PRIVACY_NOTICE_VERSION` (`"1"`; `"01"`, `" 1"`, `"1.0"`, `"2"`, kosong, atau tidak ada = tidak dicatat). `TERMS`/`ACCEPTED` selalu dicatat. Di database, `fn_prompter_record_signup_legal(user, terms, privacy)` menerima `privacy = NULL` (tidak dicatat). Jalur 2 (UI pendaftaran) wajib menambah input tersembunyi/terlihat `privacyNoticeVersion` HANYA bila blok Privacy Notice benar-benar ditampilkan; sebelum itu tidak ada baris DELIVERED baru.
+
+### 8.3 Anonimisasi PII pada `prompter_audit_logs` (jalur sempit, operator)
+Guard TETAP menolak setiap UPDATE/DELETE/TRUNCATE kecuali cascade tenant dan SATU jalur: fungsi operator `fn_prompter_audit_redact(request_ref, tenant, dry_run default true, batch)`.
+- **Tanpa GRANT** ke role mana pun (diperiksa juga `session_user`); hanya pemilik database/operator.
+- **Dry-run wajib**: eksekusi hanya diterima bila ada dry-run dengan `request_ref` sama (<= 7 hari) untuk tenant itu. Dry-run dan eksekusi masing-masing menulis SATU entri audit sendiri (`AUDIT_PII_REDACTION_DRYRUN` / `AUDIT_PII_REDACTION`) berisi HITUNGAN saja (`rows_matched`, `rows_redacted`, `remaining`) dan `request_ref`; tanpa PII.
+- **Allowlist** `prompter_audit_redaction_allowlist(resource_type, json_key)` (tabel privat, tanpa hak klien, tidak dapat di-UPDATE/DELETE oleh trigger; perubahan lewat migrasi): seed hanya `prompter_manual_ad_metrics` dengan `entered_by` dan `updated_by` (id pengguna yang tersalin lewat `to_jsonb(row)` oleh trigger `fn_prompter_manual_ad_metrics_audit`; kolom lain tabel itu bukan PII). Tipe sumber bernama finance/ledger/payment/billing/security/budget/automation/emergency/auth/tenant/profile ditolak oleh CHECK dan oleh fungsi.
+- **Yang diubah**: hanya kunci allowlist pada kolom `before_data`/`after_data`/`context`, nilainya diganti penanda `[DIHAPUS-PII]`. `id`, `tenant_id`, `actor_user_id`, `action`, `resource_type`, `resource_id`, `created_at` TIDAK berubah (guard memeriksa itu). Idempoten (nilai yang sudah penanda tidak dihitung). Per batch (1-5000, default 500) dengan `for update skip locked`, `lock_timeout 3s`, `statement_timeout 30s`.
+- **Mengapa bypass sulit**: pembukaan guard memakai nonce acak per transaksi dari tabel privat; GUC `set_config` dari klien tidak cukup (nonce tidak dapat ditebak, klien tidak punya hak tulis/baca tabel itu, dan tidak punya hak UPDATE). Diuji: set_config dari klien, GUC retensi/purge lama, `session_replication_role=replica` oleh klien, search_path (semua fungsi DEFINER mengunci `search_path`), dan pemilik dengan nonce tebakan: semua ditolak. Pemilik/superuser tetap dapat menonaktifkan trigger (bukan klaim immutable).
+- **Tidak disentuh**: `finance_audit_logs`, ledger/alert pembayaran, audit keamanan, Emergency Stop, `budget_policies`, `automation_settings`, `auth.users`, `tenants`, `user_profiles` (hanya dibaca), tabel/trigger produk lain (uji sandbox S12/S14 memeriksa tabel stub finansial tidak berubah).
+
+### 8.4 PII lewat `before_data` (trigger manual_ad_metrics) dan prasyarat Paket 4b-2
+- Trigger audit `manual_ad_metrics` menyalin SELURUH baris (`to_jsonb`) ke `before_data`/`after_data`; PII di sana hanya `entered_by`/`updated_by` (id pengguna, pseudonim). Trigger itu **tidak diubah** (milik produk bersama).
+- Pembersihan per tenant/tabel: `fn_prompter_audit_redact` (8.3). Pemindaian canary baca-saja: `select * from public.fn_prompter_audit_pii_canary_scan('<tenant atau NULL>')` mengembalikan HITUNGAN per `kind`: `ALLOWLISTED_UNREDACTED` (PII allowlist yang masih ada) dan `UNLISTED_CANDIDATE` (kunci mirip PII yang BELUM di allowlist; perlu ditinjau manusia). Tanpa grant (operator).
+- **PRASYARAT Paket 4b-2**: sebelum jalur data/ekspor/penghapusan Paket 4b-2 dijalankan, operator (a) menjalankan canary scan, (b) meninjau semua `UNLISTED_CANDIDATE`, (c) menambah allowlist lewat migrasi bila perlu, (d) menjalankan dry-run lalu eksekusi anonimisasi per tenant yang relevan, (e) memastikan canary `ALLOWLISTED_UNREDACTED` = 0. Cakupan kunci PII di luar seed adalah UNKNOWN sampai audit data produksi (tidak dilakukan; tidak ada akses).
+
+### 8.5 SLA akses internal vs batas waktu hukum
+SLA internal akses data **48 jam** adalah target OPERASIONAL internal, bukan batas hukum. Batas hukum berbeda per jenis permintaan (3x24 jam hanya untuk Pasal 30, 32, 40, 41, 46) dan tetap UNKNOWN sampai diverifikasi konsultan. Retensi 3 tahun masih usulan internal belum disahkan; tidak ada angka di kode/migrasi/teks publik.
+
+### 8.6 Aksesibilitas panel
+Pil sakelar kini memakai warna dengan kontras >= 3:1 pada kedua keadaan (abu `#71717a` = 4.83:1, brand `#4338ca` = 7.9:1 terhadap putih; kenop putih), teks abu pada `surface-muted` diganti `foreground` (abu `#71717a` di atas `#f4f4f5` hanya 4.4:1), nama aksesibel sakelar memuat teks yang terlihat ("Judul Aktifkan/Matikan"), dan fokus kembali ke judul kartu setelah sukses (sudah ada).
+
+### 8.7 Ditunda / UNKNOWN
+Dasar hukum peraturan pelaksana UU PDP: **dasar hukum belum terverifikasi (UNKNOWN)** (rujukan bernomor yang tidak terverifikasi dihapus dari seluruh repo). Cakupan PII di audit produksi, angka retensi, SLA hukum per jenis permintaan, kecukupan persetujuan Owner untuk subjek data lain: UNKNOWN. Label checkbox, `legal-pages.test.tsx:203`, `auth-actions.test.ts:106`, dan `auth-register-legal-record.test.ts:88` milik Jalur 2 dan tidak diubah di sini.

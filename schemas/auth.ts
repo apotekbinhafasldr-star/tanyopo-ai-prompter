@@ -15,12 +15,15 @@ export const registerSchema = z.object({
     .string()
     .min(8, "Kata sandi minimal 8 karakter")
     .max(72, "Kata sandi maksimal 72 karakter"),
-  // Explicit acceptance of the Terms and Privacy Policy. Only the literal
-  // `true` passes: a missing, false or any other value is rejected. The
-  // browser sends "on" for a checked checkbox, which the action normalises
-  // to `true` before parsing. Enforced here (server side) so a direct
-  // invocation of registerAction cannot skip it. Not persisted anywhere —
-  // see the PR description: permanent consent evidence is a separate decision.
+  // Explicit acceptance at sign-up. Only the literal `true` passes: a missing,
+  // false or any other value is rejected. The browser sends "on" for a checked
+  // checkbox, which the action normalises to `true` before parsing. Enforced
+  // here (server side) so a direct invocation of registerAction cannot skip it.
+  // The message text is kept as-is for now (a locked test pins it). Persistence
+  // (Paket 3): after signUp the server records TERMS/ACCEPTED (version + server
+  // time) via lib/consent/signup-legal.ts, and records PRIVACY_NOTICE/DELIVERED
+  // only when the form actually showed the notice (privacyNoticeVersion field).
+  // Neither is a PDP consent. The value itself is never stored by this schema.
   acceptLegal: z.literal(true, {
     error: "Anda harus menyetujui Syarat & Ketentuan dan Kebijakan Privasi untuk mendaftar.",
   }),
