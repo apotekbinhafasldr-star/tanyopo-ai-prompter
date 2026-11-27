@@ -759,7 +759,7 @@ def _depth_scan(s):
         yield d, t
 
 
-def check_calls(ctx, s, qualified=True, ddl=False):
+def check_calls(ctx, s, qualified=True, ddl=False, plpgsql=False):
     """Default-deny for function calls in statements that run at apply time (top level, DO, after COMMIT, DML/DDL expressions).
 
     A word/quoted identifier directly followed by "(" is a call unless: it is SQL syntax (reserved / col_name keyword, unquoted), it is
@@ -803,12 +803,13 @@ def check_calls(ctx, s, qualified=True, ddl=False):
                 continue  # INSERT ... ON CONFLICT (cols); in a JOIN ... ON the same word would be a user function
             if name == "materialized" and pw == "not" and k >= 2 and is_w(s[k - 2], "as"):
                 continue  # WITH x AS NOT MATERIALIZED (...)
-            if name in PLPGSQL_FIRST and (k == 0 or pw in ("begin", "else", "loop", "then", "declare")):
-                continue
+            if plpgsql and name in PLPGSQL_FIRST and (k == 0 or pw in ("begin", "loop", "declare")):
+                continue  # plpgsql statement head inside a DO body only; never after then/else (CASE in plain SQL)
             if ddl and name in INDEX_METHODS and pw == "using":
                 continue
-            if ddl and name in ("timestamptz", "timetz", "varbit") and prev is not None and prev.kind in ("word", "qid") and pw not in SQL_RESERVED:
-                continue  # column type with a precision in a column definition
+            if (ddl and name in ("timestamptz", "timetz", "varbit") and prev is not None and prev.kind in ("word", "qid") and pw not in SQL_RESERVED
+                    and k >= 2 and (is_w(s[k - 2], "column") or (s[k - 2].kind == "punct" and s[k - 2].text in ("(", ",")))):
+                continue  # type with a precision at a column-definition position: "add column c timestamptz(3)" / "(.., c timestamptz(3))"
         elif name in PURE_FUNCS:
             continue
         raise Deny("call of a function that is not a pure built-in (unregistered / schema-less user function)")
@@ -830,7 +831,7 @@ def read_stmt(ctx, s, phase):
         if w == "execute":
             raise Deny("dynamic EXECUTE")
     if phase in ("top", "do"):
-        check_calls(ctx, s, qualified=True)
+        check_calls(ctx, s, qualified=True, plpgsql=(phase == "do"))
     return False
 
 
@@ -1138,7 +1139,7 @@ def lint_body(ctx, text, phase):
             if head:
                 _anywhere(ctx, head, phase)
             if phase == "do" and not (tail and lw(tail[0]) in ("grant", "revoke", "set", "create", "alter", "drop", "comment")):
-                check_calls(ctx, seg, qualified=True)  # head AND tail together: the head split must not hide a call ("if loop(1) then")
+                check_calls(ctx, seg, qualified=True, plpgsql=True)  # head AND tail together: the head split must not hide a call ("if loop(1) then")
         except Deny as e:
             ctx.bad(f"statement not accepted ({e})")
             continue
@@ -1865,19 +1866,206 @@ def pg_options(timeouts=None, readonly=False):
             + (" -c default_transaction_read_only=on" if readonly else ""))
 
 
-def psql(path, env, variables=None, timeouts=None, tags=None, all_rows=False, readonly=False):
-    """Run a SQL file, return (header, row) of the LAST result set parsed from CSV, or ([], []).
-    all_rows=True (single-SELECT files only): (header, [rows])."""
-    cmd = ["psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-v", "VERBOSITY=verbose", "--csv", "-d", env.get("PGDATABASE", "postgres"), "-f", path]
-    for k, v in (variables or {}).items():
-        cmd[1:1] = ["-v", f"{k}={v}"]
+# ---------------------------------------------------------------------------------------------------------------------
+# execution layer (PR-1 structural controls; the lint above is a tripwire, these are what the SERVER enforces)
+#  1. every file runs in a session that first sets search_path = pg_catalog, pg_temp: an unqualified function/operator/type name can
+#     only resolve to pg_catalog (closes keyword-named functions, attribute notation t.fn, overload shadowing md5(1) -> public.md5(int));
+#     a schema-qualified name is NOT closed by this (x.y( is detected by the lint and, at apply, by the effects check below)
+#  2. SQL goes to the server with psql -c (never -f): psql then performs no meta-command and no :variable interpolation on it;
+#     the few :'name' variables are substituted here, as quoted literals, from validated values
+#  3. check phase = BEGIN READ ONLY + one query (snapshot taken, so SET TRANSACTION READ WRITE is refused) ... ROLLBACK
+#  4. apply phase = the runner splits the file at its single COMMIT and, before it, verifies from the server what the transaction did
+# ---------------------------------------------------------------------------------------------------------------------
+SESSION_SQL = "set search_path = pg_catalog, pg_temp; set standard_conforming_strings = on"
+SNAPSHOT_SQL = "do $$ begin perform 1; end $$"
+EFFECT_TAGS = ("EFEK DI LUAR DAFTAR",)
+LEDGER_EFFECTS = (["supabase_migrations.schema_migrations"], [], [])
+_LIT_OK = re.compile(r"[A-Za-z0-9_ .:\-]{1,160}")
+
+
+def _sig_or_stop(text):
+    try:
+        return tokenize(text)
+    except LintError as e:
+        raise Stop(f"SQL does not tokenize ({e})")
+
+
+def subst_pvars(text, variables):
+    """Replace psql :'name' with a quoted SQL literal (standard_conforming_strings = on). Any other colon-variable form is refused."""
+    toks = _sig_or_stop(text)
+    out, pos, k = [], 0, 0
+    while k < len(toks):
+        t = toks[k]
+        if t.kind == "meta":
+            raise Stop("psql meta-command in SQL text")
+        if t.kind == "pvar":
+            nxt = toks[k + 1] if k + 1 < len(toks) else None
+            if nxt is None or nxt.kind != "str" or nxt.start != t.end:
+                raise Stop("unsupported psql variable form (only :'name' is substituted)")
+            name = nxt.text[1:-1]
+            val = (variables or {}).get(name)
+            if not isinstance(val, str) or re.search(r"[\x00-\x08\x0b-\x1f\x7f]|\r|\n", val):
+                raise Stop("psql variable has no safe value")
+            out.append(text[pos:t.start])
+            out.append("'" + val.replace("'", "''") + "'")
+            pos = nxt.end
+            k += 2
+            continue
+        k += 1
+    out.append(text[pos:])
+    return "".join(out)
+
+
+def split_txn(text):
+    """(head_through_BEGIN, middle, tail_from_COMMIT) for a file with exactly one BEGIN (first) and one COMMIT; else Stop."""
+    toks = _sig_or_stop(text)
+    sig = [t for t in toks if t.kind not in ("ws", "comment")]
+    stmts, cur = [], []
+    for t in sig:
+        cur.append(t)
+        if t.kind == "punct" and t.text == ";":
+            stmts.append(cur)
+            cur = []
+    if cur:
+        stmts.append(cur)
+    kinds = [txn_kind([t for t in st if not (t.kind == "punct" and t.text == ";")]) for st in stmts]
+    if not stmts or kinds[0] != "begin" or kinds.count("begin") != 1 or kinds.count("commit") != 1 or kinds.count("other"):
+        raise Stop("file does not have exactly one BEGIN (first) and one COMMIT: the effects check cannot be placed")
+    ci = kinds.index("commit")
+    return text[:stmts[0][-1].end], text[stmts[0][-1].end:stmts[ci][0].start], text[stmts[ci][0].start:]
+
+
+def _lit(s):
+    if not isinstance(s, str) or not _LIT_OK.fullmatch(s):
+        raise Stop("effects check: an object name has characters the runner does not embed")
+    return "'" + s.replace("'", "''") + "'"
+
+
+def _arr(items):
+    return "array[" + ", ".join(_lit(x) for x in sorted(items)) + "]::text[]" if items else "array[]::text[]"
+
+
+# catalog facts that no package may change (names/hashes stay inside the server; only a fixed message comes back)
+_GLOBAL_PARTS = [
+    ("roles", "(select coalesce(string_agg(rolname || rolsuper::text || rolcreaterole::text || rolcreatedb::text || rolcanlogin::text || rolreplication::text"
+              " || rolbypassrls::text || rolinherit::text, ',' order by rolname), '') from pg_roles)"),
+    ("memberships", "(select coalesce(string_agg(roleid::text || '>' || member::text, ',' order by roleid, member), '') from pg_auth_members)"),
+    ("schemas", "(select coalesce(string_agg(nspname, ',' order by nspname), '') from pg_namespace where nspname !~ '^pg_temp|^pg_toast_temp')"),
+    ("extensions", "(select coalesce(string_agg(extname, ',' order by extname), '') from pg_extension)"),
+    ("event_triggers", "(select coalesce(string_agg(evtname, ',' order by evtname), '') from pg_event_trigger)"),
+    ("publications", "(select coalesce(string_agg(pubname, ',' order by pubname), '') from pg_publication)"),
+    ("foreign_servers", "(select coalesce(string_agg(srvname, ',' order by srvname), '') from pg_foreign_server)"),
+    ("languages", "(select coalesce(string_agg(lanname, ',' order by lanname), '') from pg_language)"),
+    ("casts", "(select count(*)::text from pg_cast where oid >= 16384)"),
+    ("operators", "(select count(*)::text from pg_operator where oid >= 16384)"),
+    ("types", "(select count(*)::text from pg_type where oid >= 16384 and (typtype in ('d', 'e', 'r', 'm') or (typtype = 'b' and typcategory <> 'A')))"),
+    ("other_relations", "(select coalesce(string_agg(n.nspname || '.' || c.relname, ',' order by n.nspname, c.relname), '') from pg_class c join pg_namespace n on n.oid = c.relnamespace"
+                        " where n.nspname not in ('public', 'storage', 'pg_catalog', 'information_schema') and n.nspname !~ '^pg_(toast|temp)' and c.relkind in ('r', 'p', 'v', 'm', 'f', 'S'))"),
+    ("other_functions", "(select coalesce(string_agg(n.nspname || '.' || p.proname, ',' order by n.nspname, p.proname), '') from pg_proc p join pg_namespace n on n.oid = p.pronamespace"
+                        " where n.nspname not in ('public', 'storage', 'pg_catalog', 'information_schema') and n.nspname !~ '^pg_(toast|temp)')"),
+]
+# object names inside the two schemas a package may change
+_ITEMS_EXPR = (
+    "(select coalesce(string_agg(x, E'\\n' order by x), '') from ("
+    "select 'r:' || n.nspname || '.' || c.relname as x from pg_class c join pg_namespace n on n.oid = c.relnamespace"
+    " where n.nspname in ('public', 'storage') and c.relkind in ('r', 'p', 'v', 'm', 'f', 'S', 'i')"
+    " union all select 'f:' || n.nspname || '.' || p.proname || '(' || oidvectortypes(p.proargtypes) || ')' from pg_proc p join pg_namespace n on n.oid = p.pronamespace"
+    " where n.nspname in ('public', 'storage')"
+    " union all select 'p:' || schemaname || '.' || tablename || '.' || policyname from pg_policies where schemaname in ('public', 'storage')"
+    " union all select 't:' || n.nspname || '.' || c.relname || '.' || t.tgname from pg_trigger t join pg_class c on c.oid = t.tgrelid"
+    " join pg_namespace n on n.oid = c.relnamespace where not t.tgisinternal and n.nspname in ('public', 'storage')"
+    ") i(x))")
+
+
+def effects_baseline_sql():
+    return ("do $linoe$ begin "
+            "if current_setting('track_counts') <> 'on' then raise exception 'EFEK DI LUAR DAFTAR: track_counts is off (the check would prove nothing)'; end if; "
+            "perform set_config('linoe.tx0', txid_current()::text, true); "
+            + "".join(f"perform set_config('linoe.g_{lbl}', md5({ex}), true); " for lbl, ex in _GLOBAL_PARTS) +
+            f"perform set_config('linoe.c0', {_ITEMS_EXPR}, true); "
+            "end $linoe$")
+
+
+def effects_check_sql(written, names, prefixes):
+    """Runs INSIDE the transaction, just before COMMIT. A raise aborts the transaction (psql ON_ERROR_STOP) = nothing is committed."""
+    return ("do $linoe$ declare v_n int; begin "
+            "if txid_current()::text is distinct from current_setting('linoe.tx0', true) then raise exception 'EFEK DI LUAR DAFTAR: transaction is not the one that started'; end if; "
+            + "".join(f"if md5({ex}) is distinct from current_setting('linoe.g_{lbl}', true) then raise exception 'EFEK DI LUAR DAFTAR: catalog facts outside the package changed ({lbl})'; end if; "
+                      for lbl, ex in _GLOBAL_PARTS) +
+            "select count(*) into v_n from pg_stat_xact_all_tables s where (s.n_tup_ins + s.n_tup_upd + s.n_tup_del) > 0 "
+            "and s.schemaname not in ('pg_catalog', 'information_schema', 'pg_toast') and s.schemaname !~ '^pg_temp' "
+            f"and (s.schemaname || '.' || s.relname) <> all ({_arr(written)}); "
+            "if v_n > 0 then raise exception 'EFEK DI LUAR DAFTAR: a table outside the package list was written'; end if; "
+            f"with a as (select unnest(string_to_array(current_setting('linoe.c0', true), E'\\n')) as x), b as (select unnest(string_to_array({_ITEMS_EXPR}, E'\\n')) as x), "
+            "d as ((select x from a except select x from b) union all (select x from b except select x from a)), "
+            "e as (select x, case left(x, 2) when 'r:' then regexp_replace(x, '^r:[^.]*[.]', '') when 'f:' then regexp_replace(split_part(x, '(', 1), '^f:[^.]*[.]', '') "
+            "when 'p:' then regexp_replace(x, '^p:[^.]*[.][^.]*[.]', '') else regexp_replace(x, '^t:[^.]*[.][^.]*[.]', '') end as bare from d) "
+            f"select count(*) into v_n from e where not (bare = any ({_arr(names)}) or exists (select 1 from unnest({_arr(prefixes)}) q where starts_with(bare, q))); "
+            "if v_n > 0 then raise exception 'EFEK DI LUAR DAFTAR: an object outside the package list was added or removed'; end if; "
+            "end $linoe$")
+
+
+def derive_effects(text, extra_statements=()):
+    """(tables a package may write, object names it may add/remove/replace, name prefixes of implicit objects) from the lint's own targets."""
+    written, names, prefixes = set(), set(), set()
+    for st in extra_statements:  # manifest rollback_allowed_statements (e.g. "drop index if exists public.x"): the objects they name may disappear
+        names.update(re.findall(r"\b(?:public|storage)\.([a-z_][a-z0-9_]*)", st))
+    for t in ddl_targets(text):
+        kind, _, rest = t.partition(":")
+        if kind == "rows":
+            written.add(rest)
+        elif kind == "table":
+            written.add("public." + rest)
+            names.add(rest)
+            prefixes.add(rest + "_")
+        elif kind in ("function", "index"):
+            names.add(rest.split(".")[-1])
+        elif kind in ("policy", "trigger"):
+            names.add(rest.split(":", 1)[1])
+    return sorted(written), sorted(names), sorted(prefixes)
+
+
+def run_sql(text, env, variables=None, timeouts=None, tags=None, mode="ro", fmt="csv", effects=None, label="file"):
+    """Run SQL text in ONE psql session built from -c items. mode 'ro': BEGIN READ ONLY + snapshot + ROLLBACK. mode 'w': the text carries
+    its own BEGIN/COMMIT; with effects=(written, names, prefixes) the runner verifies the transaction before the COMMIT."""
+    text = subst_pvars(text, variables)
+    if text.lstrip().startswith("\\"):
+        raise Stop("SQL text starts with a backslash")
+    t = {"lock_ms": 3000, "statement_ms": 120000}
+    t.update(timeouts or {})
+    # timeouts are ALSO set inside the session: a pooler that drops PGOPTIONS (Supavisor: UNKNOWN) must not remove them
+    items = [SESSION_SQL, f"set statement_timeout = {int(t['statement_ms'])}; set lock_timeout = {int(t['lock_ms'])}"]
+    if mode == "ro":
+        items += ["begin read only", SNAPSHOT_SQL, text, "rollback"]
+    elif effects is not None:
+        head, mid, tail = split_txn(text)
+        items += [head, effects_baseline_sql()] + ([mid] if mid.strip() else []) + [effects_check_sql(*effects), tail]
+    else:
+        items += [text]
+    cmd = ["psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-v", "VERBOSITY=verbose"]
+    cmd += ["--csv"] if fmt == "csv" else ["-At", "-F", fmt]
+    cmd += ["-d", env.get("PGDATABASE", "postgres")]
+    for it in items:
+        cmd += ["-c", it]
     e = dict(env)
-    e["PGOPTIONS"] = pg_options(timeouts, readonly)
+    e["PGOPTIONS"] = pg_options(timeouts, mode == "ro")
     e["PGCONNECT_TIMEOUT"] = "20"
     r = subprocess.run(cmd, env=e, capture_output=True, text=True)
     if r.returncode != 0:
-        raise Stop(f"psql failed for {os.path.basename(path)}: {safe_error(r.stderr, env, tags or GUARD_TAGS_DEFAULT)}")
-    rows = [x for x in csv.reader(io.StringIO(r.stdout)) if x]
+        raise Stop(f"psql failed for {label}: {safe_error(r.stderr, env, tuple(tags or GUARD_TAGS_DEFAULT) + EFFECT_TAGS)}")
+    return r.stdout
+
+
+def _read(path):
+    with open(path, encoding="utf-8", newline="") as f:
+        return f.read()
+
+
+def psql(path, env, variables=None, timeouts=None, tags=None, all_rows=False, readonly=False, effects=None):
+    """Run a SQL file, return (header, row) of the LAST result set parsed from CSV, or ([], []).
+    all_rows=True (single-SELECT files only): (header, [rows])."""
+    out = run_sql(_read(path), env, variables, timeouts, tags, "ro" if readonly else "w", "csv", effects, os.path.basename(path))
+    rows = [x for x in csv.reader(io.StringIO(out)) if x]
     if all_rows:
         return (rows[0], rows[1:]) if rows else ([], [])
     if len(rows) < 2:
@@ -1887,11 +2075,7 @@ def psql(path, env, variables=None, timeouts=None, tags=None, all_rows=False, re
 
 def psql_at(path, env, sep):
     """Read-only audit files printed unaligned. Returns stdout; failure -> Stop with a redacted reason."""
-    r = subprocess.run(["psql", "-X", "-q", "-At", "-F", sep, "-v", "VERBOSITY=verbose", "-d", env.get("PGDATABASE", "postgres"), "-f", path],
-                       env=env, capture_output=True, text=True)
-    if r.returncode != 0:
-        raise Stop(f"psql failed for {os.path.basename(path)}: {safe_error(r.stderr, env)}")
-    return r.stdout
+    return run_sql(_read(path), env, None, None, None, "ro", sep, None, os.path.basename(path))
 
 
 HARUS = re.compile(r"_harus_(true|false|ge_(\d+)|(\d+))$")
@@ -2127,7 +2311,7 @@ def main(argv=None):
             probe_gate()
             ledger_precheck()
             try:
-                h, r = psql(f("B"), env, timeouts=tmo, tags=tags)
+                h, r = psql(f("B"), env, timeouts=tmo, tags=tags, effects=derive_effects(_read(f("B"))))
             except Stop as e:
                 try:  # report the state afterwards: only when it is PRE do we say the database was left as it was
                     h2, r2 = psql(f("S"), env, tags=tags, readonly=True)
@@ -2142,7 +2326,7 @@ def main(argv=None):
             rep.add(f"- PASS B apply ({len(r)} result columns)")
             run_check("C", "C verification (compared with A)", baseline=base)
             ledger_precheck()
-            h, r = psql(f("D"), env, vars_, tags=tags)
+            h, r = psql(f("D"), env, vars_, tags=tags, effects=LEDGER_EFFECTS)
             fails, _ = evaluate(h, r, require_harus=True)
             if fails:
                 for x in fails:
@@ -2156,7 +2340,7 @@ def main(argv=None):
                 raise Stop(f"record-ledger refused: state is {state}")
             run_check("C", "C verification (no preflight baseline)")
             ledger_precheck()
-            h, r = psql(f("D"), env, vars_, tags=tags)
+            h, r = psql(f("D"), env, vars_, tags=tags, effects=LEDGER_EFFECTS)
             fails, _ = evaluate(h, r, require_harus=True)
             if fails:
                 raise Stop("D did not hold: " + "; ".join(fails))
@@ -2166,7 +2350,7 @@ def main(argv=None):
         elif a.mode == "rollback":
             if state not in ("APPLIED_UNRECORDED", "DONE"):
                 raise Stop(f"rollback refused: state is {state}")
-            h, r = psql(f("E"), env, timeouts=tmo, tags=tags)
+            h, r = psql(f("E"), env, timeouts=tmo, tags=tags, effects=derive_effects(_read(f("E")), pkg.get("rollback_allowed_statements", [])))
             # E must prove something: its own _harus_* result, or (packages with G) the G check that follows; never an empty pass
             fails, _ = evaluate(h, r, require_harus="G" not in pkg["files"])
             if fails:

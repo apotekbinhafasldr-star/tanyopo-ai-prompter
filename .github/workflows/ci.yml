@@ -619,6 +619,18 @@ jobs:
           grep -q '^ALL FINANCE CHAIN CHECKS PASSED' "$RUNNER_TEMP/chain.txt"
           if grep -q '^FAIL' "$RUNNER_TEMP/chain.txt"; then exit 1; fi
 
+  # Tool/package separation: a pull request that changes the production-migration tools, workflow, manifest or CODEOWNERS must not also change
+  # package files (SQL packages, migrations, rollbacks). Pull requests only; no secret; stdlib python.
+  prod-pipeline-separation:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Tool/package separation
+        run: python3 supabase/prod-packages/tools/check_separation.py --base "${{ github.event.pull_request.base.sha }}" --head "${{ github.event.pull_request.head.sha }}"
+
   # Production-migration automation: unit tests of the runner/approval checker and a full REHEARSAL of the P0-2 package
   # (A -> B -> C -> D -> F, STOP paths, rollback, tamper cases, catalog diff) on a throw-away postgres:17 with synthetic data.
   # Pipeline v2 (PR-1) extends it with a SYNTHETIC fixture package (L1/Paket 3 patterns, shape N) on a stub storage schema and non-superuser

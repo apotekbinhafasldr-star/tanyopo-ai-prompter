@@ -340,7 +340,7 @@ describe("Pipeline v2.1 — QA #188 regressions (static guards on the runner, pr
     expect(src).toMatch(/PURE_FUNCS = \{/);
     expect(src).toMatch(/SQL_RESERVED = set\(/);
     expect(src).not.toMatch(/KW_PAREN/);
-    expect(src).toMatch(/def check_calls\(ctx, s, qualified=True, ddl=False\)/);
+    expect(src).toMatch(/def check_calls\(ctx, s, qualified=True, ddl=False, plpgsql=False\)/);
     expect(src).toMatch(/BAN_WORDS = \{[^}]*"nextval"[^}]*"currval"[^}]*"lastval"/);
     expect(src).toMatch(/BAN_PREFIX_MORE = \(/);
     expect(src).toMatch(/TIMEOUT_MAX_MS = \{"lock_timeout": 10000, "statement_timeout": 120000\}/);
@@ -350,6 +350,29 @@ describe("Pipeline v2.1 — QA #188 regressions (static guards on the runner, pr
     expect(doc).toContain("Keputusan Founder (P3-5");
     expect(doc).not.toContain("gagal-tertutup");
     expect(doc).toContain("Notasi atribut tanpa kurung");
+  });
+
+  it("PR-1 structural layer: session search_path, -c only, READ ONLY + snapshot, effects before COMMIT, tool/package separation", () => {
+    expect(src).toMatch(/SESSION_SQL = "set search_path = pg_catalog, pg_temp; set standard_conforming_strings = on"/);
+    expect(src).toMatch(/begin read only/);
+    expect(src).toMatch(/def effects_check_sql\(written, names, prefixes\)/);
+    expect(src).toMatch(/pg_stat_xact_all_tables/);
+    expect(src).toMatch(/EFEK DI LUAR DAFTAR/);
+    expect(src).toMatch(/def split_txn\(text\)/);
+    expect(src).toMatch(/def subst_pvars\(text, variables\)/);
+    // the runner never hands a file to psql with -f (psql would interpret meta-commands and :variables)
+    expect(src).not.toMatch(/"-f", path/);
+    const exec = src.slice(src.indexOf("def run_sql("), src.indexOf("def _read("));
+    expect(exec).not.toMatch(/"-f"/);
+    const sep = read("supabase/prod-packages/tools/check_separation.py");
+    expect(sep).toMatch(/supabase\/prod-packages\/tools\//);
+    expect(read(".github/CODEOWNERS")).toMatch(/\/supabase\/prod-packages\//);
+    expect(read(".github/workflows/ci.yml")).toMatch(/prod-pipeline-separation/);
+    const doc = read("docs/PRODUCTION_MIGRATION.md");
+    for (const needle of ["Model ancaman dan lapisan pengendali", "tripwire", "Ditunda ke PR-2", "Fuzz diferensial", "Apa yang dibuktikan dan tidak dibuktikan"]) {
+      expect(doc).toContain(needle);
+    }
+    expect(doc).not.toMatch(/0 lolos-lint-dan-dieksekusi/);
   });
 
   it("the lint is a real tokenizer with default-deny statement classes, not a comment-stripping regex", () => {

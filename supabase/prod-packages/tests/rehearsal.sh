@@ -343,4 +343,12 @@ P -d $M -c "delete from supabase_migrations.schema_migrations where version = '2
 RF $M linoe_member $PW_MEM verify-only && grep -q "state: PRE" $W/fx.txt && pass "langkah pulih: setelah baris ledger dihapus (manual), verify-only = state PRE" || { bad "pulih: bukan PRE"; cat $W/fx.txt; }
 RF $M linoe_member $PW_MEM apply && grep -q "RESULT: PASS" $W/fx.txt && pass "langkah pulih: apply ulang berhasil dan tercatat (DONE)" || { bad "pulih: apply ulang"; cat $W/fx.txt; }
 
+# 9) structural controls proven on the same throw-away server (search_path, READ ONLY + snapshot, -c, effects before COMMIT)
+python3 -B $PK/tests/rehearsal_structural.py > $W/struct.txt 2>&1; grep -E "^(PASS|FAIL)" $W/struct.txt
+grep -q "^STRUCTURAL OK" $W/struct.txt || { bad "structural controls"; cat $W/struct.txt; }
+
+# 10) differential fuzz with this server as the oracle (fixed seed; counts are printed): accepted statements must execute NO user function in the runner session
+FUZZ_N=${FUZZ_N:-20000} python3 -B $PK/tests/fuzz_oracle.py > $W/fuzz.txt 2>&1; cat $W/fuzz.txt
+grep -q "^FUZZ OK" $W/fuzz.txt && pass "fuzz oracle: 0 accepted statements executed a user function in the runner session (seed and counts above)" || bad "fuzz oracle"
+
 echo "EXIT fail=$fail"; [ $fail = 0 ] && echo "ALL PASSED"; exit $fail

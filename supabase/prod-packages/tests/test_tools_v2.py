@@ -884,6 +884,113 @@ class QaRegressions3(unittest.TestCase):
         self.assertNotIn("pg_relation_size", rp.PURE_FUNCS)  # volatile in pg_proc
         self.assertTrue(self.lint("select pg_relation_size('x');"))
 
+class QaRegressions4(unittest.TestCase):
+    """QA delta-2 (a40de57) N1/N2 and the PR-1 structural execution layer (pure unit checks; the server-side proof is rehearsal_structural.py)."""
+    ALLOW = [{"kind": "insert_rows", "schema": "public", "table": "t", "columns": ["a"]}]
+
+    def lint(self, sql, txn="none"):
+        return rp.lint_sql("t", sql, "write", self.ALLOW, set(), txn)
+
+    def test_n1_plpgsql_statement_words_are_function_names_outside_a_do_head(self):
+        for w in ("perform", "return", "raise", "assert", "if", "while", "elsif"):
+            for f in ("select case when true then W(1) end;", "select case when false then 1 else W(1) end;", "select 1 where W(1) = 1;",
+                      "do $$ begin perform case when true then W(1) end; end $$;", "do $$ declare x int; begin x := case when true then W(1) end; end $$;",
+                      "select not W(1);"):
+                sql = f.replace("W", w)
+                self.assertTrue(self.lint(sql), sql)
+        for sql in ["do $$ begin perform (select 1); end $$;", "do $$ begin if (select 1) = 1 then null; end if; end $$;",
+                    "do $$ begin if false then null; elsif (select 1) = 1 then null; end if; end $$;"]:
+            self.assertEqual(self.lint(sql), [], sql)
+
+    def test_n2_timestamptz_family_only_at_a_column_type_position(self):
+        for n in ("timestamptz", "timetz", "varbit"):
+            for pre in ("now() at time zone", "'a' like", "'a' not like", "'a' ilike", "'a' like 'b' escape", "now() at time zone 'utc' at time zone"):
+                sql = f"alter table public.t add column z text default ({pre} {n}(1)::text);"
+                self.assertTrue(self.lint(sql), sql)
+        for sql in ["alter table public.t add column c timestamptz(3);", "create table public.t2 (a int, b timestamptz(3) default now(), c timetz(2));",
+                    "create table public.t2 (b timestamptz(3), c varbit(8));"]:
+            self.assertEqual(self.lint(sql), [], sql)
+
+    def test_pvar_substitution_is_a_quoted_literal_and_nothing_else(self):
+        self.assertEqual(rp.subst_pvars("select :'a', 'x:' || :'b'", {"a": "o'k", "b": "z"}), "select 'o''k', 'x:' || 'z'")
+        self.assertEqual(rp.subst_pvars("select $$:'a'$$, '/* :a */'", {"a": "1"}), "select $$:'a'$$, '/* :a */'")
+        for bad in ("select :a", 'select :"a"', "select :{?a}", "select :'missing'", "select \\gset"):
+            with self.assertRaises(rp.Stop):
+                rp.subst_pvars(bad, {"a": "1"})
+        with self.assertRaises(rp.Stop):
+            rp.subst_pvars("select :'a'", {"a": "x\ny"})
+
+    def test_split_txn_needs_exactly_one_begin_first_and_one_commit(self):
+        head, mid, tail = rp.split_txn("-- c\nbegin;\nselect 1;\ncommit;\nselect 2;\n")
+        self.assertEqual((head.strip().endswith("begin;"), "select 1" in mid, tail.lstrip().startswith("commit;") and "select 2" in tail), (True, True, True))
+        for bad in ("select 1;", "begin;\ncommit;\ncommit;", "begin;\nbegin;\ncommit;", "begin;\nselect 1;", "select 1;\nbegin;\ncommit;",
+                    "begin;\nsavepoint a;\ncommit;", "begin;\nrollback;\ncommit;"):
+            with self.assertRaises(rp.Stop):
+                rp.split_txn(bad)
+
+    def test_run_sql_builds_one_session_of_c_items_and_never_uses_f(self):
+        seen = []
+
+        class R:
+            returncode, stdout, stderr = 0, "", ""
+        orig = rp.subprocess.run
+        rp.subprocess.run = lambda cmd, **k: (seen.append(cmd), R())[1]
+        try:
+            rp.run_sql("select 1;", {"PGDATABASE": "d"}, mode="ro")
+            rp.run_sql("begin;\nselect 1;\ncommit;\nselect 2;", {"PGDATABASE": "d"}, mode="w", effects=(["public.t"], ["t"], ["t_"]))
+            rp.run_sql("begin;\ncommit;", {"PGDATABASE": "d"}, mode="w")
+        finally:
+            rp.subprocess.run = orig
+        for cmd in seen:
+            self.assertNotIn("-f", cmd)
+            items = [cmd[i + 1] for i, x in enumerate(cmd) if x == "-c"]
+            self.assertEqual(items[0], rp.SESSION_SQL)
+        ro = [seen[0][i + 1] for i, x in enumerate(seen[0]) if x == "-c"]
+        self.assertEqual((ro[2], ro[3], ro[-1]), ("begin read only", rp.SNAPSHOT_SQL, "rollback"))
+        self.assertIn("set statement_timeout", ro[1])
+        w = [seen[1][i + 1] for i, x in enumerate(seen[1]) if x == "-c"]
+        self.assertTrue(w[2].strip().endswith("begin;") and "linoe.tx0" in w[3] and "select 1" in w[4] and "EFEK DI LUAR DAFTAR" in w[5] and w[6].lstrip().startswith("commit;"))
+        self.assertEqual(len(w), 7)
+
+    def test_effects_names_are_embedded_only_when_plain(self):
+        with self.assertRaises(rp.Stop):
+            rp.effects_check_sql(["public.t$$; drop table x; --"], [], [])
+        with self.assertRaises(rp.Stop):
+            rp.effects_check_sql([], ["a\\b"], [])
+        with self.assertRaises(rp.Stop):
+            rp.effects_check_sql([], ["it's"], [])
+        self.assertIn("'FX tenant select'", rp.effects_check_sql(["public.t"], ["FX tenant select"], []))
+
+    def test_derive_effects_reads_the_lints_own_targets(self):
+        w, n, p = rp.derive_effects("begin;\ncreate table public.tt (a int);\ncreate or replace function public.fn_a() returns int language sql as $$ select 1 $$;\ncommit;\n",
+                                    ["drop index if exists public.ix_a"])
+        self.assertEqual((w, sorted(n), p), (["public.tt"], ["fn_a", "ix_a", "tt"], ["tt_"]))
+
+class Separation(unittest.TestCase):
+    """PR-1 control 6: a change to the tools side must not carry package files."""
+
+    def setUp(self):
+        sys.path.insert(0, os.path.join(ROOT, "supabase/prod-packages/tools"))
+        import check_separation as cs
+        self.cs = cs
+
+    def test_tool_and_package_in_one_change_fail(self):
+        for tool in ("supabase/prod-packages/tools/run_package.py", ".github/workflows/production-migration.yml",
+                     "supabase/prod-packages/manifest.json", ".github/CODEOWNERS"):
+            for pkg in ("supabase/prod-packages/p0-3/B_x.sql", "supabase/migrations/20270101000000_x.sql", "supabase/rollback/20270101000000_x.down.sql"):
+                self.assertTrue(self.cs.check([tool, pkg]), (tool, pkg))
+
+    def test_either_side_alone_and_tests_docs_pass(self):
+        self.assertEqual(self.cs.check(["supabase/prod-packages/tools/run_package.py", "supabase/prod-packages/tests/test_tools_v2.py",
+                                        "docs/PRODUCTION_MIGRATION.md", "supabase/prod-packages/tests/fixtures/fx-n/B.sql"]), [])
+        self.assertEqual(self.cs.check(["supabase/prod-packages/p0-3/B_x.sql", "supabase/migrations/20270101000000_x.sql"]), [])
+        self.assertEqual(self.cs.check([]), [])
+
+    def test_codeowners_covers_the_pipeline(self):
+        text = open(os.path.join(ROOT, ".github/CODEOWNERS")).read()
+        for path in ("/supabase/prod-packages/", "/.github/workflows/production-migration.yml", "/.github/CODEOWNERS", "/supabase/migrations/"):
+            self.assertIn(path, text)
+
 
 if __name__ == "__main__":
     unittest.main()
