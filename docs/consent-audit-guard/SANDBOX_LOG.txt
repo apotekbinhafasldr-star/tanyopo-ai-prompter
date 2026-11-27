@@ -1,5 +1,5 @@
-# SANDBOX log Paket 3 + revisi Jalur 1 (PostgreSQL 16 lokal, data sintetis, skema Supabase = stub; bukan REAL). CI menjalankan versi PG17.
-# 2026-11-27T08:26:17Z  (migrasi 20261127100000 + 20261127110000; S10-S14 = Owner, legal, anonimisasi, rollback berurutan, statis)
+# SANDBOX log Paket 3 + revisi Jalur 1 + perbaikan QA (PostgreSQL 16 lokal, data sintetis, skema Supabase = stub; bukan REAL). CI menjalankan versi PG17.
+# 2026-11-27T08:44:42Z
 SANDBOX: PostgreSQL server_version_num=160015, stub auth/tenants (bukan Supabase nyata)
 PASS: blok prompter_audit_logs diekstrak dari migrasi foundation
 PASS: S1 up berhasil
@@ -173,6 +173,12 @@ PASS: S10 status tenant: non-Owner melihat status tenant
 PASS: S10 status tenant B tidak terpengaruh tenant A
 PASS: S10 anon tidak dapat memanggil my_status
 PASS: S10 pemberi persetujuan diturunkan dari Owner: persetujuan tidak berlaku
+PASS: S10 pemberi diturunkan: status koneksi tampil OUTDATED (bukan GRANTED menyesatkan)
+PASS: S10 pemberi diturunkan: Owner lain memberi ulang -> peristiwa BARU (changed true)
+PASS: S10 setelah pemberian ulang oleh Owner aktif: check_tenant GRANTED
+PASS: S10 setelah pemberian ulang: status GRANTED
+PASS: S10 pemberian ulang kedua oleh Owner aktif: idempoten (changed false)
+PASS: S10 indeks per tenant pada peristiwa persetujuan ada
 PASS: S10 Owner kedua (UF) menarik persetujuan tenant: changed
 PASS: S10 setelah penarikan: check_tenant WITHDRAWN
 PASS: S10 penarikan membawa text_sha256 versi yang ditarik
@@ -193,6 +199,7 @@ PASS: S12 service_role tidak punya EXECUTE pada fungsi anonimisasi dan canary
 PASS: S12 service_role tidak dapat memanggil
 PASS: S12 authenticated tidak dapat memanggil
 PASS: S12 eksekusi tanpa dry-run ditolak
+PASS: S12 request_ref bebas-teks (bukan pola REQ-nnnn) ditolak
 PASS: S12 request_ref terlalu pendek ditolak
 PASS: S12 tenant NULL ditolak
 PASS: S12 tenant tidak ada ditolak
@@ -200,6 +207,9 @@ PASS: S12 batch 0 ditolak
 PASS: S12 dry_run NULL ditolak
 PASS: S12 canary sebelum: PII allowlist belum dianonimkan (3 baris x 2 kunci x 2 lokasi)
 PASS: S12 canary: kandidat di luar allowlist terlaporkan (tipe lain)
+PASS: S12 canary: nilai mirip email terlaporkan walau nama kunci netral
+PASS: S12 canary: nilai mirip telepon terlaporkan
+PASS: S12 canary: referensi actor_user_id dilaporkan (tidak dapat dianonimkan lewat jalur ini)
 PASS: S12 dry-run: cocok 3, nol diubah
 PASS: S12 dry-run tidak mengubah baris sumber
 PASS: S12 dry-run menulis SATU entri audit berisi hitungan saja
@@ -217,6 +227,25 @@ PASS: S12 konteks entri audit tanpa PII
 PASS: S12 canary sesudah: tidak ada PII allowlist tersisa
 PASS: S12 nonce dibersihkan setelah eksekusi
 PASS: S12 tenant B tetap utuh (bukan target)
+PASS: S12 allowlist menolak INSERT tipe prompter_audit_logs (pemilik, tanpa GUC)
+PASS: S12 allowlist menolak tipe prompter_audit_logs walau GUC migrasi dinyalakan (CHECK daftar-tolak/positif)
+PASS: S12 allowlist menolak INSERT tipe prompter_approvals (pemilik, tanpa GUC)
+PASS: S12 allowlist menolak tipe prompter_approvals walau GUC migrasi dinyalakan (CHECK daftar-tolak/positif)
+PASS: S12 allowlist menolak INSERT tipe prompter_compliance_flags (pemilik, tanpa GUC)
+PASS: S12 allowlist menolak tipe prompter_compliance_flags walau GUC migrasi dinyalakan (CHECK daftar-tolak/positif)
+PASS: S12 allowlist menolak INSERT tipe prompter_subscriptions (pemilik, tanpa GUC)
+PASS: S12 allowlist menolak tipe prompter_subscriptions walau GUC migrasi dinyalakan (CHECK daftar-tolak/positif)
+PASS: S12 allowlist menolak INSERT tipe prompter_connected_accounts (pemilik, tanpa GUC)
+PASS: S12 allowlist menolak tipe prompter_connected_accounts walau GUC migrasi dinyalakan (CHECK daftar-tolak/positif)
+PASS: S12 allowlist menolak INSERT tipe prompter_autopilot_policies (pemilik, tanpa GUC)
+PASS: S12 allowlist menolak tipe prompter_autopilot_policies walau GUC migrasi dinyalakan (CHECK daftar-tolak/positif)
+PASS: S12 allowlist menolak INSERT tipe prompter_feature_flags (pemilik, tanpa GUC)
+PASS: S12 allowlist menolak tipe prompter_feature_flags walau GUC migrasi dinyalakan (CHECK daftar-tolak/positif)
+PASS: S12 allowlist menolak INSERT tipe prompter_other_thing (pemilik, tanpa GUC)
+PASS: S12 allowlist menolak tipe prompter_other_thing walau GUC migrasi dinyalakan (CHECK daftar-tolak/positif)
+PASS: S12 allowlist tetap 2 baris (seed) setelah semua percobaan
+PASS: S12 dry-run palsu (baris audit buatan pengguna tenant) tertulis
+PASS: S12 eksekusi dengan dry-run palsu ditolak (bukti dari tabel privat)
 PASS: S12 service_role UPDATE kolom data ditolak (hak dikembalikan, trigger menolak)
 PASS: S12 UPDATE action ditolak
 PASS: S12 bypass: set_config nonce tebakan dari klien lalu UPDATE ditolak

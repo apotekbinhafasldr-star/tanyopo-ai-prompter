@@ -263,9 +263,15 @@ describe("Paket 3 revisi: migrasi tambahan 20261127110000", () => {
     expect(up2).toContain("session_user in ('anon', 'authenticated', 'service_role', 'authenticator')");
     expect(up2).toContain("p_dry_run boolean default true");
     expect(up2).toContain("dry-run dengan request_ref ini wajib dijalankan lebih dulu");
-    expect(up2).toContain("(finance|ledger|payment|billing|security|budget|automation|emergency|auth|tenant|profile)");
+    const deny = "(audit|consent|approval|compliance|autopilot|subscription|connect|credential|token|role|admin|flag|finance|ledger|payment|billing|invoice|security|budget|automation|emergency|stop|auth|tenant|profile)";
+    // daftar-tolak identik di CHECK allowlist dan di fungsi anonimisasi, ditambah daftar-positif sempit dan trigger penolak INSERT
+    expect(up2.split(deny).length - 1).toBe(2);
+    expect(up2).toContain("resource_type in ('prompter_manual_ad_metrics')");
+    expect(up2).toContain("allowlist anonimisasi hanya diubah lewat migrasi");
+    expect(up2).toContain("REQ-[0-9]{4,12}");
+    expect(up2).toContain("from public.prompter_audit_redact_dryruns d");
     expect(up2).toContain("[DIHAPUS-PII]");
-    expect(up2).toContain("revoke all on public.prompter_audit_redaction_allowlist, public.prompter_audit_redact_nonce from public, anon, authenticated, service_role;");
+    expect(up2).toContain("revoke all on public.prompter_audit_redaction_allowlist, public.prompter_audit_redact_nonce, public.prompter_audit_redact_dryruns from public, anon, authenticated, service_role;");
   });
 
   it("fungsi anonimisasi hanya menyentuh prompter_audit_logs (UPDATE), dan hanya kolom before_data/after_data/context", () => {
@@ -301,7 +307,7 @@ describe("Paket 3 revisi: migrasi tambahan 20261127110000", () => {
 });
 
 describe("Paket 3 revisi: dasar hukum belum terverifikasi tidak lagi dirujuk dengan nomor", () => {
-  it("tidak ada rujukan 'PP 33/2026' di dokumen/kode (diganti penanda UNKNOWN)", () => {
+  it("tidak ada rujukan peraturan tak terverifikasi bernomor di dokumen/kode (diganti penanda UNKNOWN)", () => {
     const files = ["docs/LEGAL_PSE_CHECKLIST.md", "docs/SOFT_LAUNCH_10_TENANTS.md", "docs/CONSENT_AUDIT_GUARD.md", "docs/DATABASE.md"];
     for (const f of files) expect(read(f), f).not.toMatch(/PP\s*33\s*\/\s*2026|33\/2026/);
     expect(read("docs/LEGAL_PSE_CHECKLIST.md")).toContain("dasar hukum belum terverifikasi (UNKNOWN)");

@@ -243,7 +243,7 @@ Yang berubah di main sejak basis (#150-#153): `scripts/qa/real-e2e.mjs`, `inbox-
 ## 8. UNKNOWN (belum dibuktikan)
 | Hal | Status |
 |---|---|
-| Subset 15 migrasi + shim benar-benar berjalan mulus di Postgres | **UNKNOWN**: tidak dijalankan di database mana pun. Bukti hanya statis. CI QA-1 menerapkan SEMUA 50 migrasi, bukan subset ini. Saran: job CI lokal yang menerapkan bundel ke Postgres sementara sebelum Founder menempel |
+| Subset 15 migrasi + shim benar-benar berjalan mulus di Postgres | **UNKNOWN**: tidak dijalankan di database mana pun. Bukti hanya statis. CI QA-1 menerapkan SEMUA migrasi repo (53 saat ini: 15 minimum + 38 dikecualikan), bukan subset ini. Saran: job CI lokal yang menerapkan bundel ke Postgres sementara sebelum Founder menempel |
 | Batas ukuran tempel SQL Editor di HP (potongan 50-85 KB; satu berkas 165 KB) | UNKNOWN |
 | Transaksi eksplisit `begin`/`commit` di SQL Editor dan trigger pada `auth.users` oleh role editor | UNKNOWN (umumnya didukung) |
 | Grant/ACL default tabel di proyek QA vs produksi | UNKNOWN |

@@ -310,7 +310,13 @@ eq "S10 status tenant B tidak terpengaruh tenant A" "$(as g10 authenticated $UB 
 ERRIS "S10 anon tidak dapat memanggil my_status" "$(as g10 anon '' "select count(*) from public.fn_prompter_consent_my_status()")"
 PA -d g10 -c "update public.user_profiles set role='marketing' where id='$UA'" >/dev/null
 eq "S10 pemberi persetujuan diturunkan dari Owner: persetujuan tidak berlaku" "$(chkt $UC CONNECT_META $TA)" GRANTOR_NOT_OWNER
+eq "S10 pemberi diturunkan: status koneksi tampil OUTDATED (bukan GRANTED menyesatkan)" "$(as g10 authenticated $UF "select status from public.fn_prompter_consent_my_status() where code='CONNECT_META'")" OUTDATED
+eq "S10 pemberi diturunkan: Owner lain memberi ulang -> peristiwa BARU (changed true)" "$(as g10 authenticated $UF "select (public.fn_prompter_consent_set('CONNECT_META','GRANTED','CONNECT_FLOW'))->>'changed'")" true
+eq "S10 setelah pemberian ulang oleh Owner aktif: check_tenant GRANTED" "$(chkt $UC CONNECT_META $TA)" GRANTED
+eq "S10 setelah pemberian ulang: status GRANTED" "$(as g10 authenticated $UF "select status from public.fn_prompter_consent_my_status() where code='CONNECT_META'")" GRANTED
+eq "S10 pemberian ulang kedua oleh Owner aktif: idempoten (changed false)" "$(as g10 authenticated $UF "select (public.fn_prompter_consent_set('CONNECT_META','GRANTED','CONNECT_FLOW'))->>'changed'")" false
 PA -d g10 -c "update public.user_profiles set role='owner' where id='$UA'" >/dev/null
+eq "S10 indeks per tenant pada peristiwa persetujuan ada" "$(PA -d g10 -c "select count(*) from pg_indexes where indexname='idx_prompter_consent_events_tenant_code'")" 1
 eq "S10 Owner kedua (UF) menarik persetujuan tenant: changed" "$(as g10 authenticated $UF "select (public.fn_prompter_consent_set('CONNECT_META','WITHDRAWN','SETTINGS'))->>'changed'")" true
 eq "S10 setelah penarikan: check_tenant WITHDRAWN" "$(chkt $UC CONNECT_META $TA)" WITHDRAWN
 eq "S10 penarikan membawa text_sha256 versi yang ditarik" "$(PA -d g10 -c "select (text_sha256='$HASH1')::text from public.prompter_consent_events where subject_user_id='$UF' and action='WITHDRAWN'")" true
@@ -338,6 +344,7 @@ PA -d g12 -c "insert into public.prompter_audit_logs(tenant_id,actor_user_id,act
   -c "insert into public.prompter_audit_logs(tenant_id,actor_user_id,action,resource_type,before_data) values ('$TA','$UA','x.other','prompter_other_thing',$MD)" \
   -c "insert into public.prompter_audit_logs(tenant_id,actor_user_id,action,resource_type,before_data) values ('$TA','$UA','fin.row','finance_ledger_entry',$MD)" \
   -c "insert into public.prompter_audit_logs(tenant_id,actor_user_id,action,resource_type,before_data,after_data) values ('$TB','$UB','manual_metrics.update','prompter_manual_ad_metrics',$MD,$MD)" >/dev/null
+PA -d g12 -c "insert into public.prompter_audit_logs(tenant_id,actor_user_id,action,resource_type,before_data) values ('$TA','$UA','x.pii','prompter_other_thing','{\"contact_line\":\"a@b.test\",\"tel\":\"+62 812-3456-7890\"}'::jsonb)" >/dev/null
 ROWID="select md5(string_agg(concat_ws('|',id,tenant_id,actor_user_id,action,resource_type,resource_id,created_at),',' order by id)) from public.prompter_audit_logs where action in ('manual_metrics.update','x.other','fin.row')"
 OTHER="select md5(string_agg(id::text||coalesce(before_data::text,'')||coalesce(after_data::text,'')||context::text,',' order by id)) from public.prompter_audit_logs where (resource_type<>'prompter_manual_ad_metrics' or tenant_id='$TB') and action in ('manual_metrics.update','x.other','fin.row')"
 SAFE="select md5((select string_agg(note,',') from public.finance_audit_logs)||(select string_agg(v::text,',') from public.budget_policies))"
@@ -349,6 +356,7 @@ done
 ERRIS "S12 service_role tidak dapat memanggil" "$(as g12 service_role '' "$RED('REQ-0001','$TA',true,500)")"
 ERRIS "S12 authenticated tidak dapat memanggil" "$(as g12 authenticated $UA "$RED('REQ-0001','$TA',true,500)")"
 ERRIS "S12 eksekusi tanpa dry-run ditolak" "$(op g12 "$RED('REQ-0001','$TA',false,500)")"
+ERRIS "S12 request_ref bebas-teks (bukan pola REQ-nnnn) ditolak" "$(op g12 "$RED('nama-budi-123','$TA',true,500)")"
 ERRIS "S12 request_ref terlalu pendek ditolak" "$(op g12 "$RED('ab','$TA',true,500)")"
 ERRIS "S12 tenant NULL ditolak" "$(op g12 "$RED('REQ-0001',null,true,500)")"
 ERRIS "S12 tenant tidak ada ditolak" "$(op g12 "$RED('REQ-0001','99999999-9999-9999-9999-999999999999',true,500)")"
@@ -356,6 +364,9 @@ ERRIS "S12 batch 0 ditolak" "$(op g12 "$RED('REQ-0001','$TA',true,0)")"
 ERRIS "S12 dry_run NULL ditolak" "$(op g12 "$RED('REQ-0001','$TA',null,500)")"
 eq "S12 canary sebelum: PII allowlist belum dianonimkan (3 baris x 2 kunci x 2 lokasi)" "$(PA -d g12 -c "select coalesce(sum(row_count),0) from public.fn_prompter_audit_pii_canary_scan('$TA') where kind='ALLOWLISTED_UNREDACTED'")" 12
 eq "S12 canary: kandidat di luar allowlist terlaporkan (tipe lain)" "$(PA -d g12 -c "select count(*)>0 from public.fn_prompter_audit_pii_canary_scan('$TA') where kind='UNLISTED_CANDIDATE' and resource_type='prompter_other_thing'")" t
+eq "S12 canary: nilai mirip email terlaporkan walau nama kunci netral" "$(PA -d g12 -c "select coalesce(sum(row_count),0) from public.fn_prompter_audit_pii_canary_scan('$TA') where kind='VALUE_EMAIL_LIKE' and json_key='contact_line'")" 1
+eq "S12 canary: nilai mirip telepon terlaporkan" "$(PA -d g12 -c "select coalesce(sum(row_count),0) from public.fn_prompter_audit_pii_canary_scan('$TA') where kind='VALUE_PHONE_LIKE' and json_key='tel'")" 1
+eq "S12 canary: referensi actor_user_id dilaporkan (tidak dapat dianonimkan lewat jalur ini)" "$(PA -d g12 -c "select count(*)>0 from public.fn_prompter_audit_pii_canary_scan('$TA') where kind='ACTOR_REFERENCE'")" t
 eq "S12 dry-run: cocok 3, nol diubah" "$(op g12 "$RED('REQ-0001','$TA',true,500)")" '{"dry_run": true, "remaining": 3, "rows_matched": 3, "rows_redacted": 0}'
 eq "S12 dry-run tidak mengubah baris sumber" "$(PA -d g12 -c "select count(*) from public.prompter_audit_logs where before_data->>'entered_by'='$UA'")" 6
 eq "S12 dry-run menulis SATU entri audit berisi hitungan saja" "$(PA -d g12 -c "select count(*)||':'||min(after_data::text) from public.prompter_audit_logs where action='AUDIT_PII_REDACTION_DRYRUN'")" '1:{"rows_matched": 3}'
@@ -373,6 +384,16 @@ eq "S12 konteks entri audit tanpa PII" "$(PA -d g12 -c "select string_agg(distin
 eq "S12 canary sesudah: tidak ada PII allowlist tersisa" "$(PA -d g12 -c "select count(*) from public.fn_prompter_audit_pii_canary_scan('$TA') where kind='ALLOWLISTED_UNREDACTED'")" 0
 eq "S12 nonce dibersihkan setelah eksekusi" "$(PA -d g12 -c "select count(*) from public.prompter_audit_redact_nonce")" 0
 eq "S12 tenant B tetap utuh (bukan target)" "$(PA -d g12 -c "select count(*) from public.prompter_audit_logs where tenant_id='$TB' and before_data->>'entered_by'='$UA'")" 1
+# P2-1: allowlist tidak dapat ditambah ke tipe terlarang/audit/keamanan/bukti, walau oleh pemilik (bahkan dengan GUC migrasi)
+for t in prompter_audit_logs prompter_approvals prompter_compliance_flags prompter_subscriptions prompter_connected_accounts prompter_autopilot_policies prompter_feature_flags prompter_other_thing; do
+  ERRIS "S12 allowlist menolak INSERT tipe $t (pemilik, tanpa GUC)" "$(op g12 "insert into public.prompter_audit_redaction_allowlist(resource_type,json_key) values ('$t','request_ref')")"
+  ERRIS "S12 allowlist menolak tipe $t walau GUC migrasi dinyalakan (CHECK daftar-tolak/positif)" "$(PA -v ON_ERROR_STOP=1 -d g12 -c "set linoe.allowlist_migration='on'" -c "insert into public.prompter_audit_redaction_allowlist(resource_type,json_key) values ('$t','request_ref')" 2>/dev/null || echo ERR)"
+done
+eq "S12 allowlist tetap 2 baris (seed) setelah semua percobaan" "$(PA -d g12 -c "select count(*) from public.prompter_audit_redaction_allowlist")" 2
+# P3-2: dry-run palsu yang ditulis pengguna tenant ke audit TIDAK memenuhi syarat dry-run
+TEN=$TA as g12 authenticated $UA "insert into public.prompter_audit_logs(tenant_id,actor_user_id,action,resource_type,context) values ('$TA','$UA','AUDIT_PII_REDACTION_DRYRUN','prompter_audit_logs','{\"request_ref\":\"REQ-9999\"}'::jsonb)" >/dev/null
+eq "S12 dry-run palsu (baris audit buatan pengguna tenant) tertulis" "$(PA -d g12 -c "select count(*) from public.prompter_audit_logs where context->>'request_ref'='REQ-9999'")" 1
+ERRIS "S12 eksekusi dengan dry-run palsu ditolak (bukti dari tabel privat)" "$(op g12 "$RED('REQ-9999','$TA',false,500)")"
 # guard tetap menolak semua jalur lain, termasuk percobaan bypass
 PA -d g12 -c "grant update, delete, truncate on public.prompter_audit_logs to service_role, authenticated" >/dev/null
 ERRIS "S12 service_role UPDATE kolom data ditolak (hak dikembalikan, trigger menolak)" "$(as g12 service_role '' "update public.prompter_audit_logs set before_data='{}'::jsonb")"

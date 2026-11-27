@@ -1,6 +1,7 @@
 -- Rollback untuk 20261127110000_prompter_consent_owner_audit_redaction.sql. Idempoten. Mengembalikan fungsi ke isi migrasi 20261127100000.
 -- Urutan: jalankan rollback INI lebih dulu, baru rollback 20261127100000 bila perlu.
 -- AMAN: menolak (RAISE) bila prompter_consent_events memuat baris ber-text_sha256 (hash akan hilang), kecuali linoe.drop_evidence=YA.
+-- Praktis: sejak consent_set baru dipakai, text_sha256 selalu terisi, jadi rollback ini butuh ekspor dulu lalu linoe.drop_evidence=YA.
 -- Baris audit yang SUDAH dianonimisasi TIDAK dapat dipulihkan (sengaja). Tidak menyentuh auth.users, tenants, atau tabel produk lain.
 begin;
 
@@ -165,8 +166,11 @@ $$;
   end if;
 end $down$;
 
+drop table if exists public.prompter_audit_redact_dryruns;
 drop table if exists public.prompter_audit_redact_nonce;
 drop table if exists public.prompter_audit_redaction_allowlist;
+drop function if exists public.fn_prompter_audit_allowlist_insert_guard();
+drop index if exists public.idx_prompter_consent_events_tenant_code;
 
 alter table if exists public.prompter_consent_events drop constraint if exists prompter_consent_events_text_sha256_check;
 alter table if exists public.prompter_consent_events drop column if exists text_sha256;
