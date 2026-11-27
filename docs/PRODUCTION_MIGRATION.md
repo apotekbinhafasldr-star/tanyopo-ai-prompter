@@ -75,3 +75,53 @@ PR yang menambah folder di `supabase/prod-packages/<id>/`, entri manifest (check
 - Role yang harus menjadi anggota pemilik objek berkekuatan tinggi pada project bersama; dikendalikan oleh persetujuan, checksum, lint, dan sidik jari objek lain.
 - `actions/checkout` tidak dipakai; runner GitHub tetap pihak ketiga yang tepercaya.
 - Berkas D memakai variabel psql `:'created_by'`; untuk SQL Editor manual ganti dengan teks literal.
+
+---
+# Pipeline v2 (PR-1): perluasan runner dan gladi bersih PG17
+
+Status: **kode + tes + dokumen saja.** PR-1 TIDAK menambah paket ke `manifest.json` (hanya `p0-2`), TIDAK menambah opsi paket di workflow, dan paket `p0-2` tidak berubah (berkas dan entri manifest identik; entri dikunci hash di tes). Paket `p0-3`, `l1-storage`, `p3-consent` menyusul di PR-2/PR-3 dan masing-masing butuh persetujuan Founder. **Workflow tidak boleh dijalankan sebelum persetujuan eksplisit.**
+
+## Kelas bukti (jujur)
+| Kelas | Arti | Isi PR-1 |
+|---|---|---|
+| CODE | terbaca di berkas | runner, lint, SQL probe, dokumen ini |
+| UNIT | tes tanpa database | `tests/test_tools.py` (p0-2, tidak diubah), `tests/test_tools_v2.py`, tes statis TypeScript |
+| SANDBOX | PostgreSQL sementara + stub storage, **bukan Supabase** | `rehearsal.sh` bagian 7 (fixture sintetis `fx-n`) |
+| REAL | terbukti di produksi | **tidak ada** |
+| UNKNOWN | belum terbukti | lihat daftar di bawah |
+
+Rehearsal = **SANDBOX**. Ia membuktikan logika runner dan lint, bukan hak, kepemilikan, atau perilaku Supabase Storage nyata.
+
+## Model hak migrasi: R1 (default) dan R2 (cadangan)
+- **R1 (keputusan Founder)**: `linoe_migrator` dicoba TANPA hak istimewa. Runner **tidak pernah** menaikkan hak: tidak ada `CREATE/ALTER ROLE`, `GRANT`, atau `SET ROLE` oleh kode Python (dijaga tes). Bila probe hak `BLOCK`/`UNKNOWN`, `apply` dibatalkan **sebelum menulis apa pun**; hasilnya HOLD, bukan eskalasi.
+- **R2 (cadangan, butuh persetujuan Founder)**: Founder menerapkan berkas bentuk N lewat SQL Editor Supabase; runner hanya menjalankan A/C/F (+ D bila diizinkan) dan mencetak sha256 untuk dicocokkan. Tidak dipakai kecuali Founder menyetujui secara terpisah.
+- `approved_privileged_role` tetap `false` (R3 = PR terpisah, tidak disarankan).
+
+## Allow-list per paket (bukan pelonggaran global)
+Lint global TETAP menolak: `drop policy/trigger/function`, `create policy/trigger`, `delete from`, `UPDATE` tabel non-`public`, ACL (`grant/revoke`) di luar `public` atau ke `public/anon/authenticated`, `truncate` bentuk apa pun. Sebuah pernyataan hanya lolos bila cocok dengan **satu entri `allow`** di manifest paket itu: `kind` + `schema` (hanya `public` atau `storage`) + `table` + `names` literal (mis. `drop_policy`, schema `storage`, table `objects`, names eksplisit); `update_rows` wajib `columns` + `where`; `delete_from` wajib `where` dan boleh dikunci ke satu fungsi (`in_function`); `revoke/grant` wajib `objects` + `privileges` + `roles`. Rollback punya `rollback_allow` sendiri.
+Tidak pernah bisa dilonggarkan oleh manifest: `ALTER ... OWNER`, `set role`/`session authorization`, `session_replication_role`, `pg_advisory*`, `COPY ... PROGRAM`, `EXECUTE` dinamis, `DROP` tanpa nama/dengan wildcard/`CASCADE`, `GRANT` keanggotaan role, `ALTER DEFAULT PRIVILEGES`, `grant/revoke ... ALL ... IN SCHEMA`, `DISABLE TRIGGER`, meta-perintah psql (`\!`, `\i`, ...), literal `E'...'`, CRLF. Entri tanpa pemakaian (usang) = galat. Tanpa `allow`, perilaku sama seperti sebelumnya (p0-2 lolos tanpa perubahan).
+
+## Bentuk paket
+- **W (wrapped, p0-2)**: B membungkus migrasi apa adanya; migrasi dilarang membawa `begin/commit`.
+- **N (native-txn)**: B = berkas migrasi itu sendiri (sha256 sama), E = berkas rollback itu sendiri; wajib tepat satu `begin` di awal dan satu `commit` di akhir. Atomik: galat di mana pun membatalkan semuanya; runner mencetak `state after the failed B: PRE`.
+- **S** dapat menghitung kolom `keadaan` (`PRE`/`APPLIED_UNRECORDED`/`DONE`/`ROLLED_BACK`/`UNKNOWN`, kosakata tertutup). **G** (opsional) diperiksa setelah rollback; keadaan sesudahnya wajib `PRE`/`ROLLED_BACK`. Baris ledger tidak dihapus otomatis sehingga `apply` ulang ditolak (`ROLLED_BACK`).
+- `ledger_verify: true` (paket baru): setelah D, runner memeriksa baris ledger tepat satu, nama cocok, dan `statements` memuat sha256 migrasi dari manifest; nama ganda terdeteksi.
+- Timeout: `lock_timeout=3000` ms ditambahkan ke semua sesi runner (sabuk), `statement_timeout` 120000 ms; paket boleh menyempit lewat `timeouts` (batas 100..10000 / 1000..120000). Berkas migrasi tetap memasang `set local` sendiri.
+
+## Privilege probe (read-only)
+Diturunkan dari `allow` (+ `probes` eksplisit): keanggotaan role pemilik (syarat `DROP/CREATE POLICY`, `DROP TRIGGER`, `COMMENT`, `ALTER TABLE`), hak `TRIGGER`/`SELECT`/`UPDATE`/`DELETE`, `CREATE` di schema, `INSERT` ledger, plus ACL mentah (md5 dan hitungan hak tulis non-pemilik). Status per probe `PASS`/`BLOCK`/`UNKNOWN`/`INFO`; label hanya urutan + jenis (mis. `tbl1.owner`), tanpa nama objek. Probe tidak menulis dan tidak mencoba `DROP`. `REVOKE` oleh non-pemilik di PostgreSQL berupa no-op diam-diam: karena itu C/F memeriksa ACL mentah (`has_*_privilege`/`aclexplode`). p0-2 tidak punya `allow`, jadi tidak menjalankan probe.
+
+## Aturan log publik (repo PUBLIC = log publik)
+Runner hanya mencetak: nama pemeriksaan, `PASS/FAIL`, hitungan, hash, dan boolean. Tidak pernah: nama policy/bucket/tabel/fungsi, baris, atau teks galat PostgreSQL mentah (yang mengutip nama objek pihak lain). Galat diringkas ke `SQLSTATE` + deskripsi tetap (+ tag penjaga paket untuk `P0001`). Nilai hasil query di luar boolean/integer/hash/timestamp = STOP. Dijaga: tes AST (runner tidak boleh menyisipkan variabel hasil mentah ke baris log), tes statis TypeScript (`string_agg` hanya di dalam `md5`), dan rehearsal yang meng-`grep` seluruh log terhadap nama "pihak lain" kanari dan password. Nama objek milik pihak lain tetap hanya dilihat lewat SQL Editor privat.
+
+## Langkah dari HP Android (Founder)
+1. Buka PR-1 di GitHub (aplikasi/browser HP), baca ringkasan dan hasil CI. Draft PR **jangan** di-merge sebelum Anda mengirim `APPROVE MERGE-PRODPKG-1` ke Claude.
+2. Setelah merge: tidak ada yang berjalan otomatis. Workflow tetap manual (Actions > Production Migration > Run workflow), pilih `main`, paket `p0-2`, mode, dan SHA 40 karakter ujung `main` (salin dari halaman Commits), lalu setujui Review deployments. Jangan menjalankan sebelum Anda menyetujui eksplisit untuk run itu.
+3. Untuk paket baru (PR-2/PR-3): urutan `owner-audit` (menampilkan probe) > `verify-only` > keputusan GO/HOLD bersama Claude > `apply` > `verify-only`. Probe `BLOCK` berarti HOLD (R1); R2 hanya dengan `APPROVE MANUAL-APPLY-<PAKET>`.
+4. Kirim teks Summary (aman dipublikasi) ke Claude; jangan kirim password/token.
+
+## UNKNOWN (belum terbukti; bukan dianggap aman)
+Pemilik dan hak nyata `storage.*`/`prompter_audit_logs`/fungsi di produksi; perilaku Supabase Storage nyata; apakah `PGOPTIONS` (statement/lock timeout) diteruskan oleh Supavisor; kunci tepat pada tabel hidup; hasil CI PG17 untuk bagian 7 sampai job selesai; run pertama workflow di produksi (belum pernah ada).
+
+## Dependensi
+PR-2: `p0-3` + `l1-storage` (bentuk N pertama, entri `allow` nyata, tes terhadap berkas L1 asli sudah ada sebagai UNIT). PR-3: `p3-consent` (setelah #186 final). Opsi workflow baru hanya muncul setelah merge ke `main`.

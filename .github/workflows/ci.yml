@@ -621,6 +621,8 @@ jobs:
 
   # Production-migration automation: unit tests of the runner/approval checker and a full REHEARSAL of the P0-2 package
   # (A -> B -> C -> D -> F, STOP paths, rollback, tamper cases, catalog diff) on a throw-away postgres:17 with synthetic data.
+  # Pipeline v2 (PR-1) extends it with a SYNTHETIC fixture package (L1/Paket 3 patterns, shape N) on a stub storage schema and non-superuser
+  # roles: allow-list, out-of-allow-list STOP, atomicity, idempotence, rollback + G, ledger check, R1 privilege probes, log without names. SANDBOX evidence only.
   # No secret, no Supabase connection: the rehearsal script refuses non-local hosts and any credential variable.
   prod-migration-rehearsal:
     runs-on: ubuntu-latest
