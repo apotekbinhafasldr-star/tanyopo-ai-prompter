@@ -76,7 +76,7 @@ Bila nanti berbayar: ikuti GO_LIVE_PAYMENTS.md dan persetujuan eksplisit; status
 1. Pilih calon tenant, catat di spreadsheet Founder (nama usaha, kontak, tanggal undang, status). Simpan data seminimal mungkin.
 2. Kirim email undangan resmi (email perusahaan) berisi: tautan `/register`, tautan `/terms` dan `/privacy`, batas trial (bagian 3),
    penegasan "iklan tidak ditayangkan otomatis, pembayaran belum aktif", dan alamat dukungan.
-3. Tenant daftar, memverifikasi email, mengisi `/onboarding`. Pastikan kotak setuju Syarat/Privasi dicentang (wajib di form).
+3. Tenant daftar, memverifikasi email, mengisi `/onboarding`. Pastikan kotak penerimaan Syarat & Ketentuan dicentang (wajib di form); Kebijakan Privasi tampil sebagai pemberitahuan terpisah tanpa kotak centang.
 4. Dalam 24 jam Founder cek: tenant muncul (bagian 8), trial 14 hari tercatat, satu penggunaan AI berhasil.
 5. Hari ke-7 dan hari ke-12: email singkat menanyakan kendala, mengingatkan trial berakhir.
 6. Hari ke-14: trial berakhir. Tanyakan keputusan; data tidak dihapus otomatis (lihat bagian 7 bila diminta).

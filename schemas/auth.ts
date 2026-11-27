@@ -7,6 +7,8 @@ export const loginSchema = z.object({
 
 export type LoginInput = z.infer<typeof loginSchema>;
 
+export const ACCEPT_LEGAL_ERROR = "Anda harus menyetujui Syarat & Ketentuan untuk mendaftar.";
+
 export const registerSchema = z.object({
   nama: z.string().trim().min(2, "Nama minimal 2 karakter").max(120),
   namaUsaha: z.string().trim().min(2, "Nama bisnis minimal 2 karakter").max(120),
@@ -23,7 +25,7 @@ export const registerSchema = z.object({
   // (version + server time) via lib/consent/signup-legal.ts, and PRIVACY_NOTICE/DELIVERED only when the form posted
   // the current privacyNoticeVersion. Neither is a PDP consent. The value itself is never stored by this schema.
   acceptLegal: z.literal(true, {
-    error: "Anda harus menyetujui Syarat & Ketentuan untuk mendaftar.",
+    error: ACCEPT_LEGAL_ERROR,
   }),
 });
 

@@ -238,7 +238,7 @@ describe("legal links", () => {
     expect(link.className).toMatch(/\bmin-h-11\b/);
     // No second control; no acceptance / permission / PDP wording; no reference to the (flagged-off) settings panel.
     expect(notice.querySelectorAll("input,button,select,textarea")).toHaveLength(0);
-    expect(notice.textContent).not.toMatch(/menyetuj|setuju|persetujuan|izin|mengizinkan|bersedia|PDP|Pengaturan|disampaikan|dicatat|bukti/i);
+    expect(notice.textContent).not.toMatch(/menyetuj|setuju|persetujuan|izin|mengizinkan|bersedia|PDP|Pengaturan|disampaikan|dicatat|bukti|menerima|terima|sepakat|mengakui|agree|accept|consent|konsen|konfirmasi|dengan\s+(mendaftar|melanjutkan)/i);
     // Shows the current notice version, from the single source constant.
     expect(Number.isInteger(PRIVACY_NOTICE_VERSION) && PRIVACY_NOTICE_VERSION >= 1).toBe(true);
     expect(notice.textContent).toContain(`Versi pemberitahuan: ${PRIVACY_NOTICE_VERSION}`);
@@ -259,6 +259,26 @@ describe("legal links", () => {
     expect(document.getElementById("pemberitahuan-privasi")!.contains(input)).toBe(false);
     expect(input.id).not.toBe("acceptLegal");
     expect(container.querySelectorAll('input[name="acceptLegal"]')).toHaveLength(1);
+  });
+
+  it("the notice title is a semantic heading that names the region", () => {
+    render(<RegisterForm />);
+    const notice = document.getElementById("pemberitahuan-privasi")!;
+    const heading = screen.getByRole("heading", { name: "Pemberitahuan privasi" });
+    expect(notice.contains(heading)).toBe(true);
+    expect(notice.getAttribute("aria-labelledby")).toBe(heading.id);
+  });
+
+  it("no whole legal page equates the Privacy Policy with an acceptance (Terms accepted, Privacy only a notice)", () => {
+    const banned = [
+      /(menyetujui|menyetujuinya|menerima|setuju|sepakat|mengakui)[^.]{0,80}(Kebijakan Privasi|Privacy)/i,
+      /(Kebijakan Privasi|Privacy)[^.]{0,80}(menyetuj|menerima|setuju|sepakat|mengakui)/i,
+    ];
+    for (const Page of [TermsPage, PrivacyPage]) {
+      const text = pageText(Page);
+      for (const re of banned) expect(text).not.toMatch(re);
+      cleanup();
+    }
   });
 
   it("/terms section 1 accepts the Terms only and does not equate the Privacy Policy with acceptance", () => {

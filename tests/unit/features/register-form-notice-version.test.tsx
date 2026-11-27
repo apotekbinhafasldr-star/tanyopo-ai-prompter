@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 // Integrasi UI-server: FormData yang dibentuk dari form ASLI (bukan tangan) dibaca registerAction ASLI; pencatat
 // dimock agar argumennya terlihat. Versi yang tampil di UI = hidden input = yang dibandingkan server.
@@ -31,6 +31,7 @@ vi.mock("@/lib/consent/signup-legal", () => ({ recordSignupLegal: recordMock }))
 
 import { registerAction } from "@/features/auth/actions";
 import { RegisterForm } from "@/features/auth/register-form";
+import { ACCEPT_LEGAL_ERROR } from "@/schemas/auth";
 import { PRIVACY_NOTICE_VERSION } from "@/features/legal/legal-versions";
 
 beforeEach(() => {
@@ -72,5 +73,28 @@ describe("RegisterForm -> registerAction: versi pemberitahuan privasi", () => {
     fd.set("privacyNoticeVersion", String(PRIVACY_NOTICE_VERSION + 1));
     await registerAction({ error: null }, fd);
     expect(recordMock).toHaveBeenCalledWith("uid-ui", { privacyNoticeDelivered: false });
+  });
+
+  it("galat penerimaan Terms dari server dikaitkan ke checkbox (aria-invalid + aria-describedby ke role=alert)", async () => {
+    render(<RegisterForm />);
+    expect((document.getElementById("acceptLegal") as HTMLInputElement).getAttribute("aria-invalid")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Nama Anda"), { target: { value: "Budi" } });
+    fireEvent.change(screen.getByLabelText("Nama Bisnis"), { target: { value: "Toko Budi" } });
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "budi@example.com" } });
+    fireEvent.change(document.getElementById("password") as HTMLInputElement, { target: { value: "Rahasia-123" } });
+    // checkbox TIDAK dicentang -> server menolak dengan pesan Terms
+    await act(async () => {
+      fireEvent.submit(document.querySelector("form")!);
+    });
+    const box = document.getElementById("acceptLegal") as HTMLInputElement;
+    expect(box.getAttribute("aria-invalid")).toBe("true");
+    const alertId = box.getAttribute("aria-describedby")!;
+    expect(alertId).toBe("accept-legal-error");
+    const alert = document.getElementById(alertId)!;
+    expect(alert.getAttribute("role")).toBe("alert");
+    expect(alert.textContent).toBe(ACCEPT_LEGAL_ERROR);
+    // galat itu tampil sekali saja (tidak digandakan di bagian bawah form)
+    expect(screen.getAllByText(ACCEPT_LEGAL_ERROR)).toHaveLength(1);
+    expect(signUpMock).not.toHaveBeenCalled();
   });
 });
