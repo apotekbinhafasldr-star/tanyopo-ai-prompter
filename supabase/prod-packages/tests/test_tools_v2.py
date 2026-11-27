@@ -734,6 +734,79 @@ class StateAndModes(unittest.TestCase):
         self.assertNotIn("fx-n", wf)
         self.assertNotIn("fixtures", wf)
 
+class QaRegressions2(unittest.TestCase):
+    """QA #188 re-review (444a7c4): P2-A function-call default-deny, P2-B quoted identifiers, P3 timeouts / CR / product names."""
+
+    def bad(self, sql, txn="none", role="write"):
+        out = rp.lint_sql("t", sql, role, [], set(), txn)
+        self.assertTrue(out, sql)
+        return out
+
+    def ok(self, sql, txn="none"):
+        self.assertEqual(rp.lint_sql("t", sql, "write", [], set(), txn), [], sql)
+
+    def test_p2a_schema_less_user_function_calls_are_refused_everywhere(self):
+        for sql in ["select fn_other_writer();", "select * from fn_x();", "select (select fn_x());", "select coalesce(fn_x(), 1);",
+                    "select fn_x ();", "select fn_x /* c */ ();", 'select "fn_x"();', 'select "Now"();',
+                    "do $$ begin perform fn_apply_verified_payment('a'); end $$;",
+                    "do $$ declare x timestamptz; begin x := fn_fx_evidence_purge(now()); end $$;",
+                    "do $$ begin if fn_x() then null; end if; end $$;",
+                    "do $$ begin for r in select fn_x() loop null; end loop; end $$;",
+                    "do $$ begin assert fn_x(); end $$;",
+                    "do $$ begin raise notice '%', fn_x(); end $$;",
+                    "do $$ begin perform public.fn_x(); end $$;", "select public.fn_x();", "select pg_catalog.fn_x();",
+                    "select pg_catalog.pg_promote();", "select pg_create_restore_point('x');", "select pg_stat_reset();",
+                    "select pg_rotate_logfile();", "select txid_current();", "select pg_drop_replication_slot('s');"]:
+            self.bad(sql)
+        self.bad("begin;\nselect 1;\ncommit;\nselect fn_x();", txn="wrap")
+        self.bad("begin;\nselect 1;\ncommit;\nselect pg_catalog.pg_promote();", txn="wrap")
+
+    def test_p2a_dml_expression_calls_are_refused_too(self):
+        self.bad("update public.t set a = fn_x() where b = 1;")
+        self.bad("insert into public.t (a) values (fn_x());")
+        self.bad("do $$ begin update public.t set a = fn_x() where b = 1; end $$;")
+
+    def test_p2a_pure_builtins_still_pass(self):
+        for sql in ["select now(), count(*), md5('a'), coalesce(1, 2), to_regclass('public.t');",
+                    "select (select count(*) from (values ('a'), ('b')) r(n) where r.n in ('a')) as x;",
+                    "select string_agg(a, ',' order by a) from (select 'x' as a) q;",
+                    "select pg_catalog.now(), pg_get_functiondef(1), has_function_privilege('postgres', 'x()', 'EXECUTE');",
+                    "do $$ begin if not exists (select 1 where now() is not null) then raise exception 'x'; end if; end $$;"]:
+            self.ok(sql)
+
+    def test_p2b_quoted_and_assigned_sequence_functions_are_refused(self):
+        for sql in ["""select "nextval"('s');""", "select nextval('s');", """select "NEXTVAL"('s');""", "select currval('s');", "select lastval();",
+                    """select pg_catalog."nextval"('s');""", """select "setval"('s', 1);""", """select "pg_sleep"(1);""", """select "dblink"('x');""",
+                    """select "lo_import"('/etc/passwd');""", """select "pg_read_file"('x');""", """select "set_config"('a', 'b', false);""",
+                    "do $$ declare x bigint; begin x := nextval('s'); end $$;", """do $$ declare x bigint; begin x := "nextval"('s'); end $$;"""]:
+            self.bad(sql)
+
+    def test_p3_timeouts_zero_and_large_values_are_refused(self):
+        for v in ("0", "'0'", "'0s'", "'0ms'", "'1h'", "'11s'", "'121s'", "'2min'", "1000000", "'-1'", "'abc'"):
+            self.bad(f"set local lock_timeout = {v};")
+        self.bad("set local statement_timeout = 0;")
+        self.bad("set local statement_timeout = '3min';")
+        for sql in ["set local lock_timeout = '3s';", "set local lock_timeout = '10s';", "set local statement_timeout = '120s';",
+                    "set local statement_timeout to 5000;", "set local lock_timeout = '500ms';"]:
+            self.ok(sql)
+
+    def test_p3_carriage_return_is_refused_by_the_tokenizer_itself(self):
+        with self.assertRaises(rp.LintError):
+            rp.tokenize("select 1; -- c\r\\! id\nselect 2;")
+        self.assertTrue(rp.lint_sql("t", "select 1; -- c\r\\! id\nselect 2;", "write", [], set(), "none"))
+
+    def test_p3_other_product_names_in_identifiers_and_literals(self):
+        for sql in ["select 'publoe-media';", "select 'mitapeng_x';", "select 'x' from \"kagura_tbl\";", "select 1 from public.apotek_x;",
+                    "select 'umkmpro-media';", "select 1 from umkmpro_orders;", "select 1 from \"PUBLOE_x\";"]:
+            self.bad(sql)
+        self.ok("select 'bukan umkmpro-ai, dibatalkan';")
+
+    def test_p3_probe_log_has_no_acl_fingerprints(self):
+        sql = open(os.path.join(ROOT, "supabase/prod-packages/tools/privilege_probe_readonly.sql")).read()
+        self.assertNotIn("relacl", sql)
+        self.assertNotIn("aclexplode", sql)
+        self.assertNotRegex(sql, r"md5\(")
+
 
 if __name__ == "__main__":
     unittest.main()

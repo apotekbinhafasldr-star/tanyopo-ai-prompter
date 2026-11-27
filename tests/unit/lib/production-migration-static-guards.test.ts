@@ -336,6 +336,19 @@ describe("Pipeline v2.1 — QA #188 regressions (static guards on the runner, pr
   const src = read(RUNNER);
   const probe = read("supabase/prod-packages/tools/privilege_probe_readonly.sql").replace(/--[^\n]*/g, "");
 
+  it("function calls are default-deny, sequence functions are banned after normalising quotes, timeouts are bounded, no ACL fingerprints", () => {
+    expect(src).toMatch(/def check_calls\(ctx, s, qualified=False\)/);
+    expect(src).toMatch(/PURE_FUNCS = \{/);
+    expect(src).toMatch(/BAN_WORDS = \{[^}]*"nextval"[^}]*"currval"[^}]*"lastval"/);
+    expect(src).toMatch(/BAN_PREFIX_MORE = \(/);
+    expect(src).toMatch(/TIMEOUT_MAX_MS = \{"lock_timeout": 10000, "statement_timeout": 120000\}/);
+    expect(src).toMatch(/carriage return in SQL text/);
+    expect(probe).not.toMatch(/relacl|aclexplode|md5\(/);
+    const doc = read("docs/PRODUCTION_MIGRATION.md");
+    expect(doc).toContain("Keputusan Founder (P3-5");
+    expect(doc).not.toContain("gagal-tertutup");
+  });
+
   it("the lint is a real tokenizer with default-deny statement classes, not a comment-stripping regex", () => {
     expect(src).toMatch(/def tokenize\(sql\)/);
     expect(src).toMatch(/class LintError/);

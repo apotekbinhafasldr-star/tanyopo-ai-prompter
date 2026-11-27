@@ -1,7 +1,7 @@
 -- LINOE - PROBE HAK READ-ONLY (hanya SELECT; tidak menulis, tidak mencoba DROP/CREATE). Dijalankan runner dengan
 -- psql -v probe_spec='<json>' (spec diturunkan dari allow-list paket di manifest). Keluaran: (probe, status, info).
 -- status: PASS = hak ada; BLOCK = hak tidak ada; UNKNOWN = objek tidak ditemukan/tidak bisa dinilai (diperlakukan seperti BLOCK);
--- INFO = nilai catatan (hitungan/md5, TANPA nama). Label probe = urutan + jenis (mis. tbl1.owner), tidak memuat nama objek.
+-- INFO = nilai catatan (boolean/hitungan, TANPA nama; tanpa md5/isi ACL). Label probe = urutan + jenis (mis. tbl1.owner), tidak memuat nama objek.
 -- Aturan PostgreSQL (dokumentasi, bukan bukti Supabase): CREATE/DROP POLICY, DROP TRIGGER, COMMENT, ALTER TABLE menuntut hak role pemilik
 -- (owner). Dicek dengan pg_has_role(..., 'USAGE') = hak pemilik benar-benar DIWARISI; 'MEMBER' saja salah untuk role NOINHERIT; CREATE TRIGGER menuntut hak TRIGGER; UPDATE/DELETE baris menuntut hak tabel; REVOKE oleh non-pemilik = no-op diam-diam.
 with spec as (select :'probe_spec'::jsonb as j),
@@ -22,13 +22,6 @@ r_tbl as (
       else 'UNKNOWN' end as status,
     ''::text as info
   from tk
-),
-r_acl as (
-  select 'acl_' || t.lbl as probe, 'INFO'::text as status, coalesce(md5(c.relacl::text), md5('')) as info
-    from tb t join pg_class c on c.oid = to_regclass(t.q)
-  union all
-  select 'aclw_' || t.lbl, 'INFO', (select count(*) from aclexplode(c.relacl) a where a.privilege_type in ('UPDATE', 'DELETE', 'TRUNCATE') and a.grantee <> c.relowner)::text
-    from tb t join pg_class c on c.oid = to_regclass(t.q)
 ),
 fn as (
   select 'fn' || o::text as lbl, x as q from spec, jsonb_array_elements_text(coalesce(j->'functions', '[]'::jsonb)) with ordinality as a(x, o)
@@ -71,6 +64,6 @@ r_role as (
   select 'role.priv_member_count', 'INFO', (select count(*) from pg_roles r where r.rolname in ('postgres', 'supabase_admin') and pg_has_role(current_user, r.oid, 'MEMBER'))::text
 )
 select probe, status, case info when 'true' then 't' when 'false' then 'f' else info end as info from (
-  select * from r_tbl union all select * from r_acl union all select * from r_fn union all select * from r_rep union all select * from r_sc
+  select * from r_tbl union all select * from r_fn union all select * from r_rep union all select * from r_sc
   union all select * from r_ledger union all select * from r_role
 ) u order by probe;

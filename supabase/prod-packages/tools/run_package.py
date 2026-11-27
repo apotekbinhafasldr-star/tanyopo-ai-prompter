@@ -112,6 +112,46 @@ BAN_WORDS = {
     "pg_sleep", "pg_terminate_backend", "pg_cancel_backend", "pg_reload_conf", "pg_switch_wal", "pg_logical_emit_message",
     "lo_import", "lo_export", "lo_creat", "lo_create", "lo_unlink", "lo_put", "lo_from_bytea", "query_to_xml", "table_to_xml",
     "cursor_to_xml", "query_to_xml_and_xmlschema", "session_replication_role", "current_setting_unsafe",
+    # sequences / counters / server-side effects (also refused when double-quoted: the check runs on the normalised identifier)
+    "nextval", "currval", "lastval", "txid_current", "pg_current_xact_id", "pg_promote", "pg_rotate_logfile", "pg_create_restore_point",
+    "pg_drop_replication_slot", "pg_stat_reset", "pg_stat_reset_shared", "pg_stat_reset_single_table_counters",
+    "pg_stat_reset_single_function_counters", "pg_stat_statements_reset", "pg_import_system_collations", "pg_wal_replay_pause",
+    "pg_wal_replay_resume", "pg_start_backup", "pg_stop_backup", "pg_backup_start", "pg_backup_stop", "pg_replication_slot_advance",
+    "lo_open", "lo_close", "lo_get", "lo_truncate", "lo_lseek", "lo_tell", "lowrite", "loread", "pg_log_backend_memory_contexts",
+}
+BAN_PREFIX_MORE = ("pg_replication_origin", "pg_create_", "pg_copy_", "pg_ls_", "pg_read_", "pg_stat_reset", "pg_backup_",
+                   "pg_wal_replay", "pg_logical_slot_", "pg_drop_")
+# product words: any identifier or literal that names another product's object is refused
+OTHER_PRODUCT_RE = re.compile(r"publoe|mitapeng|umkmpro|kagura|apotek", re.I)
+# in a string literal the shared project name "umkmpro-ai" may be mentioned (messages); other umkmpro* names may not
+OTHER_PRODUCT_LIT_RE = re.compile(r"publoe|mitapeng|kagura|apotek|umkmpro(?![-_ ]*ai\b)", re.I)
+
+# Unqualified names that may be followed by "(" in a SELECT/PERFORM/DO/post-COMMIT statement: pure built-ins only.
+PURE_FUNCS = {
+    "now", "clock_timestamp", "statement_timestamp", "count", "sum", "min", "max", "avg", "bool_and", "bool_or", "every", "md5", "coalesce",
+    "nullif", "greatest", "least", "array_agg", "string_agg", "jsonb_agg", "json_agg", "jsonb_build_object", "json_build_object",
+    "jsonb_build_array", "to_char", "to_date", "to_timestamp", "to_number", "to_regclass", "to_regprocedure", "to_regproc", "to_regtype",
+    "to_regnamespace", "to_regrole", "regexp_replace", "regexp_match", "regexp_matches", "length", "char_length", "lower", "upper", "concat",
+    "concat_ws", "replace", "substr", "substring", "trim", "btrim", "ltrim", "rtrim", "position", "left", "right", "format", "quote_ident",
+    "quote_literal", "split_part", "string_to_array", "array_to_string", "array_length", "cardinality", "unnest", "generate_series",
+    "date_trunc", "extract", "date_part", "age", "abs", "round", "floor", "ceil", "ceiling", "jsonb_array_length", "jsonb_typeof",
+    "jsonb_extract_path_text", "jsonb_object_keys", "gen_random_uuid", "pg_get_functiondef", "pg_get_function_identity_arguments",
+    "pg_get_function_arguments", "pg_get_expr", "pg_get_constraintdef", "pg_get_indexdef", "pg_get_triggerdef", "pg_get_viewdef",
+    "has_function_privilege", "has_table_privilege", "has_schema_privilege", "has_column_privilege", "has_sequence_privilege",
+    "has_any_column_privilege", "pg_has_role", "to_jsonb", "to_json", "jsonb_each", "jsonb_each_text", "row_to_json", "aclexplode", "jsonb_array_elements", "jsonb_array_elements_text", "chr", "obj_description", "pg_get_userbyid", "row_number", "rank", "dense_rank", "cast", "overlay", "current_setting", "pg_typeof",
+    "exists", "any", "all", "some", "row", "array", "grouping",
+}
+# SQL keywords/types that may sit directly before "(" (unquoted only; a quoted "and"( is a function name)
+KW_PAREN = {
+    "and", "or", "not", "in", "exists", "values", "using", "check", "if", "as", "on", "from", "join", "inner", "left", "right", "full", "cross",
+    "natural", "lateral", "select", "where", "when", "then", "else", "case", "between", "over", "filter", "within", "by", "limit", "offset",
+    "union", "except", "intersect", "returning", "distinct", "unique", "primary", "key", "references", "default", "like", "ilike", "similar",
+    "is", "to", "at", "with", "set", "into", "end", "elsif", "elseif", "while", "for", "return", "perform", "raise", "loop", "begin", "materialized",
+    "window", "sets", "rollup", "cube", "tablesample", "collate", "interval", "varchar", "char", "character", "numeric", "decimal", "timestamp",
+    "timestamptz", "time", "timetz", "bit", "varbit", "float", "current_timestamp", "localtimestamp", "localtime", "current_time",
+    "partition", "order", "group", "having", "asc", "desc", "nulls", "first", "last", "rows", "range", "groups", "unbounded", "preceding",
+    "following", "current", "escape", "symmetric", "asymmetric", "verbose", "only", "conflict", "do", "nothing", "update", "delete", "insert",
+    "table", "array", "any", "all", "some", "row", "of", "after", "before", "each", "execute", "constraint", "foreign", "add", "column",
 }
 BAN_PREFIX = ("dblink", "pg_advisory", "pg_try_advisory")
 OBJ_WORDS = {"table", "policy", "function", "trigger", "index", "schema", "role", "user", "extension", "database", "view", "sequence",
@@ -153,6 +193,9 @@ def _scan_sq(sql, i, esc):
 
 def tokenize(sql):
     """Token list [(kind, text, start, end)]. kinds: ws comment str estr qid dq word num param pvar meta punct."""
+    if "\r" in sql:
+        # psql ends a -- comment at CR, the tokenizer would not: refuse instead of guessing (defence in depth, verify_package also refuses CR)
+        raise LintError("carriage return in SQL text")
     out, i, n = [], 0, len(sql)
 
     def add(kind, j):
@@ -701,6 +744,39 @@ def _depth_scan(s):
         yield d, t
 
 
+def check_calls(ctx, s, qualified=False):
+    """Default-deny for function calls in statements that run at apply time (top level, DO, after COMMIT).
+
+    A word/quoted identifier directly followed by "(" is a call unless it is a SQL keyword/type (unquoted) or a pure built-in from
+    PURE_FUNCS. Quoted identifiers are normalised first ("nextval" == nextval; "Now" is NOT now). With qualified=True, schema.name( is
+    refused too unless the schema is pg_catalog/information_schema AND the name is pure (DML targets use schema.table ( and are gated
+    by the allow-list instead). Not covered (documented): operators, casts, views, RLS/policy functions and triggers that run
+    user code implicitly.
+    """
+    for k, t in enumerate(s):
+        if t.kind not in ("word", "qid") or k + 1 >= len(s) or not (s[k + 1].kind == "punct" and s[k + 1].text == "("):
+            continue
+        try:
+            name = ident(t, False)
+        except Deny:
+            raise Deny("call of a function with an unreadable name")
+        if k >= 1 and s[k - 1].kind == "punct" and s[k - 1].text == ".":
+            if not qualified:
+                continue
+            if k >= 2 and s[k - 2].kind in ("word", "qid") and not (k >= 3 and s[k - 3].kind == "punct" and s[k - 3].text == "."):
+                sch = ident(s[k - 2], False)
+                if sch in ("pg_catalog", "information_schema") and name in PURE_FUNCS and (s[k - 2].kind == "word" or sch == s[k - 2].text[1:-1]):
+                    continue
+            raise Deny("call of a schema-qualified function that is not a pure built-in")
+        if k >= 1 and (is_w(s[k - 1], "as") or (s[k - 1].kind == "punct" and s[k - 1].text == ")")):
+            continue  # alias with a column list: "... as a(x, o)" / "(subquery) r(n)" (no call can follow an operand)
+        if t.kind == "word" and (name in KW_PAREN or name in PURE_FUNCS):
+            continue
+        if t.kind == "qid" and name in PURE_FUNCS and name == name.lower():
+            continue
+        raise Deny("call of a function that is not a pure built-in (unregistered / schema-less user function)")
+
+
 def read_stmt(ctx, s, phase):
     """select/with/values/table: no writes. Top-level and DO: no SELECT INTO, no FOR UPDATE, no qualified user-function call."""
     words = [lw(t) for t in s]
@@ -716,18 +792,8 @@ def read_stmt(ctx, s, phase):
             raise Deny("SELECT INTO creates a table")
         if w == "execute":
             raise Deny("dynamic EXECUTE")
-        if w == "nextval" and phase in ("top", "do"):
-            raise Deny("nextval() changes a sequence")
     if phase in ("top", "do"):
-        for k in range(len(s) - 3):
-            if (s[k].kind in ("word", "qid") and s[k + 1].kind == "punct" and s[k + 1].text == "." and s[k + 2].kind in ("word", "qid")
-                    and s[k + 3].kind == "punct" and s[k + 3].text == "("):
-                try:
-                    sch = ident(s[k], False)
-                except Deny:
-                    sch = "?"
-                if sch not in ("pg_catalog", "information_schema"):
-                    raise Deny("call of a schema-qualified function inside a read statement")
+        check_calls(ctx, s, qualified=True)
     return False
 
 
@@ -927,9 +993,26 @@ def p_do(ctx, s):
     return False
 
 
+TIMEOUT_MAX_MS = {"lock_timeout": 10000, "statement_timeout": 120000}
+
+
+def _timeout_ms(t):
+    """'3s' / '500ms' / '2min' / 3000 (ms) -> milliseconds, or None when it is not a plain positive duration."""
+    text = t.text[1:-1] if t.kind == "str" else t.text
+    m = re.fullmatch(r"\s*(\d{1,9})\s*(ms|s|min|h|d)?\s*", text, re.I)
+    if not m or (t.kind == "str" and "'" in text):
+        return None
+    mult = {None: 1, "ms": 1, "s": 1000, "min": 60000, "h": 3600000, "d": 86400000}[m.group(2).lower() if m.group(2) else None]
+    return int(m.group(1)) * mult
+
+
 def p_set(ctx, s):
     if (len(s) == 5 and is_w(s[1], "local") and is_w(s[2], "lock_timeout", "statement_timeout") and
             (s[3].kind == "punct" and s[3].text == "=" or is_w(s[3], "to")) and s[4].kind in ("str", "num")):
+        ms = _timeout_ms(s[4])
+        lim = TIMEOUT_MAX_MS[s[2].text.lower()]
+        if ms is None or ms <= 0 or ms > lim:
+            raise Deny(f"{s[2].text.lower()} must be a positive duration of at most {lim // 1000}s (0 = unlimited is refused)")
         return False
     raise Deny("only SET LOCAL lock_timeout/statement_timeout = <literal> is accepted")
 
@@ -1008,8 +1091,14 @@ def lint_body(ctx, text, phase):
     check_tokens(ctx, sig, in_body=True)
     for seg in split_statements(sig):
         head, tail = _strip_prefix(seg)
-        if head:
-            _anywhere(ctx, head, phase)
+        try:
+            if head:
+                _anywhere(ctx, head, phase)
+                if phase == "do":
+                    check_calls(ctx, head, qualified=True)
+        except Deny as e:
+            ctx.bad(f"statement not accepted ({e})")
+            continue
         if not tail:
             continue
         first = lw(tail[0])
@@ -1018,9 +1107,13 @@ def lint_body(ctx, text, phase):
             if first in HARD_DENY_START:
                 raise Deny("dynamic EXECUTE is never accepted" if first == "execute" else f"'{first}' is not accepted inside a body")
             if first in ("update", "delete", "insert", "grant", "revoke", "set", "create", "alter", "drop", "comment", "with", "values", "table"):
+                if phase == "do" and first in ("update", "delete", "insert", "set", "create", "alter", "drop", "comment", "grant", "revoke"):
+                    check_calls(ctx, tail, qualified=False)
                 accepted = classify(ctx, tail, phase)
             else:
                 _anywhere(ctx, tail, phase)
+                if phase == "do":
+                    check_calls(ctx, tail, qualified=True)
                 if first == "select" or first == "perform":
                     read_stmt(ctx, tail, phase)
                 accepted = False
@@ -1084,6 +1177,8 @@ def classify(ctx, s, phase="top"):
         raise Deny("this ALTER form is not accepted")
     if f == "comment":
         return p_comment(ctx, s)
+    if f in ("update", "delete", "insert") and phase == "top":
+        check_calls(ctx, s, qualified=False)
     if f == "update":
         return p_update(ctx, s, phase)
     if f == "delete":
@@ -1128,9 +1223,9 @@ def check_tokens(ctx, sig, in_body=False):
             except Deny:
                 continue
             lo = v.lower() if t.kind == "qid" else v
-            if lo in BAN_WORDS or lo.startswith(BAN_PREFIX):
+            if lo in BAN_WORDS or lo.startswith(BAN_PREFIX) or lo.startswith(BAN_PREFIX_MORE):
                 ctx.bad(f"forbidden SQL (function or setting '{lo}' is refused)")
-            if lo.startswith("umkmpro_"):
+            if OTHER_PRODUCT_RE.search(v):
                 ctx.bad("forbidden SQL (other product object)")
             if t.kind == "word" and lo == "u" and k + 2 < len(sig) and sig[k + 1].text == "&" and sig[k + 2].kind in ("str", "qid") \
                     and sig[k + 2].start == sig[k + 1].end:
@@ -1144,7 +1239,7 @@ def check_tokens(ctx, sig, in_body=False):
                     ctx.bad("forbidden SQL (other product object)")
                 if lo == "cron":
                     ctx.bad("forbidden SQL (cron change)")
-        elif t.kind == "str" and re.search(r"public\.\"?(publoe|mitapeng)|umkmpro_", t.text, re.I):
+        elif t.kind == "str" and OTHER_PRODUCT_LIT_RE.search(t.text):
             ctx.bad("forbidden SQL (other product object named in a literal)")
 
 
