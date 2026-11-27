@@ -98,7 +98,12 @@ describe("ConsentPanel", () => {
     expect(sw).toHaveClass("min-h-11");
     expect(sw.getAttribute("aria-labelledby")).toBe("consent-MARKETING_COMMS-title consent-MARKETING_COMMS-title-action");
     // Label in Name: nama aksesibel memuat judul DAN teks yang terlihat pada tombol.
-    expect(sw).toHaveAccessibleName("Email pembaruan Aktifkan");
+    expect(sw).toHaveAccessibleName("Email pembaruan Izinkan");
+    // Nama TETAP saat status berubah (keadaan lewat aria-checked, bukan kata kerja yang berganti).
+    cleanup();
+    render(<ConsentPanel items={[{ ...optional, status: "GRANTED", statusLabel: "Aktif" }]} />);
+    expect(screen.getByRole("switch")).toHaveAccessibleName("Email pembaruan Izinkan");
+    expect(screen.getByRole("switch")).toHaveAttribute("aria-checked", "true");
     expect(sw.getAttribute("aria-describedby")).toBe("consent-MARKETING_COMMS-desc");
     expect(document.getElementById("consent-MARKETING_COMMS-title")).not.toBeNull();
   });

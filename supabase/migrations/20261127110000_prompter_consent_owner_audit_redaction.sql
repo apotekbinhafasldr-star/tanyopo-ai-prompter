@@ -26,6 +26,9 @@ begin
   end if;
 end $$;
 
+create index if not exists idx_prompter_consent_events_tenant_code
+  on public.prompter_consent_events (tenant_id, code, occurred_at desc) where tenant_id is not null;
+
 -- 2. Pendaftaran: Privacy Notice dicatat HANYA bila versi dikirim.
 create or replace function public.fn_prompter_record_signup_legal(p_user_id uuid, p_terms_version integer, p_privacy_version integer)
 returns jsonb
@@ -73,6 +76,7 @@ declare
   v_connect boolean;
   v_row public.prompter_consent_events;
   v_ver integer;
+  v_grantor_ok boolean := true;
 begin
   if v_uid is null then
     raise exception 'tidak terautentikasi' using errcode = '28000';
@@ -117,7 +121,13 @@ begin
      order by e.occurred_at desc, e.id desc limit 1;
   end if;
 
-  if found and v_last.action = p_action and (p_action = 'WITHDRAWN' or v_last.version = v_cat.version) then
+  -- Jalur idempoten untuk GRANTED pada kode koneksi hanya bila pemberi TERAKHIR masih Owner tenant ini. Bila Owner pemberi sudah diturunkan,
+  -- persetujuan itu tidak berlaku (check_tenant: GRANTOR_NOT_OWNER), jadi Owner pemanggil menulis peristiwa GRANTED baru.
+  if found and v_connect then
+    v_grantor_ok := exists (select 1 from public.user_profiles up
+                             where up.id = v_last.subject_user_id and up.tenant_id = v_tenant and up.role::text = 'owner');
+  end if;
+  if found and v_last.action = p_action and (p_action = 'WITHDRAWN' or (v_last.version = v_cat.version and v_grantor_ok)) then
     return jsonb_build_object('code', p_code, 'version', v_last.version, 'status', v_last.action, 'changed', false, 'occurred_at', v_last.occurred_at);
   end if;
   if not found and p_action = 'WITHDRAWN' then
@@ -133,7 +143,7 @@ begin
 end;
 $$;
 
--- 4. Status untuk layar pengaturan: CONNECT_* = status TENANT pemanggil; lain = status pengguna. SECURITY DEFINER agar Owner kedua melihat
+-- 4. Status untuk layar pengaturan (GRANTED koneksi hanya bila pemberi masih Owner; selain itu OUTDATED = perlu persetujuan ulang): CONNECT_* = status TENANT pemanggil; lain = status pengguna. SECURITY DEFINER agar Owner kedua melihat
 --    persetujuan tenant (RLS peristiwa hanya per pengguna); hanya membaca baris tenant/pengguna pemanggil.
 create or replace function public.fn_prompter_consent_my_status()
 returns table (code text, version integer, purpose_id text, text_id text, status text, occurred_at timestamptz)
@@ -145,7 +155,10 @@ as $$
   with me as (select up.tenant_id from public.user_profiles up where up.id = auth.uid())
   select c.code, c.version, c.purpose_id, c.text_id,
          case when e.id is null then 'NOT_GIVEN'
-              when e.action = 'GRANTED' and e.version = c.version then 'GRANTED'
+              when e.action = 'GRANTED' and e.version = c.version
+                   and (left(c.code, 8) <> 'CONNECT_'
+                        or exists (select 1 from public.user_profiles g
+                                    where g.id = e.subject_user_id and g.tenant_id = e.tenant_id and g.role::text = 'owner')) then 'GRANTED'
               when e.action = 'GRANTED' then 'OUTDATED'
               else 'WITHDRAWN' end,
          e.occurred_at
@@ -210,27 +223,51 @@ end;
 $$;
 
 -- 6. Anonimisasi PII audit: tabel allowlist + nonce (privat, tanpa hak klien).
+-- Daftar-tolak (mencakup audit/persetujuan/approval/compliance/autopilot/langganan/koneksi/kredensial/token/peran/admin/flag/finansial/
+-- keamanan/Emergency Stop) DAN daftar-positif sempit: hanya tipe yang sudah dikonfirmasi PII-nya. Menambah tipe = migrasi baru yang
+-- mengubah CHECK ini setelah tinjau; INSERT biasa ditolak trigger (bukan hanya konvensi).
 create table if not exists public.prompter_audit_redaction_allowlist (
   resource_type text not null check (resource_type ~ '^[a-z][a-z0-9_]{2,63}$'
-    and resource_type !~* '(finance|ledger|payment|billing|security|budget|automation|emergency|auth|tenant|profile)'),
+    and resource_type !~* '(audit|consent|approval|compliance|autopilot|subscription|connect|credential|token|role|admin|flag|finance|ledger|payment|billing|invoice|security|budget|automation|emergency|stop|auth|tenant|profile)'
+    and resource_type in ('prompter_manual_ad_metrics')),
   json_key text not null check (json_key ~ '^[a-z][a-z0-9_]{1,63}$'),
   note text,
   primary key (resource_type, json_key)
 );
--- Seed awal (dikonfirmasi dari trigger manual_ad_metrics): hanya kolom pengenal pengguna yang tersalin lewat before_data/after_data.
-insert into public.prompter_audit_redaction_allowlist (resource_type, json_key, note) values
-  ('prompter_manual_ad_metrics', 'entered_by', 'id pengguna penginput tersalin dari baris sumber lewat to_jsonb'),
-  ('prompter_manual_ad_metrics', 'updated_by', 'id pengguna pengubah tersalin dari baris sumber lewat to_jsonb')
-on conflict (resource_type, json_key) do nothing;
-
 create table if not exists public.prompter_audit_redact_nonce (
   txid bigint primary key,
   nonce uuid not null,
   created_at timestamptz not null default now()
 );
+create table if not exists public.prompter_audit_redact_dryruns (
+  request_ref text not null check (request_ref ~ '^REQ-[0-9]{4,12}$'),
+  tenant_id uuid not null,
+  rows_matched bigint not null,
+  created_at timestamptz not null default now(),
+  primary key (request_ref, tenant_id, created_at)
+);
+alter table public.prompter_audit_redact_dryruns enable row level security;
 alter table public.prompter_audit_redaction_allowlist enable row level security;
 alter table public.prompter_audit_redact_nonce enable row level security;
-revoke all on public.prompter_audit_redaction_allowlist, public.prompter_audit_redact_nonce from public, anon, authenticated, service_role;
+revoke all on public.prompter_audit_redaction_allowlist, public.prompter_audit_redact_nonce, public.prompter_audit_redact_dryruns from public, anon, authenticated, service_role;
+
+create or replace function public.fn_prompter_audit_allowlist_insert_guard()
+returns trigger
+language plpgsql
+set search_path = pg_catalog, public
+as $$
+begin
+  if coalesce(current_setting('linoe.allowlist_migration', true), '') <> 'on' then
+    raise exception 'allowlist anonimisasi hanya diubah lewat migrasi (guard LINOE)' using errcode = '42501';
+  end if;
+  return new;
+end;
+$$;
+revoke all on function public.fn_prompter_audit_allowlist_insert_guard() from public, anon, authenticated, service_role;
+drop trigger if exists trg_prompter_audit_redaction_allowlist_insert_guard on public.prompter_audit_redaction_allowlist;
+create trigger trg_prompter_audit_redaction_allowlist_insert_guard
+  before insert on public.prompter_audit_redaction_allowlist
+  for each row execute function public.fn_prompter_audit_allowlist_insert_guard();
 
 drop trigger if exists trg_prompter_audit_redaction_allowlist_guard on public.prompter_audit_redaction_allowlist;
 create trigger trg_prompter_audit_redaction_allowlist_guard
@@ -240,6 +277,14 @@ drop trigger if exists trg_prompter_audit_redaction_allowlist_block_truncate on 
 create trigger trg_prompter_audit_redaction_allowlist_block_truncate
   before truncate on public.prompter_audit_redaction_allowlist
   for each statement execute function public.fn_prompter_block_truncate_guard();
+
+-- Seed awal (dikonfirmasi dari trigger manual_ad_metrics): hanya kolom pengenal pengguna yang tersalin lewat before_data/after_data.
+set local linoe.allowlist_migration = 'on';
+insert into public.prompter_audit_redaction_allowlist (resource_type, json_key, note) values
+  ('prompter_manual_ad_metrics', 'entered_by', 'id pengguna penginput tersalin dari baris sumber lewat to_jsonb'),
+  ('prompter_manual_ad_metrics', 'updated_by', 'id pengguna pengubah tersalin dari baris sumber lewat to_jsonb')
+on conflict (resource_type, json_key) do nothing;
+set local linoe.allowlist_migration = 'off';
 
 -- 7. Guard audit: tambah SATU jalur UPDATE sempit (nonce acak per transaksi yang hanya dibuat fungsi operator; hanya kolom data berubah).
 --    Klien tidak bisa menebak nonce (tabel privat) dan tidak punya hak UPDATE. DELETE hanya cascade tenant seperti sebelumnya.
@@ -310,7 +355,7 @@ set lock_timeout = '3s'
 set statement_timeout = '30s'
 as $$
 declare
-  c_deny constant text := '(finance|ledger|payment|billing|security|budget|automation|emergency|auth|tenant|profile)';
+  c_deny constant text := '(audit|consent|approval|compliance|autopilot|subscription|connect|credential|token|role|admin|flag|finance|ledger|payment|billing|invoice|security|budget|automation|emergency|stop|auth|tenant|profile)';
   v_matched bigint;
   v_redacted bigint := 0;
   v_remaining bigint;
@@ -319,8 +364,8 @@ begin
   if session_user in ('anon', 'authenticated', 'service_role', 'authenticator') then
     raise exception 'fungsi ini khusus operator' using errcode = '42501';
   end if;
-  if p_request_ref is null or p_request_ref !~ '^[A-Za-z0-9._:-]{6,64}$' then
-    raise exception 'request_ref wajib (6-64 karakter: huruf, angka, . _ : -)' using errcode = '22023';
+  if p_request_ref is null or p_request_ref !~ '^REQ-[0-9]{4,12}$' then
+    raise exception 'request_ref wajib berpola REQ-<4-12 digit> (tanpa teks bebas/PII)' using errcode = '22023';
   end if;
   if p_tenant_id is null or not exists (select 1 from public.tenants t where t.id = p_tenant_id) then
     raise exception 'tenant wajib dan harus ada' using errcode = '22023';
@@ -334,6 +379,7 @@ begin
      and public.fn_prompter_audit_row_needs_redaction(r.resource_type, r.before_data, r.after_data, r.context);
 
   if p_dry_run then
+    insert into public.prompter_audit_redact_dryruns (request_ref, tenant_id, rows_matched) values (p_request_ref, p_tenant_id, v_matched);
     insert into public.prompter_audit_logs (tenant_id, actor_user_id, action, resource_type, after_data, context)
     values (p_tenant_id, null, 'AUDIT_PII_REDACTION_DRYRUN', 'prompter_audit_logs',
             jsonb_build_object('rows_matched', v_matched),
@@ -341,9 +387,9 @@ begin
     return jsonb_build_object('dry_run', true, 'rows_matched', v_matched, 'rows_redacted', 0, 'remaining', v_matched);
   end if;
 
-  if not exists (select 1 from public.prompter_audit_logs d
-                  where d.tenant_id = p_tenant_id and d.action = 'AUDIT_PII_REDACTION_DRYRUN'
-                    and d.context ->> 'request_ref' = p_request_ref and d.created_at > now() - interval '7 days') then
+  -- Bukti dry-run dibaca dari tabel PRIVAT (bukan dari audit yang dapat ditulis pengguna tenant, jadi tidak dapat dipalsukan).
+  if not exists (select 1 from public.prompter_audit_redact_dryruns d
+                  where d.tenant_id = p_tenant_id and d.request_ref = p_request_ref and d.created_at > now() - interval '7 days') then
     raise exception 'dry-run dengan request_ref ini wajib dijalankan lebih dulu (<= 7 hari)' using errcode = '22023';
   end if;
 
@@ -411,11 +457,31 @@ as $$
    where k.v is distinct from to_jsonb('[DIHAPUS-PII]'::text)
    group by k.rt, k.k, k.loc
   union all
+  -- Kunci bernama umum PII yang BELUM di allowlist (tinjau manusia; allowlist tetap eksplisit).
   select 'UNLISTED_CANDIDATE'::text, k.rt, k.k, k.loc, count(*)
     from keys k
-   where k.k ~* '(email|phone|telp|hp_|nama|name|alamat|address|nik|ktp|ip_addr|user_id|_by$)'
+   where k.k ~* '(email|e_mail|phone|telp|tlp|whatsapp|wa_|hp_|nama|name|alamat|address|nik|ktp|npwp|ip_addr|user_id|_by$|owner|member|customer|pelanggan|contact|kontak)'
      and not exists (select 1 from public.prompter_audit_redaction_allowlist a where a.resource_type = k.rt and a.json_key = k.k)
    group by k.rt, k.k, k.loc
+  union all
+  -- Berdasarkan NILAI (kunci apa pun, tingkat atas): teks mirip email atau nomor telepon. Hitungan saja, nilai tidak dikembalikan.
+  select 'VALUE_EMAIL_LIKE'::text, k.rt, k.k, k.loc, count(*)
+    from keys k
+   where jsonb_typeof(k.v) = 'string' and (k.v #>> '{}') ~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$'
+     and not exists (select 1 from public.prompter_audit_redaction_allowlist a where a.resource_type = k.rt and a.json_key = k.k)
+   group by k.rt, k.k, k.loc
+  union all
+  select 'VALUE_PHONE_LIKE'::text, k.rt, k.k, k.loc, count(*)
+    from keys k
+   where jsonb_typeof(k.v) = 'string' and (k.v #>> '{}') ~ '^\+?[0-9][0-9 .()-]{7,18}[0-9]$'
+     and not exists (select 1 from public.prompter_audit_redaction_allowlist a where a.resource_type = k.rt and a.json_key = k.k)
+   group by k.rt, k.k, k.loc
+  union all
+  -- Kolom actor_user_id (FK ke auth.users) TIDAK dapat dianonimkan lewat jalur ini; dilaporkan sebagai referensi tersisa (blocker 4b-2, lihat dokumen).
+  select 'ACTOR_REFERENCE'::text, r.resource_type, 'actor_user_id'::text, 'column'::text, count(*)
+    from public.prompter_audit_logs r
+   where r.actor_user_id is not null and (p_tenant_id is null or r.tenant_id = p_tenant_id)
+   group by r.resource_type
   order by 1, 2, 3, 4;
 $$;
 
