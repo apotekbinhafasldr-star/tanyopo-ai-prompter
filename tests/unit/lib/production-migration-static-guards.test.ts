@@ -194,9 +194,27 @@ function sortKeys(v: unknown): unknown {
   return v;
 }
 
+interface AllowEntry {
+  kind: string;
+  schema: string;
+  names?: string[];
+  columns?: string[];
+  objects?: string[];
+  roles?: string[];
+}
+interface FxPackage {
+  fixture: boolean;
+  shape: string;
+  migration: FileEntry;
+  rollback: FileEntry;
+  files: Record<string, FileEntry>;
+  allow: AllowEntry[];
+  rollback_allow: AllowEntry[];
+}
+
 describe("Pipeline v2 — synthetic fixture package (rehearsal only)", () => {
   const FXM = "supabase/prod-packages/tests/fixtures/manifest.json";
-  const fx = JSON.parse(read(FXM)) as { packages: Record<string, Record<string, any>> };
+  const fx = JSON.parse(read(FXM)) as { packages: Record<string, FxPackage> };
   const pkg = fx.packages["fx-n"];
 
   it("every checksum of the fixture matches the bytes (run tests/fixtures/rehash.py after editing it)", () => {
@@ -218,7 +236,7 @@ describe("Pipeline v2 — synthetic fixture package (rehearsal only)", () => {
   });
 
   it("the allow-lists are literal: schema public/storage only, no wildcard, no unused-looking entry kinds", () => {
-    for (const list of [pkg.allow, pkg.rollback_allow] as Array<Array<Record<string, any>>>) {
+    for (const list of [pkg.allow, pkg.rollback_allow] as AllowEntry[][]) {
       expect(list.length).toBeGreaterThan(0);
       for (const e of list) {
         expect(["public", "storage"], JSON.stringify(e)).toContain(e.schema);
