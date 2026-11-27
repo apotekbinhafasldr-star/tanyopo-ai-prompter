@@ -22,6 +22,8 @@ import {
 } from "@/lib/campaigns/external-budget-guard";
 import { readEmergencyStopStrict } from "@/services/automation-settings";
 import { decryptToken } from "@/lib/crypto/token-cipher";
+import { connectConsentCode } from "@/lib/consent/catalog";
+import { consentGateMessage } from "@/lib/consent/require-consent";
 import {
   LaunchDatabaseError,
   LaunchFenceLostError,
@@ -704,6 +706,13 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
   const connector = getConnector(connectorPlatform);
   if (!connector) {
     return { error: `Connector ${connectorPlatform} tidak tersedia.` };
+  }
+
+  // Paket 3: gerbang persetujuan koneksi. Enforcement MATI (default) = no-op murni; HIDUP = fail-closed sebelum token dibuka.
+  const consentCode = connectConsentCode(connectorPlatform);
+  if (consentCode) {
+    const consentMessage = await consentGateMessage(consentCode, session.userId, session.tenantId);
+    if (consentMessage) return { error: consentMessage };
   }
 
   let accessToken: string;

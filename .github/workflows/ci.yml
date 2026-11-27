@@ -329,6 +329,47 @@ jobs:
           grep -E '^(FAIL|SOME|REFUSED)|ERROR' "$RUNNER_TEMP/l1.txt" | head -20 | sed 's/^/::error::/' || true
           grep -q '^ALL PASSED' "$RUNNER_TEMP/l1.txt"
 
+  # Paket 3 (Consent & Audit Guard): migrasi + rollback pada PostgreSQL 17 SEMENTARA (data sintetis, skema Supabase = stub, bukan REAL).
+  # Membuktikan idempotensi, rollback memulihkan hak persis, guard audit menolak UPDATE/DELETE/TRUNCATE (hak dan trigger), cascade hapus tenant
+  # tetap berjalan, RLS lintas pengguna, purge dry-run tanpa PII, parameter retensi NULL = NOT_APPROVED, dan tidak ada efek ke auth.users/tenants.
+  # Tidak pernah menerapkan apa pun ke Supabase.
+  consent-audit-guard-sql:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: linoe_ci
+          POSTGRES_PASSWORD: linoe_ci_password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U linoe_ci -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: linoe_ci
+      PGPASSWORD: linoe_ci_password
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ensure psql client
+        run: command -v psql || (sudo apt-get update && sudo apt-get install -y postgresql-client)
+
+      - name: Consent and audit guard SQL tests (PostgreSQL 17 required)
+        env:
+          REQUIRE_PG_MAJOR: "17"
+        run: |
+          set -o pipefail
+          bash supabase/tests/consent-audit-guard/run-local.sh 2>&1 | tee "$RUNNER_TEMP/p3.txt" || true
+          # surface failures as annotations (job logs are not always downloadable)
+          grep -E '^(FAIL|SOME|REFUSED)|ERROR' "$RUNNER_TEMP/p3.txt" | head -20 | sed 's/^/::error::/' || true
+          grep -q '^ALL PASSED' "$RUNNER_TEMP/p3.txt"
+
   billing-b4-sql:
     runs-on: ubuntu-latest
     services:
