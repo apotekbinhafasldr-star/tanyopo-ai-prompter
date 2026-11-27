@@ -215,7 +215,7 @@ Langkah (Chrome Android; bila layar sempit aktifkan "Situs desktop" di menu Chro
 Sumber (https://supabase.com/docs/guides/auth/auth-smtp, diakses 2026-11-11): SMTP bawaan menolak mengirim ke alamat yang bukan anggota tim proyek (error "Email address not authorized"), batas 2 pesan per jam, tanpa jaminan pengiriman, "tidak untuk produksi".
 
 1. Siapkan alamat email **biasa yang bukan anggota tim Supabase** dan bisa dibuka di HP (misalnya Gmail pribadi lain). Gunakan mode penyamaran.
-2. Buka `https://<domain-produksi>/register`, daftar dengan alamat itu, centang Syarat/Privasi.
+2. Buka `https://<domain-produksi>/register`, daftar dengan alamat itu, centang kotak Syarat & Ketentuan (Privasi hanya pemberitahuan, tanpa kotak).
 3. Diharapkan: muncul pesan "Akun berhasil dibuat. Silakan cek email Anda..."; email dari LINOE tiba dalam 2 menit (cek spam); tautan membuka `/onboarding`, bukan error.
 4. Catat: jam daftar, jam email tiba, masuk inbox atau spam, ada tidaknya pesan error.
 5. Catatan: ini membuat akun nyata di proyek bersama (akan dihitung sebagai salah satu dari 10 tenant, atau sebagai akun uji Anda). Menghapusnya butuh persetujuan (SOFT_LAUNCH bagian 7); jangan mendaftar berulang-ulang (batas 2/jam bila SMTP bawaan).

@@ -13,7 +13,7 @@ const root = path.resolve(__dirname, "../../..");
 const sha = (f: string) => createHash("sha256").update(readFileSync(path.join(root, f))).digest("hex");
 
 const PINNED = {
-  terms: { file: "app/(legal)/terms/page.tsx", version: 1, sha256: "9fa862fb39b6c17fdb4f1ddb2c700b28f64ae870d35c3be3b21c9b00205a0b33" },
+  terms: { file: "app/(legal)/terms/page.tsx", version: 2, sha256: "b8aa35705b4231efa35c34cd7c482d7e6095d794fd8e6f33c13c01538915179c" },
   privacy: { file: "app/(legal)/privacy/page.tsx", version: 1, sha256: "d66e3a2cd8d8117beb7f4f89a46e194d95e1e835bb2e70520e23b481d6d1e175" },
 } as const;
 

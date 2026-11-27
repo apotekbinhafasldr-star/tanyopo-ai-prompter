@@ -8,8 +8,9 @@ import { Input } from "@/components/ui/input";
 import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import { VerifyOtpForm } from "@/features/auth/verify-otp-form";
-import { validateEmailFormat } from "@/schemas/auth";
+import { ACCEPT_LEGAL_ERROR, validateEmailFormat } from "@/schemas/auth";
 import { LegalLinks } from "@/features/legal/legal-links";
+import { PRIVACY_NOTICE_VERSION } from "@/features/legal/legal-versions";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 const initialState: AuthActionState = { error: null };
@@ -90,6 +91,10 @@ export function RegisterForm() {
     );
   }
 
+  // Galat penerimaan Syarat & Ketentuan dikaitkan ke checkbox (aria-invalid + aria-describedby); galat lain tetap di bawah.
+  const acceptError = state.error === ACCEPT_LEGAL_ERROR ? state.error : null;
+  const otherError = acceptError ? null : state.error;
+
   return (
     <Card>
       <CardHeader>
@@ -147,30 +152,64 @@ export function RegisterForm() {
             <PasswordInput id="password" name="password" autoComplete="new-password" minLength={8} required />
             <p className="text-xs text-muted-foreground">Minimal 8 karakter.</p>
           </div>
-          <div className="flex items-start gap-2.5">
+          <div className="flex items-start">
             <input
               id="acceptLegal"
               name="acceptLegal"
               type="checkbox"
               required
               defaultChecked={false}
-              className="mt-0.5 size-4 shrink-0 rounded border-border accent-[var(--color-brand,currentColor)]"
+              aria-invalid={acceptError ? true : undefined}
+              aria-describedby={acceptError ? "accept-legal-error" : undefined}
+              className="mt-1 size-5 shrink-0 accent-[var(--color-brand,currentColor)]"
             />
-            <Label htmlFor="acceptLegal" className="text-xs font-normal leading-relaxed text-muted-foreground">
+            {/* pl-3 (bukan gap) agar celah antara kotak dan teks ikut menjadi area ketuk label. */}
+            <Label htmlFor="acceptLegal" className="py-1 pl-3 text-sm font-normal leading-relaxed text-foreground">
               Saya telah membaca dan menyetujui{" "}
-              <Link href="/terms" target="_blank" className="font-medium text-foreground hover:underline">
+              <Link
+                href="/terms"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-medium text-brand underline underline-offset-2"
+              >
                 Syarat &amp; Ketentuan
-              </Link>{" "}
-              dan{" "}
-              <Link href="/privacy" target="_blank" className="font-medium text-foreground hover:underline">
-                Kebijakan Privasi
               </Link>
               .
             </Label>
           </div>
-          {state.error ? (
+          {acceptError ? (
+            <p id="accept-legal-error" role="alert" className="text-sm text-danger">
+              {acceptError}
+            </p>
+          ) : null}
+          {/* Pemberitahuan, bukan kontrol: tanpa kotak centang. Dibaca terpisah dari penerimaan Syarat & Ketentuan. */}
+          {/* Hidden input dan blok di bawah satu paket: jangan hapus salah satunya (server mencatat DELIVERED dari input ini). */}
+          <input type="hidden" name="privacyNoticeVersion" value={PRIVACY_NOTICE_VERSION} />
+          <section
+            id="pemberitahuan-privasi"
+            aria-labelledby="pemberitahuan-privasi-judul"
+            className="rounded-lg border border-border bg-surface-muted p-3 text-sm leading-relaxed text-foreground"
+          >
+            <h2 id="pemberitahuan-privasi-judul" className="text-sm font-medium">
+              Pemberitahuan privasi
+            </h2>
+            <p className="mt-1">
+              Kami mengolah data pribadi Anda sesuai Kebijakan Privasi. Ini pemberitahuan untuk dibaca, bukan kotak yang
+              perlu Anda centang.
+            </p>
+            <Link
+              href="/privacy"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex min-h-11 items-center font-medium text-brand underline underline-offset-2"
+            >
+              Baca Kebijakan Privasi
+            </Link>
+            <p className="text-xs text-foreground/80">Versi pemberitahuan: {PRIVACY_NOTICE_VERSION}</p>
+          </section>
+          {otherError ? (
             <div role="alert" className="flex flex-col gap-2 text-sm text-danger">
-              <p>{state.error}</p>
+              <p>{otherError}</p>
               {state.uncertain ? (
                 <p className="flex gap-4 text-xs">
                   <Link href="/login" className="font-medium text-brand hover:underline">
