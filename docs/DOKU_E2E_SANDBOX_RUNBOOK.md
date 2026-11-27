@@ -299,6 +299,28 @@ Sumber diakses 2026-11-11. Ringkasan halaman dibaca lewat alat pembaca-ringkas, 
 Catatan: dokumen DOKU menyebut `payment_method_types` bila dihilangkan menampilkan semua metode yang tersedia, dan kode kita memang tidak mengirimnya. Namun halaman yang sama
 menyebut permintaan dasar hanya terjamin untuk VA, kartu, QRIS, toko, dan e-money (OVO, LinkAja); e-wallet lain bisa butuh data tambahan (asumsi A12). Buktikan di S3.
 
+### 8A. Verifikasi ulang klaim yang bisa kedaluwarsa (2026-11-11)
+
+Dibaca ulang lewat alat pembaca-ringkas pada 2026-11-11; periksa kutipan penting di halaman aslinya sebelum keputusan.
+
+| Klaim | Hasil | Sumber |
+|---|---|---|
+| KYB 2x24 hari kerja; dokumen bervariasi menurut lokasi, bidang usaha, kewarganegaraan penanda tangan; ganti kredensial sandbox ke produksi di Service Management | MASIH BENAR. Halaman tidak menyebut aturan kode pos/alamat (hanya "business address") | https://dashboard.doku.com/docs/docs/getting-started/register-business |
+| Notifikasi dijawab 2xx; 3 percobaan ulang (30 menit, 6 jam, 12 jam setelah percobaan awal); kirim ulang manual di Integration, HTTP Notification | MASIH BENAR | https://developers.doku.com/get-started-with-doku-api/notification/retry-notification.md |
+| Notification URL: publik, tanpa autentikasi/VPN/port tak lazim, ngrok tidak didukung, `https` dianjurkan; diisi per channel di Settings, Payment Settings | MASIH BENAR | https://developers.doku.com/get-started-with-doku-api/notification/setup-notification-url.md |
+| Check Status: host sandbox `api-sandbox.doku.com`, produksi `api.doku.com`; panggil 60 detik setelah bayar; `order.currency` tidak terdokumentasi (hanya `invoice_number` dan `amount`) | MASIH BENAR; B-CUR tetap relevan | https://dashboard.doku.com/docs/docs/http-notification/check-status-non-snap |
+| Checkout: `order.currency` opsional, 3 huruf ISO 4217, bila dihilangkan default IDR; `payment_method_types` opsional (dihilangkan = semua metode); `payment_due_date` menit, default 60 | BARU (menguatkan opsi B-CUR (1): mengirim `IDR` eksplisit sah menurut dokumen). Host Checkout sandbox `api-sandbox.doku.com/checkout/v1/payment`, produksi `api.doku.com/checkout/v1/payment` | https://developers.doku.com/accept-payments/doku-checkout/integration-guide/backend-integration.md |
+| Status level-order Checkout (`ORDER_GENERATED`, `ORDER_EXPIRED`, `ORDER_RECOVERED`) hanya untuk merchant terdaftar sejak Desember 2024; merchant lama minta aktivasi; tidak ada field currency | MASIH BENAR | https://developers.doku.com/accept-payments/doku-checkout/order-status-for-checkout-page |
+| Simulator sandbox `https://sandbox.doku.com/integration/simulator/`; halaman tidak menyebut channel apa yang bisa disimulasikan | MASIH BENAR; cakupan channel tetap BELUM TERVERIFIKASI | https://developers.doku.com/accept-payments/doku-checkout/integration-guide/simulate-payment-and-notification.md |
+| Settlement hari kerja 12:00-14:00 WIB; DOKU tidak menyelesaikan dana bisnis yang belum terverifikasi; T+1 (VA bank lain, QRIS, e-wallet LinkAja/DOKU, debit BRI), T+2 (VA BCA/DOKU, e-wallet OVO/ShopeePay/DANA/i.saku, kartu BNI Cybersource, Kartu Kredit Indonesia), T+3 (kartu acquirer lain), T+4 (Alfa/Indomaret); Kredivo Selasa dan Jumat | MASIH BENAR; baris PayLater dan debit adalah tambahan | https://docs.doku.com/accept-payments/finance-and-settlement/settlement-time |
+| Refund: rekening bank maks 10 hari kerja, e-wallet DOKU 3 hari kerja, maks Rp25.000.000 per pencairan bank; DOKU hanya mengembalikan harga produk, bukan MDR | MASIH BENAR | https://docs.doku.com/accept-payments/finance-and-settlement/refund-and-chargeback/refund-and-chargeback |
+| Refund: biaya Rp2.500 per transaksi (e-wallet DOKU) dan Rp6.500 per transaksi (transfer bank di bawah Rp25.000.000), di luar PPN, dipotong dari settlement; batas e-wallet Rp2.000.000 (non-KYC) / Rp20.000.000 (KYC), turnover Rp40.000.000 per 30 hari; untuk refund non-kartu merchant juga menyetor dana IDR ke akun DOKU dan mengirim instruksi pembayaran lewat API | BARU; bagian 6.1 menyebut tiket DOKU Care (sumber help.doku.com), halaman ini menyebut setoran dana dan instruksi API. Dua prosedur itu belum didamaikan: tanya DOKU Care mana yang berlaku untuk merchant ini | idem |
+| Chargeback: hanya permintaan dari acquirer diproses; agregator memotong dari settlement berikutnya, kekurangan escrow dibayar maks 7 hari kerja; biaya chargeback tidak disebut | MASIH BENAR | idem |
+| Status `REFUNDED` pada Check Status | BARU: halaman Check Status menyebutnya untuk OVO Open API; VA bank tetap tidak terdokumentasi memuat refund | https://dashboard.doku.com/docs/docs/http-notification/check-status-non-snap |
+| Lokasi menu Back Office dan URL login | TIDAK TERVERIFIKASI: halaman pendaftaran hanya menyebut "DOKU Back Office" dan Service Management tanpa tautan | https://dashboard.doku.com/docs/docs/getting-started/register-business |
+
+Hasil: tidak ada klaim DOKU di runbook ini yang terbukti usang. Status tetap seperti bagian 0: tidak ada SANDBOX E2E pembayaran, tidak ada REAL E2E, KYB dan kode pos merchant EXTERNAL BLOCKED. Matriks gabungan: [INTEGRATIONS_READINESS_MATRIX.md](INTEGRATIONS_READINESS_MATRIX.md).
+
 ## 9. Celah teknis yang belum tertutup (rekomendasi; tidak ada yang dikerjakan di PR ini)
 
 Temuan baru dari audit 2026-11-11, bukan pengulangan audit yang sudah PASS. Semua berstatus CODE belum dibuat. P0 = harus selesai sebelum bukti sandbox dianggap lengkap
