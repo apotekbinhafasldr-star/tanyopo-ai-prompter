@@ -14,6 +14,8 @@ TOOL_RE = [
     r"^supabase/prod-packages/manifest\.json$",
     r"^\.github/workflows/production-migration\.yml$",
     r"^\.github/CODEOWNERS$",
+    r"^\.github/workflows/ci\.yml$",
+    r"^\.gitattributes$",
 ]
 # package files: SQL packages (not the tools/tests directories), the migrations and rollbacks they embed
 PACKAGE_RE = [

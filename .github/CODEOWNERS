@@ -5,4 +5,6 @@
 /supabase/rollback/ @apotekbinhafasldr-star
 /.github/workflows/production-migration.yml @apotekbinhafasldr-star
 /.github/CODEOWNERS @apotekbinhafasldr-star
+/.github/workflows/ci.yml @apotekbinhafasldr-star
+/.gitattributes @apotekbinhafasldr-star
 /docs/PRODUCTION_MIGRATION.md @apotekbinhafasldr-star

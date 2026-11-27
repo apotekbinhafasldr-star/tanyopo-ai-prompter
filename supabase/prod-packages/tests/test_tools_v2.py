@@ -976,7 +976,7 @@ class Separation(unittest.TestCase):
 
     def test_tool_and_package_in_one_change_fail(self):
         for tool in ("supabase/prod-packages/tools/run_package.py", ".github/workflows/production-migration.yml",
-                     "supabase/prod-packages/manifest.json", ".github/CODEOWNERS"):
+                     "supabase/prod-packages/manifest.json", ".github/CODEOWNERS", ".github/workflows/ci.yml", ".gitattributes"):
             for pkg in ("supabase/prod-packages/p0-3/B_x.sql", "supabase/migrations/20270101000000_x.sql", "supabase/rollback/20270101000000_x.down.sql"):
                 self.assertTrue(self.cs.check([tool, pkg]), (tool, pkg))
 
@@ -988,7 +988,7 @@ class Separation(unittest.TestCase):
 
     def test_codeowners_covers_the_pipeline(self):
         text = open(os.path.join(ROOT, ".github/CODEOWNERS")).read()
-        for path in ("/supabase/prod-packages/", "/.github/workflows/production-migration.yml", "/.github/CODEOWNERS", "/supabase/migrations/"):
+        for path in ("/supabase/prod-packages/", "/.github/workflows/production-migration.yml", "/.github/CODEOWNERS", "/supabase/migrations/", "/.github/workflows/ci.yml", "/.gitattributes"):
             self.assertIn(path, text)
 
 
