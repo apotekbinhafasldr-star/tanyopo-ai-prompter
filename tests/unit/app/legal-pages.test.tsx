@@ -23,6 +23,7 @@ import { LegalHeader } from "@/features/legal/legal-header";
 import LegalLayout from "@/app/(legal)/layout";
 import DemoLayout from "@/app/demo/layout";
 import { LEGAL } from "@/features/legal/legal-meta";
+import { PRIVACY_NOTICE_VERSION } from "@/features/legal/legal-versions";
 import { PLAN_TIERS } from "@/lib/billing/plans";
 
 afterEach(() => cleanup());
@@ -188,23 +189,86 @@ describe("legal links", () => {
     }
   });
 
-  it("the registration form has an unchecked, required consent checkbox with Terms/Privacy links", () => {
+  it("the registration form has ONE unchecked, required checkbox that accepts the Terms only (Privacy is a separate notice)", () => {
     render(<RegisterForm />);
     const boxes = screen.getAllByRole("checkbox");
     expect(boxes).toHaveLength(1);
     const box = boxes[0] as HTMLInputElement;
     expect(box.name).toBe("acceptLegal");
+    expect(box.id).toBe("acceptLegal");
     expect(box.checked).toBe(false);
     expect(box.required).toBe(true);
-    // Label is associated with the checkbox and carries the legal links.
+    // Label: exact text, links to /terms only, never to /privacy, no privacy / PDP wording.
     const label = document.querySelector('label[for="acceptLegal"]')!;
     expect(label).not.toBeNull();
-    expect(label.querySelector('a[href="/terms"]')).not.toBeNull();
-    expect(label.querySelector('a[href="/privacy"]')).not.toBeNull();
+    expect(label.textContent).toBe("Saya telah membaca dan menyetujui Syarat & Ketentuan.");
+    const termsLink = label.querySelector('a[href="/terms"]')!;
+    expect(termsLink).not.toBeNull();
+    expect(termsLink.getAttribute("target")).toBe("_blank");
+    expect(termsLink.getAttribute("rel") ?? "").toMatch(/noopener/);
+    expect(label.querySelector('a[href="/privacy"]')).toBeNull();
+    expect(label.querySelectorAll("a")).toHaveLength(1);
+    expect(label.textContent).not.toMatch(/privasi|privacy|PDP|data pribadi|pelindungan/i);
+    expect(box.getAttribute("aria-describedby") ?? "").not.toContain("pemberitahuan-privasi");
     for (const href of ["/privacy", "/terms", "/data-deletion"]) {
       expect(document.querySelector(`a[href="${href}"]`)).not.toBeNull();
     }
     expect(screen.getByRole("button", { name: /Daftar Gratis/ })).toBeInTheDocument();
+  });
+
+  it("the Privacy Notice is a separate labelled block between the checkbox and the submit button, with no control and no acceptance wording", () => {
+    render(<RegisterForm />);
+    const box = document.getElementById("acceptLegal")!;
+    const label = document.querySelector('label[for="acceptLegal"]')!;
+    const notice = document.getElementById("pemberitahuan-privasi")!;
+    expect(notice).not.toBeNull();
+    // Labelled region (accessible name from its own heading), outside the label and the checkbox row.
+    expect(screen.getByRole("region", { name: "Pemberitahuan privasi" })).toBe(notice);
+    expect(label.contains(notice)).toBe(false);
+    expect(box.parentElement!.contains(notice)).toBe(false);
+    // Exactly one /privacy link inside the block, opening safely in a new tab.
+    const links = notice.querySelectorAll("a");
+    expect(links).toHaveLength(1);
+    const link = notice.querySelector('a[href="/privacy"]')!;
+    expect(link).not.toBeNull();
+    expect(link.textContent).toBe("Baca Kebijakan Privasi");
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("rel") ?? "").toMatch(/noopener/);
+    // 44px touch target on the link (min-h-11).
+    expect(link.className).toMatch(/\bmin-h-11\b/);
+    // No second control; no acceptance / permission / PDP wording; no reference to the (flagged-off) settings panel.
+    expect(notice.querySelectorAll("input,button,select,textarea")).toHaveLength(0);
+    expect(notice.textContent).not.toMatch(/menyetuj|setuju|persetujuan|izin|mengizinkan|bersedia|PDP|Pengaturan|disampaikan|dicatat|bukti/i);
+    // Shows the current notice version, from the single source constant.
+    expect(Number.isInteger(PRIVACY_NOTICE_VERSION) && PRIVACY_NOTICE_VERSION >= 1).toBe(true);
+    expect(notice.textContent).toContain(`Versi pemberitahuan: ${PRIVACY_NOTICE_VERSION}`);
+    // DOM order: checkbox < notice < submit button.
+    const btn = screen.getByRole("button", { name: /Daftar Gratis/ });
+    expect(box.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(notice.compareDocumentPosition(btn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("the form posts the current notice version as a hidden field (same constant the server compares against)", () => {
+    const { container } = render(<RegisterForm />);
+    const hidden = container.querySelectorAll('input[name="privacyNoticeVersion"]');
+    expect(hidden).toHaveLength(1);
+    const input = hidden[0] as HTMLInputElement;
+    expect(input.type).toBe("hidden");
+    expect(input.value).toBe(String(PRIVACY_NOTICE_VERSION));
+    // Not part of the notice block (which holds no input) and not the checkbox.
+    expect(document.getElementById("pemberitahuan-privasi")!.contains(input)).toBe(false);
+    expect(input.id).not.toBe("acceptLegal");
+    expect(container.querySelectorAll('input[name="acceptLegal"]')).toHaveLength(1);
+  });
+
+  it("/terms section 1 accepts the Terms only and does not equate the Privacy Policy with acceptance", () => {
+    render(<TermsPage />);
+    const section = document.getElementById("penerimaan")!;
+    const text = section.textContent ?? "";
+    expect(text).toMatch(/Anda menyetujui Syarat ini\./);
+    expect(text).not.toMatch(/menyetujui[^.]*(Privasi|Privacy)/i);
+    expect(text).not.toMatch(/Syarat ini dan\s+Kebijakan Privasi/);
+    expect(section.querySelector('a[href="/privacy"]')).not.toBeNull();
   });
 
   it("the demo banner layout links to all four legal pages", () => {

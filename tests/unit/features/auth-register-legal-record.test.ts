@@ -85,7 +85,8 @@ describe("registerAction: pencatatan Terms/Privacy Notice sisi server (Paket 3)"
 
   it("checkbox tidak dicentang: ditolak sebelum signUp, tanpa pencatatan, pesan galat lama tidak berubah", async () => {
     const result = await registerAction({ error: null }, form(null));
-    expect(result.error).toMatch(/Syarat & Ketentuan dan Kebijakan Privasi/);
+    expect(result.error).toBe("Anda harus menyetujui Syarat & Ketentuan untuk mendaftar.");
+    expect(result.error).not.toMatch(/Privasi|Privacy|PDP/i);
     expect(signUpMock).not.toHaveBeenCalled();
     expect(recordMock).not.toHaveBeenCalled();
   });

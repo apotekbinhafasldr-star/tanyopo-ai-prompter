@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { VerifyOtpForm } from "@/features/auth/verify-otp-form";
 import { validateEmailFormat } from "@/schemas/auth";
 import { LegalLinks } from "@/features/legal/legal-links";
+import { PRIVACY_NOTICE_VERSION } from "@/features/legal/legal-versions";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 const initialState: AuthActionState = { error: null };
@@ -147,27 +148,52 @@ export function RegisterForm() {
             <PasswordInput id="password" name="password" autoComplete="new-password" minLength={8} required />
             <p className="text-xs text-muted-foreground">Minimal 8 karakter.</p>
           </div>
-          <div className="flex items-start gap-2.5">
+          <div className="flex items-start gap-3">
             <input
               id="acceptLegal"
               name="acceptLegal"
               type="checkbox"
               required
               defaultChecked={false}
-              className="mt-0.5 size-4 shrink-0 rounded border-border accent-[var(--color-brand,currentColor)]"
+              className="mt-1 size-5 shrink-0 rounded border-border-strong accent-[var(--color-brand,currentColor)]"
             />
-            <Label htmlFor="acceptLegal" className="text-xs font-normal leading-relaxed text-muted-foreground">
+            <Label htmlFor="acceptLegal" className="py-1 text-sm font-normal leading-relaxed text-foreground">
               Saya telah membaca dan menyetujui{" "}
-              <Link href="/terms" target="_blank" className="font-medium text-foreground hover:underline">
+              <Link
+                href="/terms"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-medium text-brand underline underline-offset-2"
+              >
                 Syarat &amp; Ketentuan
-              </Link>{" "}
-              dan{" "}
-              <Link href="/privacy" target="_blank" className="font-medium text-foreground hover:underline">
-                Kebijakan Privasi
               </Link>
               .
             </Label>
           </div>
+          {/* Pemberitahuan, bukan kontrol: tanpa kotak centang. Dibaca terpisah dari penerimaan Syarat & Ketentuan. */}
+          <input type="hidden" name="privacyNoticeVersion" value={PRIVACY_NOTICE_VERSION} />
+          <section
+            id="pemberitahuan-privasi"
+            aria-labelledby="pemberitahuan-privasi-judul"
+            className="rounded-lg border border-border bg-surface-muted p-3 text-sm leading-relaxed text-foreground"
+          >
+            <p id="pemberitahuan-privasi-judul" className="font-medium">
+              Pemberitahuan privasi
+            </p>
+            <p className="mt-1">
+              Kami mengolah data pribadi Anda sesuai Kebijakan Privasi. Ini pemberitahuan untuk dibaca, bukan kotak yang
+              perlu Anda centang.
+            </p>
+            <Link
+              href="/privacy"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex min-h-11 items-center font-medium text-brand underline underline-offset-2"
+            >
+              Baca Kebijakan Privasi
+            </Link>
+            <p className="text-xs text-foreground/80">Versi pemberitahuan: {PRIVACY_NOTICE_VERSION}</p>
+          </section>
           {state.error ? (
             <div role="alert" className="flex flex-col gap-2 text-sm text-danger">
               <p>{state.error}</p>

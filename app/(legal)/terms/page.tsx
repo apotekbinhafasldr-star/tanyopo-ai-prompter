@@ -38,11 +38,11 @@ export default function TermsPage() {
     >
       <LegalSection id="penerimaan" title="1. Penerimaan">
         <p>
-          Dengan membuat akun atau memakai LINOE, Anda menyetujui Syarat ini dan{" "}
+          Dengan membuat akun atau memakai LINOE, Anda menyetujui Syarat ini.{" "}
           <Link href="/privacy" className="font-medium text-brand hover:underline">
             Kebijakan Privasi
-          </Link>
-          . {LEGAL.product} dikelola oleh {LEGAL.operator} (<a href={`mailto:${LEGAL.contactEmail}`}>{LEGAL.contactEmail}</a>
+          </Link>{" "}
+          menjelaskan cara kami mengolah data pribadi dan dibaca bersama Syarat ini. {LEGAL.product} dikelola oleh {LEGAL.operator} (<a href={`mailto:${LEGAL.contactEmail}`}>{LEGAL.contactEmail}</a>
           ). Jika Anda tidak setuju, jangan memakai layanan.
         </p>
       </LegalSection>
