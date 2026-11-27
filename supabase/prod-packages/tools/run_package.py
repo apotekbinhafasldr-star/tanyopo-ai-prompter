@@ -32,6 +32,7 @@ text is reduced to SQLSTATE + a fixed description.
 Exit code 0 = every check held. Anything else = STOP.
 """
 import argparse
+import collections
 import csv
 import hashlib
 import io
@@ -46,20 +47,31 @@ DEFAULT_ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 MODES = ("check-only", "owner-audit", "verify-only", "apply", "record-ledger", "rollback")
 
 # --------------------------------------------------------------------------------------------------------------------
-# static lint
+# static lint (v2.1: a real SQL tokenizer + DEFAULT-DENY per statement)
 #
-# Two layers, both fail-closed:
-#   1. FORBIDDEN: global patterns. Nothing in the manifest can lift these (ownership change, role switch, advisory locks,
-#      dynamic EXECUTE, COPY PROGRAM, psql meta-commands, ...). A few of them are "gated" operations (drop/create policy or
-#      trigger, drop function, delete from, UPDATE of a non-public table, ACL changes outside public): the SAME patterns stay
-#      in force, and a statement is only removed from the lint input when it matches ONE entry of that package's explicit
-#      `allow` list (kind + schema + table + literal names). No allow-list = everything is rejected exactly as before.
-#   2. allow-list entries are validated (validate_allow): literal identifiers only, no wildcard, schema in {public, storage},
-#      no unknown keys, and an entry that no statement uses is itself an error (stale allow-lists are not tolerated).
+# History: v2.0 removed comments with a regex and then matched regexes on the rest. That was wrong: "select '/*'; <cmd>;
+# select '*/';" made the lint blind to <cmd> (psql meta-commands, DROP POLICY, an early COMMIT). v2.1 therefore:
+#   1. tokenizes the file the way PostgreSQL/psql do: '...' with '' escapes, E'...' with backslash escapes, $tag$...$tag$,
+#      "..." identifiers (with ""), U&, -- comments and NESTED /* */ comments. Anything that does not tokenize = rejected.
+#   2. rejects, on tokens, anything psql would act on outside a literal: a backslash (psql meta-command), :var / :'var'
+#      interpolation (only D may use :'created_by'), E'..' and U&'..' literals.
+#   3. splits the file into top-level statements and ACCEPTS ONLY the statement classes listed in classify(); every other
+#      statement (INSERT, ALTER POLICY, CREATE INDEX on storage, COPY, LOCK, VACUUM, DO with unknown content, ...) is
+#      rejected ("default-deny", fail-closed). Gated classes (drop/create policy or trigger, drop function, UPDATE/INSERT/DELETE,
+#      ACL changes outside public) must ALSO match one entry of the package's explicit `allow` list (kind + schema + object +
+#      literal names). Identifiers are normalised first ("public"."x" == public.x); a quoted name that is not a plain
+#      lower-case identifier is rejected, so no guard can be bypassed with quoting.
+#   4. keeps the older FORBIDDEN regexes as a SECOND net, run on the normalised token text of every statement that was not
+#      accepted through an allow-list entry. The allow-list can never lift: ownership change (owner\s+to), role switch,
+#      session_replication_role, pg_(try_)?advisory locks, dynamic EXECUTE, set_config, COPY, role membership grant
+#      (privilege escalation), ALTER DEFAULT PRIVILEGES, psql meta-command, another product's objects.
+# Documented limit: the lint cannot prove what an UNQUALIFIED function call does (select some_public_fn()). That is covered by
+# review + the read-only transaction used for A/C/F/S/G + ddl_targets/public_refs (every object a package names is pinned in
+# the manifest) + the sandbox rehearsal. See docs/PRODUCTION_MIGRATION.md.
 # --------------------------------------------------------------------------------------------------------------------
 ALLOW_SCHEMAS = ("public", "storage")
-ALLOW_KINDS = ("drop_policy", "create_policy", "drop_trigger", "create_trigger", "drop_function", "update_rows", "delete_from",
-               "revoke", "grant")
+ALLOW_KINDS = ("drop_policy", "create_policy", "drop_trigger", "create_trigger", "drop_function", "update_rows", "insert_rows",
+               "delete_from", "revoke", "grant")
 KNOWN_PRIVS = {"all", "select", "insert", "update", "delete", "truncate", "references", "trigger", "execute", "usage"}
 SENSITIVE_GRANTEES = {"public", "anon", "authenticated"}
 IDENT = r'(?:"[^"]+"|[A-Za-z_][A-Za-z0-9_$]*)'
@@ -94,196 +106,288 @@ FORBIDDEN = [
     (r"\bdisable\s+(trigger|rule|row\s+level\s+security)\b", "disables a trigger/rule/RLS"),
 ]
 
+# words that are refused wherever they appear (outside literals), whatever the package says
+BAN_WORDS = {
+    "set_config", "setval", "pg_notify", "pg_read_file", "pg_read_binary_file", "pg_ls_dir", "pg_stat_file", "pg_file_write",
+    "pg_sleep", "pg_terminate_backend", "pg_cancel_backend", "pg_reload_conf", "pg_switch_wal", "pg_logical_emit_message",
+    "lo_import", "lo_export", "lo_creat", "lo_create", "lo_unlink", "lo_put", "lo_from_bytea", "query_to_xml", "table_to_xml",
+    "cursor_to_xml", "query_to_xml_and_xmlschema", "session_replication_role", "current_setting_unsafe",
+}
+BAN_PREFIX = ("dblink", "pg_advisory", "pg_try_advisory")
+OBJ_WORDS = {"table", "policy", "function", "trigger", "index", "schema", "role", "user", "extension", "database", "view", "sequence",
+             "type", "or", "unique", "materialized", "publication", "subscription", "procedure", "domain", "temp", "temporary",
+             "unlogged", "rule", "aggregate", "operator", "server", "foreign", "column", "constraint", "owned", "default", "event"}
 
-def strip_sql(sql):
-    """Drop /* */ and -- comments (good enough for lint: the reviewed files hold no '--' inside string literals)."""
-    sql = re.sub(r"/\*.*?\*/", " ", sql, flags=re.S)
-    return re.sub(r"--[^\n]*", " ", sql)
+
+class LintError(Exception):
+    """The text does not tokenize like PostgreSQL would read it: treated as a violation (fail-closed)."""
 
 
-def _blank(seg):
-    return re.sub(r"[^\n]", " ", seg)
+class Deny(Exception):
+    """A statement is outside the accepted classes (message = reason, never object contents)."""
 
 
+Tok = collections.namedtuple("Tok", "kind text start end")
 _DQ = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)?\$")
+_PARAM = re.compile(r"\$\d+")
+WORD_RE = re.compile(r"[A-Za-z_\u0080-\U0010ffff][A-Za-z0-9_$\u0080-\U0010ffff]*")
+NUM_RE = re.compile(r"(?:\d[\d_]*(?:\.[\d_]*)?|\.\d[\d_]*)(?:[eE][+-]?\d+)?")
 
 
-def _skip_single_quoted(sql, i):
-    """sql[i] == "'" -> index just after the closing quote ('' is an escaped quote)."""
+def _scan_sq(sql, i, esc):
+    """sql[i] == "'" -> index after the closing quote. '' is an escaped quote; with esc (E'..') a backslash escapes the next char."""
     n, j = len(sql), i + 1
     while j < n:
-        if sql[j] == "'":
+        c = sql[j]
+        if esc and c == "\\":
+            j += 2
+            continue
+        if c == "'":
             if j + 1 < n and sql[j + 1] == "'":
                 j += 2
                 continue
             return j + 1
         j += 1
-    return n
+    raise LintError("unterminated string literal")
 
 
-def mask_literals(sql):
-    """Blank '...' strings, "..." identifiers and $tag$ ... $tag$ bodies (newlines kept). Input must be comment-free."""
+def tokenize(sql):
+    """Token list [(kind, text, start, end)]. kinds: ws comment str estr qid dq word num param pvar meta punct."""
     out, i, n = [], 0, len(sql)
+
+    def add(kind, j):
+        nonlocal i
+        out.append(Tok(kind, sql[i:j], i, j))
+        i = j
+
     while i < n:
         c = sql[i]
-        if c == "'":
-            j = _skip_single_quoted(sql, i)
-            out.append(_blank(sql[i:j]))
-            i = j
+        if c.isspace():
+            j = i + 1
+            while j < n and sql[j].isspace():
+                j += 1
+            add("ws", j)
+        elif sql.startswith("--", i):
+            j = sql.find("\n", i)
+            add("comment", n if j < 0 else j)
+        elif sql.startswith("/*", i):
+            depth, j = 1, i + 2
+            while depth:
+                a, b = sql.find("/*", j), sql.find("*/", j)
+                if b < 0:
+                    raise LintError("unterminated block comment")
+                if 0 <= a < b:
+                    depth, j = depth + 1, a + 2
+                else:
+                    depth, j = depth - 1, b + 2
+            add("comment", j)
+        elif c == "'":
+            add("str", _scan_sq(sql, i, False))
         elif c == '"':
-            j = sql.find('"', i + 1)
-            j = n if j < 0 else j + 1
-            out.append(_blank(sql[i:j]))
-            i = j
+            j = i + 1
+            while True:
+                k = sql.find('"', j)
+                if k < 0:
+                    raise LintError("unterminated quoted identifier")
+                if k + 1 < n and sql[k + 1] == '"':
+                    j = k + 2
+                    continue
+                j = k + 1
+                break
+            add("qid", j)
         elif c == "$":
             m = _DQ.match(sql, i)
             if m:
-                j = sql.find(m.group(0), m.end())
-                j = n if j < 0 else j + len(m.group(0))
-                out.append(_blank(sql[i:j]))
-                i = j
+                k = sql.find(m.group(0), m.end())
+                if k < 0:
+                    raise LintError("unterminated dollar-quoted string")
+                add("dq", k + len(m.group(0)))
             else:
-                out.append(c)
-                i += 1
+                m2 = _PARAM.match(sql, i)
+                add("param" if m2 else "punct", m2.end() if m2 else i + 1)
+        elif c == "\\":
+            add("meta", i + 1)
+        elif c == ":":
+            if sql.startswith("::", i):
+                add("punct", i + 2)
+            elif i + 1 < n and (sql[i + 1] in "'\"{" or WORD_RE.match(sql, i + 1)):
+                add("pvar", i + 1)
+            else:
+                add("punct", i + 1)
         else:
-            out.append(c)
-            i += 1
-    return "".join(out)
-
-
-def mask_strings(sql):
-    """Blank only '...' literals (dollar-quoted bodies stay visible: they hold the plpgsql statements that must be linted)."""
-    out, i, n = [], 0, len(sql)
-    while i < n:
-        if sql[i] == "'":
-            j = _skip_single_quoted(sql, i)
-            out.append(_blank(sql[i:j]))
-            i = j
-        else:
-            out.append(sql[i])
-            i += 1
-    return "".join(out)
-
-
-def has_escape_string(sql):
-    """True when an E'...' literal STARTS anywhere (backslash escapes would defeat the quote scanner above)."""
-    i, n = 0, len(sql)
-    while i < n:
-        c = sql[i]
-        if c == "'":
-            if i > 0 and sql[i - 1] in "eE" and (i < 2 or not (sql[i - 2].isalnum() or sql[i - 2] in "_$")):
-                return True
-            i = _skip_single_quoted(sql, i)
-        elif c == "$":
-            m = _DQ.match(sql, i)
-            i = (m.end() if m else i + 1)  # enter dollar bodies: a literal inside a plpgsql body counts too
-        else:
-            i += 1
-    return False
-
-
-def dollar_spans(sql):
-    """[(body_start, body_end)] of every top-level $tag$ ... $tag$ body."""
-    spans, i, n = [], 0, len(sql)
-    while i < n:
-        c = sql[i]
-        if c == "'":
-            i = _skip_single_quoted(sql, i)
-        elif c == "$":
-            m = _DQ.match(sql, i)
-            if not m:
-                i += 1
+            m = WORD_RE.match(sql, i)
+            if m:
+                if m.group(0) in ("e", "E") and m.end() < n and sql[m.end()] == "'":
+                    add("estr", _scan_sq(sql, m.end(), True))
+                else:
+                    add("word", m.end())
                 continue
-            j = sql.find(m.group(0), m.end())
-            if j < 0:
-                spans.append((m.end(), n))
-                break
-            spans.append((m.end(), j))
-            i = j + len(m.group(0))
+            m = NUM_RE.match(sql, i)
+            if m and m.end() > i:
+                add("num", m.end())
+                continue
+            add("punct", i + 1)
+    return out
+
+
+def sig_tokens(toks):
+    return [t for t in toks if t.kind not in ("ws", "comment")]
+
+
+def dq_body(t):
+    m = _DQ.match(t.text)
+    return t.text[len(m.group(0)):-len(m.group(0))]
+
+
+def split_statements(sig):
+    out, cur = [], []
+    for t in sig:
+        if t.kind == "punct" and t.text == ";":
+            if cur:
+                out.append(cur)
+            cur = []
         else:
-            i += 1
-    return spans
+            cur.append(t)
+    if cur:
+        out.append(cur)
+    return out
 
 
-def _id(s):
-    s = s.strip()
-    return s[1:-1] if s.startswith('"') and s.endswith('"') else s.lower()
+def is_w(t, *ws):
+    return t.kind == "word" and t.text.lower() in ws
 
 
-def _q(rx):
-    return re.compile(rx, re.I)
+def lw(t):
+    return t.text.lower() if t.kind == "word" else None
 
 
-GATED = {
-    "drop_policy": _q(rf"\bdrop\s+policy\s+(?:if\s+exists\s+)?(?P<name>{IDENT})\s+on\s+(?P<schema>{IDENT})\s*\.\s*(?P<table>{IDENT})(?!\s*\.)(?!\s+cascade\b)"),
-    "create_policy": _q(rf"\bcreate\s+policy\s+(?P<name>{IDENT})\s+on\s+(?P<schema>{IDENT})\s*\.\s*(?P<table>{IDENT})(?!\s*\.)"),
-    "drop_trigger": _q(rf"\bdrop\s+trigger\s+(?:if\s+exists\s+)?(?P<name>{IDENT})\s+on\s+(?P<schema>{IDENT})\s*\.\s*(?P<table>{IDENT})(?!\s*\.)(?!\s+cascade\b)"),
-    "create_trigger": _q(rf"\bcreate\s+(?:or\s+replace\s+)?(?:constraint\s+)?trigger\s+(?P<name>{IDENT})\s+(?:before|after|instead\s+of)\s[^;]*?\bon\s+(?P<schema>{IDENT})\s*\.\s*(?P<table>{IDENT})(?!\s*\.)(?P<rest>[^;]*)"),
-    "drop_function": _q(rf"\bdrop\s+function\s+(?:if\s+exists\s+)?(?P<schema>{IDENT})\s*\.\s*(?P<name>{IDENT})\s*\((?P<args>[^)]*)\)(?!\s*cascade\b)"),
-    "update_rows": _q(rf"\bupdate\s+(?:only\s+)?(?P<schema>{IDENT})\s*\.\s*(?P<table>{IDENT})(?:\s+(?:as\s+)?(?!set\b)(?P<alias>{IDENT}))?\s+set\b(?P<rest>[^;]*)"),
-    "delete_from": _q(rf"\bdelete\s+from\s+(?:only\s+)?(?P<schema>{IDENT})\s*\.\s*(?P<table>{IDENT})(?P<rest>[^;]*)"),
-    "acl": _q(rf"\b(?P<verb>revoke|grant)\s+(?P<privs>[a-z_][a-z_ ,]*?)\s+on\s+(?:(?P<otype>table|function|sequence)\s+)?(?P<schema>{IDENT})\s*\.\s*(?P<obj>{IDENT})(?P<args>\s*\([^)]*\))?\s+(?:from|to)\s+(?P<roles>[^;]*)"),
-}
-FUNC_DEF = re.compile(rf"\bcreate\s+(?:or\s+replace\s+)?(?:function|procedure)\s+(?:{IDENT}\s*\.\s*)?(?P<fn>{IDENT})", re.I)
-_TRG_FN = re.compile(r"\bexecute\s+(?:function|procedure)\s+(?P<f>[\w.\"]+)", re.I)
+def ident(t, strict=True):
+    """Normalised identifier: unquoted -> lower-case; "quoted" -> its content. strict: only plain [a-z_][a-z0-9_]* is accepted."""
+    if t.kind == "word":
+        v = t.text.lower()
+    elif t.kind == "qid":
+        v = t.text[1:-1].replace('""', '"')
+    else:
+        raise Deny("identifier expected")
+    if not v or (strict and not re.fullmatch(r"[a-z_][a-z0-9_]*", v)):
+        raise Deny("quoted/odd identifier is not a plain lower-case name")
+    return v
 
 
-def _enclosing_function(body, pos, spans):
-    best = None
-    for m in FUNC_DEF.finditer(body):
-        if m.start() > pos:
-            break
-        for a, b in spans:
-            if a > m.end():
-                if a <= pos < b:
-                    best = _id(m.group("fn"))
-                break
-    return best
+def qname(s, i, strict=True):
+    parts = [ident(s[i], strict)]
+    i += 1
+    while i + 1 < len(s) and s[i].kind == "punct" and s[i].text == "." and s[i + 1].kind in ("word", "qid"):
+        parts.append(ident(s[i + 1], strict))
+        i += 2
+    return parts, i
 
 
-def _gated_op(kind, m, body, spans):
-    """Parse one statement match into an op dict, or None when the statement class is not gated (e.g. UPDATE of public)."""
-    g = m.groupdict()
-    op = {"kind": kind, "start": m.start(), "end": m.end(), "schema": _id(g["schema"]) if g.get("schema") else None}
-    if kind in ("drop_policy", "create_policy", "drop_trigger", "create_trigger"):
-        op["table"], op["name"] = _id(g["table"]), _id(g["name"])
-        if kind == "create_trigger":
-            f = _TRG_FN.search(g.get("rest") or "")
-            op["fn"] = _id(f.group("f").replace("public.", "")) if f else None
-    elif kind == "drop_function":
-        op["name"] = _id(g["name"])
-    elif kind == "update_rows":
-        if op["schema"] == "public":
-            return None
-        op["table"] = _id(g["table"])
-        rest = g.get("rest") or ""
-        setc = re.split(r"\bwhere\b|\bfrom\b|\breturning\b", rest, maxsplit=1, flags=re.I)[0]
-        op["columns"] = sorted({_id(c) for c in re.findall(rf"(?:^|,)\s*({IDENT})\s*=", setc)})
-        op["where"] = bool(re.search(r"\bwhere\b", rest, re.I))
-    elif kind == "delete_from":
-        op["table"] = _id(g["table"])
-        op["where"] = bool(re.search(r"\bwhere\b", g.get("rest") or "", re.I))
-        op["in_function"] = _enclosing_function(body, m.start(), spans)
-    elif kind == "acl":
-        verb = g["verb"].lower()
-        privs = sorted({re.sub(r"\s+", " ", p.strip().lower()).replace("all privileges", "all") for p in g["privs"].split(",") if p.strip()})
-        roles_txt = g["roles"]
-        grant_opt = bool(re.search(r"with\s+grant\s+option|granted\s+by", roles_txt, re.I))
-        roles_txt = re.sub(r"\b(with\s+grant\s+option|cascade|restrict|granted\s+by\s+\S+)\b", " ", roles_txt, flags=re.I)
-        roles = sorted({_id(r.replace("group ", "").strip()) for r in roles_txt.split(",") if r.strip()})
-        gated = op["schema"] != "public" or grant_opt or (verb == "grant" and set(roles) & SENSITIVE_GRANTEES)
-        if not gated:
-            return None
-        op.update(kind=verb, obj=_id(g["obj"]), privileges=privs, roles=roles, grant_option=grant_opt)
-    return op
+def need(s, i, *ws):
+    if i >= len(s) or not is_w(s[i], *ws):
+        raise Deny("unexpected statement shape")
+    return i + 1
 
 
-def _entry_matches(e, op):
-    if e.get("kind") != op["kind"]:
+def norm_text(s):
+    """Normalised statement text: words lower-case, "quoted" plain names unquoted, strings -> '', no spaces around dots."""
+    parts = []
+    for t in s:
+        if t.kind == "word":
+            parts.append(t.text.lower())
+        elif t.kind == "qid":
+            v = t.text[1:-1].replace('""', '"')
+            parts.append(v if re.fullmatch(r"[a-z_][a-z0-9_]*", v) else t.text)
+        elif t.kind in ("str", "estr"):
+            parts.append("''")
+        elif t.kind == "dq":
+            parts.append("$$")
+        else:
+            parts.append(t.text)
+    out = ""
+    for p in parts:
+        if out and p not in (".", ",", ";", ")", "(") and not out.endswith((".", "(")):
+            out += " "
+        out += p
+    return out
+
+
+def norm_literal(text):
+    """Statement text -> comparison key (used for rollback_allowed_statements): raw string contents kept."""
+    s = split_statements(sig_tokens(tokenize(text)))
+    return [" ".join(t.text.lower() if t.kind in ("word",) else t.text for t in st) for st in s]
+
+
+def depth0(s, pred, start=0):
+    d = 0
+    for k in range(start, len(s)):
+        t = s[k]
+        if t.kind == "punct" and t.text == "(":
+            d += 1
+        elif t.kind == "punct" and t.text == ")":
+            d -= 1
+        elif d == 0 and pred(t):
+            return k
+    return -1
+
+
+def match_paren(s, i):
+    """s[i] is '(' -> index of its matching ')' or -1."""
+    d = 0
+    for k in range(i, len(s)):
+        if s[k].kind == "punct" and s[k].text == "(":
+            d += 1
+        elif s[k].kind == "punct" and s[k].text == ")":
+            d -= 1
+            if d == 0:
+                return k
+    return -1
+
+
+def split_commas(s):
+    out, cur, d = [], [], 0
+    for t in s:
+        if t.kind == "punct" and t.text in "([":
+            d += 1
+        elif t.kind == "punct" and t.text in ")]":
+            d -= 1
+        if d == 0 and t.kind == "punct" and t.text == ",":
+            out.append(cur)
+            cur = []
+        else:
+            cur.append(t)
+    out.append(cur)
+    return out
+
+
+def sig_string(name, toks):
+    """Canonical function signature name(type, type) from the tokens between '(' and ')' (types only)."""
+    return f"{name}({','.join(norm_text(part) for part in split_commas(toks) if part)})"
+
+
+def norm_sig(text):
+    s = sig_tokens(tokenize(text))
+    name = ident(s[0])
+    return sig_string(name, s[2:-1])
+
+
+class Ctx:
+    def __init__(self, name, allow, used, role, txn, literals, allow_pvar):
+        self.name, self.allow, self.used, self.role, self.txn = name, allow or [], used, role, txn
+        self.literals, self.allow_pvar = literals, allow_pvar
+        self.out, self.targets, self.fn_name = [], set(), None
+        self.literal_hits = set()
+        # what the statements need at apply time (feeds the read-only privilege probes): see derive_needs()
+        self.need_tables, self.need_fn, self.fn_created, self.tbl_created, self.need_schema = {}, set(), set(), set(), set()
+
+    def bad(self, why):
+        self.out.append(f"{self.name}: {why}")
+
+
+def _entry_ok(e, op):
+    if e.get("kind") != op["kind"] or e.get("schema") != op["schema"]:
         return False
     k = op["kind"]
-    if e.get("schema") != op["schema"]:
-        return False
     if k in ("drop_policy", "create_policy", "drop_trigger", "create_trigger"):
         if e.get("table") != op["table"] or op["name"] not in e.get("names", []):
             return False
@@ -291,10 +395,12 @@ def _entry_matches(e, op):
             return False
         return True
     if k == "drop_function":
-        return op["name"] in e.get("names", [])
+        return op["sig"] in e.get("signatures", [])
     if k == "update_rows":
-        return (e.get("table") == op["table"] and set(op["columns"]) <= set(e.get("columns", [])) and bool(op["columns"])
+        return (e.get("table") == op["table"] and bool(op["columns"]) and set(op["columns"]) <= set(e.get("columns", []))
                 and (op["where"] or not e.get("require_where", True)))
+    if k == "insert_rows":
+        return e.get("table") == op["table"] and bool(op["columns"]) and set(op["columns"]) <= set(e.get("columns", []))
     if k == "delete_from":
         if e.get("table") != op["table"] or not (op["where"] or not e.get("require_where", True)):
             return False
@@ -305,58 +411,920 @@ def _entry_matches(e, op):
     return False
 
 
+_entry_matches = _entry_ok  # name kept for older callers
+
+
 def _describe(op):
     k = op["kind"]
     if k in ("revoke", "grant"):
         return f"{k} {','.join(op['privileges'])} on {op['schema']}.{op['obj']} -> {','.join(op['roles'])}"
-    tail = ":" + op["name"] if op.get("name") and k != "drop_function" else ""
     if k == "drop_function":
-        return f"drop_function {op['schema']}.{op['name']}"
+        return f"drop_function {op['schema']}.{op['sig']}"
+    tail = ":" + op["name"] if op.get("name") else ""
     return f"{k} {op['schema']}.{op.get('table', '')}{tail}"
 
 
-def gate_statements(name, body, allow, used=None):
-    """Return (body with allow-listed statements blanked, [violations]). `used` collects indexes of allow entries that matched."""
-    spans = dollar_spans(body)
-    ops = []
-    for kind, rx in GATED.items():
-        for m in rx.finditer(body):
-            op = _gated_op(kind, m, body, spans)
-            if op:
-                ops.append(op)
-    out, chars = [], list(body)
-    for op in sorted(ops, key=lambda o: o["start"]):
-        idx = next((i for i, e in enumerate(allow) if _entry_matches(e, op)), None)
-        if idx is None:
-            out.append(f"{name}: {_describe(op)} is not in the package allow-list")
-        elif used is not None:
-            used.add(idx)
-        for i in range(op["start"], op["end"]):
-            if chars[i] != "\n":
-                chars[i] = " "
-    return "".join(chars), out
+def _need(ctx, schema, obj, *kinds):
+    ctx.need_tables.setdefault(f"{schema}.{obj}", set()).update(kinds)
 
 
-def lint_forbidden(name, sql, allow=None, used=None):
+def _op_needs(ctx, op):
+    k, sc = op["kind"], op["schema"]
+    if k in ("drop_policy", "create_policy", "drop_trigger"):
+        _need(ctx, sc, op["table"], "owner")
+    elif k == "create_trigger":
+        _need(ctx, sc, op["table"], "owner", "trigger")
+    elif k == "update_rows":
+        _need(ctx, sc, op["table"], "select", "update")
+    elif k == "insert_rows":
+        _need(ctx, sc, op["table"], "insert")
+    elif k == "delete_from":
+        _need(ctx, sc, op["table"], "select", "delete")
+    elif k == "drop_function":
+        ctx.need_fn.add(f"{sc}.{op['sig']}")
+    elif k in ("revoke", "grant"):
+        if op.get("otype") == "function":
+            ctx.need_fn.add(f"{sc}.{op['sig']}")
+        else:
+            _need(ctx, sc, op["obj"], "owner")
+
+
+def gate(ctx, op):
+    """The op must match ONE allow-list entry. Returns True when it did (so the FORBIDDEN second net skips the statement)."""
+    _op_needs(ctx, op)
+    idx = next((i for i, e in enumerate(ctx.allow) if _entry_ok(e, op)), None)
+    if idx is None:
+        ctx.bad(f"{_describe(op)} is not in the package allow-list")
+        return True
+    if ctx.used is not None:
+        ctx.used.add(idx)
+    return True
+
+
+# ---- statement parsers (each returns True when the statement was accepted through an allow-list entry) -----------------
+def p_drop_policy_trigger(ctx, s, kind):
+    i = 2
+    if is_w(s[i], "if"):
+        i = need(s, i + 1, "exists")
+    name = ident(s[i], False)
+    i = need(s, i + 1, "on")
+    parts, i = qname(s, i)
+    if len(parts) != 2 or i != len(s):
+        raise Deny("expected: DROP <POLICY|TRIGGER> [IF EXISTS] name ON schema.table (nothing else)")
+    ctx.targets.add(f"{kind}:{parts[0]}.{parts[1]}:{name}")
+    return gate(ctx, {"kind": f"drop_{kind}", "schema": parts[0], "table": parts[1], "name": name})
+
+
+def p_create_policy(ctx, s):
+    name = ident(s[2], False)
+    i = need(s, 3, "on")
+    parts, i = qname(s, i)
+    if len(parts) != 2:
+        raise Deny("schema-qualified table required")
+    ctx.targets.add(f"policy:{parts[0]}.{parts[1]}:{name}")
+    return gate(ctx, {"kind": "create_policy", "schema": parts[0], "table": parts[1], "name": name})
+
+
+def p_create_trigger(ctx, s, i):
+    # create [or replace] [constraint] trigger NAME {before|after|instead of} ... on schema.table ... execute function|procedure f()
+    name = ident(s[i], False)
+    j = depth0(s, lambda t: is_w(t, "on"), i + 1)
+    if j < 0:
+        raise Deny("trigger without ON table")
+    parts, j2 = qname(s, j + 1)
+    if len(parts) != 2:
+        raise Deny("schema-qualified table required")
+    k = depth0(s, lambda t: is_w(t, "execute"), j2)
+    if k < 0 or k + 1 >= len(s) or not is_w(s[k + 1], "function", "procedure"):
+        raise Deny("trigger needs EXECUTE FUNCTION")
+    fparts, _ = qname(s, k + 2)
+    if len(fparts) == 2 and fparts[0] != "public":
+        raise Deny("trigger function must be in public")
+    ctx.targets.add(f"trigger:{parts[0]}.{parts[1]}:{name}")
+    return gate(ctx, {"kind": "create_trigger", "schema": parts[0], "table": parts[1], "name": name, "fn": fparts[-1]})
+
+
+def p_drop_function(ctx, s):
+    i = 2
+    if is_w(s[i], "if"):
+        i = need(s, i + 1, "exists")
+    parts, i = qname(s, i)
+    if len(parts) != 2 or i >= len(s) or not (s[i].kind == "punct" and s[i].text == "("):
+        raise Deny("expected DROP FUNCTION schema.name(argument types)")
+    close = match_paren(s, i)
+    if close < 0 or close != len(s) - 1:
+        raise Deny("DROP FUNCTION must end after the argument list (no CASCADE)")
+    sig = sig_string(parts[1], s[i + 1:close])
+    ctx.targets.add(("function:" if parts[0] == "public" else f"function:{parts[0]}.") + parts[1])
+    return gate(ctx, {"kind": "drop_function", "schema": parts[0], "name": parts[1], "sig": sig})
+
+
+_TRIVIAL_WORDS = {"true", "false", "not", "and", "or", "is", "null", "in", "any", "all", "exists", "select", "from", "distinct", "unknown"}
+
+
+def _where_ok(clause):
+    """A WHERE clause must exist, must reference a column/parameter, and must not be an obvious tautology (TRUE, 1=1, '... OR TRUE').
+    Documented limit: a tautology written some other way cannot be excluded by a lint; the allow-list entry + review cover that."""
+    core = [t for t in clause if not (t.kind == "punct" and t.text in "()")]
+    if not core:
+        return False
+    w = [lw(t) for t in core]
+    if len(core) == 1 and w[0] in ("true", "false", "null"):
+        return False
+    for k, x in enumerate(w):
+        if x == "true" and ((k and w[k - 1] == "or") or (k + 1 < len(w) and w[k + 1] == "or")):
+            return False
+    for k in range(len(core) - 2):
+        if core[k].kind == "num" and core[k + 1].text == "=" and core[k + 2].kind == "num" and core[k].text == core[k + 2].text:
+            return False
+    return any((t.kind in ("qid", "param") or (t.kind == "word" and lw(t) not in _TRIVIAL_WORDS)) for t in core)
+
+
+def _tail_clause(s, start, stops):
+    j = depth0(s, lambda t: lw(t) in stops, start)
+    return s[start:] if j < 0 else s[start:j]
+
+
+def p_update(ctx, s, phase):
+    i = 1
+    if is_w(s[i], "only"):
+        i += 1
+    parts, i = qname(s, i)
+    if len(parts) != 2:
+        raise Deny("UPDATE needs a schema-qualified table (search_path is not trusted)")
+    schema, table = parts
+    if phase == "fn" and schema == "public":
+        return False  # a function body that updates public tables: the table is pinned by public_refs / ddl_targets
+    if i < len(s) and is_w(s[i], "as"):
+        i += 1
+    if i < len(s) and not is_w(s[i], "set") and s[i].kind in ("word", "qid"):
+        i += 1  # alias
+    i = need(s, i, "set")
+    stop = depth0(s, lambda t: is_w(t, "where", "from", "returning"), i)
+    setl = s[i:] if stop < 0 else s[i:stop]
+    cols = []
+    for item in split_commas(setl):
+        if len(item) < 3 or item[0].kind not in ("word", "qid") or not (item[1].kind == "punct" and item[1].text == "="):
+            raise Deny("SET list item is not 'column = expression'")
+        cols.append(ident(item[0]))
+    w = depth0(s, lambda t: is_w(t, "where"), i)
+    has_where = False
+    if w >= 0:
+        has_where = _where_ok(_tail_clause(s, w + 1, {"returning"}))
+        if not has_where:
+            raise Deny("UPDATE WHERE clause is missing or trivially true")
+    if schema != "public":
+        ctx.targets.add(f"rows:{schema}.{table}")
+    return gate(ctx, {"kind": "update_rows", "schema": schema, "table": table, "columns": sorted(set(cols)), "where": has_where})
+
+
+def p_delete(ctx, s, phase):
+    i = need(s, 1, "from")
+    if is_w(s[i], "only"):
+        i += 1
+    parts, i = qname(s, i)
+    if len(parts) != 2:
+        raise Deny("DELETE needs a schema-qualified table")
+    w = depth0(s, lambda t: is_w(t, "where"), i)
+    has_where = False
+    if w >= 0:
+        has_where = _where_ok(_tail_clause(s, w + 1, {"returning"}))
+        if not has_where:
+            raise Deny("DELETE WHERE clause is missing or trivially true")
+    ctx.targets.add(f"rows:{parts[0]}.{parts[1]}")
+    return gate(ctx, {"kind": "delete_from", "schema": parts[0], "table": parts[1], "where": has_where, "in_function": ctx.fn_name})
+
+
+def p_insert(ctx, s, phase):
+    i = need(s, 1, "into")
+    parts, i = qname(s, i)
+    if ctx.role == "ledger" and parts == ["supabase_migrations", "schema_migrations"] and phase == "top":
+        return False
+    if len(parts) != 2:
+        raise Deny("INSERT needs a schema-qualified table")
+    schema, table = parts
+    if phase == "fn" and schema == "public":
+        return False
+    cols = []
+    if i < len(s) and s[i].kind == "punct" and s[i].text == "(" and not (i + 1 < len(s) and is_w(s[i + 1], "select", "with", "values")):
+        close = match_paren(s, i)
+        if close < 0:
+            raise Deny("INSERT column list is not closed")
+        cols = [ident(item[0]) for item in split_commas(s[i + 1:close]) if item and item[0].kind in ("word", "qid")]
+    ctx.targets.add(f"rows:{schema}.{table}")
+    return gate(ctx, {"kind": "insert_rows", "schema": schema, "table": table, "columns": sorted(set(cols))})
+
+
+def p_acl(ctx, s):
+    verb = lw(s[0])
+    on = depth0(s, lambda t: is_w(t, "on"), 1)
+    if on < 0:
+        raise Deny("role membership grant (privilege escalation) or unrecognised ACL statement")
+    privs = []
+    for item in split_commas(s[1:on]):
+        ws = [lw(t) for t in item]
+        if ws and ws[-1] == "privileges":
+            ws = ws[:-1]
+        if len(ws) != 1 or ws[0] is None or ws[0] not in KNOWN_PRIVS:
+            raise Deny("only plain privilege names are accepted (no column lists, no GRANT OPTION FOR)")
+        privs.append(ws[0])
+    i = on + 1
+    otype = "table"
+    if is_w(s[i], "table", "function", "sequence"):
+        otype = lw(s[i])
+        i += 1
+    elif is_w(s[i], "all", "schema", "database", "domain", "language", "foreign", "type", "large", "tablespace", "procedure", "routine"):
+        raise Deny("bulk ACL change or unsupported object type")
+    parts, i = qname(s, i)
+    if len(parts) != 2:
+        raise Deny("schema-qualified object required")
+    fsig = None
+    if otype == "function":
+        if i >= len(s) or not (s[i].kind == "punct" and s[i].text == "("):
+            raise Deny("function ACL needs an argument list")
+        close = match_paren(s, i)
+        if close < 0:
+            raise Deny("function argument list not closed")
+        fsig = sig_string(parts[1], s[i + 1:close])
+        i = close + 1
+    if i >= len(s) or not is_w(s[i], "to" if verb == "grant" else "from"):
+        raise Deny("expected TO/FROM")
+    roles, grant_opt = [], False
+    rest = s[i + 1:]
+    k = 0
+    cur = []
+    items = []
+    while k < len(rest):
+        t = rest[k]
+        if t.kind == "punct" and t.text == ",":
+            items.append(cur)
+            cur = []
+        elif is_w(t, "with") and k + 2 < len(rest) + 0 and is_w(rest[k + 1], "grant") and is_w(rest[k + 2], "option"):
+            grant_opt = True
+            k += 2
+        elif is_w(t, "cascade", "restrict"):
+            pass
+        elif is_w(t, "granted", "group"):
+            raise Deny("GRANTED BY / GROUP is not accepted")
+        else:
+            cur.append(t)
+        k += 1
+    items.append(cur)
+    for it in items:
+        if len(it) != 1 or it[0].kind not in ("word", "qid"):
+            raise Deny("grantee must be a plain role name")
+        r = ident(it[0], False) if it[0].kind == "qid" else it[0].text.lower()
+        if r in ("current_user", "session_user", "current_role"):
+            raise Deny("grantee must be a plain role name")
+        roles.append(r)
+    if not roles or not roles[0]:
+        raise Deny("no grantee")
+    schema, obj = parts
+    ctx.targets.add((("function:" if otype == "function" else "table:") + obj) if schema == "public" else f"acl:{schema}.{obj}")
+    privs_n = sorted(set(privs))
+    gated = schema != "public" or grant_opt or (verb == "grant" and set(roles) & SENSITIVE_GRANTEES)
+    op = {"kind": verb, "schema": schema, "obj": obj, "privileges": privs_n, "roles": sorted(set(roles)), "grant_option": grant_opt,
+          "otype": otype, "sig": fsig}
+    if not gated:
+        _op_needs(ctx, op)
+        return False
+    return gate(ctx, op)
+
+
+def _depth_scan(s):
+    d = 0
+    for t in s:
+        if t.kind == "punct" and t.text == "(":
+            d += 1
+        elif t.kind == "punct" and t.text == ")":
+            d -= 1
+        yield d, t
+
+
+def read_stmt(ctx, s, phase):
+    """select/with/values/table: no writes. Top-level and DO: no SELECT INTO, no FOR UPDATE, no qualified user-function call."""
+    words = [lw(t) for t in s]
+    for k, w in enumerate(words):
+        if w is None:
+            continue
+        if w in ("insert", "delete", "merge", "truncate", "copy", "call", "grant", "revoke", "alter", "drop", "create", "vacuum"):
+            raise Deny(f"'{w}' inside a read statement (data-modifying CTE or similar)")
+        if w == "update":
+            if not (phase == "fn" and k > 0 and words[k - 1] in ("for", "key")):
+                raise Deny("'update' inside a read statement")
+        if w == "into" and phase == "top":
+            raise Deny("SELECT INTO creates a table")
+        if w == "execute":
+            raise Deny("dynamic EXECUTE")
+        if w == "nextval" and phase in ("top", "do"):
+            raise Deny("nextval() changes a sequence")
+    if phase in ("top", "do"):
+        for k in range(len(s) - 3):
+            if (s[k].kind in ("word", "qid") and s[k + 1].kind == "punct" and s[k + 1].text == "." and s[k + 2].kind in ("word", "qid")
+                    and s[k + 3].kind == "punct" and s[k + 3].text == "("):
+                try:
+                    sch = ident(s[k], False)
+                except Deny:
+                    sch = "?"
+                if sch not in ("pg_catalog", "information_schema"):
+                    raise Deny("call of a schema-qualified function inside a read statement")
+    return False
+
+
+def p_alter_table(ctx, s):
+    i = 2
+    if is_w(s[i], "if"):
+        i = need(s, i + 1, "exists")
+    if is_w(s[i], "only"):
+        i += 1
+    parts, i = qname(s, i)
+    if len(parts) != 2 or parts[0] != "public":
+        raise Deny("ALTER TABLE is accepted on public tables only")
+    ctx.targets.add(f"table:{parts[1]}")
+    _need(ctx, "public", parts[1], "owner")
+    for act in split_commas(s[i:]):
+        w = [lw(t) for t in act]
+        ok = (w[:1] == ["add"] or w[:2] == ["validate", "constraint"] or w[:4] in (["enable", "row", "level", "security"], ["force", "row", "level", "security"])
+              or (w[:2] == ["alter", "column"] and w[3:5] in (["set", "default"], ["drop", "default"], ["set", "not"], ["drop", "not"])))
+        if not ok:
+            raise Deny("ALTER TABLE action is not in the accepted list (add column/constraint, alter column default/not null, enable/force RLS)")
+    return False
+
+
+def p_create_index(ctx, s):
+    i = 1
+    if is_w(s[i], "unique"):
+        i += 1
+    i = need(s, i, "index")
+    if is_w(s[i], "concurrently"):
+        raise Deny("CREATE INDEX CONCURRENTLY cannot run inside the transaction")
+    if is_w(s[i], "if"):
+        i = need(s, i + 1, "not")
+        i = need(s, i, "exists")
+    name = ident(s[i])
+    i = need(s, i + 1, "on")
+    if is_w(s[i], "only"):
+        i += 1
+    parts, i = qname(s, i)
+    if len(parts) != 2 or parts[0] != "public":
+        raise Deny("CREATE INDEX is accepted on public tables only")
+    ctx.targets.update({f"index:{name}", f"table:{parts[1]}"})
+    _need(ctx, "public", parts[1], "owner")
+    return False
+
+
+def p_create_table(ctx, s, temp):
+    i = need(s, 2 if temp else 1, "table")
+    if is_w(s[i], "if"):
+        i = need(s, i + 1, "not")
+        i = need(s, i, "exists")
+    parts, i = qname(s, i)
+    if temp:
+        if len(parts) != 1:
+            raise Deny("temporary table must be a bare name")
+        j = i
+        if j < len(s) and is_w(s[j], "on"):
+            j = need(s, j + 1, "commit")
+            if is_w(s[j], "drop"):
+                j += 1
+            elif is_w(s[j], "delete", "preserve"):
+                j = need(s, j + 1, "rows")
+            else:
+                raise Deny("unexpected ON COMMIT action")
+        j = need(s, j, "as")
+        if j >= len(s) or not (is_w(s[j], "select", "with") or (s[j].kind == "punct" and s[j].text == "(")):
+            raise Deny("CREATE TEMP TABLE must be AS SELECT")
+        read_stmt(ctx, s[j:], "top")
+        return False
+    if len(parts) != 2 or parts[0] != "public":
+        raise Deny("CREATE TABLE is accepted in public only")
+    if i >= len(s) or not (s[i].kind == "punct" and s[i].text == "("):
+        raise Deny("CREATE TABLE must list its columns (no AS/LIKE/PARTITION OF)")
+    ctx.targets.add(f"table:{parts[1]}")
+    ctx.tbl_created.add(f"public.{parts[1]}")
+    ctx.need_schema.add("public")
+    return False
+
+
+def p_comment(ctx, s):
+    i = need(s, 1, "on")
+    if not is_w(s[i], "table", "column", "function"):
+        raise Deny("COMMENT ON is accepted for public tables, columns and functions only")
+    kind = lw(s[i])
+    parts, i = qname(s, i + 1)
+    fsig = None
+    if kind == "function":
+        if i >= len(s) or s[i].text != "(":
+            raise Deny("function comment needs an argument list")
+        close = match_paren(s, i)
+        if close < 0:
+            raise Deny("argument list not closed")
+        fsig = sig_string(parts[-1], s[i + 1:close])
+        i = close + 1
+    want = {"table": 2, "column": 3, "function": 2}[kind]
+    if len(parts) != want or parts[0] != "public":
+        raise Deny("COMMENT ON target must be public.<name>")
+    i = need(s, i, "is")
+    if i != len(s) - 1 or not (s[i].kind in ("str", "dq") or is_w(s[i], "null")):
+        raise Deny("COMMENT must be IS 'literal' or IS NULL")
+    ctx.targets.add(("function:" if kind == "function" else "table:") + parts[1])
+    if kind == "function":
+        ctx.need_fn.add(f"public.{fsig}")
+    else:
+        _need(ctx, "public", parts[1], "owner")
+    return False
+
+
+_TYPE_FIRST = {"double", "timestamp", "time", "character", "bit", "national", "interval", "varchar", "char", "with", "without"}
+
+
+def arg_sig(name, toks):
+    """name(type,type) of a CREATE FUNCTION argument list: argument names, modes (OUT is not part of the identity) and defaults dropped."""
     out = []
-    body, gate_out = gate_statements(name, strip_sql(sql), allow or [], used)
-    out += gate_out
-    low = body.lower()
+    for part in split_commas(toks):
+        if not part:
+            continue
+        k = depth0(part, lambda t: is_w(t, "default") or (t.kind == "punct" and t.text == "="))
+        part = part if k < 0 else part[:k]
+        if part and is_w(part[0], "out"):
+            continue
+        if part and is_w(part[0], "in", "inout", "variadic"):
+            part = part[1:]
+        if len(part) >= 2 and part[0].kind in ("word", "qid") and not is_w(part[0], *_TYPE_FIRST):
+            part = part[1:]
+        out.append(norm_text(part))
+    return f"{name}({','.join(out)})"
+
+
+FN_CLAUSE_START = {"language", "security", "set", "as", "stable", "volatile", "immutable", "strict", "called", "leakproof", "parallel", "cost", "rows", "not", "null", "window"}
+FN_CLAUSE_WORDS = {"returns", "setof", "table", "language", "plpgsql", "sql", "security", "definer", "invoker", "set", "search_path", "to",
+                   "public", "pg_temp", "pg_catalog", "stable", "volatile", "immutable", "strict", "as", "leakproof", "not", "parallel",
+                   "safe", "restricted", "unsafe", "cost", "null", "input", "called", "on", "returns", "rows"}
+
+
+def p_create_function(ctx, s, i):
+    parts, i = qname(s, i)
+    if len(parts) != 2 or parts[0] != "public":
+        raise Deny("CREATE FUNCTION is accepted in public only (schema-qualified)")
+    name = parts[1]
+    if i >= len(s) or s[i].text != "(":
+        raise Deny("function argument list expected")
+    close = match_paren(s, i)
+    if close < 0:
+        raise Deny("argument list not closed")
+    body, lang, in_returns, depth = None, None, False, 0
+    for k in range(close + 1, len(s)):
+        t = s[k]
+        if t.kind == "punct" and t.text == "(":
+            depth += 1
+        elif t.kind == "punct" and t.text == ")":
+            depth -= 1
+        elif depth:
+            continue
+        elif t.kind == "dq":
+            if body is not None:
+                raise Deny("two function bodies")
+            body = t
+        elif t.kind == "str" and is_w(s[k - 1], "as"):
+            raise Deny("function body must be dollar-quoted")
+        elif t.kind == "word":
+            w = lw(t)
+            if w in FN_CLAUSE_START:
+                in_returns = False
+            if w == "returns":
+                in_returns = True
+            elif w == "language":
+                if k + 1 >= len(s) or not is_w(s[k + 1], "plpgsql", "sql"):
+                    raise Deny("only LANGUAGE plpgsql or sql is accepted")
+                lang = lw(s[k + 1])
+            elif w == "set" and not (k + 1 < len(s) and is_w(s[k + 1], "search_path")):
+                raise Deny("only SET search_path is accepted in a function header")
+            elif not in_returns and w not in FN_CLAUSE_WORDS:
+                raise Deny("function header clause is not in the accepted list")
+    if body is None or lang is None:
+        raise Deny("function needs LANGUAGE plpgsql|sql and a dollar-quoted body")
+    ctx.targets.add(f"function:{name}")
+    ctx.fn_created.add("public." + arg_sig(name, s[i + 1:close]))
+    ctx.need_schema.add("public")
+    old = ctx.fn_name
+    ctx.fn_name = name
+    try:
+        lint_body(ctx, dq_body(body), "fn")
+    finally:
+        ctx.fn_name = old
+    return False
+
+
+def p_do(ctx, s):
+    i = 1
+    if is_w(s[i], "language"):
+        if i + 1 >= len(s) or not is_w(s[i + 1], "plpgsql"):
+            raise Deny("DO LANGUAGE must be plpgsql")
+        i += 2
+    if i != len(s) - 1 or s[i].kind != "dq":
+        raise Deny("DO needs exactly one dollar-quoted body")
+    lint_body(ctx, dq_body(s[i]), "do")
+    return False
+
+
+def p_set(ctx, s):
+    if (len(s) == 5 and is_w(s[1], "local") and is_w(s[2], "lock_timeout", "statement_timeout") and
+            (s[3].kind == "punct" and s[3].text == "=" or is_w(s[3], "to")) and s[4].kind in ("str", "num")):
+        return False
+    raise Deny("only SET LOCAL lock_timeout/statement_timeout = <literal> is accepted")
+
+
+PREFIX_STOP = {"then", "loop"}
+
+
+def _strip_prefix(s):
+    """plpgsql: peel IF..THEN / ELSIF..THEN / ELSE / BEGIN / DECLARE / FOR..LOOP / WHEN..THEN prefixes, return (head, tail)."""
+    head = []
+    while s:
+        w = lw(s[0])
+        if w in ("else", "begin", "declare", "loop"):
+            head.append(s[0])
+            s = s[1:]
+        elif w in ("if", "elsif", "elseif", "for", "foreach", "while", "when", "exception"):
+            case, k, d = 0, 0, 0
+            cut = -1
+            while k < len(s):
+                t = s[k]
+                if t.kind == "punct" and t.text == "(":
+                    d += 1
+                elif t.kind == "punct" and t.text == ")":
+                    d -= 1
+                elif d == 0 and is_w(t, "case"):
+                    case += 1
+                elif d == 0 and is_w(t, "end") and case:
+                    case -= 1
+                elif d == 0 and case == 0 and is_w(t, "then", "loop"):
+                    cut = k
+                    break
+                k += 1
+            if cut < 0:
+                head.extend(s)
+                return head, []
+            head.extend(s[:cut + 1])
+            s = s[cut + 1:]
+        else:
+            break
+    return head, s
+
+
+GENERIC_START = {"select", "perform", "return", "raise", "end", "null", "exit", "continue", "get", "assert", "open", "close", "fetch",
+                 "move", "case", "if"}
+HARD_DENY_START = {"commit", "rollback", "savepoint", "release", "execute", "call", "vacuum", "reindex", "cluster", "refresh", "listen",
+                   "notify", "unlisten", "prepare", "deallocate", "discard", "load", "import", "reset", "lock", "analyze", "checkpoint",
+                   "copy", "start", "begin_", "do", "security", "explain", "show", "truncate", "merge"}
+
+
+def _anywhere(ctx, toks, phase, allow_into=True):
+    """No data/DDL verbs in a segment that does not START with one."""
+    w = [lw(t) for t in toks]
+    for k, x in enumerate(w):
+        nxt = w[k + 1] if k + 1 < len(w) else None
+        prev = w[k - 1] if k else None
+        if x in ("grant", "revoke", "truncate", "copy", "merge", "vacuum", "execute"):
+            raise Deny(f"'{x}' is not accepted here" + (" (dynamic EXECUTE)" if x == "execute" else ""))
+        if x == "insert" and nxt == "into":
+            raise Deny("INSERT inside a control/read statement")
+        if x == "delete" and nxt == "from":
+            raise Deny("DELETE inside a control/read statement")
+        if x == "update" and prev not in ("for", "do", "key", "on"):
+            raise Deny("UPDATE inside a control/read statement")
+        if x in ("create", "alter", "drop") and nxt in OBJ_WORDS:
+            raise Deny("DDL inside a control/read statement")
+        if x == "lock" and nxt == "table":
+            raise Deny("LOCK TABLE")
+
+
+def lint_body(ctx, text, phase):
+    """plpgsql / SQL function body or DO body. phase: 'do' (runs at apply time) or 'fn' (definition only)."""
+    try:
+        sig = sig_tokens(tokenize(text))
+    except LintError as e:
+        raise Deny(f"body does not tokenize ({e})")
+    check_tokens(ctx, sig, in_body=True)
+    for seg in split_statements(sig):
+        head, tail = _strip_prefix(seg)
+        if head:
+            _anywhere(ctx, head, phase)
+        if not tail:
+            continue
+        first = lw(tail[0])
+        try:
+            accepted = None
+            if first in HARD_DENY_START:
+                raise Deny("dynamic EXECUTE is never accepted" if first == "execute" else f"'{first}' is not accepted inside a body")
+            if first in ("update", "delete", "insert", "grant", "revoke", "set", "create", "alter", "drop", "comment", "with", "values", "table"):
+                accepted = classify(ctx, tail, phase)
+            else:
+                _anywhere(ctx, tail, phase)
+                if first == "select" or first == "perform":
+                    read_stmt(ctx, tail, phase)
+                accepted = False
+        except (Deny, IndexError) as e:
+            ctx.bad(f"statement not accepted ({e if isinstance(e, Deny) else 'cannot be parsed'})")
+            continue
+        if not accepted:
+            _second_net(ctx, tail)
+
+
+def classify(ctx, s, phase="top"):
+    """Return True when accepted through an allow-list entry; raise Deny when the statement class is not accepted."""
+    f = lw(s[0])
+    if f is None:
+        raise Deny("statement does not start with a keyword")
+    if f in ("select", "with", "values", "table"):
+        if f == "with" and phase == "fn":
+            pass
+        return read_stmt(ctx, s, phase)
+    if ctx.role == "readonly":
+        raise Deny("a read-only file may only contain SELECT/WITH statements")
+    if f == "set":
+        return p_set(ctx, s)
+    if f == "do":
+        if phase != "top":
+            raise Deny("nested DO")
+        return p_do(ctx, s)
+    if phase != "top" and f in ("create", "alter", "comment") and not (f == "create" and is_w(s[1], "policy", "trigger", "constraint") or
+                                                                       f == "create" and is_w(s[1], "or") and is_w(s[2], "replace") and is_w(s[3], "trigger")):
+        raise Deny("DDL other than allow-listed policy/trigger statements is not accepted inside a DO/function body")
+    if f == "drop":
+        if is_w(s[1], "policy"):
+            return p_drop_policy_trigger(ctx, s, "policy")
+        if is_w(s[1], "trigger"):
+            return p_drop_policy_trigger(ctx, s, "trigger")
+        if is_w(s[1], "function"):
+            return p_drop_function(ctx, s)
+        raise Deny("DROP is accepted for allow-listed policy/trigger/function only")
+    if f == "create":
+        i = 1
+        if is_w(s[i], "or"):
+            i = need(s, i + 1, "replace")
+        if is_w(s[i], "function"):
+            return p_create_function(ctx, s, i + 1)
+        if i == 1 and is_w(s[1], "policy"):
+            return p_create_policy(ctx, s)
+        if is_w(s[i], "constraint"):
+            i += 1
+        if is_w(s[i], "trigger"):
+            return p_create_trigger(ctx, s, i + 1)
+        if i == 1 and is_w(s[1], "unique", "index"):
+            return p_create_index(ctx, s)
+        if i == 1 and is_w(s[1], "table"):
+            return p_create_table(ctx, s, False)
+        if i == 1 and is_w(s[1], "temp", "temporary"):
+            return p_create_table(ctx, s, True)
+        raise Deny("this CREATE form is not accepted")
+    if f == "alter":
+        if is_w(s[1], "table"):
+            return p_alter_table(ctx, s)
+        raise Deny("this ALTER form is not accepted")
+    if f == "comment":
+        return p_comment(ctx, s)
+    if f == "update":
+        return p_update(ctx, s, phase)
+    if f == "delete":
+        return p_delete(ctx, s, phase)
+    if f == "insert":
+        return p_insert(ctx, s, phase)
+    if f in ("grant", "revoke"):
+        return p_acl(ctx, s)
+    raise Deny(f"statement class '{f}' is not accepted")
+
+
+TXN_BEGIN = (["begin"], ["begin", "transaction"], ["begin", "work"], ["start", "transaction"])
+TXN_COMMIT = (["commit"], ["commit", "transaction"], ["commit", "work"])
+TXN_WORDS = {"begin", "start", "commit", "end", "rollback", "abort", "savepoint", "release", "prepare"}
+
+
+def txn_kind(s):
+    w = [lw(t) for t in s]
+    if w in TXN_BEGIN:
+        return "begin"
+    if w in TXN_COMMIT:
+        return "commit"
+    if w and w[0] in TXN_WORDS and not (w[0] == "prepare" and w[1:2] != ["transaction"]):
+        return "other"
+    return None
+
+
+def check_tokens(ctx, sig, in_body=False):
+    """Token-level refusals that hold everywhere (also inside DO/function bodies)."""
+    for k, t in enumerate(sig):
+        if t.kind == "meta":
+            ctx.bad("contains a backslash outside string literals (psql meta-command)")
+        elif t.kind == "pvar":
+            nxt = sig[k + 1] if k + 1 < len(sig) else None
+            if not (ctx.allow_pvar == "any" or (ctx.allow_pvar and nxt is not None and nxt.kind == "str" and nxt.text == "'created_by'")):
+                ctx.bad("psql variable interpolation (:name / :'name') is not accepted here")
+        elif t.kind == "estr":
+            ctx.bad("forbidden SQL (escape-string literal E'...')")
+        elif t.kind in ("word", "qid"):
+            try:
+                v = ident(t, False)
+            except Deny:
+                continue
+            lo = v.lower() if t.kind == "qid" else v
+            if lo in BAN_WORDS or lo.startswith(BAN_PREFIX):
+                ctx.bad(f"forbidden SQL (function or setting '{lo}' is refused)")
+            if lo.startswith("umkmpro_"):
+                ctx.bad("forbidden SQL (other product object)")
+            if t.kind == "word" and lo == "u" and k + 2 < len(sig) and sig[k + 1].text == "&" and sig[k + 2].kind in ("str", "qid") \
+                    and sig[k + 2].start == sig[k + 1].end:
+                ctx.bad("forbidden SQL (U& unicode-escape literal)")
+            if k + 2 < len(sig) and sig[k + 1].kind == "punct" and sig[k + 1].text == "." and sig[k + 2].kind in ("word", "qid"):
+                try:
+                    nxt = ident(sig[k + 2], False)
+                except Deny:
+                    nxt = ""
+                if lo == "public" and re.match(r"(publoe|mitapeng)", nxt, re.I):
+                    ctx.bad("forbidden SQL (other product object)")
+                if lo == "cron":
+                    ctx.bad("forbidden SQL (cron change)")
+        elif t.kind == "str" and re.search(r"public\.\"?(publoe|mitapeng)|umkmpro_", t.text, re.I):
+            ctx.bad("forbidden SQL (other product object named in a literal)")
+
+
+def _second_net(ctx, s):
+    text = norm_text(s)
     for pat, why in FORBIDDEN:
-        if re.search(pat, low, re.I | re.S):
-            out.append(f"{name}: forbidden SQL ({why})")
-    if re.search(r"\bexecute\s+(?!on\b|function\b|procedure\b)", mask_strings(low)):
-        out.append(f"{name}: forbidden SQL (dynamic EXECUTE)")
-    if has_escape_string(body):
-        out.append(f"{name}: forbidden SQL (escape-string literal E'...')")
-    return out
+        if re.search(pat, text, re.I | re.S):
+            ctx.bad(f"forbidden SQL ({why})")
+    if re.search(r"\bexecute\s+(?!on\b|function\b|procedure\b)", text):
+        ctx.bad("forbidden SQL (dynamic EXECUTE)")
+
+
+def lint_sql(name, sql, role="write", allow=None, used=None, txn="none", literals=(), allow_pvar=False, targets=None, needs=None):
+    """The one entry point. role: write | readonly | ledger.  txn: none (no transaction control) | wrap (BEGIN first, one COMMIT, only
+    SELECTs after it).  Returns [violation, ...]."""
+    ctx = Ctx(name, allow, used, role, txn, set(literals or ()), allow_pvar)
+    try:
+        sig = sig_tokens(tokenize(sql))
+    except LintError as e:
+        return [f"{name}: SQL does not tokenize ({e})"]
+    check_tokens(ctx, sig)
+    stmts = split_statements(sig)
+    lits = {x for lit in (literals or ()) for x in norm_literal(lit)}
+    begins, commits, after_commit = 0, 0, False
+    for idx, s in enumerate(stmts):
+        key = " ".join(t.text.lower() if t.kind == "word" else t.text for t in s)
+        if key in lits:
+            continue
+        tk = txn_kind(s)
+        if tk is not None:
+            if txn != "wrap" or role == "readonly":
+                ctx.bad("transaction control (BEGIN/COMMIT/ROLLBACK/SAVEPOINT/END/ABORT...) is not allowed in this file")
+                continue
+            if tk == "begin":
+                begins += 1
+                if idx != 0:
+                    ctx.bad("BEGIN must be the first statement")
+            elif tk == "commit":
+                commits += 1
+                after_commit = True
+            else:
+                ctx.bad("transaction control other than one BEGIN and one COMMIT is not allowed")
+            continue
+        try:
+            if after_commit and lw(s[0]) not in ("select",):
+                raise Deny("only SELECT may follow the COMMIT (everything else would run outside the atomic transaction)")
+            accepted = classify(ctx, s, "top")
+        except Deny as e:
+            ctx.bad(f"statement not accepted ({e}); first words: {' '.join(norm_text(s[:2]).split()[:2])}")
+            continue
+        except (IndexError, KeyError):
+            ctx.bad("statement not accepted (cannot be parsed)")
+            continue
+        if not accepted and role != "readonly" and lw(s[0]) not in ("do",):
+            _second_net(ctx, s)
+    if txn == "wrap" and role != "readonly" and (begins != 1 or commits != 1 or (stmts and txn_kind(stmts[0]) != "begin")):
+        ctx.bad("a file with its own transaction needs exactly one BEGIN (first) and one COMMIT")
+    if targets is not None:
+        targets.update(ctx.targets)
+    if needs is not None:
+        for q, ks in ctx.need_tables.items():
+            needs["tables"].setdefault(q, set()).update(ks)
+        needs["functions"] |= ctx.need_fn
+        needs["created_fn"] |= ctx.fn_created
+        needs["created_tables"] |= ctx.tbl_created
+        needs["schemas"] |= ctx.need_schema
+    return ctx.out
+
+
+def lint_forbidden(name, sql, allow=None, used=None, txn="none", literals=()):
+    return lint_sql(name, sql, "write", allow, used, txn, literals)
 
 
 def lint_psql_meta(name, sql):
     """psql meta-commands (\\!, \\i, \\copy, \\gset ...) run on the runner host: none is allowed anywhere in a package file."""
-    if "\\" in mask_literals(strip_sql(sql)):
-        return [f"{name}: contains a backslash outside string literals (psql meta-command)"]
-    return []
+    try:
+        sig = sig_tokens(tokenize(sql))
+    except LintError as e:
+        return [f"{name}: SQL does not tokenize ({e})"]
+    return [f"{name}: contains a backslash outside string literals (psql meta-command)"] if any(t.kind == "meta" for t in sig) else []
+
+
+def lint_readonly(name, sql, allow_pvar=False):
+    return lint_sql(name, sql, "readonly", allow_pvar=allow_pvar)
+
+
+def has_txn_control(sql):
+    try:
+        stmts = split_statements(sig_tokens(tokenize(sql)))
+    except LintError:
+        return ["(does not tokenize)"]
+    return [norm_text(s) for s in stmts if txn_kind(s)]
+
+
+def check_native_txn(name, sql):
+    """Shape N: the file carries its OWN transaction: exactly one top-level BEGIN first and one COMMIT last, nothing else."""
+    try:
+        stmts = split_statements(sig_tokens(tokenize(sql)))
+    except LintError as e:
+        return [f"{name}: SQL does not tokenize ({e})"]
+    out = []
+    kinds = [txn_kind(s) for s in stmts]
+    if not stmts or kinds[0] != "begin":
+        out.append(f"{name}: native-transaction file must start with BEGIN")
+    if not stmts or kinds[-1] != "commit":
+        out.append(f"{name}: native-transaction file must end with COMMIT")
+    ctl = [k for k in kinds if k]
+    if len(ctl) != 2 or ctl.count("other"):
+        out.append(f"{name}: expected exactly one BEGIN and one COMMIT at top level, found {len(ctl)} transaction-control statements")
+    return out
+
+
+def _code_streams(sql):
+    """Yield every token stream of a file: the top level and (recursively) every dollar-quoted body that tokenizes."""
+    try:
+        sig = sig_tokens(tokenize(sql))
+    except LintError:
+        return
+    yield sig
+    for t in sig:
+        if t.kind == "dq":
+            yield from _code_streams(dq_body(t))
+
+
+def _text_literals(sql):
+    """Raw text of every literal / dollar body (conservative scan, like the old regex lint)."""
+    try:
+        sig = sig_tokens(tokenize(sql))
+    except LintError:
+        return [sql]
+    out = []
+    for t in sig:
+        if t.kind in ("str", "estr"):
+            out.append(t.text)
+        elif t.kind == "dq":
+            out.append(dq_body(t))
+            out.extend(_text_literals(dq_body(t)))
+    return out
+
+
+def _qualified_pairs(sql):
+    """(schema, object) of every a.b / "a"."b" reference in code, normalised (lenient: odd quoted names are kept as written)."""
+    pairs = set()
+    for sig in _code_streams(sql):
+        for k in range(len(sig) - 2):
+            if sig[k].kind in ("word", "qid") and sig[k + 1].kind == "punct" and sig[k + 1].text == "." and sig[k + 2].kind in ("word", "qid"):
+                try:
+                    pairs.add((ident(sig[k], False).lower() if sig[k].kind == "word" else ident(sig[k], False),
+                               ident(sig[k + 2], False).lower() if sig[k + 2].kind == "word" else ident(sig[k + 2], False)))
+                except Deny:
+                    pass
+    return pairs
+
+
+def ddl_targets(sql):
+    """Objects a migration creates/alters/grants on, e.g. {'function:fn_x','table:prompter_invoices','index:uq_x'}: taken from the
+    statements the lint accepted (so quoting/comments cannot hide one). Policies/triggers/rows/ACLs outside public are listed too."""
+    t = set()
+    lint_sql("targets", sql, "write", allow=None, used=None, txn="wrap" if has_txn_control(sql) else "none", targets=t,
+             allow_pvar="any")
+    return t
+
+
+def public_refs(sql):
+    refs = {b for a, b in _qualified_pairs(sql) if a == "public"}
+    for lit in _text_literals(sql):
+        refs |= {m.group(1).lower() for m in re.finditer(r"\bpublic\.\"?(\w+)", lit, re.I)}
+    return refs
+
+
+FOREIGN_SCHEMAS = "storage|auth|vault|cron|supabase_migrations|extensions|realtime|net|pgsodium|supabase_functions"
+
+
+def foreign_refs(sql):
+    """schema.object references to Supabase-managed schemas (e.g. storage.objects). Opt-in per package (allowed_foreign_refs)."""
+    fs = set(FOREIGN_SCHEMAS.split("|"))
+    refs = {f"{a}.{b}" for a, b in _qualified_pairs(sql) if a in fs}
+    for lit in _text_literals(sql):
+        refs |= {f"{m.group(1).lower()}.{m.group(2).lower()}" for m in re.finditer(rf"\b({FOREIGN_SCHEMAS})\.\"?(\w+)", lit, re.I)}
+    return refs
 
 
 def validate_allow(entries, label="allow"):
@@ -375,7 +1343,9 @@ def validate_allow(entries, label="allow"):
         if k in ("drop_policy", "create_policy", "drop_trigger", "create_trigger"):
             keys |= {"table", "names"} | ({"functions"} if k == "create_trigger" else set())
         elif k == "drop_function":
-            keys |= {"names"}
+            keys |= {"signatures"}
+        elif k == "insert_rows":
+            keys |= {"table", "columns"}
         elif k == "update_rows":
             keys |= {"table", "columns", "require_where"}
         elif k == "delete_from":
@@ -388,7 +1358,7 @@ def validate_allow(entries, label="allow"):
             problems.append(f"{w}: schema must be one of {ALLOW_SCHEMAS}")
         if "table" in keys and not (isinstance(e.get("table"), str) and ident.match(e["table"])):
             problems.append(f"{w}: table must be one literal identifier")
-        lists = [x for x in ("names", "columns", "objects", "roles", "functions", "privileges") if x in keys]
+        lists = [x for x in ("names", "signatures", "columns", "objects", "roles", "functions", "privileges") if x in keys]
         for lk in lists:
             v = e.get(lk)
             if lk == "functions" and v is None:
@@ -399,6 +1369,8 @@ def validate_allow(entries, label="allow"):
             for x in v:
                 if not isinstance(x, str) or not x.strip() or x != x.strip() or re.search(r"[*%?\\]", x) or len(x) > 120:
                     problems.append(f"{w}: {lk} entry must be a literal name (no wildcard, no padding)")
+                elif lk == "signatures" and not (re.fullmatch(r"[a-z_][a-z0-9_]*\([a-z0-9_ ,\[\]]*\)", x) and norm_sig(x) == x):
+                    problems.append(f"{w}: signatures must be canonical name(type,type) with no spaces after commas")
                 elif lk in ("columns", "objects", "roles") and not ident.match(x):
                     problems.append(f"{w}: {lk} entry must be a lower-case identifier")
                 elif lk == "privileges" and x not in KNOWN_PRIVS:
@@ -414,92 +1386,8 @@ def check_unused(entries, used, label):
     return [f"{label}[{i}] is not used by any statement (stale allow-list entry)" for i in range(len(entries)) if i not in used]
 
 
-WRITE_RE = re.compile(r"^\s*(insert|update|delete|drop|alter|create|grant|revoke|truncate|do|call|copy|set|reset|begin|commit)\b", re.I | re.M)
-
-
-def lint_readonly(name, sql):
-    hits = WRITE_RE.findall(strip_sql(sql))
-    return [f"{name}: read-only file contains a '{h.lower()}' statement" for h in sorted(set(hits))]
-
-
-def check_native_txn(name, sql):
-    """Shape N: the file carries its OWN transaction: exactly one top-level BEGIN first and one COMMIT last, nothing else."""
-    body = mask_literals(strip_sql(sql))
-    stmts = [s.strip().lower() for s in body.split(";") if s.strip()]
-    out = []
-    if not stmts or not re.fullmatch(r"(begin|start\s+transaction)(\s+(isolation|read|not|deferrable).*)?", stmts[0], re.S):
-        out.append(f"{name}: native-transaction file must start with BEGIN")
-    if not stmts or stmts[-1] != "commit":
-        out.append(f"{name}: native-transaction file must end with COMMIT")
-    ctl = [s for s in stmts if re.match(r"(begin|start\s+transaction|commit|end|rollback|abort|savepoint|release|prepare\s+transaction|commit\s+prepared)\b", s)]
-    if len(ctl) != 2:
-        out.append(f"{name}: expected exactly one BEGIN and one COMMIT at top level, found {len(ctl)} transaction-control statements")
-    return out
-
-
-def has_txn_control(sql):
-    body = mask_literals(strip_sql(sql))
-    return [s.strip() for s in body.split(";")
-            if re.match(r"\s*(begin|start\s+transaction|commit|end|rollback|abort|savepoint|release)\b", s, re.I)]
-
-
-def ddl_targets(sql):
-    """Objects a migration body creates/alters/grants on, e.g. {'function:fn_x','table:prompter_invoices','index:uq_x'}.
-    v2 additionally recognises policies, triggers, UPDATE/DELETE of rows, ACL changes and DDL outside `public` (schema-qualified)."""
-    b = strip_sql(sql)
-    t = set()
-    for m in re.finditer(r"create\s+(?:or\s+replace\s+)?function\s+public\.(\w+)", b, re.I):
-        t.add("function:" + m.group(1).lower())
-    for m in re.finditer(r"alter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?public\.(\w+)", b, re.I):
-        t.add("table:" + m.group(1).lower())
-    for m in re.finditer(r"create\s+(?:unique\s+)?index\s+(?:if\s+not\s+exists\s+)?(\w+)\s+on\s+public\.(\w+)", b, re.I):
-        t.add("index:" + m.group(1).lower())
-        t.add("table:" + m.group(2).lower())
-    for m in re.finditer(r"\b(?:revoke|grant)\b[^;]*?\bon\s+function\s+public\.(\w+)", b, re.I | re.S):
-        t.add("function:" + m.group(1).lower())
-    for m in re.finditer(r"\b(?:revoke|grant)\b[^;]*?\bon\s+(?!function\b)(?:table\s+)?public\.(\w+)", b, re.I | re.S):
-        t.add("table:" + m.group(1).lower())
-    for m in re.finditer(r"comment\s+on\s+(?:column|table)\s+public\.(\w+)", b, re.I):
-        t.add("table:" + m.group(1).lower())
-    for m in re.finditer(r"comment\s+on\s+function\s+public\.(\w+)", b, re.I):
-        t.add("function:" + m.group(1).lower())
-    # ---- v2 ----
-    for m in re.finditer(r"create\s+table\s+(?:if\s+not\s+exists\s+)?(?!temp\b|temporary\b|unlogged\b)(?:public\.)?(\w+)\s*\(", b, re.I):
-        t.add("table:" + m.group(1).lower())
-    for kind in ("create_policy", "drop_policy", "create_trigger", "drop_trigger"):
-        for m in GATED[kind].finditer(b):
-            g = m.groupdict()
-            t.add(f"{kind.split('_')[1]}:{_id(g['schema'])}.{_id(g['table'])}:{_id(g['name'])}")
-    for m in GATED["drop_function"].finditer(b):
-        g = m.groupdict()
-        t.add(("function:" if _id(g["schema"]) == "public" else f"function:{_id(g['schema'])}.") + _id(g["name"]))
-    for kind in ("update_rows", "delete_from"):
-        for m in GATED[kind].finditer(b):
-            g = m.groupdict()
-            if kind == "update_rows" and _id(g["schema"]) == "public":
-                continue
-            t.add(f"rows:{_id(g['schema'])}.{_id(g['table'])}")
-    for m in GATED["acl"].finditer(b):
-        g = m.groupdict()
-        if _id(g["schema"]) != "public":
-            t.add(f"acl:{_id(g['schema'])}.{_id(g['obj'])}")
-    for m in re.finditer(r"create\s+table\s+(?:if\s+not\s+exists\s+)?(?!temp\b|temporary\b|unlogged\b)(?!public\.)(\w+)\.(\w+)", b, re.I):
-        t.add(f"table:{m.group(1).lower()}.{m.group(2).lower()}")
-    for m in re.finditer(r"comment\s+on\s+(?:column|table)\s+(?!public\.)(\w+)\.(\w+)", b, re.I):
-        t.add(f"table:{m.group(1).lower()}.{m.group(2).lower()}")
-    return t
-
-
-def public_refs(sql):
-    return {m.group(1).lower() for m in re.finditer(r"\bpublic\.(\w+)", strip_sql(sql), re.I)}
-
-
-FOREIGN_SCHEMAS = "storage|auth|vault|cron|supabase_migrations|extensions|realtime|net|pgsodium|supabase_functions"
-
-
-def foreign_refs(sql):
-    """schema.object references to Supabase-managed schemas (e.g. storage.objects). Opt-in per package (allowed_foreign_refs)."""
-    return {f"{m.group(1).lower()}.{m.group(2).lower()}" for m in re.finditer(rf"\b({FOREIGN_SCHEMAS})\.(\w+)", strip_sql(sql), re.I)}
+def check_unused(entries, used, label):
+    return [f"{label}[{i}] is not used by any statement (stale allow-list entry)" for i in range(len(entries)) if i not in used]
 
 
 # --------------------------------------------------------------------------------------------------------------------
@@ -524,13 +1412,13 @@ GUARD_TAGS_DEFAULT = ("PREFLIGHT GAGAL", "PEMERIKSAAN AKHIR GAGAL", "DIBATALKAN"
 
 def validate_probes(spec, label="probes"):
     problems = []
-    if not isinstance(spec, dict) or set(spec) - {"tables", "functions", "schemas", "ledger_insert"}:
+    if not isinstance(spec, dict) or set(spec) - {"tables", "functions", "replaces", "schemas", "ledger_insert"}:
         return [f"{label}: unknown structure"]
     for t in spec.get("tables", []):
         if not (isinstance(t, dict) and TABLE_RE.match(str(t.get("table", ""))) and isinstance(t.get("need"), list) and t["need"]
                 and set(t["need"]) <= PROBE_NEEDS and set(t) <= {"table", "need"}):
             problems.append(f"{label}.tables: each entry needs a literal public/storage table and a non-empty need list")
-    for f_ in spec.get("functions", []):
+    for f_ in list(spec.get("functions", [])) + list(spec.get("replaces", [])):
         if not (isinstance(f_, str) and FUNC_RE.match(f_)):
             problems.append(f"{label}.functions: literal schema.name(argtypes) required")
     for s in spec.get("schemas", []):
@@ -539,41 +1427,63 @@ def validate_probes(spec, label="probes"):
     return problems
 
 
-def derive_probe_spec(pkg):
-    """Privilege probes mirror the package: the allow-lists (+ explicit `probes`) say which rights the apply will need.
-    A package without allow-list/probes (p0-2) has an empty spec and runs no probe: its behaviour does not change."""
-    tables = {}
+def derive_needs(*sqls):
+    """What the apply (and the rollback) statements need: {'tables': {schema.t: {owner,...}}, 'functions': {schema.sig},
+    'replaces': {schema.sig}, 'schemas': {...}} taken from the statements the lint parsed (so it cannot drift from the SQL)."""
+    n = {"tables": {}, "functions": set(), "created_fn": set(), "created_tables": set(), "schemas": set()}
+    for sql in sqls:
+        lint_sql("needs", sql, "write", allow=None, txn="wrap" if has_txn_control(sql) else "none", needs=n, allow_pvar="any")
+    # objects the package itself creates need no pre-existing owner (the rollback may drop/alter what the migration created)
+    return {"tables": {t: k for t, k in n["tables"].items() if t not in n["created_tables"]},
+            "functions": n["functions"] - n["created_fn"], "replaces": n["created_fn"], "schemas": n["schemas"]}
+
+
+def derive_probe_spec(pkg, texts=None):
+    """Privilege probes mirror the package: the allow-lists (+ explicit `probes`) and, when `texts` (migration, rollback SQL) is given,
+    the statements themselves say which rights the apply will need (ownership of altered tables/functions, CREATE on public ...).
+    A package with neither (no allow-list, no texts) has an empty spec and runs no probe."""
+    tables, funcs, repl, schemas = {}, set(), set(), set()
 
     def need(t, *ks):
         tables.setdefault(t, set()).update(ks)
 
     for e in list(pkg.get("allow", [])) + list(pkg.get("rollback_allow", [])):
-        k, s = e["kind"], e["schema"]
+        k, sc = e["kind"], e["schema"]
         if k in ("drop_policy", "create_policy", "drop_trigger"):
-            need(f"{s}.{e['table']}", "owner")
+            need(f"{sc}.{e['table']}", "owner")
         elif k == "create_trigger":
-            need(f"{s}.{e['table']}", "owner", "trigger")
+            need(f"{sc}.{e['table']}", "owner", "trigger")
         elif k == "update_rows":
-            need(f"{s}.{e['table']}", "select", "update")
+            need(f"{sc}.{e['table']}", "select", "update")
+        elif k == "insert_rows":
+            need(f"{sc}.{e['table']}", "insert")
         elif k == "delete_from":
-            need(f"{s}.{e['table']}", "select", "delete")
+            need(f"{sc}.{e['table']}", "select", "delete")
+        elif k == "drop_function":
+            funcs.update(f"{sc}.{x}" for x in e["signatures"])
         elif k in ("revoke", "grant"):
             for o in e["objects"]:
-                need(f"{s}.{o}", "owner")
+                need(f"{sc}.{o}", "owner")
+    if texts:
+        n = derive_needs(*texts)
+        for t, ks in n["tables"].items():
+            need(t, *ks)
+        funcs |= n["functions"]
+        repl |= n["replaces"]
+        schemas |= n["schemas"]
     ex = pkg.get("probes", {})
     for t in ex.get("tables", []):
         need(t["table"], *t["need"])
-    spec = {"tables": [{"table": t, "need": sorted(n)} for t, n in sorted(tables.items())],
-            "functions": sorted(ex.get("functions", [])), "schemas": sorted(ex.get("schemas", [])),
+    spec = {"tables": [{"table": t, "need": sorted(n_)} for t, n_ in sorted(tables.items())],
+            "functions": sorted((funcs - repl) | set(ex.get("functions", []))), "replaces": sorted(repl),
+            "schemas": sorted(schemas | set(ex.get("schemas", []))),
             "ledger_insert": bool(ex.get("ledger_insert") or pkg.get("ledger_verify"))}
-    return spec if (spec["tables"] or spec["functions"] or spec["schemas"] or spec["ledger_insert"]) else None
+    return spec if (spec["tables"] or spec["functions"] or spec["replaces"] or spec["schemas"] or spec["ledger_insert"]) else None
 
 
-def lint_rollback(name, text, pkg, allow, used):
-    body = strip_sql(text)
-    for lit in pkg.get("rollback_allowed_statements", []):  # the rollback may only drop what the migration added, listed literally
-        body = re.sub(re.sub(r"\s+", r"\\s+", re.escape(lit).replace("\\ ", " ")), " ", body, flags=re.I)
-    return lint_forbidden(name, body, allow, used)
+def lint_rollback(name, text, pkg, allow, used, txn="none"):
+    """The rollback may only drop what the migration added, listed LITERALLY (statement equality on tokens, not a text substitution)."""
+    return lint_sql(name, text, "write", allow, used, txn, pkg.get("rollback_allowed_statements", []))
 
 
 def verify_package(root, manifest, pkg_id):
@@ -625,21 +1535,21 @@ def verify_package(root, manifest, pkg_id):
     if problems:  # a malformed allow-list is never used to lint
         return pkg, problems
     used_m, used_r = set(), set()
+    native = shape == "native-txn"
     for k, text in texts.items():
         problems += lint_psql_meta(f"file {k}", text)
         if k == "E":
-            problems += lint_rollback("file E (after removing the allowed rollback statements)", text, pkg, rallow, None)
+            problems += lint_rollback("file E", text, pkg, rallow, None, txn="wrap")
         elif k == "B":
-            problems += lint_forbidden("file B", text, allow, None)
+            problems += lint_sql("file B", text, "write", allow, None, "wrap")
+        elif k == "D":
+            problems += lint_sql("file D", text, "ledger", None, None, "wrap", allow_pvar=True)
         else:
-            problems += lint_forbidden(f"file {k}", text)
+            problems += lint_readonly(f"file {k}", text)
     problems += lint_psql_meta("migration", mig) + lint_psql_meta("rollback", rb)
-    problems += lint_forbidden("migration", mig, allow, used_m)
-    problems += lint_rollback("rollback", rb, pkg, rallow, used_r)
+    problems += lint_sql("migration", mig, "write", allow, used_m, "wrap" if native else "none")
+    problems += lint_rollback("rollback", rb, pkg, rallow, used_r, txn="wrap" if native else "none")
     problems += check_unused(allow, used_m, "allow") + check_unused(rallow, used_r, "rollback_allow")
-    for k in ("A", "C", "F", "S", "G"):
-        if k in texts:
-            problems += lint_readonly(f"file {k}", texts[k])
     b = texts["B"]
     if shape == "wrapped":
         # B = guards + the migration verbatim + post checks; E = the rollback verbatim
@@ -659,13 +1569,16 @@ def verify_package(root, manifest, pkg_id):
         if pkg["files"]["E"]["path"] != pkg["rollback"]["path"] or pkg["files"]["E"]["sha256"] != pkg["rollback"]["sha256"] or texts["E"] != rb:
             problems.append("native-txn shape: file E must be the rollback file itself")
         problems += check_native_txn("migration", mig) + check_native_txn("rollback", rb)
-    if re.search(r"insert\s+into\s+supabase_migrations", strip_sql(b), re.I):
+    b_stmts = split_statements(sig_tokens(tokenize(b)))
+    if any(norm_text(st).startswith("insert into supabase_migrations") for st in b_stmts):
         problems.append("file B writes the migration ledger (only D may)")
-    d = strip_sql(texts["D"])
-    ins = re.findall(r"insert\s+into\s+supabase_migrations\.schema_migrations", d, re.I)
-    if len(ins) != 1 or f"'{pkg['version']}'" not in d or re.search(r"^\s*(update|delete|drop|truncate|alter|create|grant|revoke)\b", d, re.I | re.M):
+    d_sig = sig_tokens(tokenize(texts["D"]))
+    d_stmts = split_statements(d_sig)
+    ins = [st for st in d_stmts if norm_text(st).startswith("insert into supabase_migrations.schema_migrations")]
+    bad_first = [st for st in d_stmts if lw(st[0]) in ("update", "delete", "drop", "truncate", "alter", "create", "grant", "revoke")]
+    if len(ins) != 1 or not any(t.kind == "str" and t.text == f"'{pkg['version']}'" for t in d_sig) or bad_first:
         problems.append("file D must do exactly one ledger INSERT of the manifest version and nothing else")
-    if ":'created_by'" not in texts["D"]:
+    if not any(t.kind == "pvar" and k + 1 < len(d_sig) and d_sig[k + 1].text == "'created_by'" for k, t in enumerate(d_sig)):
         problems.append("file D must take created_by from the runner")
     if pkg.get("ledger_verify"):
         if pkg["migration"]["sha256"] not in texts["D"]:
@@ -732,7 +1645,7 @@ def validate_connection(target, env, manifest):
 # error text (which quotes object names) are never echoed: only the SQLSTATE class and a fixed description. A static test
 # (tests/test_tools.py, AST walk) fails if run_package.py interpolates raw result variables into a log line.
 # --------------------------------------------------------------------------------------------------------------------
-SAFE_CELL_RE = re.compile(r"^(?:t|f|-?\d{1,18}|[0-9a-f]{32}|[0-9a-f]{64}|\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:[+-]\d{2}(?::?\d{2})?|Z)?)?$")
+SAFE_CELL_RE = re.compile(r"^(?:t|f|-?\d{1,19}|[0-9a-f]{32}|[0-9a-f]{64}|\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:[+-]\d{2}(?::?\d{2})?|Z)?)?$")
 COL_RE = re.compile(r"^[A-Za-z0-9_]{1,80}$")
 BUILTIN_ROLES = {"postgres", "supabase_admin", "supabase_storage_admin", "supabase_auth_admin", "supabase_functions_admin",
                  "authenticator", "service_role", "anon", "authenticated", "dashboard_user", "pgbouncer", "pg_database_owner", "linoe_migrator"}
@@ -809,21 +1722,23 @@ def scrub(text, env):
     return text
 
 
-def pg_options(timeouts=None):
+def pg_options(timeouts=None, readonly=False):
     t = {"lock_ms": 3000, "statement_ms": 120000}
     t.update(timeouts or {})
+    # readonly: the server itself refuses writes in A/C/F/S/G and the probes, whatever their text says (defence in depth next to the lint)
     return (f"-c statement_timeout={int(t['statement_ms'])} -c lock_timeout={int(t['lock_ms'])} "
-            "-c idle_in_transaction_session_timeout=60000 -c client_min_messages=warning")
+            "-c idle_in_transaction_session_timeout=60000 -c client_min_messages=warning"
+            + (" -c default_transaction_read_only=on" if readonly else ""))
 
 
-def psql(path, env, variables=None, timeouts=None, tags=None, all_rows=False):
+def psql(path, env, variables=None, timeouts=None, tags=None, all_rows=False, readonly=False):
     """Run a SQL file, return (header, row) of the LAST result set parsed from CSV, or ([], []).
     all_rows=True (single-SELECT files only): (header, [rows])."""
     cmd = ["psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-v", "VERBOSITY=verbose", "--csv", "-d", env.get("PGDATABASE", "postgres"), "-f", path]
     for k, v in (variables or {}).items():
         cmd[1:1] = ["-v", f"{k}={v}"]
     e = dict(env)
-    e["PGOPTIONS"] = pg_options(timeouts)
+    e["PGOPTIONS"] = pg_options(timeouts, readonly)
     e["PGCONNECT_TIMEOUT"] = "20"
     r = subprocess.run(cmd, env=e, capture_output=True, text=True)
     if r.returncode != 0:
@@ -848,10 +1763,13 @@ def psql_at(path, env, sep):
 HARUS = re.compile(r"_harus_(true|false|ge_(\d+)|(\d+))$")
 
 
-def evaluate(header, row, baseline=None):
+def evaluate(header, row, baseline=None, require_harus=False):
     """Return (failures, notes). The expectation is encoded in the column NAME (_harus_*, _catat, _samakan_A, _info)."""
     fails, notes = [], []
     base = {}
+    if require_harus and (not header or not any(HARUS.search(h) for h in header)):
+        # an empty result or a result without a single _harus_* column proves nothing: it is a failure, never a silent pass
+        return ["result has no _harus_* expectation column (empty result)"], notes
     if baseline:
         for h, v in zip(*baseline):
             if h.endswith("_catat"):
@@ -922,12 +1840,13 @@ class Report:
 
 PROBE_SQL = os.path.join(HERE, "privilege_probe_readonly.sql")
 LEDGER_SQL = os.path.join(HERE, "ledger_verify_readonly.sql")
+LEDGER_PRE_SQL = os.path.join(HERE, "ledger_precheck_readonly.sql")
 PROBE_STATUS = ("PASS", "BLOCK", "UNKNOWN", "INFO")
 
 
 def run_probes(spec, env, rep, tags=None):
     """Read-only privilege probes. Returns (n_pass, n_block, n_unknown). Prints probe id + status only (no object names)."""
-    h, rows = psql(PROBE_SQL, env, {"probe_spec": json.dumps(spec, separators=(",", ":"))}, tags=tags, all_rows=True)
+    h, rows = psql(PROBE_SQL, env, {"probe_spec": json.dumps(spec, separators=(",", ":"))}, tags=tags, all_rows=True, readonly=True)
     if h != ["probe", "status", "info"]:
         raise Stop("privilege probe returned an unexpected shape")
     npass = nblock = nunk = 0
@@ -980,7 +1899,8 @@ def main(argv=None):
         rep.add(f"- PASS connection policy ({a.target})")
         tags = tuple(pkg.get("guard_tags", GUARD_TAGS_DEFAULT))
         tmo = pkg.get("timeouts")
-        spec = derive_probe_spec(pkg)
+        with open(os.path.join(a.root, pkg["migration"]["path"]), encoding="utf-8") as fm_, open(os.path.join(a.root, pkg["rollback"]["path"]), encoding="utf-8") as fr_:
+            spec = derive_probe_spec(pkg, [fm_.read(), fr_.read()])
         audit_sql = os.path.join(a.root, "supabase/prod-packages/tools/owner_audit_readonly.sql")
         f = lambda k: os.path.join(a.root, pkg["files"][k]["path"])
         if a.mode == "owner-audit":
@@ -1002,18 +1922,18 @@ def main(argv=None):
             if kv.get("login_superuser") == "true" or kv.get("login_anggota_postgres") == "true" or kv.get("login_anggota_supabase_admin") == "true":
                 raise Stop("login role is superuser or a member of postgres/supabase_admin: refused until a separate approved change sets approved_privileged_role")
             rep.add("- PASS role is not a superuser and not a member of postgres/supabase_admin")
-        hdr, row = psql(f("S"), env, tags=tags)
+        hdr, row = psql(f("S"), env, tags=tags, readonly=True)
         state = state_of(hdr, row, pkg)
         rep.add(f"- state: {state}")
 
         def run_check(key, label, baseline=None):
-            h, r = psql(f(key), env, tags=tags)
+            h, r = psql(f(key), env, tags=tags, readonly=True)
             bad = check_log_safe(h, r, skip=("keadaan",))
             if bad:
                 for x in bad:
                     rep.add(f"- FAIL {label}: {x}")
                 raise Stop(f"{label} produced output outside the log-safe grammar")
-            fails, notes = evaluate(h, r, baseline)
+            fails, notes = evaluate(h, r, baseline, require_harus=True)
             for n in notes:
                 rep.add(f"    note {label}: {n}")
             if fails:
@@ -1033,19 +1953,32 @@ def main(argv=None):
         def ledger_check():
             if not pkg.get("ledger_verify"):
                 return
-            h, r = psql(LEDGER_SQL, env, {"ver": pkg["version"], "nm": pkg["name"], "sha": pkg["migration"]["sha256"]}, tags=tags)
-            fails, _ = evaluate(h, r)
+            h, r = psql(LEDGER_SQL, env, {"ver": pkg["version"], "nm": pkg["name"], "sha": pkg["migration"]["sha256"]}, tags=tags, readonly=True)
+            fails, _ = evaluate(h, r, require_harus=True)
             if fails:
                 for x in fails:
                     rep.add(f"- FAIL ledger verification: {x}")
                 raise Stop("ledger verification did not hold")
             rep.add("- PASS ledger row: present once, name and SHA-256 match the manifest")
 
+        def ledger_precheck():
+            """Before B and again before D: the version and the NAME must not be in the ledger yet (a duplicate name would make D's ON CONFLICT silently record nothing)."""
+            if not pkg.get("ledger_verify"):
+                return
+            h, r = psql(LEDGER_PRE_SQL, env, {"ver": pkg["version"], "nm": pkg["name"]}, tags=tags, readonly=True)
+            fails, _ = evaluate(h, r, require_harus=True)
+            if fails:
+                for x in fails:
+                    rep.add(f"- FAIL ledger pre-check: {x}")
+                raise Stop("ledger pre-check did not hold: version or name already in the ledger; nothing was written")
+            rep.add("- PASS ledger pre-check: neither the version nor the name is in the ledger yet")
+
         vars_ = {"created_by": f"github-actions:{a.run_id}:{(a.sha or 'local')[:12]}"}
         if a.mode == "verify-only":
             if state == "PRE":
                 run_check("A", "A preflight")
                 probe_gate()
+                ledger_precheck()
             elif state == "APPLIED_UNRECORDED":
                 run_check("C", "C verification (applied, not yet recorded in the ledger; no preflight baseline)")
                 rep.add("- NEXT: run mode record-ledger")
@@ -1058,19 +1991,25 @@ def main(argv=None):
                 raise Stop(f"apply refused: state is {state}, not PRE (nothing was run)")
             base = run_check("A", "A preflight")
             probe_gate()
+            ledger_precheck()
             try:
                 h, r = psql(f("B"), env, timeouts=tmo, tags=tags)
             except Stop as e:
-                try:  # B is one transaction: report the state afterwards so the Summary proves nothing was left half-done
-                    h2, r2 = psql(f("S"), env, tags=tags)
-                    rep.add(f"- state after the failed B: {state_of(h2, r2, pkg)} (B is atomic: a failure leaves the database as it was)")
+                try:  # report the state afterwards: only when it is PRE do we say the database was left as it was
+                    h2, r2 = psql(f("S"), env, tags=tags, readonly=True)
+                    st2 = state_of(h2, r2, pkg)
+                    if st2 == "PRE":
+                        rep.add("- state after the failed B: PRE (B is a single transaction: one BEGIN, one COMMIT, nothing after COMMIT but SELECT; checked by the lint)")
+                    else:
+                        rep.add(f"- state after the failed B: {st2}. STATE TIDAK PRE: periksa manual (jangan jalankan apa pun lagi sebelum dicek).")
                 except Stop:
-                    rep.add("- state after the failed B could not be read")
+                    rep.add("- state after the failed B could not be read. STATE TIDAK PRE: periksa manual.")
                 raise e
             rep.add(f"- PASS B apply ({len(r)} result columns)")
             run_check("C", "C verification (compared with A)", baseline=base)
+            ledger_precheck()
             h, r = psql(f("D"), env, vars_, tags=tags)
-            fails, _ = evaluate(h, r)
+            fails, _ = evaluate(h, r, require_harus=True)
             if fails:
                 for x in fails:
                     rep.add(f"- FAIL D ledger: {x}")
@@ -1082,8 +2021,9 @@ def main(argv=None):
             if state != "APPLIED_UNRECORDED":
                 raise Stop(f"record-ledger refused: state is {state}")
             run_check("C", "C verification (no preflight baseline)")
+            ledger_precheck()
             h, r = psql(f("D"), env, vars_, tags=tags)
-            fails, _ = evaluate(h, r)
+            fails, _ = evaluate(h, r, require_harus=True)
             if fails:
                 raise Stop("D did not hold: " + "; ".join(fails))
             rep.add("- PASS D ledger recorded")
@@ -1093,12 +2033,13 @@ def main(argv=None):
             if state not in ("APPLIED_UNRECORDED", "DONE"):
                 raise Stop(f"rollback refused: state is {state}")
             h, r = psql(f("E"), env, timeouts=tmo, tags=tags)
-            fails, _ = evaluate(h, r)
+            # E must prove something: its own _harus_* result, or (packages with G) the G check that follows; never an empty pass
+            fails, _ = evaluate(h, r, require_harus="G" not in pkg["files"])
             if fails:
                 raise Stop("E result did not hold: " + "; ".join(fails))
             if "G" in pkg["files"]:
                 run_check("G", "G state after rollback")
-                h2, r2 = psql(f("S"), env, tags=tags)
+                h2, r2 = psql(f("S"), env, tags=tags, readonly=True)
                 after = state_of(h2, r2, pkg)
                 rep.add(f"- state after rollback: {after}")
                 if after not in ("PRE", "ROLLED_BACK"):

@@ -25,7 +25,7 @@ STORAGE_ALLOW = [
     {"kind": "create_policy", "schema": "storage", "table": "objects", "names": ["FX tenant select"]},
     {"kind": "drop_trigger", "schema": "public", "table": "fx_audit_logs", "names": ["trg_fx"]},
     {"kind": "create_trigger", "schema": "public", "table": "fx_audit_logs", "names": ["trg_fx"], "functions": ["fn_fx"]},
-    {"kind": "drop_function", "schema": "public", "names": ["fn_fx"]},
+    {"kind": "drop_function", "schema": "public", "signatures": ["fn_fx()"]},
     {"kind": "update_rows", "schema": "storage", "table": "buckets", "columns": ["public"]},
     {"kind": "delete_from", "schema": "public", "table": "fx_evidence", "in_function": "fn_fx_purge"},
     {"kind": "revoke", "schema": "storage", "objects": ["objects"], "privileges": ["truncate"], "roles": ["anon", "authenticated"]},
@@ -147,7 +147,10 @@ class AllowlistIsNotGlobal(unittest.TestCase):
         self.assertTrue(lint("update storage.buckets set owner = null where id = 'x';", STORAGE_ALLOW)[0])
         self.assertTrue(lint("update storage.buckets set public = false, file_size_limit = 1 where id = 'x';", STORAGE_ALLOW)[0])
         self.assertEqual(lint("update storage.buckets b set public = false where b.id = 'x';", STORAGE_ALLOW)[0], [])
-        self.assertEqual(lint("update public.t set a = 1 where b = 2;")[0], [])  # public UPDATE inside migrations stays as before
+        # v2.1 (QA P1-2): an UPDATE of a PUBLIC table is gated too (only a function BODY that is merely defined may update public tables)
+        self.assertTrue(lint("update public.t set a = 1 where b = 2;")[0])
+        pub = STORAGE_ALLOW + [{"kind": "update_rows", "schema": "public", "table": "t", "columns": ["a"]}]
+        self.assertEqual(lint("update public.t set a = 1 where b = 2;", pub)[0], [])
 
     def test_sensitive_grants_and_grant_option(self):
         self.assertTrue(lint("grant select on public.t to anon;", STORAGE_ALLOW)[0])
@@ -183,8 +186,8 @@ class AllowlistIsNotGlobal(unittest.TestCase):
                       {"kind": "create_policy", "schema": "storage", "table": "objects", "names": [old]},
                       {"kind": "update_rows", "schema": "storage", "table": "buckets", "columns": ["public"]}]
         u1, u2 = set(), set()
-        self.assertEqual(rp.lint_forbidden("l1", mig, up_allow, u1), [])
-        self.assertEqual(rp.lint_forbidden("l1.down", down, down_allow, u2), [])
+        self.assertEqual(rp.lint_forbidden("l1", mig, up_allow, u1, txn="wrap"), [])
+        self.assertEqual(rp.lint_forbidden("l1.down", down, down_allow, u2, txn="wrap"), [])
         self.assertEqual(rp.check_unused(up_allow, u1, "a"), [])
         self.assertEqual(rp.check_unused(down_allow, u2, "a"), [])
         self.assertEqual(rp.check_native_txn("l1", mig), [])
@@ -192,7 +195,7 @@ class AllowlistIsNotGlobal(unittest.TestCase):
         # drop one name from the list -> the same real file is rejected again
         weaker = copy.deepcopy(up_allow)
         weaker[1]["names"] = pol[:3]
-        self.assertTrue(rp.lint_forbidden("l1", mig, weaker, set()))
+        self.assertTrue(rp.lint_forbidden("l1", mig, weaker, set(), txn="wrap"))
 
     def test_p02_files_are_untouched_by_the_new_gates(self):
         m = rp.load_manifest(ROOT)
@@ -363,8 +366,8 @@ class Probes(unittest.TestCase):
     def test_tool_sql_files_are_read_only(self):
         for f in ("privilege_probe_readonly.sql", "ledger_verify_readonly.sql", "catalog_snapshot_ext.sql", "catalog_snapshot.sql", "owner_audit_readonly.sql"):
             sql = open(os.path.join(ROOT, "supabase/prod-packages/tools", f)).read()
-            self.assertEqual(rp.lint_readonly(f, sql), [], f)
-            self.assertEqual(rp.lint_forbidden(f, sql), [], f)
+            self.assertEqual(rp.lint_readonly(f, sql, allow_pvar="any"), [], f)
+            self.assertEqual(rp.lint_sql(f, sql, "write", allow_pvar="any"), [], f)
             self.assertEqual(rp.lint_psql_meta(f, sql), [], f)
 
     def test_probe_output_is_validated_before_printing(self):
@@ -414,9 +417,9 @@ class LogSafety(unittest.TestCase):
         self.assertIn("authentication", rp.safe_error('FATAL: password authentication failed for user "x"', {}))
 
     def test_cells(self):
-        for ok in ("t", "f", "0", "-3", "123456789012345678", "a" * 32, "b" * 64, "", "2026-11-27 10:00:00+00", "2026-11-27T10:00:00.123456Z"):
+        for ok in ("t", "f", "0", "-3", "123456789012345678", "9223372036854775807", "-9223372036854775808", "a" * 32, "b" * 64, "", "2026-11-27 10:00:00+00", "2026-11-27T10:00:00.123456Z"):
             self.assertEqual(rp.check_log_safe(["c"], [ok]), [], ok)
-        for bad in ("storage.objects", "CANARY_OTHER_POLICY_zq81", "FX tenant all", "a" * 31, "1234567890123456789", "t,f", "x" * 100):
+        for bad in ("storage.objects", "CANARY_OTHER_POLICY_zq81", "FX tenant all", "a" * 31, "12345678901234567890", "t,f", "x" * 100):
             self.assertTrue(rp.check_log_safe(["c"], [bad]), bad)
         self.assertEqual(rp.safe_cell("CANARY_x"), "<withheld len=8>")
         self.assertEqual(rp.safe_cell("t"), "'t'")
@@ -470,6 +473,244 @@ class LogSafety(unittest.TestCase):
         tree = ast.parse(bad)
         found = [n for n in ast.walk(tree) if isinstance(n, ast.Name) and n.id == "r"]
         self.assertTrue(found)
+
+
+class QaRegressions(unittest.TestCase):
+    """Independent QA of PR #188 (c3188cf): each trick that made the v2.0 regex lint blind, plus variants. All must stay rejected."""
+    ALLOW = STORAGE_ALLOW + [{"kind": "update_rows", "schema": "public", "table": "t", "columns": ["a"]}]
+
+    def bad(self, sql, txn="none", allow=None, role="write"):
+        out = rp.lint_sql("t", sql, role, self.ALLOW if allow is None else allow, set(), txn)
+        self.assertTrue(out, sql)
+        return out
+
+    # ---- P1-1: comment openers hidden in literals / identifiers --------------------------------------------------------
+    def test_fake_comment_in_string_does_not_hide_a_psql_meta_command(self):
+        for q in ["select '/*';\n\\! echo pwned\nselect '*/';", "select $$/*$$;\n\\! id\nselect $$*/$$;", "select $a$/*$a$;\n\\! id\nselect $a$*/$a$;",
+                  'select "/*" from t;\n\\! id\nselect "*/" from t;', "select '/*' as a, '--' as b;\n\\! id\nselect '*/';",
+                  "select 1;\n/* a /* b */ still comment */ \\! id\n"]:
+            sql = q.replace("\\n", "\n")
+            self.assertTrue(any("psql meta-command" in x for x in self.bad(sql)), sql)
+            self.assertTrue(rp.lint_psql_meta("t", sql), sql)
+
+    def test_fake_comment_in_string_does_not_hide_drop_policy_outside_the_allowlist(self):
+        for lit in ("'/*'", "$$/*$$", '"/*"', "$x$/*$x$"):
+            end = lit.replace("/*", "*/")
+            sql = f'select {lit} as a;\ndrop policy "CANARY other" on storage.objects;\nselect {end} as b;'
+            self.assertTrue(any("allow-list" in x for x in self.bad(sql)), sql)
+
+    def test_fake_comment_does_not_hide_an_early_commit(self):
+        sql = "begin;\nselect '/*';\ncommit;\ncreate table public.x(a int);\nselect '*/';\ncommit;"
+        self.assertTrue(any("COMMIT" in x for x in self.bad(sql, txn="wrap")), sql)
+        for sql in ["begin;\nselect 1;\ncommit;\nupdate public.t set a = 1 where b = 2;", "begin;\nselect 1;\ncommit;\ncommit;",
+                    "begin;\nselect 1;\nrollback;\ncommit;", "begin;\nsavepoint a;\ncommit;", "begin;\nselect 1;\nend;\ncommit;", "begin;\nabort;\ncommit;",
+                    "begin;\nbegin;\nselect 1;\ncommit;", "select 1;\nbegin;\ncommit;", "begin;\nselect 1;"]:
+            self.bad(sql, txn="wrap")
+        # wrapped-shape migration/rollback files carry no transaction control at all
+        for kw in ("commit", "begin", "rollback", "savepoint a", "end", "abort", "release a", "start transaction", "prepare transaction 'x'"):
+            self.assertTrue(any("transaction control" in x for x in self.bad(f"select 1;\n{kw};", txn="none")), kw)
+        self.assertEqual(rp.lint_sql("t", "begin;\nselect 1;\ncommit;\nselect 2;", "write", [], set(), "wrap"), [])
+
+    def test_unterminated_or_odd_tokens_fail_closed(self):
+        for sql in ["select 1; /* open", "select 'x", 'select "x', "select $a$ x", "/* a /* b */ \\! id", "select E'\\'; \\! id\nselect E'\\'"]:
+            self.bad(sql)
+
+    def test_escape_strings_and_unicode_escapes_are_rejected(self):
+        for sql in ["select E'\\'';\n\\! id\nselect E'\\'';", "select e'a';", "select U&'\\0041';", 'select U&"\\0041" from t;']:
+            self.bad(sql)
+
+    def test_backslash_and_psql_variables_inside_literals_are_data(self):
+        self.assertEqual(rp.lint_sql("t", "select '\\! id', $$ \\! id $$, \"a\\b\" from t;", "readonly"), [])
+        self.assertEqual(rp.lint_psql_meta("t", "-- \\! in a comment\nselect 1; /* \\! */"), [])
+        for sql in ["select :x;", "select :'x';", 'select :"x";', "select 1 \\gset", "select 1 \\g", "\\i x.sql", "select 1;\n\\copy t to 'x'"]:
+            self.bad(sql)
+        self.assertEqual(rp.lint_sql("t", "select a::text, b[1:2] from t;", "readonly"), [])
+
+    def test_copy_program_and_server_files(self):
+        for sql in ["copy t from program 'id';", "copy (select 1) to program 'id';", "select pg_read_file('x');", "select lo_import('x');"]:
+            self.bad(sql)
+
+    # ---- P1-2: default-deny per statement -------------------------------------------------------------------------------
+    NEGATIVE = [
+        "insert into storage.buckets (id) values ('x');", "insert into public.unlisted (a) values (1);", "insert into public.t values (1);",
+        "update storage.objects set name = 'x' where id = 1;", "update public.unlisted set a = 1 where b = 2;", "delete from storage.objects where id = 1;",
+        'alter policy "x" on storage.objects using (true);', "alter table storage.objects add column x int;", "alter table public.t owner to postgres;",
+        "alter table public.t disable row level security;", "alter table public.t drop column a;", "alter table public.t rename to u;",
+        "alter table public.t alter column a type text;", "alter table public.t set schema storage;",
+        "create function storage.f() returns void language sql as $$ select 1 $$;", "create function public.f() returns void language plpythonu as $$ x $$;",
+        "create function f() returns void language sql as $$ select 1 $$;", "create function public.f() returns void language sql as $$ select 1 $$ set role postgres;",
+        "comment on table storage.objects is 'x';", "comment on policy x on storage.objects is 'x';", "create index i on storage.objects (id);",
+        "create index concurrently i on public.t (a);", "create index i on t (a);", "copy public.t to stdout;", "lock table public.t;", "vacuum public.t;",
+        "alter function public.f() security invoker;", "alter schema storage rename to x;", "alter function storage.f() owner to x;",
+        "do $$ begin execute 'select 1'; end $$;", "do language plpython3u $$ x $$;", "do $$ begin delete from storage.objects where id = 1; end $$;",
+        "do $$ begin update storage.objects set name = 'x' where id = 1; end $$;", "do $$ begin insert into storage.buckets (id) values ('x'); end $$;",
+        "do $$ begin perform set_config('x', 'y', false); end $$;", "do $$ begin create table public.zz (a int); end $$;",
+        "do $$ begin commit; end $$;", "do $$ begin drop policy x on storage.objects; end $$;", "do $$ begin grant select on storage.objects to anon; end $$;",
+        "create table storage.t (a int);", "create table public.t as select 1;", "create table public.t (like storage.objects);" if False else "create table public.t2 as select 1;",
+        "create view public.v as select 1;", "create sequence public.s;", "create schema x;", "create extension x;", "create type public.t as enum ('a');",
+        "refresh materialized view public.m;", "reindex table public.t;", "cluster public.t;", "analyze public.t;", "listen x;", "notify x;", "prepare p as select 1;",
+        "declare c cursor for select 1;", "explain select 1;", "show all;", "reset all;", "set search_path = public;", "set statement_timeout = 0;",
+        "select 1 into public.copy1;", "select * into public.copy1 from public.t;", "with d as (delete from public.t where a = 1 returning *) select * from d;",
+        "select nextval('x');", "select public.fn_x();", "select storage.fn();", "select 1 for update;", "values (1);" if False else "call public.p();",
+        "grant select on public.t to anon;", "grant select on public.t to authenticated;", "grant select on public.t to public;",
+        "grant select on storage.objects to service_role;", "grant select on schema public to x;", "grant usage on schema public to x;",
+        "grant all on all tables in schema public to x;", "grant postgres to x;", "revoke select (a) on public.t from anon;",
+        "drop table public.t;", "drop index public.i;", "truncate public.t;", "drop function public.fn_unlisted();", "drop function storage.fn_fx();",
+    ]
+
+    def test_default_deny_rejects_every_unlisted_statement_class(self):
+        for sql in self.NEGATIVE:
+            if sql in ("select 1 for update;",):
+                continue
+            self.bad(sql)
+
+    def test_all_gated_classes_are_exact_not_prefix(self):
+        for sql in ['drop policy "FX tenant all" on storage.objects cascade;', 'drop policy "FX tenant all" on storage.objects, storage.buckets;',
+                    'drop policy a on t1, t2;', 'drop policy "FX tenant all" on storage.objects restrict;', 'drop policy if exists on storage.objects;',
+                    "drop function public.fn_fx(uuid);", "drop function public.fn_fx;", "drop function public.fn_fx() cascade;",
+                    "drop function public.fn_fx(), public.fn_other();",
+                    "create trigger trg_fx before update on public.fx_audit_logs for each row execute function public.fn_other();",
+                    "create trigger trg_fx before update on public.fx_audit_logs for each row execute function auth.fn_fx();"]:
+            self.bad(sql)
+
+    def test_drop_function_matches_the_signature_not_just_the_name(self):
+        ok = [{"kind": "drop_function", "schema": "public", "signatures": ["fn_fx(uuid,text)"]}]
+        self.assertEqual(rp.lint_sql("t", "drop function public.fn_fx(uuid, text);", "write", ok, set()), [])
+        self.assertEqual(rp.lint_sql("t", "drop function public.fn_fx(p_a uuid, text);", "write", ok, set())[:0], [])
+        for sql in ["drop function public.fn_fx();", "drop function public.fn_fx(uuid);", "drop function public.fn_fx(text, uuid);", "drop function public.fn_fx(uuid, text, int);"]:
+            self.bad(sql, allow=ok)
+        self.assertTrue(rp.validate_allow([{"kind": "drop_function", "schema": "public", "names": ["fn_fx"]}]))
+        self.assertTrue(rp.validate_allow([{"kind": "drop_function", "schema": "public", "signatures": ["fn_fx(uuid, text)"]}]))
+
+    # ---- P1-3: quoted identifiers are normalised before every guard -----------------------------------------------------
+    def test_quoted_identifiers_are_normalised_before_the_guards(self):
+        for sql in ['select 1 from public."publoe_x";', 'select 1 from "public"."mitapeng_x";', 'select 1 from "public" . "publoe_x";',
+                    'select 1 from public . /* c */ publoe_x;', 'select 1 from "public".umkmpro_x;', 'select "umkmpro_x" from t;',
+                    'select 1 from "cron"."job";', 'select storage."fn"();', 'select "storage"."fn"();', 'select "set_config"(\'a\', \'b\', true);',
+                    'select pg_catalog."set_config"(\'a\', \'b\', true);', 'select "pg_advisory_lock"(1);', 'select dblink_exec(\'x\', \'y\');']:
+            self.bad(sql)
+        # the same names as plain text are rejected the same way
+        self.assertEqual(rp.public_refs('select 1 from public."x_t", "public"."y_t", public . z_t;'), {"x_t", "y_t", "z_t"})
+        self.assertEqual(rp.foreign_refs('select 1 from "storage"."objects", storage . buckets;'), {"storage.objects", "storage.buckets"})
+        self.assertIn("Foo", rp.public_refs('select 1 from public."Foo";'))  # mixed case is kept as written -> never in an allow-list
+
+    def test_quoted_names_in_gated_statements_are_normalised_or_rejected(self):
+        allow = [{"kind": "drop_policy", "schema": "storage", "table": "objects", "names": ["x"]}]
+        for sql in ['drop policy x on "storage"."objects";', 'drop policy "x" on storage."objects";', 'DROP POLICY X ON STORAGE.OBJECTS;']:
+            self.assertEqual(rp.lint_sql("t", sql, "write", allow, set()), [], sql)
+        for sql in ['drop policy x on "Storage"."objects";', 'drop policy x on storage."Objects";', 'drop policy x on "storage"."obj ects";',
+                    'drop policy x on storage."objects""";', 'drop policy "X" on storage.objects;']:
+            self.bad(sql, allow=allow)
+        self.assertEqual(rp.ddl_targets('create function "public"."fn_q"() returns void language sql as $$ select 1 $$;'), {"function:fn_q"})
+        self.assertEqual(rp.ddl_targets('alter table public."t_q" add column a int;'), {"table:t_q"})
+
+    # ---- P2: UPDATE gating ----------------------------------------------------------------------------------------------
+    def test_update_gating(self):
+        al = [{"kind": "update_rows", "schema": "storage", "table": "buckets", "columns": ["public"]}]
+        good = "update storage.buckets set public = false where id = 'x';"
+        self.assertEqual(rp.lint_sql("t", good, "write", al, set()), [])
+        for sql in ["update storage.buckets set public = false where true;", "update storage.buckets set public = false where 1 = 1;",
+                    "update storage.buckets set public = false where (true);", "update storage.buckets set public = false where id = 'x' or true;",
+                    "update storage.buckets set public = false;", "update storage.buckets set public = false from storage.objects;",
+                    "update buckets set public = false where id = 'x';", "update storage.buckets set (public, owner) = (false, null) where id = 'x';",
+                    "update storage.buckets set public = false, owner = null where id = 'x';",
+                    "update storage.buckets set public = (select 1 as owner), owner = 'x' where id = 'x';",
+                    "update storage.buckets set public = false where id = 'x'; update storage.buckets set owner = null where id = 'x';",
+                    "update storage.objects set public = false where id = 'x';", "update only storage.buckets set owner = 'a' where id = 'x';",
+                    "update storage.buckets set public = false where null;"]:
+            self.bad(sql, allow=al)
+        self.assertEqual(rp.lint_sql("t", "update storage.buckets b set public = (select true) where b.id = 'x' and b.public is distinct from true;", "write", al, set()), [])
+
+    def test_search_path_cannot_make_an_update_unqualified(self):
+        self.bad("set search_path = storage;\nupdate buckets set public = false where id = 'x';")
+        self.bad("set local search_path = storage;")
+
+    def test_set_config_is_refused_everywhere_even_when_concatenated(self):
+        for sql in ["select set_config('ro' || 'le', 'postgres', true);", "do $$ begin perform set_config('ro' || 'le', 'postgres', true); end $$;",
+                    "create function public.f() returns void language plpgsql as $$ begin perform set_config('a', 'b', true); end $$;",
+                    "select set_config(c, 'postgres', true) from (select 'role' as c) q;"]:
+            self.assertTrue(any("set_config" in x for x in self.bad(sql)), sql)
+
+    def test_read_only_files_are_select_only(self):
+        for sql in ["select 1; insert into x values (1);", "select 1; set local lock_timeout = '1s';", "begin; select 1; commit;", "do $$ begin null; end $$;",
+                    "select 1 into public.x from t;", "with d as (delete from t returning *) select * from d;", "select '/*'; \\! id\nselect '*/';",
+                    "select set_config('a', 'b', true);", "select public.f();"]:
+            self.assertTrue(rp.lint_sql("t", sql.replace("\\\\", "\\"), "readonly"), sql)
+        self.assertEqual(rp.lint_sql("t", "-- c\nwith a as (select 1 as x) select x from a;", "readonly"), [])
+
+    # ---- through verify_package: the attacker regenerates every checksum and target ------------------------------------
+    def test_whole_package_with_the_tricks_is_rejected_even_with_regenerated_checksums(self):
+        fp = FixturePackage("test_clean_fixture_passes")
+        for trick in ["select '/*';\n\\! echo $MIGRATION_DB_PASSWORD\nselect '*/';",
+                      "select '/*';\ndrop policy \"CANARY_OTHER_POLICY\" on storage.objects;\nselect '*/';",
+                      "select '/*';\ncommit;\nselect '*/';", "select $$/*$$;\n\\! id\nselect $$*/$$;"]:
+            fp.setUp()
+            try:
+                fp.edit(fp.MIG, lambda s: s.replace("\ncommit;", "\n" + trick + "\ncommit;"))
+                self.assertTrue(fp.verify(), trick)
+                fp.tearDown()
+                fp.setUp()
+                fp.edit(fp.DOWN, lambda s: s.replace("\ncommit;", "\n" + trick + "\ncommit;"))
+                self.assertTrue(fp.verify(), trick)
+            finally:
+                fp.tearDown()
+
+    def test_b_with_an_early_commit_is_refused_for_the_wrapped_p02_shape(self):
+        m = rp.load_manifest(ROOT)
+        pkg = m["packages"]["p0-2"]
+        tmp = tempfile.mkdtemp()
+        try:
+            for d in ("supabase/prod-packages", "supabase/migrations", "supabase/rollback"):
+                shutil.copytree(os.path.join(ROOT, d), os.path.join(tmp, d))
+            bp = os.path.join(tmp, pkg["files"]["B"]["path"])
+            txt = open(bp).read()
+            open(bp, "w").write(txt.replace("create temp table", "select '/*';\ncommit;\nbegin;\nselect '*/';\ncreate temp table", 1))
+            mp = os.path.join(tmp, "supabase/prod-packages/manifest.json")
+            mm = json.load(open(mp))
+            mm["packages"]["p0-2"]["files"]["B"]["sha256"] = hashlib.sha256(open(bp, "rb").read()).hexdigest()
+            json.dump(mm, open(mp, "w"), indent=2)
+            probs = rp.verify_package(tmp, rp.load_manifest(tmp), "p0-2")[1]
+            self.assertTrue(any("COMMIT" in x or "transaction control" in x or "BEGIN" in x for x in probs), probs)
+        finally:
+            shutil.rmtree(tmp)
+
+    # ---- P2/P3 runner behaviour --------------------------------------------------------------------------------------------
+    def test_evaluate_requires_an_expectation_column(self):
+        for h, r in (([], []), (["a_info"], ["1"]), (["x_catat"], ["1"])):
+            self.assertTrue(rp.evaluate(h, r, require_harus=True)[0], h)
+        self.assertEqual(rp.evaluate(["x_harus_1"], ["1"], require_harus=True)[0], [])
+
+    def test_p02_a_c_f_values_with_realistic_magnitudes(self):
+        big = "9223372036854775807"
+        ts = "2026-11-27 10:11:12.123456+00"
+        for v in (big, "-" + big, ts, "2026-11-27T10:11:12Z", "d41d8cd98f00b204e9800998ecf8427e", "t", "f", "0", ""):
+            self.assertEqual(rp.check_log_safe(["c_info"], [v]), [], v)
+        self.assertEqual(rp.evaluate(["a_harus_1", "b_harus_ge_1", "c_info"], ["1", big, ts], require_harus=True)[0], [])
+
+    def test_probe_owner_uses_usage_not_member(self):
+        sql = open(os.path.join(ROOT, "supabase/prod-packages/tools/privilege_probe_readonly.sql")).read()
+        body = "\n".join(x for x in sql.splitlines() if not x.lstrip().startswith("--"))
+        self.assertNotIn("'MEMBER') then 'PASS'", body)
+        self.assertGreaterEqual(len(re.findall(r"'USAGE'\) then 'PASS'", body)), 3)
+
+    def test_probe_spec_covers_drop_function_and_replaced_functions_and_rollback(self):
+        m = rp.load_manifest(ROOT)
+        pkg = m["packages"]["p0-2"]
+        texts = [open(os.path.join(ROOT, pkg[k]["path"])).read() for k in ("migration", "rollback")]
+        spec = rp.derive_probe_spec(pkg, texts)
+        self.assertIn("public.fn_apply_verified_payment(uuid,text,text,numeric,text)", spec["replaces"])
+        self.assertEqual({t["table"] for t in spec["tables"]}, {"public.prompter_invoices"})
+        self.assertEqual(rp.validate_probes(spec), [])
+        fx = rp.load_manifest(ROOT, FX_MANIFEST)["packages"]["fx-n"]
+        ftexts = [open(os.path.join(ROOT, fx[k]["path"])).read() for k in ("migration", "rollback")]
+        fs = rp.derive_probe_spec(fx, ftexts)
+        self.assertIn("public.fn_fx_evidence_purge(timestamptz)", fs["replaces"])  # created by the migration: nothing to own before apply
+        self.assertEqual(fs["functions"], [])  # ... and the rollback's DROP FUNCTION needs no pre-existing owner either
+        self.assertEqual(rp.validate_probes(fs), [])
+        # a rollback that replaces/drops an EXISTING function needs its owner
+        n = rp.derive_needs("create or replace function public.f(a int, text) returns void language sql as $$ select 1 $$;", "drop function public.g(uuid);")
+        self.assertEqual(n["replaces"], {"public.f(int,text)"})
+        self.assertEqual(n["functions"], {"public.g(uuid)"})
 
 
 class StateAndModes(unittest.TestCase):

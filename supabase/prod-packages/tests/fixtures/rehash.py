@@ -33,7 +33,7 @@ ROLLBACK_ALLOW = [
     {"kind": "update_rows", "schema": "storage", "table": "buckets", "columns": ["public"]},
     {"kind": "create_policy", "schema": "storage", "table": "objects", "names": ["FX tenant all"]},
     {"kind": "drop_trigger", "schema": "public", "table": "fx_audit_logs", "names": ["trg_fx_audit_no_update"]},
-    {"kind": "drop_function", "schema": "public", "names": ["fn_fx_block_audit_change", "fn_fx_evidence_purge"]},
+    {"kind": "drop_function", "schema": "public", "signatures": ["fn_fx_block_audit_change()", "fn_fx_evidence_purge(timestamptz)"]},
     {"kind": "grant", "schema": "storage", "objects": ["objects"], "privileges": ["truncate"], "roles": ["anon", "authenticated"]},
 ]
 # keys of the catalog snapshots (catalog_snapshot.sql + catalog_snapshot_ext.sql) that apply must change: nothing else may differ

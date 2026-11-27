@@ -267,4 +267,80 @@ PGDATABASE=$M PGUSER=linoe_member PGPASSWORD=$PW_MEM $RUN --package fx-n --manif
 # 7k) production policy still refuses: privileged/unsafe logins and hosts (unit-tested; here the CLI path)
 PGDATABASE=$M PGUSER=linoe_member PGPASSWORD=x PGHOST=localhost $RUN --package fx-n --manifest $FXM --root $root --mode apply --target production >$W/fx.txt 2>&1 && bad "production target accepted a rehearsal login" || { grep -q "FAIL connection" $W/fx.txt && pass "production target refuses the rehearsal login/host"; }
 
+# =====================================================================================================================
+# --- 8) QA independen #188: regresi (SANDBOX). Trik tokenizer, COMMIT dini, role NOINHERIT, nama ledger ganda, hasil kosong.
+# =====================================================================================================================
+TMPK() { # <path relatif di fx-n> <teks lama> <teks baru> -> $TDX = salinan paket fixture yang diubah, SEMUA checksum dibuat ulang (kasus terbaik penyerang)
+  TDX=$(mktemp -d); for d in supabase/prod-packages supabase/migrations supabase/rollback; do mkdir -p $TDX/$d && cp -r $root/$d/. $TDX/$d/; done
+  python3 - "$TDX" "$1" "$2" "$3" <<'PY'
+import hashlib, json, sys
+td, rel, old, new = sys.argv[1:5]
+p = td + "/supabase/prod-packages/tests/fixtures/fx-n/" + rel; s = open(p).read(); assert old == "@ALL" or old in s, old; open(p, "w").write(new + "\n" if old == "@ALL" else s.replace(old, new, 1))
+mp = td + "/supabase/prod-packages/tests/fixtures/manifest.json"; m = json.load(open(mp)); k = m["packages"]["fx-n"]
+for e in [k["migration"], k["rollback"]] + list(k["files"].values()): e["sha256"] = hashlib.sha256(open(td + "/" + e["path"], "rb").read()).hexdigest()
+json.dump(m, open(mp, "w"))
+PY
+}
+RT() { # <db> <mode>: jalankan paket fixture hasil TMPK ($TDX) sebagai linoe_member
+  PGDATABASE=$1 PGUSER=linoe_member PGPASSWORD=$PW_MEM $RUN --package fx-n --manifest $TDX/supabase/prod-packages/tests/fixtures/manifest.json --root $TDX --mode "$2" --target rehearsal --run-id fx-qa >$W/fx.txt 2>&1; local rc=$?
+  cat $W/fx.txt >> $W/fxlogs.txt; return $rc; }
+MIGREL=migration/20990101000000_fixture_native_txn.sql; DOWNREL=rollback/20990101000000_fixture_native_txn.down.sql
+MARK=$W/pwned_marker
+
+# 8a) KONTROL: psql MEMANG menjalankan \! setelah pembuka komentar palsu di dalam string (jadi serangannya nyata, bukan teori)
+printf "select '/*';\n\\\\! touch %s\nselect '*/';\n" "$W/ctrl_marker" > $W/trick_ctrl.sql
+P -d postgres -f $W/trick_ctrl.sql >/dev/null 2>&1; [ -e "$W/ctrl_marker" ] && pass "(kontrol) psql menjalankan meta-perintah \\! yang disembunyikan di balik '/*' dalam string (serangan QA nyata)" || bad "kontrol: marker tidak terbentuk"
+M=fx12; mkfx $M; S12=$(SNAPX $M)
+for t in "meta" "dollar" "qid" "dropcanary" "commit"; do
+  case $t in
+    meta)       TRK=$(printf "select '/*';\n\\\\! touch %s\nselect '*/';" "$MARK");;
+    dollar)     TRK=$(printf 'select $$/*$$;\n\\\\! touch %s\nselect $$*/$$;' "$MARK");;
+    qid)        TRK=$(printf 'select 1 as "/*";\n\\\\! touch %s\nselect 1 as "*/";' "$MARK");;
+    dropcanary) TRK=$(printf "select '/*';\ndrop policy \"CANARY_OTHER_POLICY_zq81\" on storage.objects;\nselect '*/';");;
+    commit)     TRK=$(printf "select '/*';\ncommit;\ncreate table public.fx_qa_outside_txn (a int);\nselect '*/';");;
+  esac
+  TMPK $MIGREL "
+commit;" "
+$TRK
+commit;"
+  RT $M apply && bad "8a trik $t: apply berjalan" || { grep -q "FAIL static" $W/fx.txt && ! grep -q "PASS B apply" $W/fx.txt && pass "QA trik '$t' (semua checksum dibuat ulang): STOP di lint statis, B tidak pernah jalan"; }
+  [ ! -e "$MARK" ] && [ "$S12" = "$(SNAPX $M)" ] && pass "QA trik '$t': tidak ada meta-perintah dijalankan, katalog identik" || bad "QA trik $t menyentuh sistem/db"
+done
+
+# 8b) role NOINHERIT yang ANGGOTA role pemilik: MEMBER akan bilang PASS, tetapi haknya tidak diwarisi -> probe harus BLOCK
+M=fx13; mkfx $M && P -d $M -c "do \$\$ begin if not exists (select 1 from pg_roles where rolname = 'linoe_noinh') then create role linoe_noinh login nosuperuser noinherit password 'rh_noinh_pw_6e9'; end if; end \$\$" -c "grant supabase_storage_admin, sb_owner to linoe_noinh" -c "grant usage on schema storage, supabase_migrations to linoe_noinh" -c "grant select on storage.objects, storage.buckets, public.fx_audit_logs, public.fx_evidence to linoe_noinh" -c "grant select, insert on supabase_migrations.schema_migrations to linoe_noinh" >/dev/null 2>&1; S13=$(SNAPX $M)
+[ "$(PA -d $M -c "select pg_has_role('linoe_noinh', 'supabase_storage_admin', 'MEMBER')::text||pg_has_role('linoe_noinh', 'supabase_storage_admin', 'USAGE')::text")" = "truefalse" ] && pass "(kontrol) role NOINHERIT: MEMBER=true tetapi USAGE=false (hak tidak diwarisi)" || bad "kontrol NOINHERIT"
+RF $M linoe_noinh rh_noinh_pw_6e9 apply && bad "apply berjalan untuk role NOINHERIT" || { grep -q "BLOCK" $W/fx.txt && grep -q "refused before any write" $W/fx.txt && ! grep -q "PASS B apply" $W/fx.txt && pass "probe pemilik memakai USAGE: role NOINHERIT = BLOCK, apply dibatalkan sebelum B"; }
+[ "$S13" = "$(SNAPX $M)" ] && pass "role NOINHERIT: katalog identik" || bad "NOINHERIT mengubah katalog"
+
+# 8c) nama ledger ganda (versi lain) -> D akan diam-diam tidak mencatat; cek awal menolak SEBELUM B
+M=fx14; mkfx $M && P -d $M -c "insert into supabase_migrations.schema_migrations(version,name) values ('20990101000009','fixture_native_txn')" >/dev/null; S14=$(SNAPX $M)
+RF $M linoe_member $PW_MEM apply && bad "apply berjalan dengan nama ledger ganda" || { grep -q "FAIL ledger pre-check" $W/fx.txt && ! grep -q "PASS B apply" $W/fx.txt && pass "nama migrasi sudah ada di ledger (versi lain): STOP di cek awal ledger, sebelum B"; }
+[ "$S14" = "$(SNAPX $M)" ] && pass "nama ledger ganda: katalog identik" || bad "nama ganda mengubah katalog"
+
+# 8d) hasil kosong / tanpa kolom _harus_ = GAGAL (bukan lolos)
+M=fx15; mkfx $M; S15=$(SNAPX $M)
+for f in A_preflight_readonly.sql; do
+  TMPK $f "@ALL" "select 1 as hanya_info"
+  RT $M apply && bad "$f tanpa kolom _harus_ lolos" || { grep -q "no _harus_\* expectation column" $W/fx.txt && ! grep -q "PASS B apply" $W/fx.txt && pass "hasil $f tanpa kolom _harus_ = GAGAL (bukan lolos kosong), STOP sebelum B"; }
+done
+python3 - $root <<'PY' && pass "evaluate(require_harus): hasil kosong atau tanpa _harus_ ditolak, hasil sah diterima" || bad "evaluate menerima hasil kosong"
+import sys
+sys.path.insert(0, sys.argv[1] + "/supabase/prod-packages/tools")
+import run_package as rp
+assert rp.evaluate([], [], require_harus=True)[0] and rp.evaluate(["ok_info"], ["1"], require_harus=True)[0]
+assert not rp.evaluate(["a_harus_1"], ["1"], require_harus=True)[0]
+PY
+[ "$S15" = "$(SNAPX $M)" ] && pass "hasil kosong: katalog identik" || bad "hasil kosong mengubah katalog"
+
+# 8e) gerbang read-only di sisi server: file A/C/F/S/G tidak bisa menulis walau lint dilewati
+PGOPTIONS="-c default_transaction_read_only=on" PS -d $M -c "create table public.zz_ro(a int)" >/dev/null 2>&1 && bad "transaksi read-only menerima CREATE TABLE" || pass "default_transaction_read_only=on menolak tulis (lapisan kedua di luar lint)"
+
+# 8f) pulih setelah rollback (docs: "Setelah rollback: cara pulih"): hapus baris ledger (oleh Founder, bukan runner) -> PRE -> apply lagi
+M=fx16; mkfx $M; RF $M linoe_member $PW_MEM apply >/dev/null || bad "fx16 apply"; RF $M linoe_member $PW_MEM rollback >/dev/null || bad "fx16 rollback"
+RF $M linoe_member $PW_MEM apply && bad "apply setelah rollback" || grep -q "state is ROLLED_BACK" $W/fx.txt || bad "fx16 bukan ROLLED_BACK"
+P -d $M -c "delete from supabase_migrations.schema_migrations where version = '20990101000000'" >/dev/null
+RF $M linoe_member $PW_MEM verify-only && grep -q "state: PRE" $W/fx.txt && pass "langkah pulih: setelah baris ledger dihapus (manual), verify-only = state PRE" || { bad "pulih: bukan PRE"; cat $W/fx.txt; }
+RF $M linoe_member $PW_MEM apply && grep -q "RESULT: PASS" $W/fx.txt && pass "langkah pulih: apply ulang berhasil dan tercatat (DONE)" || { bad "pulih: apply ulang"; cat $W/fx.txt; }
+
 echo "EXIT fail=$fail"; [ $fail = 0 ] && echo "ALL PASSED"; exit $fail

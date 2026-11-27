@@ -303,7 +303,7 @@ describe("Pipeline v2 — public-log safety and file hygiene", () => {
       files.add(p.rollback.path);
       for (const e of Object.values(p.files)) files.add(e.path);
     }
-    for (const rel of [...files, "supabase/prod-packages/tools/privilege_probe_readonly.sql", "supabase/prod-packages/tools/ledger_verify_readonly.sql", "supabase/prod-packages/tools/run_package.py"]) {
+    for (const rel of [...files, "supabase/prod-packages/tools/privilege_probe_readonly.sql", "supabase/prod-packages/tools/ledger_verify_readonly.sql", "supabase/prod-packages/tools/ledger_precheck_readonly.sql", "supabase/prod-packages/tools/run_package.py"]) {
       expect(readFileSync(path.join(root, rel), "utf8").includes("\r"), rel).toBe(false);
     }
   });
@@ -329,5 +329,60 @@ describe("Pipeline v2 — public-log safety and file hygiene", () => {
     for (const needle of ["R1", "R2", "Allow-list", "SANDBOX", "UNKNOWN", "HP Android", "log publik", "Privilege probe", "ROLLED_BACK", "APPROVE"]) {
       expect(doc, needle).toContain(needle);
     }
+  });
+});
+
+describe("Pipeline v2.1 — QA #188 regressions (static guards on the runner, probe and tools)", () => {
+  const src = read(RUNNER);
+  const probe = read("supabase/prod-packages/tools/privilege_probe_readonly.sql").replace(/--[^\n]*/g, "");
+
+  it("the lint is a real tokenizer with default-deny statement classes, not a comment-stripping regex", () => {
+    expect(src).toMatch(/def tokenize\(sql\)/);
+    expect(src).toMatch(/class LintError/);
+    expect(src).toMatch(/def classify\(ctx, s, phase="top"\)/);
+    expect(src).toMatch(/default-deny/);
+    expect(src).not.toMatch(/def strip_sql\(/);
+    expect(src).not.toMatch(/re\.sub\(r"\/\\\*\.\*\?\\\*\/"/);
+    expect(src).toMatch(/only SELECT may follow the COMMIT/);
+    expect(src).toMatch(/nested/i);
+  });
+
+  it("set_config, advisory locks, dblink and friends are refused as WORDS (concatenation cannot hide them)", () => {
+    expect(src).toMatch(/BAN_WORDS = \{[^}]*"set_config"/);
+    expect(src).toMatch(/BAN_PREFIX = \("dblink", "pg_advisory", "pg_try_advisory"\)/);
+  });
+
+  it("the owner probe checks inherited rights (USAGE), never plain membership; A/C/F/S/G run in a read-only transaction", () => {
+    expect(probe).not.toMatch(/'MEMBER'\) then 'PASS'/);
+    expect(probe).toMatch(/'USAGE'\) then 'PASS'/);
+    expect(src).toMatch(/default_transaction_read_only=on/);
+    expect(src).toMatch(/require_harus/);
+    expect(src).toMatch(/STATE TIDAK PRE: periksa manual/);
+  });
+
+  it("the ledger name/version pre-check exists, is read-only and prints counts only", () => {
+    const sql = read("supabase/prod-packages/tools/ledger_precheck_readonly.sql").replace(/--[^\n]*/g, "");
+    expect(sql).toMatch(/^\s*select/i);
+    expect(sql).not.toMatch(/\b(insert|update|delete|drop|alter|create|grant|revoke)\b/i);
+    expect(sql).toMatch(/_harus_0/);
+    expect(src).toMatch(/def ledger_precheck\(\)/);
+  });
+
+  it("the python suites carry the QA regression class and the rehearsal drives the real tricks through the runner", () => {
+    expect(read("supabase/prod-packages/tests/test_tools_v2.py")).toMatch(/class QaRegressions/);
+    const r = read("supabase/prod-packages/tests/rehearsal.sh");
+    expect(r).toMatch(/psql menjalankan meta-perintah/);
+    expect(r).toMatch(/role NOINHERIT/);
+    expect(r).toMatch(/nama migrasi sudah ada di ledger/);
+  });
+
+  it("the guide states the p0-2 runner changes honestly and carries the recovery and log tables", () => {
+    const doc = read("docs/PRODUCTION_MIGRATION.md");
+    for (const needle of ["Perubahan perilaku runner untuk p0-2", "Setelah rollback: cara pulih", "Tabel baris log", "lock_timeout"]) {
+      expect(doc, needle).toContain(needle);
+    }
+    expect(doc).not.toMatch(/Lint global TETAP menolak/);
+    expect(doc).not.toMatch(/Tidak pernah bisa dilonggarkan oleh manifest/);
+    expect(doc).not.toMatch(/hasil CI PG17 untuk bagian 7 sampai job selesai/);
   });
 });

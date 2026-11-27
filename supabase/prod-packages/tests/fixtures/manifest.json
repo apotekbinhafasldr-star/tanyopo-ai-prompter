@@ -167,9 +167,9 @@
         {
           "kind": "drop_function",
           "schema": "public",
-          "names": [
-            "fn_fx_block_audit_change",
-            "fn_fx_evidence_purge"
+          "signatures": [
+            "fn_fx_block_audit_change()",
+            "fn_fx_evidence_purge(timestamptz)"
           ]
         },
         {
