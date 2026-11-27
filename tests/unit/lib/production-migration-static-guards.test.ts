@@ -369,7 +369,7 @@ describe("Pipeline v2.1 — QA #188 regressions (static guards on the runner, pr
     expect(read(".github/CODEOWNERS")).toMatch(/\/supabase\/prod-packages\//);
     expect(read(".github/workflows/ci.yml")).toMatch(/prod-pipeline-separation/);
     const doc = read("docs/PRODUCTION_MIGRATION.md");
-    for (const needle of ["Model ancaman dan lapisan pengendali", "tripwire", "Ditunda ke PR-2", "Fuzz diferensial", "Apa yang dibuktikan dan tidak dibuktikan"]) {
+    for (const needle of ["Model ancaman dan lapisan pengendali", "tripwire", "Ditunda ke PR-2", "Fuzz diferensial", "Apa yang dibuktikan dan tidak dibuktikan", "Evaluasi arsitektur alternatif"]) {
       expect(doc).toContain(needle);
     }
     expect(doc).not.toMatch(/0 lolos-lint-dan-dieksekusi/);

@@ -43,6 +43,7 @@ create function public."substring"(anyelement) returns int language plpgsql as $
 create function public.fn_w(public.mine) returns int language plpgsql as $$ begin insert into public.other_log values ('attr'); return 1; end $$;
 insert into public.mine values (1); create sequence public.fz_seq;""")
     count = lambda: psql("select count(*) from public.other_log")[0]
+    declared_for_priv = (["public.mine"], ["mine"], ["mine_"])
 
     # control: with the default search_path the shadowing functions DO run (so the next checks mean something)
     for q in ("select md5(1)", "select 1 where first(1) = 1", "select substring(1)", "select t.fn_w from public.mine t"):
@@ -60,6 +61,30 @@ insert into public.mine values (1); create sequence public.fz_seq;""")
     psql("select public.md5(1)")
     ok(int(count()) == 1, "documented limit: a schema-qualified call (public.md5(1)) still executes under any search_path")
     psql("truncate public.other_log")
+
+    # privilege: a minimum role is NOT a boundary against a SECURITY DEFINER function of "another product" that has EXECUTE for PUBLIC (default)
+    psql("""do $$ begin
+        if not exists (select 1 from pg_roles where rolname = 'fz_other_owner') then create role fz_other_owner nologin; end if;
+        if not exists (select 1 from pg_roles where rolname = 'fz_min') then create role fz_min nologin; end if; end $$;
+        create schema fz_other authorization fz_other_owner;
+        create table fz_other.t(a int); alter table fz_other.t owner to fz_other_owner; grant usage on schema fz_other to public;
+        create function fz_other.fn_writer() returns int language plpgsql security definer set search_path = pg_catalog as $$ begin insert into fz_other.t values (1); return 1; end $$;
+        alter function fz_other.fn_writer() owner to fz_other_owner;
+        create function fz_other.fn_closed() returns int language plpgsql security definer set search_path = pg_catalog as $$ begin insert into fz_other.t values (2); return 1; end $$;
+        alter function fz_other.fn_closed() owner to fz_other_owner; revoke execute on function fz_other.fn_closed() from public;
+        grant usage on schema public to fz_min; grant select on public.mine to fz_min;""")
+    o, rc, er = psql("set role fz_min; insert into fz_other.t values (9)")
+    ok(rc != 0 and "permission denied" in er, "privilege: the minimum role cannot write the other product's table directly")
+    o, rc, er = psql("set role fz_min; select fz_other.fn_closed()")
+    ok(rc != 0 and "permission denied" in er, "privilege: a definer function whose OWNER revoked PUBLIC execute is closed to the minimum role (only its owner can do this)")
+    o, rc, er = psql("set role fz_min; select fz_other.fn_writer()")
+    ok(rc == 0 and psql("select count(*) from fz_other.t")[0] == "1", "privilege: a definer function with the default PUBLIC execute WRITES for the minimum role (a privilege limit is not a boundary against it)")
+    psql("truncate fz_other.t")
+    o, rc, er = psql("set role fz_min; set search_path = pg_catalog, pg_temp; select fn_writer()")
+    ok(rc != 0, "search_path: the same function called WITHOUT its schema does not resolve")
+    err = run("begin;\nselect fz_other.fn_writer();\ncommit;\nselect 1;\n", mode="w", effects=declared_for_priv)
+    ok(err is not None and "EFEK DI LUAR DAFTAR" in err and psql("select count(*) from fz_other.t")[0] == "0",
+       "effects: the qualified call of the other product's definer function is rolled back before COMMIT (the table written is not in the package list)")
 
     # check phase: BEGIN READ ONLY + snapshot
     err = run("set transaction read write; create table public.zz(a int);", mode="ro")
