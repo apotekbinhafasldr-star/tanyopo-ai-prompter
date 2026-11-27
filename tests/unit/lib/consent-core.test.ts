@@ -111,6 +111,7 @@ describe("requireConsent", () => {
 });
 
 describe("requireConsent: persetujuan koneksi milik TENANT (Owner, Opsi A)", () => {
+  const rpcOk = (data: unknown) => vi.fn(async () => ({ data, error: null }));
   const on = { isEnabled: () => true };
   it("tanpa tenantId (null/kosong): ditolak fail-closed TANPA memanggil database", async () => {
     const getClient = vi.fn();
