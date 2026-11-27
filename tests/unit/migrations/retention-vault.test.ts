@@ -189,7 +189,7 @@ describe("4r dokumentasi dan lingkup repo", () => {
   });
 
   it("rekonsiliasi: filter TENANT_CASCADE + archived_at, kasus UNDETERMINED ditinjau manual; rollback RENAME didokumentasikan", () => {
-    expect(prose).toMatch(/archive_reason = 'TENANT_CASCADE'.*UNDETERMINED/s);
+    expect(prose).toMatch(/archive_reason = 'TENANT_CASCADE'[\s\S]*UNDETERMINED/);
     expect(prose).toMatch(/archived_at >=/);
     expect(prose).toMatch(/RENAME/);
     expect(prose).toMatch(/linoe\.rename_retention_vault/);
