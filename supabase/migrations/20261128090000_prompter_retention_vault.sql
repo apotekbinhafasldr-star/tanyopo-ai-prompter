@@ -19,7 +19,7 @@
 --     Satu-satunya perubahan pada objek yang sudah ada: trigger baru (BEFORE DELETE / BEFORE TRUNCATE) pada tiga tabel billing LINOE.
 --
 -- Rollback: supabase/rollback/20261128090000_prompter_retention_vault.down-soft.sql (lepas penyalinan, SIMPAN brankas),
---           20261128090000_prompter_retention_vault.down.sql (menolak bila brankas berisi), dan down paksa (GUC linoe.drop_retention_vault) - lihat docs/RETENTION_VAULT.md.
+--           20261128090000_prompter_retention_vault.down.sql (menolak bila brankas berisi; dengan GUC persis brankas di-RENAME menjadi tabel arsip, tidak pernah di-DROP) - lihat docs/RETENTION_VAULT.md.
 begin;
 
 set local lock_timeout = '3s';
@@ -154,7 +154,7 @@ begin
   raise exception 'LR003 TRUNCATE % ditolak: bukti billing dilindungi 4r', tg_table_name using errcode = 'LR003';
 end $fn$;
 
-create or replace function public.fn_prompter_retention_vault_immutable()
+create or replace function public.fn_prompter_retention_vault_append_only_guard()
 returns trigger
 language plpgsql
 security invoker
@@ -185,12 +185,12 @@ drop trigger if exists trg_retention_no_truncate on public.prompter_payment_tran
 create trigger trg_retention_no_truncate before truncate on public.prompter_payment_transactions
   for each statement execute function public.fn_prompter_retention_block_truncate();
 
-drop trigger if exists trg_retention_vault_immutable on public.prompter_retention_vault;
-create trigger trg_retention_vault_immutable before update or delete on public.prompter_retention_vault
-  for each row execute function public.fn_prompter_retention_vault_immutable();
+drop trigger if exists trg_retention_vault_append_only_guard on public.prompter_retention_vault;
+create trigger trg_retention_vault_append_only_guard before update or delete on public.prompter_retention_vault
+  for each row execute function public.fn_prompter_retention_vault_append_only_guard();
 drop trigger if exists trg_retention_vault_no_truncate on public.prompter_retention_vault;
 create trigger trg_retention_vault_no_truncate before truncate on public.prompter_retention_vault
-  for each statement execute function public.fn_prompter_retention_vault_immutable();
+  for each statement execute function public.fn_prompter_retention_vault_append_only_guard();
 
 -- 4b. Tetap menyala walau session_replication_role = replica (pernyataan DELETE langsung tetap tersalin)
 alter table public.prompter_subscriptions         enable always trigger trg_zz_retention_capture;
@@ -200,7 +200,9 @@ alter table public.prompter_subscriptions         enable always trigger trg_rete
 alter table public.prompter_invoices              enable always trigger trg_retention_no_truncate;
 alter table public.prompter_payment_transactions  enable always trigger trg_retention_no_truncate;
 
--- 5. Status baca-saja (dibaca preflight dan pemeriksaan operator)
+-- 5. Status baca-saja (dibaca preflight dan pemeriksaan operator). ok=true HANYA bila penyalin dan penolak TRUNCATE aktif DAN ENABLE ALWAYS
+--    pada ketiga tabel billing, dipanggil oleh fungsi yang benar dengan tipe trigger yang benar, dan penjaga brankas lengkap.
+--    Acuan nama fungsi lewat pg_proc (bukan literal regproc) agar status() tetap dapat dipanggil setelah down-soft melepas fungsi penyalin.
 create or replace function public.fn_prompter_retention_vault_status()
 returns jsonb
 language sql
@@ -208,37 +210,46 @@ stable
 security invoker
 set search_path = pg_catalog, public, pg_temp
 as $fn$
-  with c as (
+  with t as (
+    select c.relname as rel, g.tgname, g.tgenabled, g.tgtype, p.proname
+      from pg_trigger g
+      join pg_class c on c.oid = g.tgrelid
+      join pg_namespace n on n.oid = c.relnamespace and n.nspname = 'public'
+      join pg_proc p on p.oid = g.tgfoid
+      join pg_namespace pn on pn.oid = p.pronamespace and pn.nspname = 'public'
+     where not g.tgisinternal
+  ), c as (
     select
-      (select count(*) from pg_trigger where tgname = 'trg_zz_retention_capture' and not tgisinternal
-          and tgenabled in ('O', 'A')
-          and tgrelid in ('public.prompter_subscriptions'::regclass, 'public.prompter_invoices'::regclass,
-                          'public.prompter_payment_transactions'::regclass)) as capture_on,
-      (select count(*) from pg_trigger where tgname = 'trg_zz_retention_capture' and not tgisinternal
-          and tgenabled = 'A'
-          and tgrelid in ('public.prompter_subscriptions'::regclass, 'public.prompter_invoices'::regclass,
-                          'public.prompter_payment_transactions'::regclass)) as capture_always,
-      (select count(*) from pg_trigger where tgname = 'trg_retention_no_truncate' and not tgisinternal
-          and tgenabled in ('O', 'A')
-          and tgrelid in ('public.prompter_subscriptions'::regclass, 'public.prompter_invoices'::regclass,
-                          'public.prompter_payment_transactions'::regclass)) as trunc_on,
-      (select count(*) from pg_trigger where tgrelid = 'public.prompter_retention_vault'::regclass
-          and not tgisinternal and tgenabled in ('O', 'A')) as vault_on,
-      (select count(*) from public.prompter_retention_vault) as vault_rows
+      count(*) filter (where rel in ('prompter_subscriptions', 'prompter_invoices', 'prompter_payment_transactions')
+          and tgname = 'trg_zz_retention_capture' and proname = 'fn_prompter_retention_vault_capture'
+          and (tgtype & 11) = 11 and tgenabled in ('O', 'A')) as capture_on,
+      count(*) filter (where rel in ('prompter_subscriptions', 'prompter_invoices', 'prompter_payment_transactions')
+          and tgname = 'trg_zz_retention_capture' and proname = 'fn_prompter_retention_vault_capture'
+          and (tgtype & 11) = 11 and tgenabled = 'A') as capture_always,
+      count(*) filter (where rel in ('prompter_subscriptions', 'prompter_invoices', 'prompter_payment_transactions')
+          and tgname = 'trg_retention_no_truncate' and proname = 'fn_prompter_retention_block_truncate'
+          and (tgtype & 33) = 32 and tgenabled in ('O', 'A')) as trunc_on,
+      count(*) filter (where rel in ('prompter_subscriptions', 'prompter_invoices', 'prompter_payment_transactions')
+          and tgname = 'trg_retention_no_truncate' and proname = 'fn_prompter_retention_block_truncate'
+          and (tgtype & 33) = 32 and tgenabled = 'A') as trunc_always,
+      count(*) filter (where rel = 'prompter_retention_vault' and proname = 'fn_prompter_retention_vault_append_only_guard'
+          and tgenabled in ('O', 'A')) as vault_on
+      from t
   )
   select jsonb_build_object(
     'capture_triggers_enabled', capture_on,
     'capture_triggers_always', capture_always,
     'truncate_guards_enabled', trunc_on,
+    'truncate_guards_always', trunc_always,
     'vault_guards_enabled', vault_on,
-    'vault_rows', vault_rows,
-    'ok', (capture_on = 3 and trunc_on = 3 and vault_on = 2)) from c;
+    'vault_rows', (select count(*) from public.prompter_retention_vault),
+    'ok', (capture_on = 3 and capture_always = 3 and trunc_on = 3 and trunc_always = 3 and vault_on = 2)) from c;
 $fn$;
 
 -- 6. Hak fungsi: tidak ada EXECUTE untuk klien (hak EXECUTE tidak diperiksa saat trigger menyala)
 revoke all on function public.fn_prompter_retention_vault_capture()   from public, anon, authenticated, service_role;
 revoke all on function public.fn_prompter_retention_block_truncate()  from public, anon, authenticated, service_role;
-revoke all on function public.fn_prompter_retention_vault_immutable() from public, anon, authenticated, service_role;
+revoke all on function public.fn_prompter_retention_vault_append_only_guard() from public, anon, authenticated, service_role;
 revoke all on function public.fn_prompter_retention_vault_status()    from public, anon, authenticated, service_role;
 
 commit;

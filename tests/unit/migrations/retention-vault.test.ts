@@ -62,8 +62,8 @@ describe("4r migrasi: lingkup dan urutan", () => {
     expect([...up.matchAll(/create table if not exists public\.([a-z_]+)/g)].map((m) => m[1])).toEqual(["prompter_retention_vault"]);
     expect([...up.matchAll(/create or replace function public\.([a-z_]+)/g)].map((m) => m[1]).sort()).toEqual([
       "fn_prompter_retention_block_truncate",
+      "fn_prompter_retention_vault_append_only_guard",
       "fn_prompter_retention_vault_capture",
-      "fn_prompter_retention_vault_immutable",
       "fn_prompter_retention_vault_status",
     ]);
     const triggerTables = [...up.matchAll(/create trigger [a-z_]+ before [a-z ]+ on public\.([a-z_]+)/g)].map((m) => m[1]);
@@ -99,7 +99,7 @@ describe("4r migrasi: fail-closed, allowlist, hak", () => {
     expect(up).not.toMatch(/force row level security/);
     expect(up).toMatch(/revoke all on public\.prompter_retention_vault from public, anon, authenticated, service_role;/);
     expect(up).toMatch(/revoke all on sequence %s from public, anon, authenticated, service_role/);
-    for (const name of ["fn_prompter_retention_vault_capture", "fn_prompter_retention_block_truncate", "fn_prompter_retention_vault_immutable", "fn_prompter_retention_vault_status"]) {
+    for (const name of ["fn_prompter_retention_vault_capture", "fn_prompter_retention_block_truncate", "fn_prompter_retention_vault_append_only_guard", "fn_prompter_retention_vault_status"]) {
       expect(up).toContain(`revoke all on function public.${name}() from public, anon, authenticated, service_role;`);
     }
     expect(up).not.toMatch(/\bgrant\b/);
@@ -107,7 +107,7 @@ describe("4r migrasi: fail-closed, allowlist, hak", () => {
 
   it("trigger penyalin dan penolak TRUNCATE ENABLE ALWAYS (enam pernyataan); penjaga hanya-tambah brankas ada", () => {
     expect((up.match(/enable always trigger (trg_zz_retention_capture|trg_retention_no_truncate)/g) ?? []).length).toBe(6);
-    expect(up).toMatch(/create trigger trg_retention_vault_immutable before update or delete on public\.prompter_retention_vault/);
+    expect(up).toMatch(/create trigger trg_retention_vault_append_only_guard before update or delete on public\.prompter_retention_vault/);
     expect(up).toMatch(/create trigger trg_retention_vault_no_truncate before truncate on public\.prompter_retention_vault/);
     expect(up).toMatch(/errcode = 'LR003'/);
     expect(up).toMatch(/errcode = 'LR004'/);
@@ -120,6 +120,14 @@ describe("4r migrasi: fail-closed, allowlist, hak", () => {
     expect(up).not.toMatch(/delete from public\.prompter_retention_vault|update public\.prompter_retention_vault|truncate public\.prompter_retention_vault/);
   });
 
+  it("status().ok mensyaratkan ENABLE ALWAYS (penyalin dan penolak TRUNCATE), fungsi dan tipe trigger yang benar", () => {
+    const fn = up.slice(up.indexOf("create or replace function public.fn_prompter_retention_vault_status"), up.indexOf("revoke all on function public.fn_prompter_retention_vault_capture"));
+    expect(fn).toMatch(/'ok', \(capture_on = 3 and capture_always = 3 and trunc_on = 3 and trunc_always = 3 and vault_on = 2\)/);
+    expect(fn).toMatch(/proname = 'fn_prompter_retention_vault_capture'/);
+    expect(fn).toMatch(/\(tgtype & 11\) = 11/);
+    expect(fn).not.toMatch(/::regproc|::regclass/);
+  });
+
   it("prasyarat fail-closed: tiga tabel, tenants, dan SELECT pemilik pada tenants", () => {
     expect(up).toMatch(/DIBATALKAN 4r: tabel % tidak ada/);
     expect(up).toMatch(/DIBATALKAN 4r: public\.tenants tidak ada/);
@@ -128,14 +136,31 @@ describe("4r migrasi: fail-closed, allowlist, hak", () => {
 });
 
 describe("4r rollback", () => {
-  it("down: menolak bila brankas berisi kecuali GUC persis; down-soft tidak membuang brankas", () => {
-    expect(down).toMatch(/current_setting\('linoe\.drop_retention_vault', true\)/);
-    expect(down).toContain("'DROP-VAULT-20261128090000'");
+  it("down: tidak pernah membuang brankas berisi (menolak, atau RENAME bila GUC persis); down-soft tidak membuang brankas", () => {
+    expect(down).toMatch(/current_setting\('linoe\.rename_retention_vault', true\)/);
+    expect(down).toContain("'ARSIPKAN-VAULT-20261128090000'");
+    expect(down).not.toMatch(/drop_retention_vault|DROP-VAULT/);
     expect(down).toMatch(/DIBATALKAN down 4r: brankas berisi % baris/);
-    expect(down).toMatch(/drop table if exists public\.prompter_retention_vault/);
-    expect(soft).not.toMatch(/drop table|prompter_retention_vault_status|retention_vault_immutable/);
+    expect(down).toMatch(/alter table public\.prompter_retention_vault rename to %I/);
+    // DROP TABLE hanya pada cabang brankas kosong (tepat satu, setelah else)
+    expect((down.match(/drop table/g) ?? []).length).toBe(1);
+    expect(down).toMatch(/else drop table public\.prompter_retention_vault;/);
+    expect(soft).not.toMatch(/drop table|prompter_retention_vault_status|retention_vault_append_only_guard/);
     expect(soft).toMatch(/drop trigger if exists trg_zz_retention_capture on public\.prompter_subscriptions/);
     expect(soft).toMatch(/drop function if exists public\.fn_prompter_retention_vault_capture\(\)/);
+  });
+
+  it("down: urutan anti-balapan (lepas trigger penyalin dulu, kunci eksklusif brankas, baru hitung)", () => {
+    const iDrop = down.indexOf("drop trigger if exists trg_zz_retention_capture on public.prompter_subscriptions");
+    const iLock = down.indexOf("lock table public.prompter_retention_vault in access exclusive mode");
+    const iCount = down.indexOf("select count(*) from public.prompter_retention_vault");
+    expect(iDrop).toBeGreaterThan(-1);
+    expect(iLock).toBeGreaterThan(iDrop);
+    expect(iCount).toBeGreaterThan(iLock);
+  });
+
+  it("down: fungsi penjaga hanya dibuang bila tidak ada trigger yang memakainya (tabel arsip tetap terjaga)", () => {
+    expect(down).toMatch(/if not exists \(select 1 from pg_trigger t join pg_proc p on p\.oid = t\.tgfoid where p\.proname = 'fn_prompter_retention_vault_append_only_guard'/);
   });
 
   it("tidak ada DELETE/UPDATE/TRUNCATE atas isi brankas di rollback maupun baris billing/tenants", () => {

@@ -165,8 +165,8 @@ eq "S1 baris tenants dan baris billing tidak berubah oleh migrasi" "$(sq g1 "sel
 eq "T15 vault: RLS aktif dan nol policy" "$(sq g1 "select c.relrowsecurity::text||':'||(select count(*) from pg_policies where tablename='prompter_retention_vault') from pg_class c where c.oid='public.prompter_retention_vault'::regclass")" "true:0"
 eq "S1 vault tanpa foreign key (keluar maupun masuk)" "$(sq g1 "select count(*) from pg_constraint where contype='f' and (conrelid='public.prompter_retention_vault'::regclass or confrelid='public.prompter_retention_vault'::regclass)")" 0
 eq "S1 retain_until nullable tanpa default (tidak ada durasi retensi)" "$(sq g1 "select is_nullable||':'||coalesce(column_default,'NULL') from information_schema.columns where table_name='prompter_retention_vault' and column_name='retain_until'")" "YES:NULL"
-eq "S1 tidak ada fungsi purge/penghapus otomatis dan tidak ada pg_cron job baru" "$(sq g1 "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and (proname ilike '%purge%' or proname ilike '%retention%') and proname not in ('fn_prompter_retention_vault_capture','fn_prompter_retention_block_truncate','fn_prompter_retention_vault_immutable','fn_prompter_retention_vault_status')")" 0
-eq "T13 status(): ok, trigger 3/3/3, penjaga vault 2, ENABLE ALWAYS 3, vault kosong" "$(sq g1 "select (s->>'ok')||':'||(s->>'capture_triggers_enabled')||(s->>'capture_triggers_always')||(s->>'truncate_guards_enabled')||(s->>'vault_guards_enabled')||':'||(s->>'vault_rows') from (select public.fn_prompter_retention_vault_status() s) x")" "true:3332:0"
+eq "S1 tidak ada fungsi purge/penghapus otomatis dan tidak ada pg_cron job baru" "$(sq g1 "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and (proname ilike '%purge%' or proname ilike '%retention%') and proname not in ('fn_prompter_retention_vault_capture','fn_prompter_retention_block_truncate','fn_prompter_retention_vault_append_only_guard','fn_prompter_retention_vault_status')")" 0
+eq "T13 status(): ok, penyalin 3/3 always, penolak TRUNCATE 3/3 always, penjaga vault 2, vault kosong" "$(sq g1 "select (s->>'ok')||':'||(s->>'capture_triggers_enabled')||(s->>'capture_triggers_always')||(s->>'truncate_guards_enabled')||(s->>'truncate_guards_always')||(s->>'vault_guards_enabled')||':'||(s->>'vault_rows') from (select public.fn_prompter_retention_vault_status() s) x")" "true:33332:0"
 # T19 hak: vault, urutan identity, dan keempat fungsi, untuk semua peran klien
 bad_priv=0
 for r in public anon authenticated service_role; do
@@ -174,14 +174,14 @@ for r in public anon authenticated service_role; do
     [ "$(sq g1 "select has_table_privilege('$r','public.prompter_retention_vault','$pr')")" = f ] || { bad_priv=1; echo "  hak $r/$pr pada vault ada"; }
   done
   [ "$(sq g1 "select has_sequence_privilege('$r', pg_get_serial_sequence('public.prompter_retention_vault','id'), 'usage')")" = f ] || { bad_priv=1; echo "  hak USAGE urutan vault untuk $r ada"; }
-  for fn in fn_prompter_retention_vault_capture fn_prompter_retention_block_truncate fn_prompter_retention_vault_immutable fn_prompter_retention_vault_status; do
+  for fn in fn_prompter_retention_vault_capture fn_prompter_retention_block_truncate fn_prompter_retention_vault_append_only_guard fn_prompter_retention_vault_status; do
     [ "$(sq g1 "select has_function_privilege('$r','public.$fn()','execute')")" = f ] || { bad_priv=1; echo "  EXECUTE $r/$fn ada"; }
   done
 done
 [ "$bad_priv" = 0 ] && pass "T19 vault, urutan identity, dan 4 fungsi: nol hak untuk public/anon/authenticated/service_role" || bad "T19 ada hak klien"
 eq "T19 ACL vault hanya pemilik" "$(sq g1 "select count(*) from pg_class c, aclexplode(c.relacl) a where c.oid='public.prompter_retention_vault'::regclass and a.grantee <> c.relowner")" 0
 eq "T21 fn capture: SECURITY DEFINER, pemilik mig4r, search_path berakhir pg_temp" "$(sq g1 "select prosecdef::text||':'||proowner::regrole::text||':'||(proconfig::text like '%search_path=pg_catalog, public, pg_temp%')::text from pg_proc where proname='fn_prompter_retention_vault_capture'")" "true:mig4r:true"
-eq "T21 tiga fungsi lain SECURITY INVOKER dengan search_path berakhir pg_temp" "$(sq g1 "select count(*) from pg_proc where proname in ('fn_prompter_retention_block_truncate','fn_prompter_retention_vault_immutable','fn_prompter_retention_vault_status') and not prosecdef and proconfig::text like '%search_path=pg_catalog, public, pg_temp%'")" 3
+eq "T21 tiga fungsi lain SECURITY INVOKER dengan search_path berakhir pg_temp" "$(sq g1 "select count(*) from pg_proc where proname in ('fn_prompter_retention_block_truncate','fn_prompter_retention_vault_append_only_guard','fn_prompter_retention_vault_status') and not prosecdef and proconfig::text like '%search_path=pg_catalog, public, pg_temp%'")" 3
 eq "T21 tidak ada fungsi yang meng-UPDATE/DELETE vault" "$(sq g1 "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and prosrc ~* '(delete\\s+from|update)\\s+(public\\.)?prompter_retention_vault'")" 0
 
 # ======================================================================================================================
@@ -305,9 +305,28 @@ eq "T9 status().ok = false setelah trigger dinonaktifkan (terdeteksi)" "$(sq g9 
 P -d g9 -c "delete from public.prompter_subscriptions where tenant_id='$TB'" >/dev/null
 eq "T9 DELETE saat trigger nonaktif TIDAK tersalin (jendela break-glass; diterima tertulis di docs)" "$(vault g9 "where source_table='prompter_subscriptions'")" 0
 P -d g9 -c "set role mig4r" -c "alter table public.prompter_subscriptions enable trigger trg_zz_retention_capture" >/dev/null
-eq "T9 ENABLE biasa: ok=true tetapi capture_triggers_always=2 (terdeteksi)" "$(sq g9 "select (s->>'ok')||':'||(s->>'capture_triggers_always') from (select public.fn_prompter_retention_vault_status() s) x")" "true:2"
+eq "T9 ENABLE biasa (bukan ALWAYS): status().ok=false dan capture_triggers_always=2 (celah mode replica terdeteksi)" "$(sq g9 "select (s->>'ok')||':'||(s->>'capture_triggers_always') from (select public.fn_prompter_retention_vault_status() s) x")" "false:2"
 P -d g9 -c "set role mig4r" -c "alter table public.prompter_subscriptions enable always trigger trg_zz_retention_capture" >/dev/null
 eq "T9 ENABLE ALWAYS dipulihkan: ok=true, always=3" "$(sq g9 "select (s->>'ok')||':'||(s->>'capture_triggers_always') from (select public.fn_prompter_retention_vault_status() s) x")" "true:3"
+
+# status(): trigger senama dengan fungsi lain, atau tipe trigger salah, tidak lolos; penolak TRUNCATE non-ALWAYS tidak lolos
+P -d g9 -c "create function public.rv_noop() returns trigger language plpgsql as \$f\$ begin return old; end \$f\$" -c "drop trigger trg_zz_retention_capture on public.prompter_invoices" -c "create trigger trg_zz_retention_capture before delete on public.prompter_invoices for each row execute function public.rv_noop()" -c "alter table public.prompter_invoices enable always trigger trg_zz_retention_capture" >/dev/null
+eq "T9 status().ok=false bila trigger senama memanggil fungsi LAIN (walau ENABLE ALWAYS)" "$(sq g9 "select public.fn_prompter_retention_vault_status()->>'ok'")" false
+P -d g9 -c "drop trigger trg_zz_retention_capture on public.prompter_invoices" -c "create trigger trg_zz_retention_capture before insert on public.prompter_invoices for each row execute function public.fn_prompter_retention_vault_capture()" -c "alter table public.prompter_invoices enable always trigger trg_zz_retention_capture" >/dev/null
+eq "T9 status().ok=false bila trigger penyalin bertipe salah (BEFORE INSERT, bukan DELETE)" "$(sq g9 "select public.fn_prompter_retention_vault_status()->>'ok'")" false
+P -d g9 -c "drop trigger trg_zz_retention_capture on public.prompter_invoices" -c "create trigger trg_zz_retention_capture before delete on public.prompter_invoices for each row execute function public.fn_prompter_retention_vault_capture()" -c "alter table public.prompter_invoices enable always trigger trg_zz_retention_capture" -c "alter table public.prompter_invoices enable trigger trg_retention_no_truncate" >/dev/null
+eq "T9 status().ok=false bila penolak TRUNCATE tidak ENABLE ALWAYS" "$(sq g9 "select (s->>'ok')||':'||(s->>'truncate_guards_always') from (select public.fn_prompter_retention_vault_status() s) x")" "false:2"
+P -d g9 -c "alter table public.prompter_invoices enable always trigger trg_retention_no_truncate" >/dev/null
+eq "T9 setelah dipulihkan: status().ok=true" "$(sq g9 "select public.fn_prompter_retention_vault_status()->>'ok'")" true
+
+# P2-1: arsip ganda untuk PK yang sama (ROW_DELETE lama + PK dibuat ulang + cascade) tidak merusak rekonsiliasi bila difilter
+mk g10c; seed g10c 1; up g10c
+P -d g10c -c "delete from public.prompter_subscriptions where tenant_id='$TA'" -c "insert into public.prompter_subscriptions(tenant_id,plan,status) values ('$TA','STARTER','ACTIVE')" >/dev/null
+T_START=$(sq g10c "select clock_timestamp()")
+deltenant g10c "$TA"
+eq "P2-1 PK langganan yang sama tersalin dua kali (ROW_DELETE lama + TENANT_CASCADE): hitungan mentah per (tenant,tabel) = 2 (bukan dasar rekonsiliasi)" "$(vault g10c "where tenant_id='$TA' and source_table='prompter_subscriptions'")" 2
+eq "P2-1 rekonsiliasi benar: filter archived_at >= awal langkah hapus DAN TENANT_CASCADE = 1 baris, cocok dengan hitungan tabel sumber sebelum hapus (1)" "$(vault g10c "where tenant_id='$TA' and source_table='prompter_subscriptions' and archive_reason='TENANT_CASCADE' and archived_at >= '$T_START'")" 1
+eq "P2-1 rekonsiliasi invoice/transaksi dengan filter yang sama = 1 dan 2 (hitungan sumber)" "$(vault g10c "where tenant_id='$TA' and source_table='prompter_invoices' and archive_reason='TENANT_CASCADE' and archived_at >= '$T_START'")/$(vault g10c "where tenant_id='$TA' and source_table='prompter_payment_transactions' and archive_reason='TENANT_CASCADE' and archived_at >= '$T_START'")" "1/2"
 
 # T10 perilaku produk lain tidak berubah: hasil hapus tenant A identik dengan dan tanpa 4r (diff seluruh hitungan tabel)
 mk g10a; seed g10a 1; mk g10b; seed g10b 1; up g10b
@@ -330,7 +349,7 @@ mk g12b; seed g12b 1       # pembanding tanpa 4r
 INS="insert into public.prompter_retention_vault(source_table,source_pk,tenant_id,row_data,archive_reason) values ('prompter_invoices','x','$TA','{}','ROW_DELETE')"
 for who in "authenticated $UA" "authenticated $UB" "anon "; do
   set -- $who; role="$1"; uid="${2:-}"; lbl="$role${uid:+ ($([ "$uid" = "$UA" ] && echo tenant A || echo tenant B))}"
-  for stmt in "select count(*) from public.prompter_retention_vault" "$INS" "update public.prompter_retention_vault set tenant_id=tenant_id" "delete from public.prompter_retention_vault" "truncate public.prompter_retention_vault" "select public.fn_prompter_retention_vault_status()" "select public.fn_prompter_retention_vault_capture()" "select public.fn_prompter_retention_block_truncate()" "select public.fn_prompter_retention_vault_immutable()"; do
+  for stmt in "select count(*) from public.prompter_retention_vault" "$INS" "update public.prompter_retention_vault set tenant_id=tenant_id" "delete from public.prompter_retention_vault" "truncate public.prompter_retention_vault" "select public.fn_prompter_retention_vault_status()" "select public.fn_prompter_retention_vault_capture()" "select public.fn_prompter_retention_block_truncate()" "select public.fn_prompter_retention_vault_append_only_guard()"; do
     out=$(as g12 "$role" "$uid" "$stmt"); case "$out" in ERR:*"permission denied"*) ;; *) bad "T11/T13 $lbl: '$stmt' tidak ditolak karena hak (got '$out')";; esac
   done
   pass "T11/T13 $lbl: nol akses ke vault dan keempat fungsi (SELECT/INSERT/UPDATE/DELETE/TRUNCATE/EXECUTE ditolak: permission denied)"
@@ -365,19 +384,39 @@ eq "T22 sesudah down lalu up lagi: DELETE tenants normal dan tersalin" "$( delte
 mk g16; seed g16 1; CAT16=$(sq g16 "$CATCNT"); up g16; deltenant g16 "$TA"
 down g16 && bad "T23 down TIDAK menolak saat vault berisi" || { grep -q "DIBATALKAN down 4r" "$W/err_down.txt" && pass "T23 down menolak saat vault berisi 4 baris (bukti tidak dibuang)" || bad "T23 down gagal karena sebab lain: $(cat "$W/err_down.txt")"; }
 eq "T23 penolakan down tidak mengubah apa pun (vault 4, status ok)" "$(vault g16 "")|$(sq g16 "select public.fn_prompter_retention_vault_status()->>'ok'")" "4|true"
-PGOPTIONS="$PGOPTIONS -c linoe.drop_retention_vault=YA" P -d g16 -c "set role mig4r" -f "$D4R" >/dev/null 2>"$W/e.txt" && bad "T23 down paksa dengan nilai GUC salah lolos" || pass "T23 down paksa dengan nilai GUC yang salah ('YA') ditolak"
+PGOPTIONS="$PGOPTIONS -c linoe.rename_retention_vault=YA" P -d g16 -c "set role mig4r" -f "$D4R" >/dev/null 2>"$W/e.txt" && bad "T23 down dengan nilai GUC salah lolos" || pass "T23 down dengan nilai GUC yang salah ('YA') ditolak"
+PGOPTIONS="$PGOPTIONS -c linoe.drop_retention_vault=DROP-VAULT-20261128090000" P -d g16 -c "set role mig4r" -f "$D4R" >/dev/null 2>"$W/e.txt" && bad "T23 GUC lama (drop) masih diterima" || pass "T23 jalur paksa lama (linoe.drop_retention_vault) sudah TIDAK ada: ditolak"
+eq "T23 setelah semua penolakan: trigger penyalin tetap terpasang (rollback transaksi utuh), vault 4 baris" "$(sq g16 "select count(*) from pg_trigger where tgname='trg_zz_retention_capture'")|$(vault g16 "")" "3|4"
 downsoft g16 && pass "T23 down-soft berhasil" || bad "T23 down-soft: $(cat "$W/err_down.txt")"
 downsoft g16 && pass "T23 down-soft idempoten" || bad "T23 down-soft kedua"
 eq "T23 down-soft: vault tetap berisi 4 baris, penjaga vault (2 trigger) dan fungsi status tetap ada" "$(vault g16 "")|$(sq g16 "select count(*) from pg_trigger where tgrelid='public.prompter_retention_vault'::regclass and not tgisinternal")|$(sq g16 "select count(*) from pg_proc where proname='fn_prompter_retention_vault_status'")" "4|2|1"
 eq "T23 down-soft: trigger penyalin dan penolak TRUNCATE hilang dari tiga tabel billing; fungsi penyalin hilang" "$(sq g16 "select count(*) from pg_trigger where tgname in ('trg_zz_retention_capture','trg_retention_no_truncate')")|$(sq g16 "select count(*) from pg_proc where proname in ('fn_prompter_retention_vault_capture','fn_prompter_retention_block_truncate')")" "0|0"
-eq "T23 down-soft: status().ok=false (penyalinan tidak aktif; 4b-2 tak boleh jalan)" "$(sq g16 "select public.fn_prompter_retention_vault_status()->>'ok'")" false
+eq "T23 down-soft: status() masih dapat dipanggil dan ok=false (penyalinan tidak aktif; 4b-2 tak boleh jalan)" "$(sq g16 "select public.fn_prompter_retention_vault_status()->>'ok'")" false
 deltenant g16 "$TB"
 eq "T23 down-soft: hapus tenant B kembali seperti sebelum 4r (tanpa salinan baru; vault tetap 4)" "$(vault g16 "")|$(sq g16 "select count(*) from public.tenants where id='$TB'")" "4|0"
 up g16 && eq "T23 apply ulang setelah down-soft: isi vault 4 baris dipertahankan, status ok=true" "$(vault g16 "")|$(sq g16 "select public.fn_prompter_retention_vault_status()->>'ok'")" "4|true" || bad "T23 apply ulang: $(cat "$W/err.txt")"
 downsoft g16
 down g16 && bad "T23 down tanpa GUC lolos setelah down-soft padahal vault berisi" || pass "T23 down biasa tetap menolak setelah down-soft selama vault berisi"
-PGOPTIONS="$PGOPTIONS -c linoe.drop_retention_vault=DROP-VAULT-20261128090000" P -d g16 -c "set role mig4r" -f "$D4R" >/dev/null 2>"$W/e.txt" && pass "T23 down paksa (GUC persis) membuang vault" || bad "T23 down paksa: $(cat "$W/e.txt")"
-eq "T23 down paksa: katalog kembali ke keadaan awal (vault dan semua fungsi hilang)" "$(sq g16 "$CATCNT")" "$CAT16"
+# P1: down dengan GUC = RENAME (riwayat TIDAK hilang), bukan DROP
+PGOPTIONS="$PGOPTIONS -c linoe.rename_retention_vault=ARSIPKAN-VAULT-20261128090000" P -d g16 -c "set role mig4r" -f "$D4R" >/dev/null 2>"$W/e.txt" && pass "T23 down dengan GUC persis berhasil (tabel brankas di-RENAME)" || bad "T23 down rename: $(cat "$W/e.txt")"
+ARS=$(sq g16 "select relname from pg_class where relnamespace='public'::regnamespace and relkind='r' and relname like 'prompter_retention_vault_arsip_%'")
+eq "P1 tabel brankas asli tidak ada lagi; tepat satu tabel arsip hasil RENAME" "$(sq g16 "select (to_regclass('public.prompter_retention_vault') is null)::text")|$(echo "$ARS" | grep -c .)" "true|1"
+eq "P1 riwayat TIDAK hilang: tabel arsip masih berisi 4 baris (isi sama)" "$(sq g16 "select count(*) from public.\"$ARS\"")" 4
+eq "P1 penjaga hanya-tambah ikut terjaga pada tabel arsip (UPDATE/DELETE/TRUNCATE ditolak LR004)" "$(for st in "update public.\"$ARS\" set tenant_id=tenant_id" "delete from public.\"$ARS\"" "truncate public.\"$ARS\""; do PS -v ON_ERROR_STOP=1 -d g16 -c "$st" 2>&1 >/dev/null | grep -c LR004; done | tr -d '\n')" 111
+eq "P1 trigger penyalin dan fungsi penyalin/status hilang; fungsi penjaga tetap ada selama tabel arsip ada" "$(sq g16 "select count(*) from pg_trigger where tgname in ('trg_zz_retention_capture','trg_retention_no_truncate')")|$(sq g16 "select count(*) from pg_proc where proname in ('fn_prompter_retention_vault_capture','fn_prompter_retention_block_truncate','fn_prompter_retention_vault_status')")|$(sq g16 "select count(*) from pg_proc where proname='fn_prompter_retention_vault_append_only_guard'")" "0|0|1"
+PGOPTIONS="$PGOPTIONS -c linoe.rename_retention_vault=ARSIPKAN-VAULT-20261128090000" P -d g16 -c "set role mig4r" -f "$D4R" >/dev/null 2>"$W/e.txt" && pass "T23 down kedua setelah RENAME idempoten (tabel arsip tidak disentuh)" || bad "T23 down kedua: $(cat "$W/e.txt")"
+eq "P1 arsip tetap 4 baris setelah down kedua" "$(sq g16 "select count(*) from public.\"$ARS\"")" 4
+up g16 && eq "P1 apply ulang setelah RENAME: vault baru kosong dan berfungsi, arsip utuh 4 baris, tidak ada tabrakan nama indeks/urutan" "$(vault g16 "")|$(sq g16 "select count(*) from public.\"$ARS\"")|$(sq g16 "select public.fn_prompter_retention_vault_status()->>'ok'")" "0|4|true" || bad "T23 apply ulang setelah rename: $(cat "$W/err.txt")"
+# down pada vault kosong: DROP (tidak ada riwayat) dan katalog kembali ke awal; fungsi penjaga hilang bila tak ada tabel arsip
+mk g16b; seed g16b 1; CAT16B=$(sq g16b "$CATCNT"); up g16b; down g16b
+eq "T23 down pada vault kosong: katalog kembali ke keadaan awal (vault dan semua fungsi hilang)" "$(sq g16b "$CATCNT")" "$CAT16B"
+# P2-2: balapan down vs DELETE yang sedang berjalan: baris yang disalin transaksi itu TIDAK ikut terbuang
+mk g16c; seed g16c 1; up g16c
+( PA -v ON_ERROR_STOP=1 -d g16c -c "begin" -c "delete from public.prompter_invoices where external_invoice_id='inv-a1'" -c "select pg_sleep(1.8)" -c "commit" >/dev/null 2>&1 ) &
+HOLD=$!; sleep 0.5
+down g16c && bad "P2-2 down lolos saat ada DELETE berjalan yang menyalin ke vault (baris ikut terbuang)" || { grep -q "DIBATALKAN down 4r: brankas berisi 1 baris" "$W/err_down.txt" && pass "P2-2 down menunggu DELETE berjalan (trigger dilepas dulu), lalu melihat 1 baris dan MENOLAK (tanpa balapan hitung)" || bad "P2-2 sebab lain: $(cat "$W/err_down.txt")"; }
+wait $HOLD
+eq "P2-2 baris arsip dari transaksi yang berjalan tetap ada dan trigger tetap terpasang" "$(vault g16c "")|$(sq g16c "select count(*) from pg_trigger where tgname='trg_zz_retention_capture'")" "1|3"
 
 # T24 prasyarat
 mk g17; seed g17 1; P -d g17 -c "drop table public.prompter_invoices" >/dev/null
@@ -475,7 +514,11 @@ mk r1; up r1 || bad "T29 apply pada rantai asli"
 if (cd "$root/supabase/tests/p0-2-invoices" && PGOPTIONS="-c client_min_messages=notice" P -d r1 -f scenarios.sql >"$W/o1.txt" 2>&1); then pass "T29 skenario P0-2 (suite lama, tanpa diubah) lulus dengan 4r terpasang: $(grep -c 'PASS:' "$W/o1.txt") pemeriksaan"; else bad "T29 skenario P0-2 gagal dengan 4r"; grep -E "FAIL|ERROR" "$W/o1.txt" | head -6; fi
 mk r2; up r2 || bad "T29 apply r2"
 if (cd "$b2s" && PGOPTIONS="-c client_min_messages=notice" P -d r2 -f scenarios.sql >"$W/o2.txt" 2>&1); then pass "T29 skenario B2 (suite lama, tanpa diubah) lulus dengan 4r terpasang: $(grep -c 'PASS:' "$W/o2.txt") pemeriksaan"; else bad "T29 skenario B2 gagal dengan 4r"; grep -E "FAIL|ERROR" "$W/o2.txt" | head -6; fi
-eq "T29 skenario lama menghapus/menyentuh baris billing dengan 4r terpasang: vault diizinkan bertambah, status tetap ok" "$(sq r1 "select public.fn_prompter_retention_vault_status()->>'ok'")|$(sq r2 "select public.fn_prompter_retention_vault_status()->>'ok'")" "true|true"
+eq "T29 setelah skenario P0-2: status().ok=true" "$(sq r1 "select public.fn_prompter_retention_vault_status()->>'ok'")" true
+# skenario B2 lama menjalankan "ALTER TABLE prompter_subscriptions ENABLE TRIGGER USER", yang MENGEMBALIKAN trigger ke mode biasa (bukan ALWAYS): status() harus mendeteksinya
+eq "T29 setelah skenario B2 (ENABLE TRIGGER USER mereset ALWAYS): status().ok=false, capture_triggers_always=2 (terdeteksi, bukan lolos diam-diam)" "$(sq r2 "select (s->>'ok')||':'||(s->>'capture_triggers_always')||(s->>'truncate_guards_always') from (select public.fn_prompter_retention_vault_status() s) x")" "false:22"
+P -d r2 -c "set role mig4r" -c "alter table public.prompter_subscriptions enable always trigger trg_zz_retention_capture" -c "alter table public.prompter_subscriptions enable always trigger trg_retention_no_truncate" >/dev/null
+eq "T29 setelah ENABLE ALWAYS dipulihkan: status().ok=true" "$(sq r2 "select public.fn_prompter_retention_vault_status()->>'ok'")" true
 
 # T30 skrip reset QA yang ada (delete from public.tenants) tetap berjalan; vault QA tumbuh (diterima)
 if command -v node >/dev/null 2>&1; then
@@ -491,6 +534,21 @@ if command -v node >/dev/null 2>&1; then
 else
   bad "T30 node tidak tersedia (dibutuhkan untuk mencetak SQL reset QA)"
 fi
+
+# T29b suite lama DIJALANKAN ULANG PENUH dengan 4r terpasang pada SETIAP database uji mereka: salinan sementara tiap runner di-patch oleh patch-legacy-mk.py
+# (hanya menambah pemasangan 4r di akhir fungsi mk(); berkas asli tidak diubah, salinan dihapus setelahnya). Invoice (migrasi billing asli) dipasang bila belum ada.
+# s1-trial-quota tidak diikutkan: database ujinya tidak memiliki prompter_payment_transactions (prasyarat 4r tidak terpenuhi); komposisi S1 dengan 4r tetap teruji
+# lewat b1-checkout dan plan-tampering (bagian "S1 first/then" mereka berjalan dengan 4r terpasang). Sapuan lifecycle (kedaluwarsa) ada di rantai B2/P0-2.
+for suite in b1-checkout plan-tampering b2-double-payment b4-payment-alerts b4-2-notifications; do
+  d="$root/supabase/tests/$suite"; pf="$d/.rv4r_patched.sh"
+  if python3 "$here/patch-legacy-mk.py" "$d/run-local.sh" "$pf" && grep -q "rv4r()" "$pf"; then
+    ( cd "$d" && bash "$pf" >"$W/legacy_$suite.txt" 2>&1 ); lrc=$?
+    rm -f "$pf"
+    if [ "$lrc" = 0 ] && grep -qE '^ALL( B4\.2 LOCAL TESTS)? PASSED' "$W/legacy_$suite.txt" && ! grep -q '^FAIL' "$W/legacy_$suite.txt"; then
+      pass "T29b suite lama $suite (tanpa diubah, 4r terpasang pada semua DB uji): $(grep -c '^PASS' "$W/legacy_$suite.txt") pemeriksaan lulus"
+    else bad "T29b suite lama $suite gagal dengan 4r terpasang"; grep -E "^FAIL|ERROR" "$W/legacy_$suite.txt" | head -6; fi
+  else rm -f "$pf"; bad "T29b patch suite $suite gagal"; fi
+done
 
 # ---------- ringkasan ----------
 for d in $(PA -d postgres -c "select datname from pg_database where datname like 'g%' or datname like 'fc' or datname like 'r_' or datname like 'rv_tpl%'"); do P -d postgres -c "drop database if exists $d" >/dev/null 2>&1; done

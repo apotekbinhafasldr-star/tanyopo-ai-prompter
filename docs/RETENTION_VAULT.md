@@ -15,8 +15,8 @@ Berkas: `supabase/migrations/20261128090000_prompter_retention_vault.sql`; rollb
 | `prompter_retention_vault` | Salinan minimal baris billing yang akan dihapus. **Tanpa foreign key** (tidak ikut terhapus bersama `tenants`/`auth.users`). RLS aktif tanpa policy; semua hak `public/anon/authenticated/service_role` dicabut (tabel dan urutan identity). |
 | `fn_prompter_retention_vault_capture()` + trigger `trg_zz_retention_capture` | `BEFORE DELETE` per baris pada tiga tabel billing. SECURITY DEFINER, `search_path = pg_catalog, public, pg_temp`. Menyalin kolom **allowlist** ke brankas dalam transaksi DELETE yang sama. Nama `zz` = urutan abjad terakhir: bila trigger lain membatalkan hapus, salinan tidak dibuat. |
 | `trg_retention_no_truncate` | `BEFORE TRUNCATE` pada tiga tabel billing: ditolak (`LR003`). |
-| `trg_retention_vault_immutable`, `trg_retention_vault_no_truncate` | Penjaga hanya-tambah pada brankas: UPDATE/DELETE/TRUNCATE ditolak (`LR004`). |
-| `fn_prompter_retention_vault_status()` | Baca-saja (jsonb): jumlah trigger aktif, jumlah `ENABLE ALWAYS`, jumlah baris brankas, `ok`. Tanpa EXECUTE untuk klien. |
+| `trg_retention_vault_append_only_guard`, `trg_retention_vault_no_truncate` | Penjaga hanya-tambah pada brankas: UPDATE/DELETE/TRUNCATE ditolak (`LR004`). |
+| `fn_prompter_retention_vault_status()` | Baca-saja (jsonb): jumlah penyalin dan penolak TRUNCATE aktif dan `ENABLE ALWAYS`, penjaga brankas, jumlah baris brankas, `ok`. `ok=true` hanya bila ketiga tabel billing memiliki penyalin DAN penolak TRUNCATE yang aktif, **ENABLE ALWAYS**, memanggil fungsi yang benar dengan tipe trigger yang benar (trigger senama dengan fungsi lain tidak lolos), dan penjaga brankas lengkap. Tanpa EXECUTE untuk klien. |
 
 Trigger penyalin dan penolak TRUNCATE `ENABLE ALWAYS` (tetap menyala di `session_replication_role = replica`).
 
@@ -49,7 +49,7 @@ Bila penyalinan ke brankas gagal karena sebab apa pun (tabel rusak/diganti nama,
 | `LR003` | TRUNCATE pada tiga tabel billing ditolak |
 | `LR004` | UPDATE/DELETE/TRUNCATE pada brankas ditolak |
 
-Konsekuensi untuk produk lain pada database bersama: bila brankas rusak atau terkunci, **penghapusan tenant mereka ikut gagal** dengan `LR001`. Itu disengaja (bukti hilang diam-diam dianggap lebih buruk daripada galat yang terlihat). Periksa `select public.fn_prompter_retention_vault_status();` secara berkala dan sebelum penghapusan tenant apa pun: `ok` harus `true` dan `capture_triggers_always` = 3.
+Konsekuensi untuk produk lain pada database bersama: bila brankas rusak atau terkunci, **penghapusan tenant mereka ikut gagal** dengan `LR001`. Itu disengaja (bukti hilang diam-diam dianggap lebih buruk daripada galat yang terlihat). Periksa `select public.fn_prompter_retention_vault_status();` secara berkala dan sebelum penghapusan tenant apa pun: `ok` harus `true` (sudah mencakup `capture_triggers_always` = 3 dan `truncate_guards_always` = 3). Catatan: `ALTER TABLE ... ENABLE TRIGGER USER/ALL` mengembalikan trigger ke mode biasa (bukan ALWAYS) dan membuat `ok=false`; pulihkan dengan `ENABLE ALWAYS TRIGGER <nama>`.
 
 **Break-glass** (hanya bila penghapusan tenant mendesak sementara brankas rusak dan tidak dapat diperbaiki cepat): pemilik tabel menjalankan `ALTER TABLE ... DISABLE TRIGGER trg_zz_retention_capture` pada tabel terkait, hanya dengan persetujuan tertulis Founder, mencatatnya, lalu `ENABLE ALWAYS` kembali dan memeriksa `status()`. Penghapusan di jendela itu **tidak tersalin** (diterima tertulis).
 
@@ -68,7 +68,7 @@ Konsekuensi untuk produk lain pada database bersama: bila brankas rusak atau ter
 | Perilaku `DELETE FROM tenants` | Tidak berubah: tetap berhasil; hasil seluruh tabel identik dengan dan tanpa 4r | SANDBOX (T10) |
 | `tenants` dan tabel mereka | Tidak diubah; nol kunci selain AccessShare pada `tenants` saat apply | SANDBOX (T25) |
 | Galat baru | `LR001` pada hapus tenant hanya bila brankas rusak (fail-closed) | SANDBOX (T4) |
-| Kunci saat apply | `ShareRowExclusive` pada tiga tabel LINOE sampai commit (`lock_timeout` 3 s): baca tetap jalan, tulis checkout tertahan sebentar | SANDBOX (T24, T25) |
+| Kunci saat apply | **Apply pertama:** `ShareRowExclusive` pada tiga tabel LINOE sampai commit (`lock_timeout` 3 s): baca tetap jalan, tulis checkout tertahan sebentar. **Apply ulang (trigger sudah ada):** `DROP TRIGGER IF EXISTS` mengambil `AccessExclusive` pada tiga tabel itu sehingga baca pun tertahan sebentar; T25 hanya mengukur apply pertama | SANDBOX (T24, T25); apply ulang = CODE |
 | `TRUNCATE` tiga tabel billing | Kini ditolak (`LR003`), termasuk `TRUNCATE tenants CASCADE` | SANDBOX (T8) |
 | Hak | Penyalin berjalan sebagai pemilik tabel; pemanggil tidak butuh hak apa pun atas brankas | SANDBOX (T1, T20) |
 | Ruang | Brankas tumbuh per baris billing yang dihapus (kecil) | ESTIMASI |
@@ -76,17 +76,17 @@ Konsekuensi untuk produk lain pada database bersama: bila brankas rusak atau ter
 
 ## 7. Penghapusan tenant yang aman (ringkas; 4a/4b bukan bagian PR ini)
 
-LINOE sendiri tidak pernah menghapus `tenants`. Urutan operator: (1) `status()` `ok=true` dan `capture_triggers_always=3`; (2) catat hitungan baris tiga tabel billing tenant itu; (3) ekspor/penghapusan data operasional sesuai prosedur permintaan data subjek (PR terpisah); (4) `DELETE` baris `tenants` oleh pemilik produk/operator; (5) cocokkan jumlah baris brankas per `(tenant_id, source_table)` dengan hitungan langkah 2 (selisih = insiden, hentikan, jangan ulangi). Setiap langkah satu pernyataan SQL yang dapat dijalankan dari SQL Editor di ponsel.
+LINOE sendiri tidak pernah menghapus `tenants`. Urutan operator: (1) `status()` `ok=true`; (2) catat hitungan baris tiga tabel billing tenant itu; (3) ekspor/penghapusan data operasional sesuai prosedur permintaan data subjek (PR terpisah); (4) `DELETE` baris `tenants` oleh pemilik produk/operator; (5) cocokkan brankas dengan hitungan langkah 2 **hanya** untuk baris yang dibuat oleh penghapusan itu: `tenant_id` yang sama, `archive_reason = 'TENANT_CASCADE'`, dan `archived_at >= <waktu mulai langkah 4>` (catat `clock_timestamp()` sebelum langkah 4). Jangan memakai hitungan mentah per `(tenant_id, source_table)`: brankas tidak unik per `source_pk` dan dapat sudah memuat arsip lama (mis. `ROW_DELETE` untuk PK yang sama, atau PK yang dibuat ulang), sehingga hitungan mentah bisa lebih besar dan menimbulkan selisih palsu (diuji: tes `P2-1`). Selisih setelah filter = insiden, hentikan, jangan ulangi. Setiap langkah satu pernyataan SQL yang dapat dijalankan dari SQL Editor di ponsel.
 
 ## 8. Rollback
 
 | Tingkat | Berkas | Efek |
 |---|---|---|
 | Soft | `supabase/rollback/20261128090000_prompter_retention_vault.down-soft.sql` | Melepas trigger penyalin dan penolak TRUNCATE serta fungsinya; **brankas dan isinya dipertahankan**; `status().ok=false` sehingga langkah penghapusan data tidak boleh lanjut. Hapus tenant kembali seperti sebelum 4r. |
-| Penuh | `...down.sql` | Membuang semua objek 4r. **Menolak** (`DIBATALKAN down 4r`) bila brankas berisi baris; tidak ada yang dibuang. |
-| Penuh paksa | `...down.sql` dengan `PGOPTIONS="-c linoe.drop_retention_vault=DROP-VAULT-20261128090000"` | Membuang brankas **beserta bukti yang sudah diarsipkan**: hanya dengan persetujuan tertulis, setelah mengekspor isi brankas. Nilai selain persis itu ditolak. |
+| Penuh | `...down.sql` | Membuang semua objek 4r bila brankas **kosong**. **Menolak** (`DIBATALKAN down 4r`) bila berisi baris; tidak ada yang dibuang. Urutan anti-balapan: trigger penyalin dilepas dahulu (menunggu transaksi DELETE yang sedang berjalan selesai), brankas dikunci eksklusif, baru dihitung (diuji: tes `P2-2`). |
+| Penuh, brankas berisi, disetujui | `...down.sql` dengan `PGOPTIONS="-c linoe.rename_retention_vault=ARSIPKAN-VAULT-20261128090000"` | Trigger penyalin dan fungsi dibuang, tetapi tabel brankas di-**RENAME** menjadi `prompter_retention_vault_arsip_<UTC yyyymmddhh24miss>` (isi, indeks, dan penjaga hanya-tambah tetap; fungsi penjaga dipertahankan). **Riwayat yang sudah diarsipkan tidak pernah dibuang oleh rollback.** Nilai selain persis itu ditolak. Apply ulang membuat brankas baru yang kosong tanpa tabrakan nama. |
 
-Semua idempoten dan diuji dua kali. Terapan gagal di tengah = rollback transaksi otomatis (prasyarat fail-closed: tiga tabel, `tenants`, dan `SELECT` pemilik pada `tenants`; `lock_timeout` 3 s; tanpa objek sebagian).
+Penghapusan permanen arsip (bila kelak disetujui) bukan bagian rollback: ekspor dan `DROP` manual atas tabel arsip, dengan persetujuan tertulis terpisah, di luar berkas ini. Semua idempoten dan diuji dua kali. Terapan gagal di tengah = rollback transaksi otomatis (prasyarat fail-closed: tiga tabel, `tenants`, dan `SELECT` pemilik pada `tenants`; `lock_timeout` 3 s; tanpa objek sebagian).
 
 ## 9. Kelas bukti dan cakupan tes
 
@@ -106,10 +106,12 @@ Pemetaan ke 42 tes yang direncanakan:
 | H statis | 31-33, 35-36 | `retention-vault.test.ts`; allowlist migrasi di tiga tes guard diperbarui; entri manifest QA2 |
 
 **Belum dicakup (jujur):**
-- Tes 29 hanya menjalankan ulang skenario P0-2 dan B2 (yang memuat lintasan checkout, webhook, invoice). Suite `b1-checkout`, `plan-tampering`, `s1-trial-quota`, dan `payment-lifecycle` tidak dijalankan ulang dengan 4r terpasang.
+- Tes 29: skenario P0-2 dan B2 dijalankan dengan 4r terpasang (T29) **dan** suite lama `b1-checkout`, `plan-tampering`, `b2-double-payment`, `b4-payment-alerts`, `b4-2-notifications` dijalankan penuh dan tanpa diubah dengan 4r terpasang pada setiap database ujinya (T29b; runner membuat salinan sementara ber-patch `patch-legacy-mk.py`). Termasuk komposisi dengan migrasi S1 dan sapuan lifecycle (dari rantai B2/P0-2). `s1-trial-quota` tidak diikutkan karena database ujinya tidak memiliki `prompter_payment_transactions` (prasyarat 4r tidak terpenuhi). Tidak ada suite `payment-lifecycle` runtime terpisah di repo; sapuannya hanya teruji lewat rantai tersebut.
 - Tes 34 (daftar putih `ddl_targets` runner paket produksi): tidak berlaku, tidak ada paket produksi di PR ini.
 - Tes 37-42 (probe REAL read-only pada Supabase produksi): sengaja tidak dijalankan; butuh persetujuan terpisah.
 - Pada sandbox peran pemilik diberi BYPASSRLS (meniru peran `postgres` Supabase); peran migrasi produksi LINOE belum diketahui. Skenario tanpa BYPASSRLS diuji terpisah (label `UNDETERMINED`).
+
+Catatan bukti: "uji mutasi" (menghapus `ENABLE ALWAYS`, `query_canceled`, allowlist, atau fail-closed lalu memastikan tes gagal) dijalankan manual oleh pembuat PR di PG16 lokal; **tidak ada log di repo ini** dan tidak diverifikasi pihak lain.
 
 ## 10. UNKNOWN (tidak boleh dianggap sudah diketahui)
 
