@@ -126,34 +126,49 @@ OTHER_PRODUCT_RE = re.compile(r"publoe|mitapeng|umkmpro|kagura|apotek", re.I)
 # in a string literal the shared project name "umkmpro-ai" may be mentioned (messages); other umkmpro* names may not
 OTHER_PRODUCT_LIT_RE = re.compile(r"publoe|mitapeng|kagura|apotek|umkmpro(?![-_ ]*ai\b)", re.I)
 
-# Unqualified names that may be followed by "(" in a SELECT/PERFORM/DO/post-COMMIT statement: pure built-ins only.
+BAN_PREFIX = ("dblink", "pg_advisory", "pg_try_advisory")
+
+# Unqualified names that may be followed by "(" in a statement that runs at apply time: pure built-ins only. Evidence per function:
+# pg_proc.provolatile is 'i' (immutable) or 's' (stable) for every overload in pg_catalog (PG16), except clock_timestamp/statement_timestamp/
+# gen_random_uuid (volatile but read-only). Words that are SQL keywords are NOT here: see SQL_RESERVED/SQL_COLNAME below.
 PURE_FUNCS = {
-    "now", "clock_timestamp", "statement_timestamp", "count", "sum", "min", "max", "avg", "bool_and", "bool_or", "every", "md5", "coalesce",
-    "nullif", "greatest", "least", "array_agg", "string_agg", "jsonb_agg", "json_agg", "jsonb_build_object", "json_build_object",
+    "now", "clock_timestamp", "statement_timestamp", "count", "sum", "min", "max", "avg", "bool_and", "bool_or", "every", "md5",
+    "array_agg", "string_agg", "jsonb_agg", "json_agg", "jsonb_build_object", "json_build_object",
     "jsonb_build_array", "to_char", "to_date", "to_timestamp", "to_number", "to_regclass", "to_regprocedure", "to_regproc", "to_regtype",
     "to_regnamespace", "to_regrole", "regexp_replace", "regexp_match", "regexp_matches", "length", "char_length", "lower", "upper", "concat",
-    "concat_ws", "replace", "substr", "substring", "trim", "btrim", "ltrim", "rtrim", "position", "left", "right", "format", "quote_ident",
+    "concat_ws", "replace", "substr", "btrim", "ltrim", "rtrim", "left", "right", "format", "quote_ident",
     "quote_literal", "split_part", "string_to_array", "array_to_string", "array_length", "cardinality", "unnest", "generate_series",
-    "date_trunc", "extract", "date_part", "age", "abs", "round", "floor", "ceil", "ceiling", "jsonb_array_length", "jsonb_typeof",
+    "date_trunc", "date_part", "age", "abs", "round", "floor", "ceil", "ceiling", "jsonb_array_length", "jsonb_typeof",
     "jsonb_extract_path_text", "jsonb_object_keys", "gen_random_uuid", "pg_get_functiondef", "pg_get_function_identity_arguments",
     "pg_get_function_arguments", "pg_get_expr", "pg_get_constraintdef", "pg_get_indexdef", "pg_get_triggerdef", "pg_get_viewdef",
     "has_function_privilege", "has_table_privilege", "has_schema_privilege", "has_column_privilege", "has_sequence_privilege",
-    "has_any_column_privilege", "pg_has_role", "to_jsonb", "to_json", "jsonb_each", "jsonb_each_text", "row_to_json", "aclexplode", "jsonb_array_elements", "jsonb_array_elements_text", "chr", "obj_description", "pg_get_userbyid", "row_number", "rank", "dense_rank", "cast", "overlay", "current_setting", "pg_typeof",
-    "exists", "any", "all", "some", "row", "array", "grouping",
+    "has_any_column_privilege", "pg_has_role", "to_jsonb", "to_json", "jsonb_each", "jsonb_each_text", "row_to_json", "aclexplode",
+    "jsonb_array_elements", "jsonb_array_elements_text", "chr", "obj_description", "pg_get_userbyid", "row_number", "rank", "dense_rank",
+    "current_setting", "pg_typeof", "current_schema",
+    # added after QA delta (all immutable/stable in pg_proc, PG16): none writes, none reads outside the catalog/arguments
+    "strpos", "lpad", "rpad", "initcap", "array_append", "array_prepend", "array_cat", "array_remove", "array_position",
+    "regexp_split_to_array", "jsonb_set", "jsonb_object_agg", "format_type", "mod", "power", "sqrt", "make_date", "col_description",
+    "current_database", "version", "pg_size_pretty", "pg_get_serial_sequence", "pg_table_is_visible", "percentile_cont", "lag", "lead",
+    "first_value", "last_value",
 }
-# SQL keywords/types that may sit directly before "(" (unquoted only; a quoted "and"( is a function name)
-KW_PAREN = {
-    "and", "or", "not", "in", "exists", "values", "using", "check", "if", "as", "on", "from", "join", "inner", "left", "right", "full", "cross",
-    "natural", "lateral", "select", "where", "when", "then", "else", "case", "between", "over", "filter", "within", "by", "limit", "offset",
-    "union", "except", "intersect", "returning", "distinct", "unique", "primary", "key", "references", "default", "like", "ilike", "similar",
-    "is", "to", "at", "with", "set", "into", "end", "elsif", "elseif", "while", "for", "return", "perform", "raise", "loop", "begin", "materialized",
-    "window", "sets", "rollup", "cube", "tablesample", "collate", "interval", "varchar", "char", "character", "numeric", "decimal", "timestamp",
-    "timestamptz", "time", "timetz", "bit", "varbit", "float", "current_timestamp", "localtimestamp", "localtime", "current_time",
-    "partition", "order", "group", "having", "asc", "desc", "nulls", "first", "last", "rows", "range", "groups", "unbounded", "preceding",
-    "following", "current", "escape", "symmetric", "asymmetric", "verbose", "only", "conflict", "do", "nothing", "update", "delete", "insert",
-    "table", "array", "any", "all", "some", "row", "of", "after", "before", "each", "execute", "constraint", "foreign", "add", "column",
-}
-BAN_PREFIX = ("dblink", "pg_advisory", "pg_try_advisory")
+# PostgreSQL 16 pg_get_keywords(): catcode R (reserved) and C (cannot be a function or type name) words are SQL syntax, never a call of a
+# user function, so they may precede "(" (select, in, exists, values, coalesce, interval, ...). Unreserved (U) and type_func (T) words CAN
+# be user function names ("set", "first", "key", "range", "filter", ...) and are only accepted in the exact syntactic contexts below.
+SQL_RESERVED = set("""all analyse analyze and any array as asc asymmetric both case cast check collate column constraint create
+current_catalog current_date current_role current_time current_timestamp current_user default deferrable desc distinct do else end except
+false fetch for foreign from grant group having in initially intersect into lateral leading limit localtime localtimestamp not null offset on
+only or order placing primary references returning select session_user some symmetric system_user table then to trailing true union unique
+user using variadic when where window with""".split())
+SQL_COLNAME = set("""between bigint bit boolean char character coalesce dec decimal exists extract float greatest grouping inout int integer
+interval json_array json_arrayagg json_object json_objectagg least national nchar none normalize nullif numeric out overlay position
+precision real row setof smallint substring time timestamp treat trim values varchar xmlattributes xmlconcat xmlelement xmlexists xmlforest
+xmlnamespaces xmlparse xmlpi xmlroot xmlserialize xmltable""".split())
+# non-reserved words allowed before "(" only directly after one of these words (or "::" for the type-name words)
+PAREN_CTX = {"by": {"order", "group", "partition"}, "key": {"primary", "foreign"},
+             "join": {"inner", "left", "right", "full", "cross", "natural", "outer"}, "varying": {"character", "char", "bit"},
+             "timestamptz": {"::"}, "timetz": {"::"}, "varbit": {"::"}}
+PLPGSQL_FIRST = {"if", "elsif", "elseif", "while", "return", "perform", "raise", "assert"}  # only as the first token of a statement/head
+INDEX_METHODS = {"btree", "hash", "gin", "gist", "spgist", "brin"}
 OBJ_WORDS = {"table", "policy", "function", "trigger", "index", "schema", "role", "user", "extension", "database", "view", "sequence",
              "type", "or", "unique", "materialized", "publication", "subscription", "procedure", "domain", "temp", "temporary",
              "unlogged", "rule", "aggregate", "operator", "server", "foreign", "column", "constraint", "owned", "default", "event"}
@@ -744,15 +759,17 @@ def _depth_scan(s):
         yield d, t
 
 
-def check_calls(ctx, s, qualified=False):
-    """Default-deny for function calls in statements that run at apply time (top level, DO, after COMMIT).
+def check_calls(ctx, s, qualified=True, ddl=False):
+    """Default-deny for function calls in statements that run at apply time (top level, DO, after COMMIT, DML/DDL expressions).
 
-    A word/quoted identifier directly followed by "(" is a call unless it is a SQL keyword/type (unquoted) or a pure built-in from
-    PURE_FUNCS. Quoted identifiers are normalised first ("nextval" == nextval; "Now" is NOT now). With qualified=True, schema.name( is
-    refused too unless the schema is pg_catalog/information_schema AND the name is pure (DML targets use schema.table ( and are gated
-    by the allow-list instead). Not covered (documented): operators, casts, views, RLS/policy functions and triggers that run
-    user code implicitly.
+    A word/quoted identifier directly followed by "(" is a call unless: it is SQL syntax (reserved / col_name keyword, unquoted), it is
+    a pure built-in from PURE_FUNCS, or it is a non-reserved keyword in its exact syntactic context (PAREN_CTX, plpgsql statement head).
+    Quoted identifiers are normalised first ("nextval" == nextval; "Now" is NOT now; a quoted keyword is a function name).
+    schema.name( is refused unless the schema is pg_catalog/information_schema AND the name is pure; a table reference followed by a
+    column list (insert into t (..), create index .. on t (..), references t (..) in DDL) is recognised by the word before the schema.
+    Not covered (documented): operators, casts, views, RLS/policy functions, triggers and the attribute notation t.fn (no parentheses).
     """
+    excl = {"into", "on", "table", "references", "only", "exists"} if ddl else {"into"}
     for k, t in enumerate(s):
         if t.kind not in ("word", "qid") or k + 1 >= len(s) or not (s[k + 1].kind == "punct" and s[k + 1].text == "("):
             continue
@@ -760,19 +777,39 @@ def check_calls(ctx, s, qualified=False):
             name = ident(t, False)
         except Deny:
             raise Deny("call of a function with an unreadable name")
-        if k >= 1 and s[k - 1].kind == "punct" and s[k - 1].text == ".":
-            if not qualified:
-                continue
+        prev = s[k - 1] if k >= 1 else None
+        if prev is not None and prev.kind == "punct" and prev.text == ".":
             if k >= 2 and s[k - 2].kind in ("word", "qid") and not (k >= 3 and s[k - 3].kind == "punct" and s[k - 3].text == "."):
+                before = s[k - 3] if k >= 3 else None
+                if before is not None and before.kind == "word" and before.text.lower() in excl:
+                    continue  # "<into|on|table|references> schema.table (column list)"
                 sch = ident(s[k - 2], False)
-                if sch in ("pg_catalog", "information_schema") and name in PURE_FUNCS and (s[k - 2].kind == "word" or sch == s[k - 2].text[1:-1]):
+                if sch in ("pg_catalog", "information_schema") and name in PURE_FUNCS:
                     continue
             raise Deny("call of a schema-qualified function that is not a pure built-in")
-        if k >= 1 and (is_w(s[k - 1], "as") or (s[k - 1].kind == "punct" and s[k - 1].text == ")")):
-            continue  # alias with a column list: "... as a(x, o)" / "(subquery) r(n)" (no call can follow an operand)
-        if t.kind == "word" and (name in KW_PAREN or name in PURE_FUNCS):
-            continue
-        if t.kind == "qid" and name in PURE_FUNCS and name == name.lower():
+        if prev is not None and (prev.kind in ("str", "num", "qid", "param") or (prev.kind == "punct" and prev.text in (")", "]"))):
+            continue  # an operand precedes: infix keyword, alias with a column list ("(subquery) r(n)"); never a call start
+        if prev is not None and is_w(prev, "as"):
+            continue  # "... as a(x, o)" alias / "as numeric(10,2)" type
+        pw = prev.text.lower() if prev is not None and prev.kind in ("word", "punct") else None
+        if t.kind == "word":
+            if name in SQL_RESERVED or name in SQL_COLNAME:
+                continue
+            if name in PURE_FUNCS:
+                continue
+            if name in PAREN_CTX and pw in PAREN_CTX[name]:
+                continue
+            if name == "conflict" and pw == "on" and is_w(s[0], "insert") and not any(is_w(x, "join") for x in s[:k]):
+                continue  # INSERT ... ON CONFLICT (cols); in a JOIN ... ON the same word would be a user function
+            if name == "materialized" and pw == "not" and k >= 2 and is_w(s[k - 2], "as"):
+                continue  # WITH x AS NOT MATERIALIZED (...)
+            if name in PLPGSQL_FIRST and (k == 0 or pw in ("begin", "else", "loop", "then", "declare")):
+                continue
+            if ddl and name in INDEX_METHODS and pw == "using":
+                continue
+            if ddl and name in ("timestamptz", "timetz", "varbit") and prev is not None and prev.kind in ("word", "qid") and pw not in SQL_RESERVED:
+                continue  # column type with a precision in a column definition
+        elif name in PURE_FUNCS:
             continue
         raise Deny("call of a function that is not a pure built-in (unregistered / schema-less user function)")
 
@@ -798,6 +835,7 @@ def read_stmt(ctx, s, phase):
 
 
 def p_alter_table(ctx, s):
+    check_calls(ctx, s, True, ddl=True)  # DEFAULT / CHECK expressions run at apply time
     i = 2
     if is_w(s[i], "if"):
         i = need(s, i + 1, "exists")
@@ -818,6 +856,7 @@ def p_alter_table(ctx, s):
 
 
 def p_create_index(ctx, s):
+    check_calls(ctx, s, True, ddl=True)  # index expressions / predicate run at apply time
     i = 1
     if is_w(s[i], "unique"):
         i += 1
@@ -845,6 +884,8 @@ def p_create_table(ctx, s, temp):
         i = need(s, i + 1, "not")
         i = need(s, i, "exists")
     parts, i = qname(s, i)
+    if not temp:
+        check_calls(ctx, s, True, ddl=True)
     if temp:
         if len(parts) != 1:
             raise Deny("temporary table must be a bare name")
@@ -933,6 +974,8 @@ def p_create_function(ctx, s, i):
     if len(parts) != 2 or parts[0] != "public":
         raise Deny("CREATE FUNCTION is accepted in public only (schema-qualified)")
     name = parts[1]
+    if name in PURE_FUNCS or name in SQL_RESERVED or name in SQL_COLNAME:
+        raise Deny("a function named like a pure built-in would shadow it by overload resolution (md5(1) -> public.md5(int))")
     if i >= len(s) or s[i].text != "(":
         raise Deny("function argument list expected")
     close = match_paren(s, i)
@@ -1094,8 +1137,8 @@ def lint_body(ctx, text, phase):
         try:
             if head:
                 _anywhere(ctx, head, phase)
-                if phase == "do":
-                    check_calls(ctx, head, qualified=True)
+            if phase == "do" and not (tail and lw(tail[0]) in ("grant", "revoke", "set", "create", "alter", "drop", "comment")):
+                check_calls(ctx, seg, qualified=True)  # head AND tail together: the head split must not hide a call ("if loop(1) then")
         except Deny as e:
             ctx.bad(f"statement not accepted ({e})")
             continue
@@ -1107,13 +1150,9 @@ def lint_body(ctx, text, phase):
             if first in HARD_DENY_START:
                 raise Deny("dynamic EXECUTE is never accepted" if first == "execute" else f"'{first}' is not accepted inside a body")
             if first in ("update", "delete", "insert", "grant", "revoke", "set", "create", "alter", "drop", "comment", "with", "values", "table"):
-                if phase == "do" and first in ("update", "delete", "insert", "set", "create", "alter", "drop", "comment", "grant", "revoke"):
-                    check_calls(ctx, tail, qualified=False)
                 accepted = classify(ctx, tail, phase)
             else:
                 _anywhere(ctx, tail, phase)
-                if phase == "do":
-                    check_calls(ctx, tail, qualified=True)
                 if first == "select" or first == "perform":
                     read_stmt(ctx, tail, phase)
                 accepted = False
@@ -1178,7 +1217,7 @@ def classify(ctx, s, phase="top"):
     if f == "comment":
         return p_comment(ctx, s)
     if f in ("update", "delete", "insert") and phase == "top":
-        check_calls(ctx, s, qualified=False)
+        check_calls(ctx, s, qualified=True)
     if f == "update":
         return p_update(ctx, s, phase)
     if f == "delete":

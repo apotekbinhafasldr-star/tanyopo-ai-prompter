@@ -337,8 +337,10 @@ describe("Pipeline v2.1 — QA #188 regressions (static guards on the runner, pr
   const probe = read("supabase/prod-packages/tools/privilege_probe_readonly.sql").replace(/--[^\n]*/g, "");
 
   it("function calls are default-deny, sequence functions are banned after normalising quotes, timeouts are bounded, no ACL fingerprints", () => {
-    expect(src).toMatch(/def check_calls\(ctx, s, qualified=False\)/);
     expect(src).toMatch(/PURE_FUNCS = \{/);
+    expect(src).toMatch(/SQL_RESERVED = set\(/);
+    expect(src).not.toMatch(/KW_PAREN/);
+    expect(src).toMatch(/def check_calls\(ctx, s, qualified=True, ddl=False\)/);
     expect(src).toMatch(/BAN_WORDS = \{[^}]*"nextval"[^}]*"currval"[^}]*"lastval"/);
     expect(src).toMatch(/BAN_PREFIX_MORE = \(/);
     expect(src).toMatch(/TIMEOUT_MAX_MS = \{"lock_timeout": 10000, "statement_timeout": 120000\}/);
@@ -347,6 +349,7 @@ describe("Pipeline v2.1 — QA #188 regressions (static guards on the runner, pr
     const doc = read("docs/PRODUCTION_MIGRATION.md");
     expect(doc).toContain("Keputusan Founder (P3-5");
     expect(doc).not.toContain("gagal-tertutup");
+    expect(doc).toContain("Notasi atribut tanpa kurung");
   });
 
   it("the lint is a real tokenizer with default-deny statement classes, not a comment-stripping regex", () => {

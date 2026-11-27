@@ -807,6 +807,83 @@ class QaRegressions2(unittest.TestCase):
         self.assertNotIn("aclexplode", sql)
         self.assertNotRegex(sql, r"md5\(")
 
+class QaRegressions3(unittest.TestCase):
+    """QA #188 delta (596083e): C1 keyword-named functions, C2 qualified calls in DML, C4 DDL expressions, D1 shadowing."""
+    ALLOW = [{"kind": "update_rows", "schema": "storage", "table": "buckets", "columns": ["public"]},
+             {"kind": "update_rows", "schema": "public", "table": "t", "columns": ["a"]},
+             {"kind": "insert_rows", "schema": "public", "table": "t", "columns": ["a"]},
+             {"kind": "delete_from", "schema": "public", "table": "t"}]
+
+    def lint(self, sql, txn="none"):
+        return rp.lint_sql("t", sql, "write", self.ALLOW, set(), txn)
+
+    def test_c1_non_reserved_keywords_are_function_names_not_syntax(self):
+        words = ["set", "first", "key", "range", "rows", "filter", "over", "within", "at", "add", "after", "before", "begin", "by", "cube",
+                 "rollup", "escape", "current", "nulls", "partition", "groups", "following", "loop", "of", "perform", "raise", "return",
+                 "while", "elsif", "if", "like", "ilike", "is", "join", "inner", "cross", "full", "natural", "similar", "sets", "each",
+                 "materialized", "nothing", "preceding", "unbounded", "verbose", "tablesample", "timestamptz", "timetz", "varbit", "conflict"]
+        forms = ["select W(1);", "select 1 where W(1) = 1;", "select 1 where id = W(1);", "select 1 order by W(1);", "select 1 where 1 = 1 and W(1) = 1;",
+                 "do $$ begin perform W(1); end $$;", "do $$ declare x int; begin x := W(1); end $$;", "do $$ begin if W(1) = 1 then null; end if; end $$;",
+                 "do $$ begin raise notice '%', W(1); end $$;", "select 1 from t x join t y on W(1) = 1;", "select not W(1) = 1;",
+                 "with q as (select W(1)) select * from q;", "select 1 from t where a = 1 and not W(1);"]
+        for w in words:
+            for f in forms:
+                sql = f.replace("W", w)
+                self.assertTrue(self.lint(sql), sql)
+        self.assertTrue(self.lint("select 1 from t x join t y on conflict(1) = 1;"))
+        self.assertTrue(self.lint("select not materialized(1) = 1;"))
+        self.assertTrue(self.lint('select "set"(1), "first"(1), "key"(1);'))
+
+    def test_c1_real_syntax_still_passes(self):
+        for sql in ["select 1 order by (1);", "select count(*) over (partition by a order by b rows between 1 preceding and current row) from public.t;",
+                    "select sum(a) filter (where a > 1) from public.t;", "with q as not materialized (select 1) select * from q;",
+                    "with q as materialized (select 1) select * from q;", "select a::varchar(10), b::numeric(10, 2), c::timestamptz(3) from public.t;",
+                    "select 1 where a in (1, 2) and not exists (select 1) and a between 1 and 2;",
+                    "select current_timestamp(3), coalesce(1, 2), greatest(1, 2), extract(epoch from now()), substring('abc' from 1);",
+                    "insert into public.t (a) values (1) on conflict (a) do nothing;",
+                    "do $$ begin if (select 1) = 1 then null; elsif (select 2) = 2 then null; end if; end $$;"]:
+            self.assertEqual(self.lint(sql), [], sql)
+
+    def test_c2_schema_qualified_calls_in_dml_are_refused(self):
+        for sql in ["update storage.buckets set public = public.fn_other_writer() where id = 'x';",
+                    "update storage.buckets set public = false where id = public.fn_other_writer('x');",
+                    "update storage.buckets set public = false where id = (select public.fn_other_writer('x'));",
+                    "update public.t set a = 1 where exists (select 1 from public.fn_w() f);",
+                    "insert into public.t (a) values (public.fn_w());", "delete from public.t where a = public.fn_w();",
+                    "do $$ begin update public.t set a = public.fn_w() where a = 1; end $$;",
+                    "do $$ begin delete from public.t where a = public.fn_w(); end $$;"]:
+            self.assertTrue(self.lint(sql), sql)
+        for sql in ["update public.t set a = 1 where a = 2;", "insert into public.t (a) values (1);", "delete from public.t where a = 1;",
+                    "update storage.buckets set public = false where id = 'x';"]:
+            self.assertEqual(self.lint(sql), [], sql)
+
+    def test_c4_ddl_expressions_are_checked(self):
+        for sql in ["alter table public.t add column b int default public.fn_w();", "alter table public.t add column b int default fn_w();",
+                    "alter table public.t add constraint c1 check (public.fn_w(a));", "alter table public.t add constraint c1 check (fn_w(a));",
+                    "create index i1 on public.t ((public.fn_w(a)));", "create index i1 on public.t ((fn_w(a)));",
+                    "create table public.t2 (a int default public.fn_w());", "create table public.t2 (a int check (fn_w(a) = 1));",
+                    "alter table public.t alter column a set default fn_w();", "create index i1 on public.t (a) where fn_w(a) = 1;",
+                    "alter table public.t add column b int generated always as (first(a)) stored;"]:
+            self.assertTrue(self.lint(sql), sql)
+        for sql in ["alter table public.t add column b int default now();", "alter table public.t add constraint c1 check (length(a::text) > 0);",
+                    "create index i1 on public.t (lower(a::text));", "create unique index i2 on public.t using btree (a) where a is not null;",
+                    "create table public.t2 (id uuid primary key default gen_random_uuid(), a numeric(10, 2), b varchar(20), "
+                    "c timestamptz(3) default now(), d int references public.t (a), unique (a, b));",
+                    "alter table public.t add constraint fk1 foreign key (a) references public.t (a);"]:
+            self.assertEqual(self.lint(sql), [], sql)
+
+    def test_d1_a_function_named_like_a_builtin_is_not_created(self):
+        for n in ("md5", "now", "count", "lower", "coalesce", "greatest", "left"):
+            self.assertTrue(self.lint(f"create or replace function public.{n}(int) returns int language sql as $$ select 1 $$;"), n)
+        self.assertEqual(self.lint("create or replace function public.fn_x(int) returns int language sql as $$ select 1 $$;"), [])
+
+    def test_extra_pure_functions_are_immutable_or_stable_only(self):
+        for f in ("strpos", "lpad", "rpad", "initcap", "array_append", "jsonb_set", "mod", "power", "make_date", "format_type", "version"):
+            self.assertIn(f, rp.PURE_FUNCS)
+            self.assertEqual(self.lint(f"select {f}(1);"), [], f)
+        self.assertNotIn("pg_relation_size", rp.PURE_FUNCS)  # volatile in pg_proc
+        self.assertTrue(self.lint("select pg_relation_size('x');"))
+
 
 if __name__ == "__main__":
     unittest.main()
