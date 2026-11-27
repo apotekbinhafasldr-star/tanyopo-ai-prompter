@@ -539,6 +539,7 @@ fi
 # (hanya menambah pemasangan 4r di akhir fungsi mk(); berkas asli tidak diubah, salinan dihapus setelahnya). Invoice (migrasi billing asli) dipasang bila belum ada.
 # s1-trial-quota tidak diikutkan: database ujinya tidak memiliki prompter_payment_transactions (prasyarat 4r tidak terpenuhi); komposisi S1 dengan 4r tetap teruji
 # lewat b1-checkout dan plan-tampering (bagian "S1 first/then" mereka berjalan dengan 4r terpasang). Sapuan lifecycle (kedaluwarsa) ada di rantai B2/P0-2.
+trap 'rm -f "$root"/supabase/tests/*/.rv4r_patched.sh' EXIT INT TERM   # salinan sementara tidak boleh tertinggal di working tree
 for suite in b1-checkout plan-tampering b2-double-payment b4-payment-alerts b4-2-notifications; do
   d="$root/supabase/tests/$suite"; pf="$d/.rv4r_patched.sh"
   if python3 "$here/patch-legacy-mk.py" "$d/run-local.sh" "$pf" && grep -q "rv4r()" "$pf"; then

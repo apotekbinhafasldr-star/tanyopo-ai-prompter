@@ -188,6 +188,13 @@ describe("4r dokumentasi dan lingkup repo", () => {
     expect(doc).not.toMatch(/publoe|mitapeng|umkmpro|apotek/i);
   });
 
+  it("rekonsiliasi: filter TENANT_CASCADE + archived_at, kasus UNDETERMINED ditinjau manual; rollback RENAME didokumentasikan", () => {
+    expect(prose).toMatch(/archive_reason = 'TENANT_CASCADE'.*UNDETERMINED/s);
+    expect(prose).toMatch(/archived_at >=/);
+    expect(prose).toMatch(/RENAME/);
+    expect(prose).toMatch(/linoe\.rename_retention_vault/);
+  });
+
   it("flag tetap OFF dan tidak ada kode aplikasi: tidak ada env/flag baru dan tidak ada paket produksi 4r", () => {
     expect(readdirSync(path.join(root, "supabase/prod-packages"))).not.toContain("4r");
     expect(readdirSync(path.join(root, "supabase/prod-packages")).filter((d) => /4r|retention/i.test(d))).toEqual([]);

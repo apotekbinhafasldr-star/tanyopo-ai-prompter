@@ -1,5 +1,5 @@
 # SANDBOX log 4r retention vault (PostgreSQL 16 lokal, data sintetis, skema Supabase = stub; bukan REAL). CI menjalankan PostgreSQL 16 dan 17.
-# 2026-11-27T17:21:57Z
+# 2026-11-27T17:34:18Z
 PostgreSQL major 16 confirmed (server_version_num=160015)
 SANDBOX: PostgreSQL server_version_num=160015, stub auth/tenants/role (bukan Supabase nyata); tabel billing dari migrasi asli repo
 PASS: T00 tabel transaksi, webhook, dan policy audit diekstrak dari migrasi asli repo
@@ -45,8 +45,8 @@ PASS: T1 vault tenant B: 3 baris, deleted_by authenticated, TENANT_CASCADE
 PASS: T1 pemilik/superuser menghapus tenant A: vault 4 baris, deleted_by postgres
 PASS: T2 DELETE langsung per tabel: ROW_DELETE tersalin (invoice, transaksi, langganan)
 PASS: T2 source_pk langganan = tenant_id; transaksi = id
-PASS: T2 hapus massal 10.000 baris: vault +10.000 (645 ms)
-PASS: T2 hapus massal 10.000 baris selesai < 120 s (645 ms; satu INSERT per baris, volume produksi jauh lebih kecil)
+PASS: T2 hapus massal 10.000 baris: vault +10.000 (595 ms)
+PASS: T2 hapus massal 10.000 baris selesai < 120 s (595 ms; satu INSERT per baris, volume produksi jauh lebih kecil)
 PASS: T6 tanpa kolom transaction_id: hapus tenant berhasil tanpa galat
 PASS: T6 row_data invoice tanpa transaction_id (kolom belum ada), vault 4 baris
 PASS: T4 vault di-rename: DELETE tenants ditolak (fail-closed)
@@ -164,8 +164,8 @@ PASS: T24 gagal dalam 3041 ms (lock_timeout 3 s, tidak menggantung)
 PASS: T24 lock_timeout: tidak ada objek sebagian (vault/trigger/fungsi) setelah rollback
 PASS: T25 apply: tenants nol kunci selain AccessShare
 PASS: T25 apply pertama: tiga tabel billing hanya ShareRowExclusiveLock (baca tetap jalan; tulis tertahan sebentar)
-PASS: T25 SELECT pada tabel billing tidak tertahan selama apply berlangsung (26 ms)
-PASS: T25 INSERT transaksi paralel tertahan selama kunci apply (2363 ms) lalu lanjut berhasil
+PASS: T25 SELECT pada tabel billing tidak tertahan selama apply berlangsung (24 ms)
+PASS: T25 INSERT transaksi paralel tertahan selama kunci apply (2364 ms) lalu lanjut berhasil
 PASS: T25 apply tanpa commit (dibatalkan) tidak meninggalkan objek 4r
 PASS: T27 40 sesi fn_apply_verified_payment (8 tenant x 5) + 4 DELETE tenants paralel: 8 applied + 32 ALREADY_PROCESSED, tanpa deadlock
 PASS: T27 tepat 1 invoice per transaksi terbayar (8) dan tenant yang dihapus paralel: vault +12 baris (4 x (1 langganan + 2 transaksi) = 12), nol anak yatim
@@ -173,7 +173,7 @@ PASS: T27 dua DELETE tenants paralel pada tenant yang sama: satu menang (1+0), t
 PASS: T27 vault tidak ganda: tepat 4 baris (1 langganan + 1 invoice + 2 transaksi), semua tenant A
 PASS: T28a DELETE tenant (tertahan) lalu INSERT checkout PENDING: INSERT gagal FK (hasil serial, tanpa baris yatim)
 PASS: T28a vault = baris yang benar-benar terhapus (1 langganan) dan tidak ada transaksi yatim
-PASS: T28b INSERT PENDING (tertahan) lalu DELETE tenant: DELETE menunggu (1442 ms) lalu berhasil
+PASS: T28b INSERT PENDING (tertahan) lalu DELETE tenant: DELETE menunggu (1440 ms) lalu berhasil
 PASS: T28b baris PENDING yang baru ikut ter-cascade dan tersalin (vault +2 = langganan + transaksi), nol anak yatim
 PASS: T29 skenario P0-2 (suite lama, tanpa diubah) lulus dengan 4r terpasang: 62 pemeriksaan
 PASS: T29 skenario B2 (suite lama, tanpa diubah) lulus dengan 4r terpasang: 60 pemeriksaan

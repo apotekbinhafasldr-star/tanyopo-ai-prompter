@@ -701,8 +701,8 @@ jobs:
 
   # 4r (Opsi A, retention vault): migrasi + rollback pada PostgreSQL 16 dan 17 SEMENTARA (data sintetis; skema Supabase = stub, bukan REAL).
   # Membuktikan penyalinan allowlist sebelum DELETE (cascade tenants dan langsung), fail-closed LR001 (vault rusak, hak dicabut, CHECK gagal, timeout),
-  # penolak TRUNCATE, mode replica, isolasi tenant/RLS/privilege, idempotensi, down-soft/down/down paksa, prasyarat, kunci, konkurensi, dan suite lama
-  # (skenario P0-2 dan B2 tanpa diubah) tetap hijau dengan 4r terpasang. Tidak pernah menerapkan apa pun ke Supabase.
+  # penolak TRUNCATE, mode replica, isolasi tenant/RLS/privilege, idempotensi, down-soft/down/down dengan RENAME vault (tanpa DROP vault berisi), prasyarat, kunci, konkurensi, dan suite lama
+  # (skenario P0-2 dan B2, serta b1-checkout, plan-tampering, b2, b4, b4-2 dijalankan penuh dengan 4r terpasang) tetap hijau. Tidak pernah menerapkan apa pun ke Supabase.
   retention-vault-sql:
     runs-on: ubuntu-latest
     strategy:
