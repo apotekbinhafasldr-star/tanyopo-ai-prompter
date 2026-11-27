@@ -28,6 +28,9 @@ const ERROR_LABEL: Record<string, string> = {
   encryption_not_configured: "Penyimpanan koneksi yang aman belum siap. Koneksi belum aktif; hubungi admin LINOE.",
   server_not_configured: "Layanan penyimpanan koneksi belum siap. Koneksi belum aktif; hubungi admin LINOE.",
   connect_failed: "Gagal menghubungkan akun. Silakan coba lagi.",
+  provider_error: "Penyedia (X) mengembalikan kesalahan saat otorisasi, bukan pembatalan dari Anda. Silakan coba lagi nanti.",
+  provider_access:
+    "X menolak permintaan: kode otorisasi kedaluwarsa (batas 30 detik), kredensial atau Callback URL aplikasi X tidak cocok, atau akun developer X belum punya akses/kredit API. Coba lagi; bila berulang hubungi admin.",
   provider_pending: "Koneksi ini belum dibuka: aplikasi LINOE masih menunggu persetujuan dari penyedia.",
 };
 

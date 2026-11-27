@@ -2,7 +2,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/env", () => ({
-  serverEnv: { x: { clientId: "cid", clientSecret: "sec", redirectUri: "https://app.example/cb" } },
+  serverEnv: { x: { clientId: "cid", clientSecret: "sec", redirectUri: "https://app.example/api/connections/x/callback" } },
   isConnectorConfigured: (c: Record<string, string | undefined>) => Object.values(c).every((v) => !!v),
 }));
 

@@ -7,10 +7,10 @@ import {
   type ConnectorInsights,
   type ConnectorTokenResult,
 } from "@/lib/connectors/types";
-import { buildXAuthorizationUrl } from "@/lib/connectors/x-pkce";
+import { buildXAuthorizationUrl, isValidXRedirectUri } from "@/lib/connectors/x-pkce";
 import type { PkceConnector } from "@/lib/connectors/pkce-connector";
 import {
-  X_PUBLISH_SCOPES,
+  X_CONNECT_SCOPES,
   createXClient,
   type XClient,
   type XMediaCategory,
@@ -63,7 +63,7 @@ function toTokenResult(tokens: XTokenSet): ConnectorTokenResult {
   return {
     accessToken: tokens.accessToken,
     refreshToken: tokens.refreshToken,
-    scopes: tokens.scopes.length ? tokens.scopes : [...X_PUBLISH_SCOPES],
+    scopes: tokens.scopes.length ? tokens.scopes : [...X_CONNECT_SCOPES],
     expiresAt: tokens.expiresInSeconds ? new Date(Date.now() + tokens.expiresInSeconds * 1000) : undefined,
   };
 }
@@ -85,11 +85,13 @@ export class XConnector implements PkceConnector {
   }
 
   private hasCredentials(): boolean {
-    return isConnectorConfigured({
-      clientId: serverEnv.x.clientId,
-      clientSecret: serverEnv.x.clientSecret,
-      redirectUri: serverEnv.x.redirectUri,
-    });
+    return (
+      isConnectorConfigured({
+        clientId: serverEnv.x.clientId,
+        clientSecret: serverEnv.x.clientSecret,
+        redirectUri: serverEnv.x.redirectUri,
+      }) && isValidXRedirectUri(serverEnv.x.redirectUri)
+    );
   }
 
   /** Siap dipakai penuh hanya bila kredensial ada DAN alur PKCE tersambung. */
@@ -131,7 +133,7 @@ export class XConnector implements PkceConnector {
     return buildXAuthorizationUrl({
       clientId,
       redirectUri,
-      scopes: X_PUBLISH_SCOPES,
+      scopes: X_CONNECT_SCOPES,
       state,
       codeChallenge,
     });
