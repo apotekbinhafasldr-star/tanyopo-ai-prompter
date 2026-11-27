@@ -12,6 +12,7 @@ import { safeNextPath } from "@/lib/auth/safe-next";
 import { isEmailOtpEnabled } from "@/lib/auth/email-otp";
 import { mapLoginError } from "@/lib/auth/login-error";
 import { recordSignupLegal } from "@/lib/consent/signup-legal";
+import { PRIVACY_NOTICE_VERSION } from "@/features/legal/legal-versions";
 import {
   RESEND_CONFIRMATION_COOLDOWN_SECONDS,
   RESEND_CONFIRMATION_HOURLY_LIMIT,
@@ -248,7 +249,8 @@ export async function registerAction(
   const newUserId = data?.user?.id;
   if (typeof newUserId === "string" && newUserId.length > 0) {
     try {
-      await recordSignupLegal(newUserId);
+      // DELIVERED hanya bila formulir mengirim versi Privacy Notice yang SAMA PERSIS dengan versi terbit (string "1"; bukan "01", " 1", "1.0").
+      await recordSignupLegal(newUserId, { privacyNoticeDelivered: formData.get("privacyNoticeVersion") === String(PRIVACY_NOTICE_VERSION) });
     } catch {
       // fail-open: pencatat tidak pernah boleh menggagalkan pendaftaran
     }

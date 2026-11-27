@@ -20,9 +20,11 @@ vi.mock("@/lib/supabase/server", () => ({
 vi.mock("@/lib/consent/signup-legal", () => ({ recordSignupLegal: recordMock }));
 
 import { registerAction } from "@/features/auth/actions";
+import { PRIVACY_NOTICE_VERSION } from "@/features/legal/legal-versions";
 
-function form(accept: string | null = "on") {
+function form(accept: string | null = "on", privacyVersion: string | null = null) {
   const fd = new FormData();
+  if (privacyVersion !== null) fd.set("privacyNoticeVersion", privacyVersion);
   if (accept !== null) fd.set("acceptLegal", accept);
   fd.set("nama", "Budi");
   fd.set("namaUsaha", "Toko Budi");
@@ -42,7 +44,7 @@ describe("registerAction: pencatatan Terms/Privacy Notice sisi server (Paket 3)"
     signUpMock.mockResolvedValue({ data: { user: { id: "uid-1", identities: [{}] }, session: null }, error: null });
     const result = await registerAction({ error: null }, form());
     expect(recordMock).toHaveBeenCalledTimes(1);
-    expect(recordMock).toHaveBeenCalledWith("uid-1");
+    expect(recordMock).toHaveBeenCalledWith("uid-1", { privacyNoticeDelivered: false });
     expect(result.error).toBeNull();
     expect(result.info).toMatch(/cek email/i);
   });
@@ -50,7 +52,7 @@ describe("registerAction: pencatatan Terms/Privacy Notice sisi server (Paket 3)"
   it("akun baru dengan sesi: mencatat lalu tetap redirect ke /onboarding", async () => {
     signUpMock.mockResolvedValue({ data: { user: { id: "uid-2", identities: [{}] }, session: { access_token: "x" } }, error: null });
     await expect(registerAction({ error: null }, form())).rejects.toThrow("REDIRECT:/onboarding");
-    expect(recordMock).toHaveBeenCalledWith("uid-2");
+    expect(recordMock).toHaveBeenCalledWith("uid-2", { privacyNoticeDelivered: false });
   });
 
   it("kegagalan pencatatan tidak memblokir pendaftaran (fail-open)", async () => {
@@ -65,7 +67,19 @@ describe("registerAction: pencatatan Terms/Privacy Notice sisi server (Paket 3)"
     recordMock.mockRejectedValue(new Error("boom"));
     signUpMock.mockResolvedValue({ data: { user: { id: "uid-4", identities: [{}] }, session: null }, error: null });
     await expect(registerAction({ error: null }, form())).resolves.toMatchObject({ error: null, info: expect.stringMatching(/Akun berhasil dibuat/) });
-    expect(recordMock).toHaveBeenCalledWith("uid-4");
+    expect(recordMock).toHaveBeenCalledWith("uid-4", { privacyNoticeDelivered: false });
+  });
+
+  it("formulir mengirim versi Privacy Notice yang SAMA PERSIS: DELIVERED dicatat (privacyNoticeDelivered true)", async () => {
+    signUpMock.mockResolvedValue({ data: { user: { id: "uid-6", identities: [{}] }, session: null }, error: null });
+    await registerAction({ error: null }, form("on", String(PRIVACY_NOTICE_VERSION)));
+    expect(recordMock).toHaveBeenCalledWith("uid-6", { privacyNoticeDelivered: true });
+  });
+
+  it.each(["", "0", "01", " 1", "1 ", "1.0", "2", "true", "on", "-1", "1e0", String(PRIVACY_NOTICE_VERSION + 1)])("versi Privacy %j tidak sama persis: DELIVERED TIDAK dicatat, Terms tetap", async (v) => {
+    signUpMock.mockResolvedValue({ data: { user: { id: "uid-7", identities: [{}] }, session: null }, error: null });
+    await registerAction({ error: null }, form("on", v));
+    expect(recordMock).toHaveBeenCalledWith("uid-7", { privacyNoticeDelivered: false });
   });
 
   it("akun yang sudah ada: TIDAK mencatat (id samaran bukan milik pendaftar baru)", async () => {

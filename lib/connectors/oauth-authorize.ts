@@ -48,7 +48,7 @@ export async function handleConnectorOauthAuthorize(
   // tidak dimulai. (Dialog persetujuan pada halaman Koneksi menyusul di paket UI berikutnya; aktivasi enforcement menunggu itu.)
   const consentCode = connectConsentCode(platform);
   if (consentCode) {
-    const decision = await requireConsent(consentCode, session.userId);
+    const decision = await requireConsent(consentCode, session.userId, session.tenantId);
     if (!decision.allowed) {
       return NextResponse.redirect(new URL("/connections?error=consent_required", request.url));
     }

@@ -102,6 +102,7 @@ describe("Billing B4.2 — static guards", () => {
       "20261111130000_prompter_p0_3_doku_alert_coverage.sql",
       "20261126100000_prompter_storage_bucket_l1.sql",
       "20261127100000_prompter_consent_audit_guard.sql",
+      "20261127110000_prompter_consent_owner_audit_redaction.sql",
     ]);
     expect(read(B41)).not.toMatch(/prompter_payment_alert_notif/);
   });

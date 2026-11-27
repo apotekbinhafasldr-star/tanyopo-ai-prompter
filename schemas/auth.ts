@@ -19,7 +19,9 @@ export const registerSchema = z.object({
   // it is not accepted through this field. Only the literal `true` passes: a missing, false or any other value is
   // rejected. The browser sends "on" for a checked checkbox, which the action normalises to `true` before parsing.
   // Enforced here (server side) so a direct invocation of registerAction cannot skip it. The field name stays
-  // `acceptLegal` (e2e and server contract).
+  // `acceptLegal` (e2e and server contract). Persistence (Paket 3): after signUp the server records TERMS/ACCEPTED
+  // (version + server time) via lib/consent/signup-legal.ts, and PRIVACY_NOTICE/DELIVERED only when the form posted
+  // the current privacyNoticeVersion. Neither is a PDP consent. The value itself is never stored by this schema.
   acceptLegal: z.literal(true, {
     error: "Anda harus menyetujui Syarat & Ketentuan untuk mendaftar.",
   }),

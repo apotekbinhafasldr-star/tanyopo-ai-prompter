@@ -1,5 +1,5 @@
-# SANDBOX log Paket 3 (PostgreSQL 16 lokal, data sintetis, skema Supabase = stub; bukan REAL). CI menjalankan versi PG17.
-# 2026-11-26T16:14:21Z
+# SANDBOX log Paket 3 + revisi Jalur 1 (PostgreSQL 16 lokal, data sintetis, skema Supabase = stub; bukan REAL). CI menjalankan versi PG17.
+# 2026-11-27T08:26:17Z  (migrasi 20261127100000 + 20261127110000; S10-S14 = Owner, legal, anonimisasi, rollback berurutan, statis)
 SANDBOX: PostgreSQL server_version_num=160015, stub auth/tenants (bukan Supabase nyata)
 PASS: blok prompter_audit_logs diekstrak dari migrasi foundation
 PASS: S1 up berhasil
@@ -149,6 +149,111 @@ PASS: S9 up kedua tidak menimpa snapshot asli
 PASS: S9 down memulihkan ACL mentah (PUBLIC, grant option, role) persis
 PASS: S9 ACL asli memuat PUBLIC dan grant option pada role (bukan tautologi)
 PASS: S9 down memulihkan komentar lama
+PASS: S10 Owner A memberi CONNECT_META (tenant dari profil, bukan klien)
+PASS: S10 peristiwa Owner membawa tenant A dan text_sha256 katalog
+PASS: S10 non-Owner (marketing) tidak dapat memberi
+PASS: S10 non-Owner tidak dapat menarik
+PASS: S10 pengguna tanpa profil/tenant ditolak
+PASS: S10 anon ditolak
+PASS: S10 Owner tenant B tidak dapat bertindak atas tenant A (p_tenant_id)
+PASS: S10 Owner A dengan p_tenant_id tenant B ditolak
+PASS: S10 Owner A dengan p_tenant_id tenant sendiri diterima
+PASS: S10 ditolak tidak membuat baris (hanya 2 peristiwa Owner A)
+PASS: S10 check_tenant: Owner A di tenant A
+PASS: S10 check_tenant: anggota non-Owner memakai persetujuan Owner tenant
+PASS: S10 check_tenant: Owner B tidak anggota tenant A
+PASS: S10 check_tenant: Owner A pada tenant B
+PASS: S10 check_tenant: tenant B belum punya persetujuan (milik A tidak berlaku)
+PASS: S10 check_tenant: tanpa profil
+PASS: S10 check_tenant: kode non-CONNECT
+PASS: S10 check_tenant: tenant NULL tidak valid
+PASS: S10 authenticated tidak dapat memanggil check_tenant
+PASS: S10 status tenant: Owner kedua (UF) melihat persetujuan tenant
+PASS: S10 status tenant: non-Owner melihat status tenant
+PASS: S10 status tenant B tidak terpengaruh tenant A
+PASS: S10 anon tidak dapat memanggil my_status
+PASS: S10 pemberi persetujuan diturunkan dari Owner: persetujuan tidak berlaku
+PASS: S10 Owner kedua (UF) menarik persetujuan tenant: changed
+PASS: S10 setelah penarikan: check_tenant WITHDRAWN
+PASS: S10 penarikan membawa text_sha256 versi yang ditarik
+PASS: S10 penarikan ulang oleh Owner A: tidak ada perubahan
+PASS: S10 consent_check lama (2 argumen) masih ada untuk kompatibilitas
+PASS: S10 fungsi consent_set 3 argumen lama sudah tidak ada (tanpa overload ambigu)
+PASS: S11 versi privacy NULL: hanya Terms ACCEPTED
+PASS: S11 baris: hanya TERMS
+PASS: S11 versi privacy dikirim: DELIVERED dicatat, Terms tidak dobel
+PASS: S11 baris: TERMS + PRIVACY DELIVERED
+PASS: S11 ulang idempoten
+PASS: S11 versi Terms NULL ditolak
+PASS: S11 versi privacy 0 ditolak
+PASS: S11 authenticated tidak dapat memanggil
+PASS: S12 anon tidak punya EXECUTE pada fungsi anonimisasi dan canary
+PASS: S12 authenticated tidak punya EXECUTE pada fungsi anonimisasi dan canary
+PASS: S12 service_role tidak punya EXECUTE pada fungsi anonimisasi dan canary
+PASS: S12 service_role tidak dapat memanggil
+PASS: S12 authenticated tidak dapat memanggil
+PASS: S12 eksekusi tanpa dry-run ditolak
+PASS: S12 request_ref terlalu pendek ditolak
+PASS: S12 tenant NULL ditolak
+PASS: S12 tenant tidak ada ditolak
+PASS: S12 batch 0 ditolak
+PASS: S12 dry_run NULL ditolak
+PASS: S12 canary sebelum: PII allowlist belum dianonimkan (3 baris x 2 kunci x 2 lokasi)
+PASS: S12 canary: kandidat di luar allowlist terlaporkan (tipe lain)
+PASS: S12 dry-run: cocok 3, nol diubah
+PASS: S12 dry-run tidak mengubah baris sumber
+PASS: S12 dry-run menulis SATU entri audit berisi hitungan saja
+PASS: S12 ref lain tanpa dry-run ditolak
+PASS: S12 eksekusi batch 2: 2 diubah, sisa 1
+PASS: S12 eksekusi lanjutan: sisa 0
+PASS: S12 eksekusi ulang idempoten (0 diubah)
+PASS: S12 PII diganti penanda; data non-PII (spend) tetap
+PASS: S12 id/tenant/aktor/action/tipe/waktu tidak berubah
+PASS: S12 baris tipe lain, tipe finansial (finance_ledger_entry), dan tenant lain tidak tersentuh
+PASS: S12 tabel finance_audit_logs dan budget_policies tidak berubah
+PASS: S12 auth.users/tenants/user_profiles tidak berubah
+PASS: S12 entri audit hanya berisi hitungan (kunci terbatas)
+PASS: S12 konteks entri audit tanpa PII
+PASS: S12 canary sesudah: tidak ada PII allowlist tersisa
+PASS: S12 nonce dibersihkan setelah eksekusi
+PASS: S12 tenant B tetap utuh (bukan target)
+PASS: S12 service_role UPDATE kolom data ditolak (hak dikembalikan, trigger menolak)
+PASS: S12 UPDATE action ditolak
+PASS: S12 bypass: set_config nonce tebakan dari klien lalu UPDATE ditolak
+PASS: S12 bypass: GUC retensi/purge lama tidak membuka audit
+PASS: S12 bypass: pemilik dengan nonce tebakan juga ditolak
+PASS: S12 bypass: klien tidak dapat menulis tabel nonce
+PASS: S12 klien tidak dapat membaca allowlist
+PASS: S12 klien tidak dapat mengubah allowlist
+PASS: S12 allowlist menolak tipe finansial (CHECK)
+PASS: S12 allowlist tidak dapat diubah lewat UPDATE (trigger), walau oleh pemilik
+PASS: S12 allowlist tidak dapat dihapus (trigger)
+PASS: S12 bypass: session_replication_role=replica oleh klien ditolak
+PASS: S12 TRUNCATE tetap ditolak trigger
+PASS: S12 semua fungsi DEFINER memakai search_path terpasang (bypass search_path)
+PASS: S12 baris sumber tidak berubah setelah percobaan klien
+PASS: S13 migrasi kedua berhasil
+PASS: S13 up kedua kali = keadaan sama (idempoten)
+PASS: S13 up ketiga kali = keadaan sama
+PASS: S13 migrasi kedua memang mengubah keadaan (bukan tautologi)
+PASS: S13 seed allowlist (2 kunci)
+PASS: S13 down kedua berhasil
+PASS: S13 down memulihkan keadaan persis seperti setelah migrasi pertama
+PASS: S13 down kedua kali idempoten
+PASS: S13 setelah down: consent_set 3 argumen kembali, 4 argumen hilang
+PASS: S13 setelah down: kolom text_sha256 hilang
+PASS: S13 setelah down: nonce tebakan tetap tidak membuka UPDATE audit
+PASS: S13 up kembali setelah down berhasil
+PASS: S13 up setelah down = keadaan sama dengan up pertama
+PASS: S13 down kedua ditolak bila ada bukti ber-hash
+PASS: S13 kegagalan di tengah migrasi kedua: seluruhnya dibatalkan
+PASS: S13 migrasi kedua sebagai SATU query berhasil
+PASS: S14 20261127110000_prompter_consent_owner_audit_redaction.sql tidak menyebut objek terlarang
+PASS: S14 20261127110000_prompter_consent_owner_audit_redaction.sql tidak mengubah tabel produk lain (user_profiles/tenants hanya dibaca)
+PASS: S14 20261127110000_prompter_consent_owner_audit_redaction.down.sql tidak menyebut objek terlarang
+PASS: S14 20261127110000_prompter_consent_owner_audit_redaction.down.sql tidak mengubah tabel produk lain (user_profiles/tenants hanya dibaca)
+PASS: S14 fungsi operator tanpa GRANT
+PASS: S14 trigger produk lain tidak diubah
 PASS: S8 20261127100000_prompter_consent_audit_guard.sql tidak menyebut objek terlarang
 PASS: S8 20261127100000_prompter_consent_audit_guard.down.sql tidak menyebut objek terlarang
 PASS: S8 migrasi tidak mengubah tenants (hanya membaca)

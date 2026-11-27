@@ -77,57 +77,88 @@ describe("requireConsent", () => {
   it("enforcement MATI: allowed tanpa menyentuh klien atau database (perilaku identik dengan sebelum Paket 3)", async () => {
     vi.stubEnv("CONSENT_ENFORCEMENT_ENABLED", "");
     const getClient = vi.fn();
-    expect(await requireConsent("CONNECT_META", "u1", { getClient })).toEqual({ allowed: true, reason: "ENFORCEMENT_OFF" });
-    expect(await requireConsent("CONNECT_X", "u1", { getClient })).toEqual({ allowed: true, reason: "ENFORCEMENT_OFF" });
-    expect(await consentGateMessage("CONNECT_META", "u1", { getClient })).toBeNull();
+    expect(await requireConsent("CONNECT_META", "u1", "t1", { getClient })).toEqual({ allowed: true, reason: "ENFORCEMENT_OFF" });
+    expect(await requireConsent("CONNECT_X", "u1", "t1", { getClient })).toEqual({ allowed: true, reason: "ENFORCEMENT_OFF" });
+    expect(await consentGateMessage("CONNECT_META", "u1", "t1", { getClient })).toBeNull();
     expect(getClient).not.toHaveBeenCalled();
   });
 
-  it("enforcement HIDUP: GRANTED lolos, memanggil fn_prompter_consent_check dengan user id server", async () => {
+  it("enforcement HIDUP: GRANTED lolos, memanggil fn_prompter_consent_check_tenant dengan user id dan tenant dari sesi server", async () => {
     const rpc = rpcOk({ consented: true, reason: "GRANTED" });
-    const d = await requireConsent("CONNECT_META", "u1", { isEnabled: () => true, getClient: async () => ({ rpc }) });
+    const d = await requireConsent("CONNECT_META", "u1", "t1", { isEnabled: () => true, getClient: async () => ({ rpc }) });
     expect(d).toEqual({ allowed: true, reason: "GRANTED" });
-    expect(rpc).toHaveBeenCalledWith("fn_prompter_consent_check", { p_user_id: "u1", p_code: "CONNECT_META" });
+    expect(rpc).toHaveBeenCalledWith("fn_prompter_consent_check_tenant", { p_user_id: "u1", p_code: "CONNECT_META", p_tenant_id: "t1" });
   });
 
-  it.each(["NO_RECORD", "WITHDRAWN", "VERSION_OUTDATED"])("enforcement HIDUP: %s ditolak (koneksi lama tanpa catatan tidak dianggap setuju)", async (reason) => {
-    const d = await requireConsent("CONNECT_META", "u1", { isEnabled: () => true, getClient: async () => ({ rpc: rpcOk({ consented: false, reason }) }) });
+  it.each(["NO_RECORD", "WITHDRAWN", "VERSION_OUTDATED", "NOT_IN_TENANT", "GRANTOR_NOT_OWNER"])("enforcement HIDUP: %s ditolak (koneksi lama tanpa catatan tidak dianggap setuju)", async (reason) => {
+    const d = await requireConsent("CONNECT_META", "u1", "t1", { isEnabled: () => true, getClient: async () => ({ rpc: rpcOk({ consented: false, reason }) }) });
     expect(d).toEqual({ allowed: false, reason });
-    expect(await consentGateMessage("CONNECT_META", "u1", { isEnabled: () => true, getClient: async () => ({ rpc: rpcOk({ consented: false, reason }) }) })).toBe(CONSENT_MESSAGES.required);
+    expect(await consentGateMessage("CONNECT_META", "u1", "t1", { isEnabled: () => true, getClient: async () => ({ rpc: rpcOk({ consented: false, reason }) }) })).toBe(CONSENT_MESSAGES.required);
   });
 
   it("fail-closed: galat rpc, exception, tanpa klien, timeout, data aneh, user kosong, kode tidak aktif/tidak dikenal", async () => {
     const on = { isEnabled: () => true };
-    expect((await requireConsent("CONNECT_META", "u1", { ...on, getClient: async () => ({ rpc: vi.fn(async () => ({ data: null, error: { message: "x" } })) }) })).allowed).toBe(false);
-    expect((await requireConsent("CONNECT_META", "u1", { ...on, getClient: async () => ({ rpc: vi.fn(async () => { throw new Error("boom"); }) }) })).allowed).toBe(false);
-    expect(await requireConsent("CONNECT_META", "u1", { ...on, getClient: async () => null })).toEqual({ allowed: false, reason: "NO_CLIENT" });
-    expect(await requireConsent("CONNECT_META", "u1", { ...on, getClient: async () => { throw new Error("x"); } })).toEqual({ allowed: false, reason: "CHECK_FAILED" });
-    expect((await requireConsent("CONNECT_META", "u1", { ...on, timeoutMs: 5, getClient: async () => ({ rpc: () => new Promise(() => {}) }) })).reason).toBe("CHECK_FAILED");
-    expect((await requireConsent("CONNECT_META", "u1", { ...on, getClient: async () => ({ rpc: rpcOk("aneh") }) })).allowed).toBe(false);
-    expect((await requireConsent("CONNECT_META", "", { ...on, getClient: async () => ({ rpc: rpcOk({ consented: true }) }) })).allowed).toBe(false);
-    expect(await requireConsent("CONNECT_X", "u1", { ...on, getClient: async () => ({ rpc: rpcOk({ consented: true }) }) })).toEqual({ allowed: false, reason: "INACTIVE_CODE" });
-    expect(await requireConsent("BUKAN_KODE" as never, "u1", on)).toEqual({ allowed: false, reason: "UNKNOWN_CODE" });
+    expect((await requireConsent("CONNECT_META", "u1", "t1", { ...on, getClient: async () => ({ rpc: vi.fn(async () => ({ data: null, error: { message: "x" } })) }) })).allowed).toBe(false);
+    expect((await requireConsent("CONNECT_META", "u1", "t1", { ...on, getClient: async () => ({ rpc: vi.fn(async () => { throw new Error("boom"); }) }) })).allowed).toBe(false);
+    expect(await requireConsent("CONNECT_META", "u1", "t1", { ...on, getClient: async () => null })).toEqual({ allowed: false, reason: "NO_CLIENT" });
+    expect(await requireConsent("CONNECT_META", "u1", "t1", { ...on, getClient: async () => { throw new Error("x"); } })).toEqual({ allowed: false, reason: "CHECK_FAILED" });
+    expect((await requireConsent("CONNECT_META", "u1", "t1", { ...on, timeoutMs: 5, getClient: async () => ({ rpc: () => new Promise(() => {}) }) })).reason).toBe("CHECK_FAILED");
+    expect((await requireConsent("CONNECT_META", "u1", "t1", { ...on, getClient: async () => ({ rpc: rpcOk("aneh") }) })).allowed).toBe(false);
+    expect((await requireConsent("CONNECT_META", "", "t1", { ...on, getClient: async () => ({ rpc: rpcOk({ consented: true }) }) })).allowed).toBe(false);
+    expect(await requireConsent("CONNECT_X", "u1", "t1", { ...on, getClient: async () => ({ rpc: rpcOk({ consented: true }) }) })).toEqual({ allowed: false, reason: "INACTIVE_CODE" });
+    expect(await requireConsent("BUKAN_KODE" as never, "u1", "t1", on)).toEqual({ allowed: false, reason: "UNKNOWN_CODE" });
+  });
+});
+
+describe("requireConsent: persetujuan koneksi milik TENANT (Owner, Opsi A)", () => {
+  const rpcOk = (data: unknown) => vi.fn(async () => ({ data, error: null }));
+  const on = { isEnabled: () => true };
+  it("tanpa tenantId (null/kosong): ditolak fail-closed TANPA memanggil database", async () => {
+    const getClient = vi.fn();
+    expect(await requireConsent("CONNECT_META", "u1", null, { ...on, getClient })).toEqual({ allowed: false, reason: "CHECK_FAILED" });
+    expect(await requireConsent("CONNECT_META", "u1", "", { ...on, getClient })).toEqual({ allowed: false, reason: "CHECK_FAILED" });
+    expect(getClient).not.toHaveBeenCalled();
+  });
+  it("enforcement MATI: tenantId null tetap no-op (perilaku sebelum Paket 3)", async () => {
+    const getClient = vi.fn();
+    expect(await requireConsent("CONNECT_META", "u1", null, { isEnabled: () => false, getClient })).toEqual({ allowed: true, reason: "ENFORCEMENT_OFF" });
+    expect(getClient).not.toHaveBeenCalled();
+  });
+  it("persetujuan Owner tenant lain / pemberi bukan lagi Owner: alasan dari database diteruskan sebagai penolakan", async () => {
+    for (const reason of ["NOT_IN_TENANT", "GRANTOR_NOT_OWNER"] as const) {
+      expect(await requireConsent("CONNECT_META", "u1", "t-lain", { ...on, getClient: async () => ({ rpc: rpcOk({ consented: false, reason }) }) })).toEqual({ allowed: false, reason });
+    }
+  });
+  it("argumen RPC memakai tenant dari sesi, bukan dari input lain", async () => {
+    const rpc = rpcOk({ consented: true, reason: "GRANTED" });
+    await requireConsent("CONNECT_TIKTOK", "u9", "tenant-9", { ...on, getClient: async () => ({ rpc }) });
+    expect(rpc).toHaveBeenCalledWith("fn_prompter_consent_check_tenant", { p_user_id: "u9", p_code: "CONNECT_TIKTOK", p_tenant_id: "tenant-9" });
   });
 });
 
 describe("recordSignupLegal (fail-open, tanpa PII di log)", () => {
   it("mencatat dengan versi dari konstanta kode (bukan input klien)", async () => {
     const rpc = vi.fn(async () => ({ data: {}, error: null }));
-    expect(await recordSignupLegal("user-1", { getClient: async () => ({ rpc }) })).toBe(true);
+    expect(await recordSignupLegal("user-1", { privacyNoticeDelivered: true }, { getClient: async () => ({ rpc }) })).toBe(true);
     expect(rpc).toHaveBeenCalledWith("fn_prompter_record_signup_legal", { p_user_id: "user-1", p_terms_version: TERMS_VERSION, p_privacy_version: PRIVACY_NOTICE_VERSION });
+  });
+  it("versi Privacy Notice TIDAK dikirim: p_privacy_version = null (DELIVERED tidak dicatat), Terms tetap dikirim", async () => {
+    const rpc = vi.fn(async () => ({ data: {}, error: null }));
+    expect(await recordSignupLegal("user-1", { privacyNoticeDelivered: false }, { getClient: async () => ({ rpc }) })).toBe(true);
+    expect(rpc).toHaveBeenCalledWith("fn_prompter_record_signup_legal", { p_user_id: "user-1", p_terms_version: TERMS_VERSION, p_privacy_version: null });
   });
   it("kegagalan (galat, exception, tanpa klien) tidak melempar dan log hanya berisi nama tahap", async () => {
     const log = vi.fn();
-    expect(await recordSignupLegal("user-secret-id", { getClient: async () => ({ rpc: async () => ({ data: null, error: { message: "mail@x.test" } }) }), logFailure: log })).toBe(false);
-    expect(await recordSignupLegal("user-secret-id", { getClient: async () => { throw new Error("mail@x.test"); }, logFailure: log })).toBe(false);
-    expect(await recordSignupLegal("user-secret-id", { getClient: async () => null, logFailure: log })).toBe(false);
+    expect(await recordSignupLegal("user-secret-id", { privacyNoticeDelivered: true }, { getClient: async () => ({ rpc: async () => ({ data: null, error: { message: "mail@x.test" } }) }), logFailure: log })).toBe(false);
+    expect(await recordSignupLegal("user-secret-id", { privacyNoticeDelivered: true }, { getClient: async () => { throw new Error("mail@x.test"); }, logFailure: log })).toBe(false);
+    expect(await recordSignupLegal("user-secret-id", { privacyNoticeDelivered: true }, { getClient: async () => null, logFailure: log })).toBe(false);
     expect(log.mock.calls.map((c) => c[0])).toEqual(["rpc_error", "exception", "no_client"]);
     expect(JSON.stringify(log.mock.calls)).not.toMatch(/secret|@/);
   });
   it("timeout: RPC yang menggantung dilepas (fail-open, log 'timeout') dan tidak menahan pendaftaran", async () => {
     const log = vi.fn();
     const t0 = Date.now();
-    expect(await recordSignupLegal("u", { timeoutMs: 20, getClient: async () => ({ rpc: () => new Promise(() => {}) }), logFailure: log })).toBe(false);
+    expect(await recordSignupLegal("u", { privacyNoticeDelivered: true }, { timeoutMs: 20, getClient: async () => ({ rpc: () => new Promise(() => {}) }), logFailure: log })).toBe(false);
     expect(Date.now() - t0).toBeLessThan(1500);
     expect(log).toHaveBeenCalledWith("timeout");
   });

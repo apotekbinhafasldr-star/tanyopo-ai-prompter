@@ -1,6 +1,14 @@
 import { PRIVACY_NOTICE_VERSION, TERMS_VERSION } from "@/features/legal/legal-versions";
 import type { ConsentRpcClient } from "@/lib/consent/rpc";
 
+export interface SignupLegalOptions {
+  /**
+   * True HANYA bila formulir benar-benar menampilkan Privacy Notice dan mengirim versi yang SAMA PERSIS dengan PRIVACY_NOTICE_VERSION.
+   * False/tidak ada: DELIVERED TIDAK dicatat (jangan mengklaim sesuatu yang tidak ditampilkan). Terms ACCEPTED selalu dicatat.
+   */
+  privacyNoticeDelivered: boolean;
+}
+
 export interface SignupLegalDeps {
   getClient?: () => Promise<ConsentRpcClient | null>;
   logFailure?: (stage: string) => void;
@@ -20,11 +28,11 @@ function defaultLog(stage: string): void {
 }
 
 /**
- * Mencatat penerimaan Terms (ACCEPTED) dan penyampaian Privacy Notice (DELIVERED) sebagai DUA catatan terpisah, versi dari konstanta
+ * Mencatat penerimaan Terms (ACCEPTED, selalu) dan penyampaian Privacy Notice (DELIVERED, hanya bila options.privacyNoticeDelivered) sebagai DUA catatan terpisah, versi dari konstanta
  * kode dan waktu dari server database. FAIL-OPEN: tidak pernah melempar dan tidak memblokir pendaftaran; kegagalan hanya dicatat
  * di log tanpa data pribadi. Dipanggil hanya sesudah signUp() mengembalikan id pengguna BARU.
  */
-export async function recordSignupLegal(userId: string, deps: SignupLegalDeps = {}): Promise<boolean> {
+export async function recordSignupLegal(userId: string, options: SignupLegalOptions, deps: SignupLegalDeps = {}): Promise<boolean> {
   const log = deps.logFailure ?? defaultLog;
   try {
     const client = await (deps.getClient ?? defaultGetClient)();
@@ -41,7 +49,7 @@ export async function recordSignupLegal(userId: string, deps: SignupLegalDeps = 
         client.rpc("fn_prompter_record_signup_legal", {
           p_user_id: userId,
           p_terms_version: TERMS_VERSION,
-          p_privacy_version: PRIVACY_NOTICE_VERSION,
+          p_privacy_version: options.privacyNoticeDelivered === true ? PRIVACY_NOTICE_VERSION : null,
         }),
       ),
       timeout,

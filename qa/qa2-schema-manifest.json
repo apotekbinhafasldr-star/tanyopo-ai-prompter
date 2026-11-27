@@ -246,6 +246,11 @@
       "file": "20261127100000_prompter_consent_audit_guard.sql",
       "group": "consent",
       "reason": "Consent & Audit Guard (Paket 3): tabel bukti persetujuan dan guard prompter_audit_logs; belum diterapkan di mana pun, enforcement default OFF; di luar alur QA-2 sampai disetujui Founder."
+    },
+    {
+      "file": "20261127110000_prompter_consent_owner_audit_redaction.sql",
+      "group": "consent",
+      "reason": "Revisi aditif Paket 3: persetujuan koneksi hanya Owner tenant dan jalur sempit operator untuk anonimisasi PII audit; belum diterapkan di mana pun; di luar alur QA-2 sampai disetujui Founder."
     }
   ],
   "forbidden": {

@@ -50,7 +50,7 @@ Catatan implikasi: bila memilih mengundang tenant sebelum TDPSE terbit, itu kepu
 | Pasal 46 ayat (1): kegagalan pelindungan data pribadi, pengendali wajib memberi **pemberitahuan tertulis paling lambat 3 x 24 jam** kepada subjek data dan lembaga; ayat (2) isi minimal; ayat (3) pemberitahuan kepada masyarakat dalam hal tertentu | **TERVERIFIKASI SEKUNDER** (teks dikutip pasal.id; halaman resmi BPK tidak terjangkau saat akses) | [pasal.id Pasal 46](https://pasal.id/peraturan/uu/uu-no-27-tahun-2022/pasal-46); resmi untuk dicocokkan: [peraturan.bpk.go.id UU 27/2022](https://peraturan.bpk.go.id/Details/229798/uu-no-27-tahun-2022) |
 | Cara hitung 3 x 24 jam dan saat jam mulai (temuan vs terbukti) | **PERLU KONFIRMASI.** Sikap hati-hati internal: hitung dari jam temuan |
 | Siapa/apa "lembaga" penerima pemberitahuan dan saluran penyampaiannya saat ini | **PERLU KONFIRMASI.** Pemberitaan sekunder 2026 menyebut lembaga PDP belum terbentuk penuh: [Bisnis.com, 8 Sep 2026](https://teknologi.bisnis.com/read/20260908/84/2002386/uu-dan-pp-sudah-ada-pengamat-aturan-pdp-belum-efektif-tanpa-lembaga) (tidak dibuka penuh), [MKRI](https://www.mkri.id/berita/Kekosongan_Lembaga_Independen_Pelindungan_Data_Pribadi-25005) |
-| PP 33/2026 (pelaksana UU PDP): ditandatangani 16 Juli 2026, berlaku 16 Januari 2027 | **PERLU KONFIRMASI.** Hanya sumber sekunder: [SIP Law Firm](https://siplawfirm.id/resources/pp-33-2026-pelindungan-data-pribadi), [Katadata, 3 Sep 2026](https://katadata.co.id/amp/finansial/makro/6a9979b7c5745/pp-pelindungan-data-pribadi-berlaku-januari-2027-ini-aturan-baru-data-anak). Teks resmi tidak ditemukan di situs pemerintah saat pencarian |
+| Peraturan pelaksana UU PDP (nomor, tanggal berlaku, isi): dasar hukum belum terverifikasi (UNKNOWN) | **PERLU KONFIRMASI.** Hanya pemberitaan sekunder; teks resmi tidak ditemukan di situs pemerintah saat pencarian. Jangan dipakai sebagai dasar sampai diverifikasi |
 | Pejabat PDP (DPO), penilaian dampak (DPIA), catatan kegiatan pemrosesan, retensi, transfer lintas negara (penyedia AI/hosting di luar negeri) berlaku bagi LINOE | **PERLU KONFIRMASI konsultan** (ringkasan sekunder menyebut kewajiban ini; penerapan ke skala 10 tenant tidak ditentukan di sini) |
 | Peran LINOE: pengendali (data akun tenant) dan/atau prosesor (data pelanggan tenant dalam konten); perlu perjanjian pemrosesan data (DPA) dengan tenant | **PERLU KONFIRMASI konsultan** |
 | Konsistensi Kebijakan Privasi dengan kewajiban (dasar pemrosesan, retensi, hak subjek, pihak ketiga, pemberitahuan insiden) | **PERLU KONFIRMASI konsultan.** Cek internal: lihat T11 di dokumen soft launch |
@@ -82,7 +82,7 @@ Operasional: kontak eskalasi terisi (RUNBOOK bagian 4), nama konsultan, arsip in
 | F4 | Ajukan pendaftaran PSE Lingkup Privat lewat OSS, setelah isian terkini dikonfirmasi | Ya | Sebelum pengguna eksternal (Pasal 6 ayat 2) |
 | F5 | Pilih konsultan hukum/PDP untuk konfirmasi bagian PERLU KONFIRMASI; minta jawaban tertulis | Ya | Sebelum tenant ke-11 atau pembayaran riil |
 | F6 | Setujui teks final Privasi/Syarat dan tetapkan `effectiveDate` (perubahan kode lewat sesi Claude) | Ya (setujui) | Sebelum undangan |
-| F7 | Tetapkan penanggung jawab data pribadi/DPO atau keputusan tidak menunjuk (dengan konsultan) | Ya | Sebelum PP 33/2026 berlaku bila terverifikasi |
+| F7 | Tetapkan penanggung jawab data pribadi/DPO atau keputusan tidak menunjuk (dengan konsultan) | Ya | Sebelum peraturan pelaksana berlaku, bila terverifikasi (dasar hukum belum terverifikasi (UNKNOWN)) |
 | F8 | Putuskan kanal email dukungan: alamat umum perusahaan sudah dipakai; pertimbangkan alamat khusus tanpa biaya (konsultasikan opsi) | Ya | Sebelum undangan |
 | F9 | Sebelum pembayaran riil: konfirmasi status PJP/merchant, pajak, faktur, dan sinkronkan Privasi (nama penyedia pembayaran) | Ya | Sebelum aktivasi pembayaran |
 
@@ -95,9 +95,9 @@ Resmi: [PP 71/2019 (JDIH Komdigi)](https://jdih.komdigi.go.id/produk_hukum/view/
 [KBLI 62191 (OSS)](https://oss.go.id/en/kbli/detail/7fe22b1e-1c4a-585e-bf8c-83e080632031);
 [PJP (Bank Indonesia)](https://www.bi.go.id/id/fungsi-utama/sistem-pembayaran/perizinan).
 Resmi untuk dicocokkan, tidak terjangkau saat akses: [UU 27/2022 (peraturan.bpk.go.id)](https://peraturan.bpk.go.id/Details/229798/uu-no-27-tahun-2022).
-Sekunder: [pasal.id Pasal 46](https://pasal.id/peraturan/uu/uu-no-27-tahun-2022/pasal-46); [SIP Law Firm PP 33/2026](https://siplawfirm.id/resources/pp-33-2026-pelindungan-data-pribadi);
-[Katadata PP PDP](https://katadata.co.id/amp/finansial/makro/6a9979b7c5745/pp-pelindungan-data-pribadi-berlaku-januari-2027-ini-aturan-baru-data-anak);
+Sekunder: [pasal.id Pasal 46](https://pasal.id/peraturan/uu/uu-no-27-tahun-2022/pasal-46).
+Peraturan pelaksana UU PDP: dasar hukum belum terverifikasi (UNKNOWN); sumber sekunder tidak dicantumkan.
 [izin.co.id PSE](https://izin.co.id/blog/apa-itu-pse-kominfo/); [SmartLegal PSE](https://smartlegal.id/pse/2025/11/17/cara-daftar-pse-kominfo-ini-prosedur-dasar-hukum-dan-persyaratannya-sl/).
 Pendukung teknis (platform, bukan hukum): [Supabase SMTP](https://supabase.com/docs/guides/auth/auth-smtp), [Supabase rate limits](https://supabase.com/docs/guides/auth/rate-limits), [Supabase backups](https://supabase.com/docs/guides/platform/backups).
 
-Tidak terjangkau/BLOCKED: teks resmi UU 27/2022 dan PP 33/2026 di situs pemerintah; isian terkini formulir PSE di OSS (butuh login); pemberitaan Bisnis.com (gagal dibuka).
+Tidak terjangkau/BLOCKED: teks resmi UU 27/2022 dan peraturan pelaksananya (dasar hukum belum terverifikasi (UNKNOWN)) di situs pemerintah; isian terkini formulir PSE di OSS (butuh login); pemberitaan Bisnis.com (gagal dibuka).

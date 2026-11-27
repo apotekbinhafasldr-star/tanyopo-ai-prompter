@@ -121,10 +121,10 @@ Status verifikasi: teks dikutip dari [pasal.id](https://pasal.id/peraturan/uu/uu
 resmi peraturan.bpk.go.id tidak terjangkau saat akses). **Cocokkan dengan teks resmi sebelum dipakai.**
 
 **PERLU KONFIRMASI konsultan/otoritas** (jangan diasumsikan):
-- Kapan jam mulai: sejak temuan pertama atau sejak kegagalan "pasti, patut, dan wajar" terbukti (ada pemberitaan sekunder tentang PP 33/2026 yang menyebut ini; belum diverifikasi di teks resmi). **Sikap hati-hati: hitung dari jam temuan.**
+- Kapan jam mulai: sejak temuan pertama atau sejak kegagalan "pasti, patut, dan wajar" terbukti (ada pemberitaan sekunder tentang peraturan pelaksana yang menyebut ini: dasar hukum belum terverifikasi (UNKNOWN)). **Sikap hati-hati: hitung dari jam temuan.**
 - Siapa "lembaga" penerima dan saluran penyampaiannya: pemberitaan sekunder 2026 menyebut lembaga PDP belum terbentuk penuh. Tanyakan ke konsultan/Komdigi sebelum insiden nyata.
 - Kriteria "kegagalan" (kehilangan, terungkap, akses tanpa izin) dan "hal tertentu" untuk pengumuman publik.
-- PP 33/2026 (pelaksana UU PDP): disebut berlaku 16 Januari 2027 oleh sumber sekunder; teks resmi belum terverifikasi.
+- Peraturan pelaksana UU PDP: nomor, tanggal berlaku, dan isi = dasar hukum belum terverifikasi (UNKNOWN); jangan dijadikan acuan.
 
 **Pra-siapkan sekarang (sebelum ada insiden):** draf email pemberitahuan ke tenant (templat di bawah), daftar kontak tenant, dan nama konsultan.
 

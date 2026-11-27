@@ -74,7 +74,7 @@ async function fetchOwnMetaPagesOrError(
   }
 
   // Paket 3: gerbang persetujuan koneksi (no-op saat enforcement MATI; fail-closed saat HIDUP, sebelum token dibuka).
-  const consentMessage = await consentGateMessage("CONNECT_META", userId);
+  const consentMessage = await consentGateMessage("CONNECT_META", userId, tenantId);
   if (consentMessage) return { error: consentMessage };
 
   let accessToken: string;
