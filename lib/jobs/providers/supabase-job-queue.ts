@@ -2,10 +2,15 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, JobType } from "@/types/database";
-import type { EnqueueJobInput, EnqueueJobResult, Job, JobQueueProvider } from "@/lib/jobs/job-queue";
+import type { EnqueueJobInput, EnqueueJobResult, Job, JobQueueProvider, JobRef } from "@/lib/jobs/job-queue";
 import { computeBackoffSeconds } from "@/lib/jobs/backoff";
 
 const UNIQUE_VIOLATION = "23505";
+
+/** A job is only addressable by a non-empty id AND tenant; anything else is rejected before any query. */
+function isValidRef(job: JobRef | null | undefined): job is JobRef {
+  return !!job && typeof job.id === "string" && job.id.length > 0 && typeof job.tenantId === "string" && job.tenantId.length > 0;
+}
 
 /**
  * DB-backed default JobQueueProvider — prompter_jobs +
@@ -73,8 +78,10 @@ export class SupabaseJobQueue implements JobQueueProvider {
     return data ?? null;
   }
 
-  async complete(jobId: string, result?: Record<string, unknown>): Promise<void> {
-    await this.admin
+  async complete(job: JobRef, result?: Record<string, unknown>): Promise<{ applied: boolean }> {
+    if (!isValidRef(job)) return { applied: false };
+
+    const { data } = await this.admin
       .from("prompter_jobs")
       .update({
         status: "SUCCEEDED",
@@ -82,46 +89,62 @@ export class SupabaseJobQueue implements JobQueueProvider {
         result: (result ?? null) as Database["public"]["Tables"]["prompter_jobs"]["Update"]["result"],
         error: null,
       })
-      .eq("id", jobId);
+      .eq("id", job.id)
+      .eq("tenant_id", job.tenantId)
+      .eq("status", "RUNNING")
+      .select("id")
+      .maybeSingle();
+
+    return { applied: !!data };
   }
 
   /**
-   * Re-reads attempts/max_attempts fresh rather than trusting a caller-
-   * supplied value, so backoff scheduling is always based on the real
-   * current attempt count.
+   * Re-reads attempts/max_attempts fresh (for THIS tenant's RUNNING job only) rather than trusting a
+   * caller-supplied value, so backoff scheduling is always based on the real current attempt count.
    */
-  async fail(jobId: string, errorMessage: string): Promise<void> {
-    const { data: job } = await this.admin
+  async fail(job: JobRef, errorMessage: string): Promise<{ applied: boolean; terminal: boolean }> {
+    if (!isValidRef(job)) return { applied: false, terminal: false };
+
+    const { data: row } = await this.admin
       .from("prompter_jobs")
       .select("attempts, max_attempts")
-      .eq("id", jobId)
-      .single();
+      .eq("id", job.id)
+      .eq("tenant_id", job.tenantId)
+      .eq("status", "RUNNING")
+      .maybeSingle();
 
-    if (!job) return;
+    if (!row) return { applied: false, terminal: false };
 
-    if (job.attempts >= job.max_attempts) {
-      await this.admin
-        .from("prompter_jobs")
-        .update({ status: "FAILED", finished_at: new Date().toISOString(), error: errorMessage })
-        .eq("id", jobId);
-      return;
-    }
+    const terminal = row.attempts >= row.max_attempts;
+    const patch = terminal
+      ? { status: "FAILED" as const, finished_at: new Date().toISOString(), error: errorMessage }
+      : {
+          status: "PENDING" as const,
+          run_at: new Date(Date.now() + computeBackoffSeconds(row.attempts) * 1000).toISOString(),
+          error: errorMessage,
+        };
 
-    const backoffSeconds = computeBackoffSeconds(job.attempts);
-    const nextRunAt = new Date(Date.now() + backoffSeconds * 1000).toISOString();
-
-    await this.admin
+    const { data: updated } = await this.admin
       .from("prompter_jobs")
-      .update({ status: "PENDING", run_at: nextRunAt, error: errorMessage })
-      .eq("id", jobId);
+      .update(patch)
+      .eq("id", job.id)
+      .eq("tenant_id", job.tenantId)
+      .eq("status", "RUNNING")
+      .select("id")
+      .maybeSingle();
+
+    return { applied: !!updated, terminal: !!updated && terminal };
   }
 
-  /** Only PENDING -> CANCELED; a RUNNING job's external call is never interrupted. */
-  async cancel(jobId: string): Promise<{ canceled: boolean }> {
+  /** Only PENDING -> CANCELED, and only for the job's own tenant; a RUNNING job's external call is never interrupted. */
+  async cancel(job: JobRef): Promise<{ canceled: boolean }> {
+    if (!isValidRef(job)) return { canceled: false };
+
     const { data } = await this.admin
       .from("prompter_jobs")
       .update({ status: "CANCELED", finished_at: new Date().toISOString() })
-      .eq("id", jobId)
+      .eq("id", job.id)
+      .eq("tenant_id", job.tenantId)
       .eq("status", "PENDING")
       .select("id")
       .maybeSingle();

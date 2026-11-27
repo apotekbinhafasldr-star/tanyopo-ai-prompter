@@ -22,6 +22,12 @@ import type { Database, JobType } from "@/types/database";
 
 export type Job = Database["public"]["Tables"]["prompter_jobs"]["Row"];
 
+/** Identifies one job row: its id AND the tenant that owns it (both from a trusted source). */
+export interface JobRef {
+  id: string;
+  tenantId: string;
+}
+
 export interface EnqueueJobInput {
   tenantId: string;
   jobType: JobType;
@@ -46,18 +52,23 @@ export interface JobQueueProvider {
   /** Atomically claims and marks RUNNING the next due job, or null if none is due. */
   claimNext(jobTypes?: JobType[]): Promise<Job | null>;
 
-  complete(jobId: string, result?: Record<string, unknown>): Promise<void>;
+  /**
+   * Marks a RUNNING job SUCCEEDED. The job is addressed by BOTH its id and its tenant (taken from
+   * the claimed job, never from request input) and must still be RUNNING: a wrong tenant, an unknown
+   * id or a job in any other state is left untouched and reported as `applied: false`.
+   */
+  complete(job: JobRef, result?: Record<string, unknown>): Promise<{ applied: boolean }>;
 
   /**
-   * Records a failure. Schedules a backoff-delayed retry (status back to
-   * PENDING, run_at pushed forward) while attempts < max_attempts;
-   * otherwise marks the job terminally FAILED. Never retries forever —
-   * see lib/jobs/backoff.ts.
+   * Records a failure of a RUNNING job (same tenant + RUNNING guard as complete()). Schedules a
+   * backoff-delayed retry (status back to PENDING, run_at pushed forward) while attempts <
+   * max_attempts; otherwise marks the job terminally FAILED (`terminal: true`). Never retries
+   * forever — see lib/jobs/backoff.ts. `applied: false` means nothing was written.
    */
-  fail(jobId: string, errorMessage: string): Promise<void>;
+  fail(job: JobRef, errorMessage: string): Promise<{ applied: boolean; terminal: boolean }>;
 
-  /** Only ever cancels a job still PENDING — a RUNNING job's in-flight
-   * external call is never killed uncontrolled. Returns canceled: false
-   * for a job that isn't PENDING (already running/finished/canceled). */
-  cancel(jobId: string): Promise<{ canceled: boolean }>;
+  /** Only ever cancels a job of the given tenant that is still PENDING — a RUNNING job's in-flight
+   * external call is never killed uncontrolled. Returns canceled: false for a job that isn't
+   * PENDING (already running/finished/canceled) or that belongs to another tenant. */
+  cancel(job: JobRef): Promise<{ canceled: boolean }>;
 }

@@ -57,14 +57,18 @@ export async function claimNextJob(
   return queue.claimNext(jobTypes);
 }
 
+/**
+ * `job` is the row returned by claimNextJob(): its id and tenant_id come from the database, never from
+ * request input. A job that is not RUNNING for that tenant is left untouched (`applied: false`).
+ */
 export async function completeJob(
   admin: SupabaseClient<Database>,
-  jobId: string,
+  job: Pick<Job, "id" | "tenant_id">,
   result?: Record<string, unknown>,
-): Promise<void> {
+): Promise<{ applied: boolean }> {
   const queue = getJobQueue(admin);
-  if (!queue) return;
-  await queue.complete(jobId, result);
+  if (!queue) return { applied: false };
+  return queue.complete({ id: job.id, tenantId: job.tenant_id }, result);
 }
 
 export async function failJob(
@@ -75,9 +79,10 @@ export async function failJob(
   const queue = getJobQueue(admin);
   if (!queue) return;
 
-  await queue.fail(job.id, errorMessage);
+  const outcome = await queue.fail({ id: job.id, tenantId: job.tenant_id }, errorMessage);
 
-  if (job.attempts >= job.max_attempts) {
+  // Audit only what was really written: a job that was not RUNNING for this tenant is never reported.
+  if (outcome.applied && outcome.terminal) {
     await admin.from("prompter_audit_logs").insert({
       tenant_id: job.tenant_id,
       actor_user_id: null,
@@ -89,6 +94,10 @@ export async function failJob(
   }
 }
 
+/**
+ * `tenantId` must come from a trusted server context (the caller's session or the job row), never from
+ * request input: the job is cancelled only if it is PENDING AND owned by that tenant.
+ */
 export async function cancelJob(
   admin: SupabaseClient<Database>,
   tenantId: string,
@@ -97,7 +106,7 @@ export async function cancelJob(
   const queue = getJobQueue(admin);
   if (!queue) return { canceled: false };
 
-  const result = await queue.cancel(jobId);
+  const result = await queue.cancel({ id: jobId, tenantId });
 
   if (result.canceled) {
     await admin.from("prompter_audit_logs").insert({
