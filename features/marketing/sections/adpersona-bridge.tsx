@@ -70,7 +70,7 @@ export function AdPersonaBridge() {
           <Reveal className="relative mt-9 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
             <span
               aria-disabled="true"
-              className="inline-flex w-full cursor-not-allowed items-center justify-center gap-2 rounded-[var(--radius-md)] bg-gradient-to-r from-brand to-brand-2 px-5 py-2.5 text-sm font-semibold text-white opacity-90 sm:w-auto"
+              className="inline-flex w-full cursor-not-allowed items-center justify-center gap-2 rounded-[var(--radius-md)] bg-action px-5 py-2.5 text-sm font-semibold text-action-foreground opacity-90 sm:w-auto"
             >
               Buat Creative dengan AdPersona
               <span className="rounded-full bg-white/20 px-2 py-0.5 text-[11px] font-medium">

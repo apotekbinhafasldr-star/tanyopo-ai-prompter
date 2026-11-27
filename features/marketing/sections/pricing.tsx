@@ -94,7 +94,7 @@ export function Pricing() {
                     Segera Hadir
                   </Button>
                 ) : (
-                  <Button asChild size="sm" className="mt-auto w-full bg-gradient-to-r from-brand to-brand-2 hover:opacity-95">
+                  <Button asChild size="sm" className="mt-auto w-full">
                     <Link href="/register">Pilih Paket Ini</Link>
                   </Button>
                 )}

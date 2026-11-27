@@ -9,8 +9,11 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        primary:
-          "bg-brand text-brand-foreground hover:bg-brand/90 shadow-[var(--shadow-sm)]",
+        // Navy action button. `action-btn` (globals.css, unlayered) makes the focus ring navy; the global ring stays indigo.
+        primary: "action-btn bg-action text-action-foreground hover:bg-action-hover shadow-[var(--shadow-sm)]",
+        // Same navy button on a dark surface (marketing hero): `action-btn--on-dark` gives a light border and a white focus ring.
+        primaryOnDark:
+          "action-btn action-btn--on-dark border bg-action text-action-foreground hover:bg-action-hover",
         secondary:
           "bg-surface text-foreground border border-border hover:bg-surface-muted",
         ghost: "text-foreground hover:bg-surface-muted",

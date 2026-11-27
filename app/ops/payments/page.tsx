@@ -285,7 +285,7 @@ export default async function PaymentQueuePage({ searchParams }: { searchParams:
                     </form>
                   ) : null}
                   <details>
-                    <summary className="flex h-11 cursor-pointer items-center justify-center rounded-md bg-brand px-4 text-sm font-medium text-brand-foreground">
+                    <summary className="flex h-11 cursor-pointer items-center justify-center rounded-md action-btn bg-action px-4 text-sm font-medium text-action-foreground hover:bg-action-hover">
                       Selesaikan dengan catatan
                     </summary>
                     <form action={resolveAlertAction} className="mt-2 space-y-2">
@@ -302,7 +302,7 @@ export default async function PaymentQueuePage({ searchParams }: { searchParams:
                         rows={3}
                         className="w-full rounded-md border border-border-strong bg-surface px-3 py-2 text-base"
                       />
-                      <button type="submit" className="h-11 w-full rounded-md bg-brand px-4 text-sm font-medium text-brand-foreground">
+                      <button type="submit" className="h-11 w-full rounded-md action-btn bg-action px-4 text-sm font-medium text-action-foreground hover:bg-action-hover">
                         Simpan & selesaikan
                       </button>
                     </form>

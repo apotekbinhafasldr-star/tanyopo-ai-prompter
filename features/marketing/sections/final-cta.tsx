@@ -19,11 +19,7 @@ export function FinalCta() {
           Siap mengubah produk Anda menjadi pertumbuhan?
         </h2>
         <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row">
-          <Button
-            asChild
-            size="lg"
-            className="bg-gradient-to-r from-brand to-brand-2 shadow-[var(--shadow-glow)] hover:opacity-95"
-          >
+          <Button asChild size="lg">
             <Link href="/register">
               Mulai Promosikan
               <ArrowRight className="size-4" aria-hidden />

@@ -122,7 +122,9 @@ font-family:var(--font-geist-sans),ui-sans-serif,system-ui,-apple-system,"Segoe 
 .fin-list{display:flex;flex-direction:column}
 .fin-empty{text-align:center;padding:28px 12px;color:var(--mute);font-size:14px;border:1px dashed var(--line);border-radius:12px}
 .fin-empty b{display:block;color:var(--ink);font-size:15px;margin-bottom:4px}
-.fin-btn{min-height:48px;border-radius:12px;border:0;background:var(--blue);color:#fff;font:inherit;font-weight:600;font-size:15px;padding:0 18px;cursor:pointer;width:100%}
+.fin-btn{min-height:48px;border-radius:12px;border:0;background:var(--action,#172b4d);color:#fff;font:inherit;font-weight:600;font-size:15px;padding:0 18px;cursor:pointer;width:100%}
+.fin-btn:hover:not([disabled]):not(.ghost){background:var(--action-hover,#243f68)}
+.fin-btn:focus-visible{outline:2px solid var(--action,#172b4d);outline-offset:2px}
 .fin-btn[disabled]{background:#e7e9f1;color:#8590a6;cursor:not-allowed}
 .fin-btn.ghost{background:#eef0f6;color:var(--mute);cursor:not-allowed}
 .fin-note{font-size:12.5px;color:var(--mute);line-height:1.45}
