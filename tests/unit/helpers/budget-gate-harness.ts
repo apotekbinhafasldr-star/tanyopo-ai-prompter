@@ -1,4 +1,5 @@
 import { vi } from "vitest";
+import { LAUNCHABLE_PROPOSAL, LAUNCHABLE_COPY_SNAPSHOT } from "@/tests/unit/helpers/launchable-proposal";
 
 /**
  * Shared Supabase test doubles for the External Budget Safety Gate tests.
@@ -35,7 +36,7 @@ export function buildLaunchHarness(options: LaunchHarnessOptions = {}) {
       currency: "IDR",
       daily_budget: 100000,
       total_budget: null,
-      ai_proposal: null,
+      ai_proposal: LAUNCHABLE_PROPOSAL,
     },
     error: null,
   });
@@ -67,7 +68,10 @@ export function buildLaunchHarness(options: LaunchHarnessOptions = {}) {
         return { select: () => ({ eq: () => ({ eq: () => ({ single: masterSingle }) }) }) };
       case "prompter_approvals": {
         // PR #36: the Meta launch reads the master's latest CAMPAIGN_LAUNCH approval.
-        const approved = { data: [{ status: "APPROVED", created_at: "2026-10-01T00:00:00Z" }], error: null };
+        const approved = {
+          data: [{ status: "APPROVED", created_at: "2026-10-01T00:00:00Z", context: { copy_snapshot: LAUNCHABLE_COPY_SNAPSHOT } }],
+          error: null,
+        };
         const builder: Record<string, unknown> = {};
         for (const method of ["select", "eq", "order", "limit"]) builder[method] = () => builder;
         builder.then = (resolve: (value: typeof approved) => unknown) => resolve(approved);
@@ -101,6 +105,14 @@ export function buildLaunchHarness(options: LaunchHarnessOptions = {}) {
             }),
           }),
         };
+      case "prompter_products": {
+        // Read-only product facts for the copy guard (FIX-195-LAUNCH-GUARD).
+        const none = { data: null, error: null };
+        const builder: Record<string, unknown> = {};
+        for (const method of ["select", "eq"]) builder[method] = () => builder;
+        builder.maybeSingle = async () => none;
+        return builder;
+      }
       case "prompter_audit_logs":
         return { insert: auditInsert };
       default:
