@@ -17,6 +17,28 @@ const COPY_LIMIT_LABELS: Record<keyof typeof COPY_LIMITS, string> = {
 };
 
 /**
+ * Problems with the ACTIVE copy that the launch actually sends, found on an unparsed value. The launch
+ * (features/campaigns/launch-actions.ts, createCreative) sends `headline`, `primary_text` and `cta` and substitutes
+ * a fallback when one is missing (campaign name / empty text / "Pelajari Lebih Lanjut"), so an approval for a
+ * proposal without them would approve something other than what is shown. `hook` is shown and gate-scanned but not
+ * sent; it may be absent, but if present it must be a string. Empty and whitespace-only strings count as missing.
+ */
+export function findActiveCopyProblems(raw: unknown): string[] {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    return ["strategi iklan belum ada atau bentuknya tidak dikenali"];
+  }
+  const record = raw as Record<string, unknown>;
+  const problems: string[] = [];
+  for (const key of ["headline", "primary_text", "cta"] as const) {
+    const value = record[key];
+    if (typeof value !== "string" || value.trim().length === 0) problems.push(`${COPY_LIMIT_LABELS[key]} kosong atau bukan teks`);
+  }
+  const hook = record.hook;
+  if (hook !== undefined && hook !== null && typeof hook !== "string") problems.push("Hook bukan teks");
+  return problems;
+}
+
+/**
  * Names every active copy field whose string is longer than COPY_LIMITS. Works on an unparsed value, so it also
  * covers a stored proposal that the schema rejected. Non-string fields are ignored here (the schema owns types).
  */

@@ -9,6 +9,7 @@ import {
   CampaignProposalGenerationSchema,
   normalizeProposalAdditions,
   findCopyLengthViolations,
+  findActiveCopyProblems,
   withPrimaryCandidate,
   withRecommendedChannels,
   selectCandidate,
@@ -313,7 +314,13 @@ export async function updateCampaignCopyAction(
     return { error: "Campaign yang sudah diajukan tidak bisa diedit." };
   }
 
-  const currentProposal = (campaign.ai_proposal ?? {}) as Record<string, Json>;
+  // A null or non-object stored proposal (never spread: a string/array would leak index keys) starts from {}, so the
+  // editor can recover a campaign whose proposal is missing or malformed.
+  const currentProposal = (
+    campaign.ai_proposal !== null && typeof campaign.ai_proposal === "object" && !Array.isArray(campaign.ai_proposal)
+      ? campaign.ai_proposal
+      : {}
+  ) as Record<string, Json>;
 
   // Server-side length guard. The editor's HTML maxLength is only a convenience: a crafted request could store
   // copy the proposal schema rejects, which would make the submit gate fall back to a partial scan.
@@ -544,6 +551,16 @@ export async function submitForApprovalAction(campaignId: string): Promise<Campa
   // that updateCampaignCopyAction edits) is enforced; the page still shows findings for every candidate as advice.
   // A stored proposal that cannot be parsed (legacy) is "cannot be assessed" like on the page, except that its
   // known active copy strings are still scanned for the two blocking rules (financial claim, special category).
+  // Required active copy first, for BOTH paths below (the schema accepts empty strings, and a null/{}/non-object
+  // proposal would otherwise be "cannot be assessed" and pass): the launch sends headline, primary_text and cta,
+  // so they must exist as non-blank text before an approval can be created. The message names the recovery paths.
+  const copyProblems = findActiveCopyProblems(campaign.ai_proposal);
+  if (copyProblems.length > 0) {
+    return {
+      error: `Campaign belum bisa diajukan: teks iklan belum lengkap (${copyProblems.join("; ")}). Lengkapi lewat editor di bagian Konten Iklan atau buat ulang strategi dengan tombol "Buat Ulang dengan AI", lalu ajukan lagi. Tidak ada pengajuan yang dibuat.`,
+    };
+  }
+
   const parsedProposal = CampaignProposalSchema.safeParse(campaign.ai_proposal);
   if (parsedProposal.success) {
     let productName: string | null = null;
@@ -568,12 +585,14 @@ export async function submitForApprovalAction(campaignId: string): Promise<Campa
       return { error: gateMessage };
     }
   } else {
-    // Cannot be parsed, so the full gate cannot run. Fail closed on copy longer than the schema allows (the
-    // launch would send it to the platform as is), then scan every blocking rule on the active copy strings.
+    // The schema does not accept this proposal (legacy shape, or copy over the length limit), so the FULL Quality
+    // Gate does NOT run: this branch is a reduced check, not a pass of the gate. It admits the proposal only when
+    // the required copy exists (above), no copy is over the length limit (the launch would send it as is) and no
+    // active copy string trips any blocking rule. Everything else the full gate assesses stays "cannot be assessed".
     const lengthViolations = findCopyLengthViolations(campaign.ai_proposal);
     if (lengthViolations.length > 0) {
       return {
-        error: `Campaign belum bisa diajukan: teks iklan melebihi batas panjang (${lengthViolations.join(", ")}). Persingkat teks di editor, lalu ajukan lagi.`,
+        error: `Campaign belum bisa diajukan: teks iklan melebihi batas panjang (${lengthViolations.join(", ")}). Persingkat teks lewat editor di bagian Konten Iklan atau buat ulang strategi dengan "Buat Ulang dengan AI", lalu ajukan lagi.`,
       };
     }
     const rawMessage = formatBlockingIssuesMessage({ issues: scanRawProposalCopy(campaign.ai_proposal) });

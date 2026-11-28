@@ -89,7 +89,7 @@ function seed(over: { master?: Row; channels?: Row[]; approvals?: Row[]; extra?:
         daily_budget: 100000,
         total_budget: null,
         currency: "IDR",
-        ai_proposal: { headline: "Lama", hook: "x", candidates: [CAND, CAND] },
+        ai_proposal: { headline: "Lama", primary_text: "teks", cta: "Beli", hook: "x", candidates: [CAND, CAND] },
         updated_at: "ts-0",
         ...over.master,
       },
@@ -196,8 +196,8 @@ describe("P2-1 lost update on ai_proposal (compare-and-swap)", () => {
   });
 
   it("regenerate (seconds of AI) does not overwrite a destination edited while the AI was running", async () => {
-    make(seed({ master: { ai_proposal: { headline: "Lama", purchase_destination: WEB } } }));
-    ai.hook = () => bump({ ai_proposal: { headline: "Lama", purchase_destination: WA } });
+    make(seed({ master: { ai_proposal: { headline: "Lama", primary_text: "teks", cta: "Beli", purchase_destination: WEB } } }));
+    ai.hook = () => bump({ ai_proposal: { headline: "Lama", primary_text: "teks", cta: "Beli", purchase_destination: WA } });
     const r = await regenerateCampaignProposalAction(M);
     expect(r.error).toMatch(/baru saja diubah/);
     expect(proposal().purchase_destination).toEqual(WA);
@@ -205,7 +205,7 @@ describe("P2-1 lost update on ai_proposal (compare-and-swap)", () => {
   });
 
   it("regenerate writes nothing if the campaign was submitted while the AI was running", async () => {
-    make(seed({ master: { ai_proposal: { headline: "Lama", purchase_destination: WEB } } }));
+    make(seed({ master: { ai_proposal: { headline: "Lama", primary_text: "teks", cta: "Beli", purchase_destination: WEB } } }));
     ai.hook = () => bump({ status: "AWAITING_APPROVAL" });
     const r = await regenerateCampaignProposalAction(M);
     expect(r.error).toBeTruthy();
@@ -231,7 +231,7 @@ describe("P2-1 lost update on ai_proposal (compare-and-swap)", () => {
 
 describe("regenerate preserves the destination", () => {
   it("a stored destination survives regeneration and is passed to the AI (host only)", async () => {
-    make(seed({ master: { ai_proposal: { headline: "Lama", purchase_destination: WEB } } }));
+    make(seed({ master: { ai_proposal: { headline: "Lama", primary_text: "teks", cta: "Beli", purchase_destination: WEB } } }));
     const r = await regenerateCampaignProposalAction(M);
     expect(r.error).toBeNull();
     expect(proposal().purchase_destination).toEqual(WEB);
@@ -256,11 +256,11 @@ describe("regenerate preserves the destination", () => {
 
 describe("P2-2 race between submit, edit and approval", () => {
   it("a destination edit that slips in during submission can never be approved", async () => {
-    make(seed({ master: { ai_proposal: { headline: "Lama", purchase_destination: WEB } } }));
+    make(seed({ master: { ai_proposal: { headline: "Lama", primary_text: "teks", cta: "Beli", purchase_destination: WEB } } }));
     // Edit lands after submit has read the campaign (snapshot = WEB) but before the status flips.
     injectOnce(
       (c) => c.table === "prompter_approvals" && c.op === "insert",
-      () => bump({ ai_proposal: { headline: "Lama", purchase_destination: WA } }),
+      () => bump({ ai_proposal: { headline: "Lama", primary_text: "teks", cta: "Beli", purchase_destination: WA } }),
     );
     expect((await submitForApprovalAction(M)).error).toBeNull();
     expect(master().status).toBe("AWAITING_APPROVAL");
@@ -282,7 +282,7 @@ describe("P2-2 race between submit, edit and approval", () => {
   });
 
   it("while AWAITING_APPROVAL no action can change the destination", async () => {
-    make(seed({ master: { ai_proposal: { headline: "Lama", purchase_destination: WEB } } }));
+    make(seed({ master: { ai_proposal: { headline: "Lama", primary_text: "teks", cta: "Beli", purchase_destination: WEB } } }));
     await submitForApprovalAction(M);
     const r = await updateCampaignDestinationAction(M, DEST_INIT, dest("WHATSAPP", "081234567890"));
     expect(r.saved).toBe(false);
@@ -290,7 +290,7 @@ describe("P2-2 race between submit, edit and approval", () => {
   });
 
   it("an edit racing the submit's status flip loses (conditional on DRAFT)", async () => {
-    make(seed({ master: { ai_proposal: { headline: "Lama", purchase_destination: WEB } } }));
+    make(seed({ master: { ai_proposal: { headline: "Lama", primary_text: "teks", cta: "Beli", purchase_destination: WEB } } }));
     injectOnce(
       (c) => c.table === "prompter_master_campaigns" && c.op === "update",
       () => bump({ status: "AWAITING_APPROVAL" }),
@@ -322,7 +322,7 @@ describe("P2-2 race between submit, edit and approval", () => {
   });
 
   it("a campaign without a destination (NONE) can still be approved; launch refuses it on its own", async () => {
-    make(seed({ master: { ai_proposal: { headline: "Lama", purchase_destination: { version: 1, type: "NONE", value: null, link: null } } } }));
+    make(seed({ master: { ai_proposal: { headline: "Lama", primary_text: "teks", cta: "Beli", purchase_destination: { version: 1, type: "NONE", value: null, link: null } } } }));
     await submitForApprovalAction(M);
     expect((await decideApprovalAction("ap1", "APPROVED", null)).error).toBeNull();
   });

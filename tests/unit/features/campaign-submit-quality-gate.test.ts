@@ -242,13 +242,14 @@ describe("submitForApprovalAction — Quality Gate enforced on the server (PR-5)
     expect((await submitForApprovalAction("c1")).error).toBeNull();
   });
 
-  it("a campaign without any stored proposal is also not refused by the gate", async () => {
+  it("a campaign without any stored proposal is refused (FIX-195: the launch would send fallback copy), with a recovery hint", async () => {
     currentSupabase = buildSupabase({ aiProposal: null, product: PRODUCT });
 
     const result = await submitForApprovalAction("c1");
 
-    expect(result.error).toBeNull();
-    expect(currentSupabase.approvalInsert).toHaveBeenCalledTimes(1);
+    expect(result.error).toMatch(/teks iklan belum lengkap/);
+    expect(result.error).toMatch(/Buat Ulang dengan AI/);
+    expectNothingWritten();
   });
 
   it("when the product cannot be read, nothing is submitted (fail closed) and the user is told to retry", async () => {
@@ -279,14 +280,15 @@ describe("submitForApprovalAction — Quality Gate enforced on the server (PR-5)
     expectNothingWritten();
   });
 
-  it("copy longer than the schema allows cannot bypass the gate: a blocking rule other than the old two is still caught", async () => {
+  it("copy longer than the schema allows is refused by the length guard (message names the length, not the claim)", async () => {
     // Over-long primary_text makes the schema parse fail; the old fallback scanned only 2 rules and let this through.
     const long = `Hasil dijamin 100% ${"kopi ".repeat(130)}`;
     const p = JSON.parse(JSON.stringify(KOPI_ROBUSTA_IMPROVED));
     p.primary_text = long;
     currentSupabase = buildSupabase({ aiProposal: p, product: PRODUCT });
     const result = await submitForApprovalAction("c1");
-    expect(result.error).toMatch(/belum bisa diajukan/i);
+    expect(result.error).toMatch(/melebihi batas panjang/);
+    expect(result.error).not.toMatch(/diblokir/);
     expectNothingWritten();
   });
 
@@ -326,6 +328,12 @@ describe("submitForApprovalAction — Quality Gate enforced on the server (PR-5)
     form.set("primaryText", "a".repeat(600));
     form.set("cta", "a".repeat(40));
     expect((await updateCampaignCopyAction("c1", { error: null }, form)).error).toBeNull();
+    expect(currentSupabase.campaignUpdate).toHaveBeenCalledTimes(1);
+    const written = currentSupabase.campaignUpdate.mock.calls[0][0].ai_proposal;
+    expect(written.hook).toBe("a".repeat(200));
+    expect(written.headline).toBe("a".repeat(120));
+    expect(written.primary_text).toBe("a".repeat(600));
+    expect(written.cta).toBe("a".repeat(40));
   });
 
   it("no dead end: after updateCampaignCopyAction cleans the active copy, the same campaign can be submitted", async () => {
@@ -351,5 +359,99 @@ describe("submitForApprovalAction — Quality Gate enforced on the server (PR-5)
     const accepted = await submitForApprovalAction("c1");
     expect(accepted.error).toBeNull();
     expect(currentSupabase.approvalInsert).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("submitForApprovalAction — required active copy and the reduced check (FIX-195)", () => {
+  beforeEach(() => {
+    mirrorChannelCampaignStatusMock.mockClear();
+  });
+
+  const LEGACY_OK = { headline: "Kopi Robusta Aceh", primary_text: "Kopi sangrai medium 200 gram", cta: "Lihat" };
+
+  it("P1: a missing, malformed or blank proposal is refused with the recovery path named", async () => {
+    const cases: [string, unknown][] = [
+      ["null", null],
+      ["empty object", {}],
+      ["string", "Kopi Robusta"],
+      ["array", [LEGACY_OK]],
+      ["headline is a number", { ...LEGACY_OK, headline: 123 }],
+      ["headline empty", { ...LEGACY_OK, headline: "" }],
+      ["headline whitespace", { ...LEGACY_OK, headline: "   " }],
+      ["primary_text missing", { headline: LEGACY_OK.headline, cta: LEGACY_OK.cta }],
+      ["primary_text whitespace", { ...LEGACY_OK, primary_text: " \n\t " }],
+      ["cta missing", { headline: LEGACY_OK.headline, primary_text: LEGACY_OK.primary_text }],
+      ["cta null", { ...LEGACY_OK, cta: null }],
+      ["hook is a number", { ...LEGACY_OK, hook: 5 }],
+    ];
+    for (const [name, aiProposal] of cases) {
+      currentSupabase = buildSupabase({ aiProposal, product: PRODUCT });
+      const result = await submitForApprovalAction("c1");
+      expect(result.error, name).toMatch(/teks iklan belum lengkap/);
+      expect(result.error, name).toMatch(/editor/);
+      expect(result.error, name).toMatch(/Buat Ulang dengan AI/);
+      expectNothingWritten();
+    }
+  });
+
+  it("P1: a proposal that parses against the schema but has an empty headline is refused too (the schema accepts \"\")", async () => {
+    const p = JSON.parse(JSON.stringify(KOPI_ROBUSTA_IMPROVED));
+    p.headline = "";
+    currentSupabase = buildSupabase({ aiProposal: p, product: PRODUCT });
+    expect((await submitForApprovalAction("c1")).error).toMatch(/teks iklan belum lengkap/);
+    expectNothingWritten();
+  });
+
+  it("P1: a valid legacy-shaped proposal (required copy present, hook absent) still passes the reduced check", async () => {
+    currentSupabase = buildSupabase({ aiProposal: LEGACY_OK, product: PRODUCT });
+    expect((await submitForApprovalAction("c1")).error).toBeNull();
+    expect(currentSupabase.approvalInsert).toHaveBeenCalledTimes(1);
+  });
+
+  it("P2: parse fails for another reason (no candidates), copy within limits, blocking claim in the headline: refused by the BLOCK rule, not the length guard", async () => {
+    for (const headline of ["Passive income dari rumah", "Hasil dijamin 100%"]) {
+      currentSupabase = buildSupabase({ aiProposal: { ...LEGACY_OK, headline }, product: PRODUCT });
+      const result = await submitForApprovalAction("c1");
+      expect(result.error).toMatch(/memuat hal yang diblokir/);
+      expect(result.error).not.toMatch(/melebihi batas panjang/);
+      expect(result.error).not.toMatch(/belum lengkap/);
+      expectNothingWritten();
+    }
+  });
+
+  it("P2: the three refusal paths have different messages (incomplete / too long / blocked)", async () => {
+    const messages: string[] = [];
+    for (const aiProposal of [
+      { ...LEGACY_OK, headline: "" },
+      { ...LEGACY_OK, primary_text: "a".repeat(601) },
+      { ...LEGACY_OK, headline: "Passive income dari rumah" },
+    ]) {
+      currentSupabase = buildSupabase({ aiProposal, product: PRODUCT });
+      messages.push(String((await submitForApprovalAction("c1")).error));
+    }
+    expect(messages[0]).toMatch(/belum lengkap/);
+    expect(messages[1]).toMatch(/melebihi batas panjang/);
+    expect(messages[2]).toMatch(/memuat hal yang diblokir/);
+    expect(new Set(messages).size).toBe(3);
+  });
+
+  it("recovery: the copy editor repairs a null, empty or non-object proposal and the campaign can then be submitted", async () => {
+    for (const aiProposal of [null, {}, "abc", [1, 2]]) {
+      currentSupabase = buildSupabase({ aiProposal, product: PRODUCT });
+      expect((await submitForApprovalAction("c1")).error).toMatch(/belum lengkap/);
+      expectNothingWritten();
+
+      const form = new FormData();
+      form.set("hook", "Kopi robusta untuk pagi yang kuat");
+      form.set("headline", "Kopi Robusta Aceh sangrai medium");
+      form.set("primaryText", "Kopi sangrai medium 200 gram");
+      form.set("cta", "Lihat");
+      expect((await updateCampaignCopyAction("c1", { error: null }, form)).error).toBeNull();
+      const written = currentSupabase.campaignUpdate.mock.calls[0][0].ai_proposal;
+      expect(Object.keys(written).sort()).toEqual(["cta", "headline", "hook", "primary_text"]);
+
+      expect((await submitForApprovalAction("c1")).error).toBeNull();
+      expect(currentSupabase.approvalInsert).toHaveBeenCalledTimes(1);
+    }
   });
 });
