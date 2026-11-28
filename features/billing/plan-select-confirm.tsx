@@ -1,7 +1,8 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useRef, useState } from "react";
 import { cn } from "@/lib/utils/cn";
+import { useBackToClose } from "@/lib/hooks/use-back-to-close";
 import { formatCurrency } from "@/lib/utils/format";
 import { changePlanAction, startCheckoutAction, type BillingActionState } from "@/features/billing/actions";
 import type { SubscriptionPlan } from "@/types/database";
@@ -64,6 +65,13 @@ export function PlanSelectConfirm({
     useCheckout ? startCheckoutAction : changePlanAction,
     initialState,
   );
+  const pendingRef = useRef(false);
+  pendingRef.current = pending;
+
+  // Back fisik Android menutup konfirmasi (bukan meninggalkan halaman). Selama aksi berjalan, Back tidak membatalkan tampilan.
+  useBackToClose(confirming && !readOnly, () => {
+    if (!pendingRef.current) setConfirming(false);
+  });
 
   if (readOnly) {
     return <p className={cn("text-xs", mutedTextClassName)}>Hanya Owner yang dapat memilih paket.</p>;
@@ -103,6 +111,9 @@ export function PlanSelectConfirm({
             {state.error}
           </p>
         ) : null}
+        <p role="status" aria-live="polite" className="sr-only">
+          {pending ? "Memproses..." : ""}
+        </p>
         <div className="flex items-center gap-3">
           <button
             type="submit"
@@ -117,7 +128,11 @@ export function PlanSelectConfirm({
           <button
             type="button"
             onClick={() => setConfirming(false)}
-            className={cn("min-h-11 px-2 text-xs font-medium underline-offset-2 hover:underline", mutedTextClassName)}
+            disabled={pending}
+            className={cn(
+              "min-h-11 min-w-11 px-3 text-sm font-medium underline-offset-2 hover:underline disabled:opacity-60",
+              mutedTextClassName,
+            )}
           >
             Kembali
           </button>
