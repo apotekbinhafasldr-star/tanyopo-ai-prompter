@@ -1,4 +1,761 @@
 {
- "_catatan": "Temuan yang sudah ada di main saat harness ini diperkenalkan (lari CI pertama, main 4fef872). Format: {\"<label halaman>\": [{\"key\": \"<kunci>\", \"reason\": \"<alasan>\"}]}. Hanya temuan di luar daftar ini yang menggagalkan job. Hapus entri begitu perbaikannya merge (harness melaporkan entri usang).",
- "accepted": {}
+ "_catatan": "Temuan yang SUDAH ADA di main 4fef872 (lari CI nyata PR #203, yang hanya mengubah harness). Kunci axe berisi selector elemen. Kunci fatal (load, status:*) tidak pernah boleh masuk. Hapus entri begitu perbaikannya merge; harness melaporkan entri usang.",
+ "accepted": {
+  "public_root": [
+   {
+    "key": "target<44:a:LINOE — Beranda",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:button:Buka menu",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:button:Ke slide 1: Analisis Produk",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:button:Ke slide 2: Strategi Marketing",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:button:Ke slide 3: Konten & Copywriting",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:button:Ke slide 4: Iklan Multi-Channel",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:button:Ke slide 5: Analitik & Laporan",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:button:Ke slide 6: Optimasi Growth",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Kebijakan Privasi",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Syarat & Ketentuan",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Kebijakan Refund",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Penghapusan Data",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "axe:scrollable-region-focusable:.-mx-4",
+    "reason": "Area gulir tidak dapat difokus keyboard; ada di main 4fef872, belum diperbaiki."
+   }
+  ],
+  "public_register": [
+   {
+    "key": "target<44:input:acceptLegal",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Kebijakan Privasi",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Syarat & Ketentuan",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Kebijakan Refund",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Penghapusan Data",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   }
+  ],
+  "public_resetpassword": [
+   {
+    "key": "redirect:/login",
+    "reason": "Tanpa token pemulihan, /reset-password dialihkan ke /login (perilaku sah); layar pemulihan itu sendiri belum teraudit oleh harness."
+   }
+  ],
+  "public_privacy": [
+   {
+    "key": "target<44:a:LINOE — Beranda",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Penyelenggara",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Data yang kami proses",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Tujuan pemrosesan",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:AI dan pihak ketiga",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Meta, TikTok, dan X",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Akun bersama lintas produk Tanyopo",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Keamanan",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Penyimpanan data",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Hak Anda",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Narahubung Pelindungan Data Pribadi",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Perubahan kebijakan",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Kontak",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Syarat & Ketentuan",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Kebijakan Refund",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Penghapusan Data",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Kebijakan Privasi",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   }
+  ],
+  "public_terms": [
+   {
+    "key": "target<44:a:LINOE — Beranda",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Penerimaan",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Layanan",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Akun dan kewajiban Anda",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Trial, paket, dan pembayaran",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Iklan dan platform pihak ketiga",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Konten AI",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Kepemilikan",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Pembatasan dan penghentian",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Ketersediaan dan hasil",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Perubahan dan hukum yang berlaku",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Kontak",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Kebijakan Privasi",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Kebijakan Refund",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Penghapusan Data",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Syarat & Ketentuan",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   }
+  ],
+  "public_refund": [
+   {
+    "key": "target<44:a:LINOE — Beranda",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Ruang lingkup",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Trial gratis 14 hari",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Status pembayaran saat ini",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Membatalkan perpanjangan",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Pembayaran yang umumnya tidak dikembalik",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Kasus yang dapat diajukan",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Cara mengajukan refund",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Hak konsumen",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Kontak",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Kebijakan Privasi",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Syarat & Ketentuan",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Penghapusan Data",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Kebijakan Refund",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   }
+  ],
+  "public_datadeletion": [
+   {
+    "key": "target<44:a:LINOE — Beranda",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Yang dapat Anda lakukan sendiri",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Tahap 1: Penerimaan permintaan",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Tahap 2: Verifikasi identitas",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Tahap 3: Penilaian lingkup dan kewajiban",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Tahap 4: Pelaksanaan",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Tahap 5: Pemberitahuan hasil",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Batasan",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Kontak",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Kebijakan Privasi",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Syarat & Ketentuan",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Kebijakan Refund",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Penghapusan Data",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   }
+  ],
+  "demo_dashboard": [
+   {
+    "key": "target<44:a:Kebijakan Privasi",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Syarat & Ketentuan",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Kebijakan Refund",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Penghapusan Data",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "axe:color-contrast:.text-xs:nth-child(2)",
+    "reason": "Kontras teks di bawah 4,5:1 (audit A-6); elemen ini ada di main 4fef872, belum diperbaiki."
+   }
+  ],
+  "demo_products": [
+   {
+    "key": "target<44:a:Kebijakan Privasi",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Syarat & Ketentuan",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Kebijakan Refund",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Penghapusan Data",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "axe:color-contrast:.justify-between > .text-xs.text-muted-foreground",
+    "reason": "Kontras teks di bawah 4,5:1 (audit A-6); elemen ini ada di main 4fef872, belum diperbaiki."
+   }
+  ],
+  "demo_campaign": [
+   {
+    "key": "target<44:a:Kebijakan Privasi",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Syarat & Ketentuan",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Kebijakan Refund",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Penghapusan Data",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "axe:color-contrast:.justify-between > p",
+    "reason": "Kontras teks di bawah 4,5:1 (audit A-6); elemen ini ada di main 4fef872, belum diperbaiki."
+   }
+  ],
+  "demo_content": [
+   {
+    "key": "target<44:a:Kebijakan Privasi",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Syarat & Ketentuan",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Kebijakan Refund",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Penghapusan Data",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "axe:color-contrast:.justify-between > p",
+    "reason": "Kontras teks di bawah 4,5:1 (audit A-6); elemen ini ada di main 4fef872, belum diperbaiki."
+   }
+  ],
+  "demo_analytics": [
+   {
+    "key": "viewport",
+    "reason": "Konten melebihi lebar 360px (overflow horizontal); ada di main 4fef872, belum diperbaiki."
+   },
+   {
+    "key": "overflowX",
+    "reason": "Konten melebihi lebar 360px (overflow horizontal); ada di main 4fef872, belum diperbaiki."
+   },
+   {
+    "key": "target<44:a:Kebijakan Privasi",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Syarat & Ketentuan",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Kebijakan Refund",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:a:Penghapusan Data",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "axe:color-contrast:.border-b > .text-xs.text-muted-foreground",
+    "reason": "Kontras teks di bawah 4,5:1 (audit A-6); elemen ini ada di main 4fef872, belum diperbaiki."
+   }
+  ],
+  "app_dashboard": [
+   {
+    "key": "target<44:a:LINOE — Beranda",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "axe:aria-prohibited-attr:.rounded-\\[var\\(--radius-lg\\)\\].border.shadow-\\[var\\(--shadow-sm\\)\\]:nth-child(1) > .p-5.flex-col.ga~b53b10ce",
+    "reason": "aria-label pada div tanpa role (MetricCard 'Belum ada data'); ada di main 4fef872, kandidat perbaikan U5."
+   },
+   {
+    "key": "axe:aria-prohibited-attr:.rounded-\\[var\\(--radius-lg\\)\\].border.shadow-\\[var\\(--shadow-sm\\)\\]:nth-child(2) > .p-5.flex-col.ga~2127bd29",
+    "reason": "aria-label pada div tanpa role (MetricCard 'Belum ada data'); ada di main 4fef872, kandidat perbaikan U5."
+   },
+   {
+    "key": "axe:aria-prohibited-attr:.rounded-\\[var\\(--radius-lg\\)\\].border.shadow-\\[var\\(--shadow-sm\\)\\]:nth-child(3) > .p-5.flex-col.ga~abcd8056",
+    "reason": "aria-label pada div tanpa role (MetricCard 'Belum ada data'); ada di main 4fef872, kandidat perbaikan U5."
+   },
+   {
+    "key": "axe:aria-prohibited-attr:.rounded-\\[var\\(--radius-lg\\)\\].border.shadow-\\[var\\(--shadow-sm\\)\\]:nth-child(4) > .p-5.flex-col.ga~ae292252",
+    "reason": "aria-label pada div tanpa role (MetricCard 'Belum ada data'); ada di main 4fef872, kandidat perbaikan U5."
+   },
+   {
+    "key": "axe:aria-prohibited-attr:.rounded-\\[var\\(--radius-lg\\)\\].border.shadow-\\[var\\(--shadow-sm\\)\\]:nth-child(5) > .p-5.flex-col.ga~3f09e00d",
+    "reason": "aria-label pada div tanpa role (MetricCard 'Belum ada data'); ada di main 4fef872, kandidat perbaikan U5."
+   },
+   {
+    "key": "axe:aria-prohibited-attr:.rounded-\\[var\\(--radius-lg\\)\\].border.shadow-\\[var\\(--shadow-sm\\)\\]:nth-child(6) > .p-5.flex-col.ga~ec050c4c",
+    "reason": "aria-label pada div tanpa role (MetricCard 'Belum ada data'); ada di main 4fef872, kandidat perbaikan U5."
+   },
+   {
+    "key": "axe:aria-prohibited-attr:.rounded-\\[var\\(--radius-lg\\)\\].border.shadow-\\[var\\(--shadow-sm\\)\\]:nth-child(7) > .p-5.flex-col.ga~b8a05180",
+    "reason": "aria-label pada div tanpa role (MetricCard 'Belum ada data'); ada di main 4fef872, kandidat perbaikan U5."
+   }
+  ],
+  "app_connections": [
+   {
+    "key": "target<44:a:LINOE — Beranda",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   }
+  ],
+  "app_billing": [
+   {
+    "key": "target<44:a:LINOE — Beranda",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:select:FreeStarterGrowthProBusinessAgencyUMKMpr",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "axe:color-contrast:.border-brand\\/30.bg-brand\\/5.p-3 > p:nth-child(2)",
+    "reason": "Kontras teks di bawah 4,5:1 (audit A-6); elemen ini ada di main 4fef872, belum diperbaiki."
+   },
+   {
+    "key": "axe:color-contrast:.border-brand\\/30.bg-brand\\/5.p-3 > p:nth-child(3)",
+    "reason": "Kontras teks di bawah 4,5:1 (audit A-6); elemen ini ada di main 4fef872, belum diperbaiki."
+   },
+   {
+    "key": "axe:color-contrast:.border-blue-200 > .p-4.gap-3.flex-col > .items-start.gap-3 > .min-w-0.flex-1 > p",
+    "reason": "Kontras teks di bawah 4,5:1 (audit A-6); elemen ini ada di main 4fef872, belum diperbaiki."
+   },
+   {
+    "key": "axe:color-contrast:.border-blue-200 > .p-4.gap-3.flex-col > .items-baseline.gap-x-1\\.5.gap-y-0\\.5 > span:nth-child(2)",
+    "reason": "Kontras teks di bawah 4,5:1 (audit A-6); elemen ini ada di main 4fef872, belum diperbaiki."
+   },
+   {
+    "key": "axe:color-contrast:.bg-orange-600",
+    "reason": "Kontras teks di bawah 4,5:1 (audit A-6); elemen ini ada di main 4fef872, belum diperbaiki."
+   },
+   {
+    "key": "axe:color-contrast:.bg-emerald-600",
+    "reason": "Kontras teks di bawah 4,5:1 (audit A-6); elemen ini ada di main 4fef872, belum diperbaiki."
+   },
+   {
+    "key": "axe:color-contrast:.border-violet-200 > .p-4.gap-3.flex-col > .items-start.gap-3 > .min-w-0.flex-1 > p",
+    "reason": "Kontras teks di bawah 4,5:1 (audit A-6); elemen ini ada di main 4fef872, belum diperbaiki."
+   },
+   {
+    "key": "axe:color-contrast:.border-violet-200 > .p-4.gap-3.flex-col > .items-baseline.gap-x-1\\.5.gap-y-0\\.5 > span:nth-child(2)",
+    "reason": "Kontras teks di bawah 4,5:1 (audit A-6); elemen ini ada di main 4fef872, belum diperbaiki."
+   }
+  ],
+  "app_campaigns": [
+   {
+    "key": "target<44:a:LINOE — Beranda",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "axe:color-contrast:th:nth-child(1)",
+    "reason": "Kontras teks di bawah 4,5:1 (audit A-6); elemen ini ada di main 4fef872, belum diperbaiki."
+   },
+   {
+    "key": "axe:color-contrast:th:nth-child(2)",
+    "reason": "Kontras teks di bawah 4,5:1 (audit A-6); elemen ini ada di main 4fef872, belum diperbaiki."
+   },
+   {
+    "key": "axe:color-contrast:th:nth-child(3)",
+    "reason": "Kontras teks di bawah 4,5:1 (audit A-6); elemen ini ada di main 4fef872, belum diperbaiki."
+   },
+   {
+    "key": "axe:color-contrast:th:nth-child(4)",
+    "reason": "Kontras teks di bawah 4,5:1 (audit A-6); elemen ini ada di main 4fef872, belum diperbaiki."
+   },
+   {
+    "key": "axe:color-contrast:th:nth-child(5)",
+    "reason": "Kontras teks di bawah 4,5:1 (audit A-6); elemen ini ada di main 4fef872, belum diperbaiki."
+   },
+   {
+    "key": "axe:color-contrast:th:nth-child(6)",
+    "reason": "Kontras teks di bawah 4,5:1 (audit A-6); elemen ini ada di main 4fef872, belum diperbaiki."
+   }
+  ],
+  "app_products": [
+   {
+    "key": "target<44:a:LINOE — Beranda",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   }
+  ],
+  "app_content": [
+   {
+    "key": "target<44:a:LINOE — Beranda",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:select:Pilih produkKopi Contoh QA",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:select:Pilih platformFacebookInstagramTikTokXWe",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:select:Pilih jenisCaptionAd CopyBlogVideo Scrip",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:select:Tidak ditentukanTambah PenjualanDapatkan",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:select:Bahasa IndonesiaEnglish",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   }
+  ],
+  "app_analytics": [
+   {
+    "key": "target<44:a:LINOE — Beranda",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:select:Pilih jenisLeadSignupAdd to CartCheckout",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:select:Tidak terkait campaignCampaign Contoh QA",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   }
+  ],
+  "app_settings": [
+   {
+    "key": "target<44:a:LINOE — Beranda",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:select:IndonesiaMalaysiaSingapuraThailandVietna",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:select:Bahasa IndonesiaEnglish",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:select:Africa/AbidjanAfrica/AccraAfrica/Addis_A",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:select:IDRUSDMYRSGDEURGBPAUD",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:select:Perlu DitinjauDidukungDibatasiBelum Diko",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "inputsNoLabel",
+    "reason": "Kontrol tanpa label terprogram; ada di main 4fef872, belum diperbaiki."
+   }
+  ],
+  "app_promote": [
+   {
+    "key": "target<44:a:LINOE — Beranda",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   }
+  ],
+  "app_promote_mode_advanced": [
+   {
+    "key": "target<44:a:LINOE — Beranda",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   }
+  ],
+  "app_campaign_detail": [
+   {
+    "key": "target<44:a:LINOE — Beranda",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   }
+  ],
+  "app_billing_confirm": [
+   {
+    "key": "target<44:a:LINOE — Beranda",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "target<44:select:FreeStarterGrowthProBusinessAgencyUMKMpr",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "axe:color-contrast:.border-brand\\/30.bg-brand\\/5.p-3 > p:nth-child(2)",
+    "reason": "Kontras teks di bawah 4,5:1 (audit A-6); elemen ini ada di main 4fef872, belum diperbaiki."
+   },
+   {
+    "key": "axe:color-contrast:.border-brand\\/30.bg-brand\\/5.p-3 > p:nth-child(3)",
+    "reason": "Kontras teks di bawah 4,5:1 (audit A-6); elemen ini ada di main 4fef872, belum diperbaiki."
+   },
+   {
+    "key": "axe:color-contrast:.border-blue-200 > .p-4.gap-3.flex-col > .items-start.gap-3 > .min-w-0.flex-1 > p",
+    "reason": "Kontras teks di bawah 4,5:1 (audit A-6); elemen ini ada di main 4fef872, belum diperbaiki."
+   },
+   {
+    "key": "axe:color-contrast:.border-blue-200 > .p-4.gap-3.flex-col > .gap-x-1\\.5.gap-y-0\\.5.items-baseline > span:nth-child(2)",
+    "reason": "Kontras teks di bawah 4,5:1 (audit A-6); elemen ini ada di main 4fef872, belum diperbaiki."
+   },
+   {
+    "key": "axe:color-contrast:.bg-black\\/5 > .font-semibold.text-sm:nth-child(1)",
+    "reason": "Kontras teks di bawah 4,5:1 (audit A-6); elemen ini ada di main 4fef872, belum diperbaiki."
+   },
+   {
+    "key": "axe:color-contrast:.gap-x-1 > span:nth-child(1)",
+    "reason": "Kontras teks di bawah 4,5:1 (audit A-6); elemen ini ada di main 4fef872, belum diperbaiki."
+   },
+   {
+    "key": "axe:color-contrast:.gap-x-1 > span:nth-child(2)",
+    "reason": "Kontras teks di bawah 4,5:1 (audit A-6); elemen ini ada di main 4fef872, belum diperbaiki."
+   },
+   {
+    "key": "axe:color-contrast:.bg-black\\/5 > p:nth-child(3)",
+    "reason": "Kontras teks di bawah 4,5:1 (audit A-6); elemen ini ada di main 4fef872, belum diperbaiki."
+   },
+   {
+    "key": "axe:color-contrast:.px-2",
+    "reason": "Kontras teks di bawah 4,5:1 (audit A-6); elemen ini ada di main 4fef872, belum diperbaiki."
+   },
+   {
+    "key": "axe:color-contrast:.bg-orange-600",
+    "reason": "Kontras teks di bawah 4,5:1 (audit A-6); elemen ini ada di main 4fef872, belum diperbaiki."
+   },
+   {
+    "key": "axe:color-contrast:.bg-emerald-600",
+    "reason": "Kontras teks di bawah 4,5:1 (audit A-6); elemen ini ada di main 4fef872, belum diperbaiki."
+   },
+   {
+    "key": "axe:color-contrast:.border-violet-200 > .p-4.gap-3.flex-col > .items-start.gap-3 > .min-w-0.flex-1 > p",
+    "reason": "Kontras teks di bawah 4,5:1 (audit A-6); elemen ini ada di main 4fef872, belum diperbaiki."
+   },
+   {
+    "key": "axe:color-contrast:.border-violet-200 > .p-4.gap-3.flex-col > .gap-x-1\\.5.gap-y-0\\.5.items-baseline > span:nth-child(2)",
+    "reason": "Kontras teks di bawah 4,5:1 (audit A-6); elemen ini ada di main 4fef872, belum diperbaiki."
+   }
+  ],
+  "app_dashboard_drawer_open": [
+   {
+    "key": "target<44:a:LINOE — Beranda",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   },
+   {
+    "key": "axe:aria-prohibited-attr:.rounded-\\[var\\(--radius-lg\\)\\].border.shadow-\\[var\\(--shadow-sm\\)\\]:nth-child(1) > .p-5.flex-col.ga~b53b10ce",
+    "reason": "aria-label pada div tanpa role (MetricCard 'Belum ada data'); ada di main 4fef872, kandidat perbaikan U5."
+   },
+   {
+    "key": "axe:aria-prohibited-attr:.rounded-\\[var\\(--radius-lg\\)\\].border.shadow-\\[var\\(--shadow-sm\\)\\]:nth-child(2) > .p-5.flex-col.ga~2127bd29",
+    "reason": "aria-label pada div tanpa role (MetricCard 'Belum ada data'); ada di main 4fef872, kandidat perbaikan U5."
+   },
+   {
+    "key": "axe:aria-prohibited-attr:.rounded-\\[var\\(--radius-lg\\)\\].border.shadow-\\[var\\(--shadow-sm\\)\\]:nth-child(3) > .p-5.flex-col.ga~abcd8056",
+    "reason": "aria-label pada div tanpa role (MetricCard 'Belum ada data'); ada di main 4fef872, kandidat perbaikan U5."
+   },
+   {
+    "key": "axe:aria-prohibited-attr:.rounded-\\[var\\(--radius-lg\\)\\].border.shadow-\\[var\\(--shadow-sm\\)\\]:nth-child(4) > .p-5.flex-col.ga~ae292252",
+    "reason": "aria-label pada div tanpa role (MetricCard 'Belum ada data'); ada di main 4fef872, kandidat perbaikan U5."
+   },
+   {
+    "key": "axe:aria-prohibited-attr:.rounded-\\[var\\(--radius-lg\\)\\].border.shadow-\\[var\\(--shadow-sm\\)\\]:nth-child(5) > .p-5.flex-col.ga~3f09e00d",
+    "reason": "aria-label pada div tanpa role (MetricCard 'Belum ada data'); ada di main 4fef872, kandidat perbaikan U5."
+   },
+   {
+    "key": "axe:aria-prohibited-attr:.rounded-\\[var\\(--radius-lg\\)\\].border.shadow-\\[var\\(--shadow-sm\\)\\]:nth-child(6) > .p-5.flex-col.ga~ec050c4c",
+    "reason": "aria-label pada div tanpa role (MetricCard 'Belum ada data'); ada di main 4fef872, kandidat perbaikan U5."
+   },
+   {
+    "key": "axe:aria-prohibited-attr:.rounded-\\[var\\(--radius-lg\\)\\].border.shadow-\\[var\\(--shadow-sm\\)\\]:nth-child(7) > .p-5.flex-col.ga~b8a05180",
+    "reason": "aria-label pada div tanpa role (MetricCard 'Belum ada data'); ada di main 4fef872, kandidat perbaikan U5."
+   }
+  ],
+  "loading_state": [
+   {
+    "key": "target<44:a:LINOE — Beranda",
+    "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
+   }
+  ]
+ }
 }

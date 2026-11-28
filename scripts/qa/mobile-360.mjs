@@ -118,7 +118,7 @@ function tokenInfo(token) {
   }
   return info;
 }
-const probeReq = async (rc, headers = {}) => { const r = await rc.get(BASE + "/demo/dashboard", { maxRedirects: 0, headers }); return { status: r.status(), location: pathOf(r.headers().location ?? "") }; };
+const probeReq = async (rc, headers = {}) => { const r = await rc.get(BASE + "/demo/dashboard", { maxRedirects: 0, headers }); return { status: r.status(), location: r.headers().location ? pathOf(r.headers().location) : "-" }; };
 async function probeBrowser(ctx) {
   const page = await ctx.newPage();
   try { await page.goto(BASE + "/demo/dashboard", { waitUntil: "domcontentloaded", timeout: 20000 }); return { ok: pathOf(page.url()) === "/demo/dashboard", finalPath: pathOf(page.url()) }; }
@@ -131,7 +131,7 @@ let demo = null;
   const probeCtx = await mk();
   const r0 = await probeCtx.request.get(BASE + "/api/demo/start", { maxRedirects: 0, headers: NAV });
   const sc = r0.headers()["set-cookie"] ?? "";
-  diag.start = { status: r0.status(), location: pathOf(r0.headers().location ?? ""), cookie: flagsOf(sc) };
+  diag.start = { status: r0.status(), location: r0.headers().location ? pathOf(r0.headers().location) : "-", cookie: flagsOf(sc) };
   let name = null, token = null;
   if (sc) { const [pair] = sc.split(";"); const i = pair.indexOf("="); name = pair.slice(0, i); token = pair.slice(i + 1); diag.token = tokenInfo(token); }
   if (token) {
