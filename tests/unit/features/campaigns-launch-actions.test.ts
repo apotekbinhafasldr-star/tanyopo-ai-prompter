@@ -826,7 +826,8 @@ describe("launchChannelCampaignAction — approval destination snapshot", () => 
 
   it("refuses a new-format campaign whose approval has no snapshot (fail closed)", async () => {
     harness = buildHarness({ master: { ai_proposal: proposal(WEB) } });
-    fx.approvals = [approved(null)];
+    // No DESTINATION snapshot (the copy fingerprint is present, so the copy guard passes and this stays a destination test).
+    fx.approvals = [approved({ copy_snapshot: LAUNCHABLE_COPY_SNAPSHOT })];
     expectRefusedBeforeAnyCall(await launchChannelCampaignAction("cc1"), /persetujuan lama/);
   });
 
@@ -854,13 +855,13 @@ describe("launchChannelCampaignAction — approval destination snapshot", () => 
 
     it("an OLD approval with no snapshot never authorises a legacy launch", async () => {
       harness = buildHarness();
-      fx.approvals = [approved(null)];
+      fx.approvals = [approved({ copy_snapshot: LAUNCHABLE_COPY_SNAPSHOT })];
       expectRefusedBeforeAnyCall(await launchChannelCampaignAction("cc1"), /persetujuan lama/);
     });
 
     it("an OLD approval whose context has only budget fields is refused", async () => {
       harness = buildHarness();
-      fx.approvals = [approved({ daily_budget: 100000, total_budget: null })];
+      fx.approvals = [approved({ daily_budget: 100000, total_budget: null, copy_snapshot: LAUNCHABLE_COPY_SNAPSHOT })];
       expectRefusedBeforeAnyCall(await launchChannelCampaignAction("cc1"), /persetujuan lama/);
     });
 
