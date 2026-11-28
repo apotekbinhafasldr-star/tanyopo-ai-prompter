@@ -23,6 +23,12 @@ import {
 const TOTAL_STEPS = 8;
 const initialState: OnboardingActionState = { error: null };
 
+const STEP_KEY = "onbStep";
+const historyState = (): Record<string, unknown> => {
+  const s = window.history.state;
+  return s && typeof s === "object" ? { ...(s as Record<string, unknown>) } : {};
+};
+
 const selectClass =
   "h-11 rounded-[var(--radius-md)] border border-border-strong bg-surface px-3 sm:h-10 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40";
 
@@ -81,6 +87,31 @@ export function OnboardingWizard() {
   const formRef = useRef<HTMLFormElement>(null);
   const firstRender = useRef(true);
 
+  // Tombol Back Android: tiap langkah = satu entri riwayat (URL sama), jadi Back mundur SATU langkah dan isian
+  // (state React di komponen ini) tetap utuh. Di langkah 1 Back meninggalkan halaman seperti biasa.
+  useEffect(() => {
+    window.history.replaceState({ ...historyState(), [STEP_KEY]: 1 }, "");
+    const onPop = (event: PopStateEvent) => {
+      const n = (event.state as Record<string, unknown> | null)?.[STEP_KEY];
+      if (typeof n === "number" && n >= 1 && n <= TOTAL_STEPS) setStep(n);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  function goTo(n: number) {
+    window.history.pushState({ ...historyState(), [STEP_KEY]: n }, "");
+    setStep(n);
+  }
+  function goBack() {
+    // Tampilan langsung mundur; riwayat disamakan lewat history.back() agar tumpukan Back tidak menyisakan langkah yang
+    // sudah ditinggalkan (popstate yang menyusul menetapkan langkah yang sama, jadi idempoten).
+    setStep((s) => Math.max(1, s - 1));
+    if (step > 1 && (window.history.state as Record<string, unknown> | null)?.[STEP_KEY] === step) {
+      window.history.back();
+    }
+  }
+
   // On every step change, move focus to the new step heading (programmatic focus, tabIndex -1). Screen readers announce
   // it, and focus never falls back to <body> when the focused "Lanjut" is removed (step 8) or becomes disabled (steps 3, 5).
   // Deliberately NOT the primary button: focusing "Selesai" would let one extra Enter submit the whole form by accident.
@@ -111,7 +142,7 @@ export function OnboardingWizard() {
     if (step < TOTAL_STEPS) {
       event.preventDefault();
       if (canAdvanceFrom[step]) {
-        setStep((s) => s + 1);
+        goTo(step + 1);
       }
     }
   }
@@ -367,7 +398,7 @@ export function OnboardingWizard() {
 
           <div className="flex flex-wrap items-center justify-between gap-3">
             {step > 1 ? (
-              <Button type="button" variant="ghost" className="min-h-11" onClick={() => setStep((s) => s - 1)}>
+              <Button type="button" variant="ghost" className="min-h-11" onClick={goBack}>
                 <ArrowLeft />
                 Kembali
               </Button>
@@ -381,7 +412,7 @@ export function OnboardingWizard() {
                 type="button"
                 className="min-h-11"
                 disabled={!canAdvanceFrom[step]}
-                onClick={() => setStep((s) => s + 1)}
+                onClick={() => goTo(step + 1)}
               >
                 Lanjut
                 <ArrowRight />
