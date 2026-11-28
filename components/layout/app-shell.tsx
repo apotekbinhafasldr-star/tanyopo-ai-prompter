@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Menu, X } from "lucide-react";
 import { Sidebar } from "@/components/layout/sidebar";
 import { LinoeLogo } from "@/components/brand/linoe-logo";
 import { cn } from "@/lib/utils/cn";
+import { useBackToClose } from "@/lib/hooks/use-back-to-close";
 
 interface AppShellProps {
   businessName: string;
@@ -39,6 +40,32 @@ const getDesktopOnServer = () => true;
 export function AppShell({ businessName, userName, userRole, showAdminLink = false, banner = null, children }: AppShellProps) {
   const [open, setOpen] = useState(false);
   const desktop = useSyncExternalStore(subscribeDesktop, getDesktop, getDesktopOnServer);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const drawerRef = useRef<HTMLDivElement>(null);
+  const wasOpen = useRef(false);
+  const drawerOpen = open && !desktop;
+  // Back fisik Android menutup drawer (bukan meninggalkan halaman).
+  const { release } = useBackToClose(drawerOpen, () => setOpen(false));
+
+  // Fokus: ke drawer saat terbuka, kembali ke tombol menu saat tertutup. Escape menutup.
+  useEffect(() => {
+    if (open) {
+      wasOpen.current = true;
+      drawerRef.current?.focus();
+    } else if (wasOpen.current) {
+      wasOpen.current = false;
+      triggerRef.current?.focus();
+    }
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -54,6 +81,7 @@ export function AppShell({ businessName, userName, userRole, showAdminLink = fal
       <div className="fixed inset-x-0 top-0 z-30 flex h-14 items-center justify-between border-b border-border bg-surface px-4 lg:hidden">
         <LinoeLogo size="sm" href="/dashboard" />
         <button
+          ref={triggerRef}
           type="button"
           aria-label={open ? "Tutup menu" : "Buka menu"}
           aria-expanded={open}
@@ -75,10 +103,12 @@ export function AppShell({ businessName, userName, userRole, showAdminLink = fal
 
       <div
         id="app-sidebar-drawer"
+        ref={drawerRef}
+        tabIndex={-1}
         // Off-canvas and closed: keep it out of the tab order and the TalkBack reading order (docked on lg, so never inert there).
         inert={!open && !desktop}
         className={cn(
-          "fixed inset-y-0 left-0 z-40 transition-transform duration-200 ease-out lg:static lg:z-auto lg:translate-x-0",
+          "fixed inset-y-0 left-0 z-40 transition-transform duration-200 ease-out focus:outline-none lg:static lg:z-auto lg:translate-x-0",
           open ? "translate-x-0" : "-translate-x-full",
         )}
       >
@@ -87,11 +117,19 @@ export function AppShell({ businessName, userName, userRole, showAdminLink = fal
           userName={userName}
           userRole={userRole}
           showAdminLink={showAdminLink}
-          onNavigate={() => setOpen(false)}
+          onNavigate={() => {
+            release();
+            setOpen(false);
+          }}
         />
       </div>
 
-      <main className="flex min-h-screen flex-1 flex-col overflow-x-hidden pt-14 lg:pt-0">
+      <main
+        // Drawer terbuka: isi halaman di belakang tidak boleh dibaca TalkBack maupun difokuskan.
+        inert={drawerOpen}
+        aria-hidden={drawerOpen || undefined}
+        className="flex min-h-screen flex-1 flex-col overflow-x-hidden pt-14 lg:pt-0"
+      >
         {banner}
         {children}
       </main>
