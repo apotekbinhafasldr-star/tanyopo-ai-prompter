@@ -181,7 +181,8 @@ describe("Paket 3: lingkup aplikasi", () => {
 
   it("panel hanya terpasang di pengaturan di belakang CONSENT_UI_ENABLED (default MATI)", () => {
     const page = read("app/(app)/settings/page.tsx");
-    expect(page).toContain("isConsentUiEnabled() ? <ConsentSection");
+    expect(page).toContain("isConsentUiEnabled() ? <PrivacyEntryCard");
+    expect(read("app/(app)/settings/privasi/page.tsx")).toContain("if (!isConsentUiEnabled()) notFound();");
     expect(read("lib/consent/flags.ts")).toContain("if (!isConsentUiEnabled())");
     expect(read("lib/consent/flags.ts")).toContain('process.env.CONSENT_UI_ENABLED === "true"');
     expect(read("lib/consent/flags.ts")).toContain('process.env.CONSENT_ENFORCEMENT_ENABLED === "true"');

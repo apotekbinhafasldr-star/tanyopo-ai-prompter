@@ -180,7 +180,7 @@ export default async function ConnectionsPage({
           {error === "consent_required" && isConsentUiEnabled() ? (
             <>
               Fitur ini memerlukan persetujuan Anda. Buka{" "}
-              <Link href="/settings" className="inline-flex min-h-11 items-center font-medium underline">
+              <Link href="/settings/privasi#persetujuan" className="inline-flex min-h-11 items-center font-medium underline">
                 Privasi &amp; Data Saya
               </Link>{" "}
               di Pengaturan untuk mengaturnya.

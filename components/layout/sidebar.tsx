@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Building2, HelpCircle, LogOut, ChevronsUpDown } from "lucide-react";
+import { Building2, HelpCircle, LogOut, ChevronsUpDown, ShieldCheck } from "lucide-react";
 import { NAV_ITEMS } from "@/lib/constants/nav";
 import { Avatar } from "@/components/ui/avatar";
 import { LinoeLogo } from "@/components/brand/linoe-logo";
@@ -15,12 +15,14 @@ interface SidebarProps {
   userRole: string;
   /** Show the "Admin Perusahaan" entry (server-decided; hidden unless true). */
   showAdminLink?: boolean;
+  /** Show the "Privasi & Data Saya" link (server-decided; hidden unless true). */
+  showPrivacyLink?: boolean;
   /** Called after a nav link is activated — used by AppShell to close the
    * off-canvas drawer on mobile/tablet. No-op on the desktop docked sidebar. */
   onNavigate?: () => void;
 }
 
-export function Sidebar({ businessName, userName, userRole, showAdminLink = false, onNavigate }: SidebarProps) {
+export function Sidebar({ businessName, userName, userRole, showAdminLink = false, showPrivacyLink = false, onNavigate }: SidebarProps) {
   const pathname = usePathname();
 
   return (
@@ -74,6 +76,17 @@ export function Sidebar({ businessName, userName, userRole, showAdminLink = fals
           >
             <Building2 className="size-4" aria-hidden />
             Admin Perusahaan
+          </Link>
+        ) : null}
+
+        {showPrivacyLink ? (
+          <Link
+            href="/settings/privasi"
+            onClick={onNavigate}
+            className="flex min-h-11 items-center gap-2 rounded-[var(--radius-md)] px-3 py-2 text-sm text-muted-foreground hover:bg-surface-muted hover:text-foreground"
+          >
+            <ShieldCheck className="size-4" aria-hidden />
+            Privasi &amp; Data Saya
           </Link>
         ) : null}
 

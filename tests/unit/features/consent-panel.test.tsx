@@ -57,7 +57,9 @@ describe("ConsentPanel", () => {
     render(<ConsentPanel items={[granted]} />);
     fireEvent.click(screen.getByRole("button", { name: /^Putuskan koneksi/ }));
     expect(screen.getByText("Tarik persetujuan ini?")).toBeInTheDocument();
-    expect(screen.getByText(/menghapus token akses/)).toBeInTheDocument();
+    expect(screen.getByText(/memutus koneksi ini dan berhenti mengakses akun tersebut/)).toBeInTheDocument();
+    // K5-9: klaim penghapusan token dan pencabutan di platform tidak dibuat sebelum diverifikasi.
+    expect(document.body.textContent).not.toMatch(/menghapus token|dicabut|mencabut/i);
     expect(screen.getByRole("button", { name: /^Batal/ })).toHaveFocus();
     fireEvent.click(screen.getByRole("button", { name: /^Batal/ }));
     expect(screen.queryByText("Tarik persetujuan ini?")).toBeNull();

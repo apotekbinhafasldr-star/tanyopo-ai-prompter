@@ -4,10 +4,22 @@ import { buildConsentItems } from "@/lib/consent/view";
 import { ConsentPanel } from "@/features/consent/consent-panel";
 
 /**
- * Memuat status persetujuan milik pengguna masuk dan menampilkan panel. Dipasang di halaman pengaturan HANYA bila
- * CONSENT_UI_ENABLED === "true". Gagal memuat = pesan galat + tombol muat ulang (bukan daftar kosong yang menyesatkan).
+ * Memuat status persetujuan milik pengguna masuk dan menampilkan panel (dipakai di /settings/privasi, hanya bila CONSENT_UI_ENABLED === "true").
+ * Gagal memuat = pesan galat + tombol muat ulang (bukan daftar kosong yang menyesatkan).
+ * `includeConnections=false` (bukan Owner): kartu persetujuan koneksi tidak ditampilkan; persetujuan koneksi platform diberikan Owner dan
+ * status per pengguna ini tidak boleh dibaca sebagai status Owner.
  */
-export async function ConsentSection({ timeZone }: { timeZone: string }) {
+export async function ConsentSection({
+  timeZone,
+  includeConnections = true,
+  title,
+  intro,
+}: {
+  timeZone: string;
+  includeConnections?: boolean;
+  title?: string;
+  intro?: string;
+}) {
   let rows: unknown = null;
   let failed = false;
   try {
@@ -18,6 +30,7 @@ export async function ConsentSection({ timeZone }: { timeZone: string }) {
   } catch {
     failed = true;
   }
-  const items = failed ? [] : buildConsentItems(rows, timeZone);
-  return <ConsentPanel items={items} loadError={failed} />;
+  const all = failed ? [] : buildConsentItems(rows, timeZone);
+  const items = includeConnections ? all : all.filter((i) => i.kind !== "CONNECTION");
+  return <ConsentPanel items={items} loadError={failed} title={title} intro={intro} />;
 }
