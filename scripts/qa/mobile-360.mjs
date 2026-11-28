@@ -1,10 +1,12 @@
 // QA mobile 360px. Runs ONLY against a locally started production build on the CI runner.
 // Login-gated screens use scripts/qa/mock-supabase.mjs (a fake backend on the runner); the app has no test bypass.
-import { chromium } from "playwright";
+import { chromium, request as pwRequest } from "playwright";
 import { AxeBuilder } from "@axe-core/playwright";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { USERS, C1 } from "./mock-supabase.mjs";
 import { readFileSync } from "node:fs";
+import { createHmac } from "node:crypto";
+import { classify, isFatalKey, keysOf, validateBaseline } from "./mobile-360-keys.mjs";
 
 const BASE = process.env.QA_BASE_URL ?? "http://localhost:3000";
 if (!/^http:\/\/localhost(:\d+)?$/.test(BASE)) throw new Error("QA runs against localhost only");
@@ -60,7 +62,19 @@ async function jpeg(page, label) {
 }
 const report = [];
 // Temuan yang SUDAH ADA di main dicatat di baseline (dengan alasan); hanya temuan BARU yang menggagalkan job.
-const BASELINE = JSON.parse(readFileSync(new URL("./mobile-360-baseline.json", import.meta.url), "utf8")).accepted ?? {};
+const BASELINE_FILE = JSON.parse(readFileSync(new URL("./mobile-360-baseline.json", import.meta.url), "utf8"));
+const baselineErrors = validateBaseline(BASELINE_FILE);
+if (baselineErrors.length) throw new Error("Baseline tidak sah:\n" + baselineErrors.join("\n"));
+const BASELINE = BASELINE_FILE.accepted ?? {};
+// Semua node pelanggaran serious/critical (bukan hanya yang pertama) agar pelanggaran baru dengan aturan sama terlihat.
+const axeOf = async (page) =>
+  (await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze()).violations.map((v) => ({
+    id: v.id,
+    impact: v.impact,
+    nodes: v.nodes.length,
+    targets: v.nodes.map((n) => (Array.isArray(n.target) ? n.target.flat().join(" >> ") : String(n.target))),
+  }));
+const pathOf = (u) => { try { return new URL(u, "http://x").pathname; } catch { return "-"; } };
 async function audit(ctx, label, route, { wait = "networkidle", before, afterNav } = {}) {
   const page = await ctx.newPage();
   const consoleErrors = [];
@@ -73,9 +87,10 @@ async function audit(ctx, label, route, { wait = "networkidle", before, afterNav
     if (afterNav) await afterNav(page);
     await page.waitForTimeout(400);
     entry.finalUrl = page.url().replace(BASE, "");
+    entry.requestedPath = pathOf(route);
+    entry.finalPath = pathOf(entry.finalUrl);
     Object.assign(entry, await measure(page));
-    const axe = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze();
-    entry.axe = axe.violations.map((v) => ({ id: v.id, impact: v.impact, nodes: v.nodes.length, sample: v.nodes[0]?.target?.join(" ") }));
+    entry.axe = await axeOf(page);
     entry.consoleErrors = consoleErrors.slice(0, 3);
     await page.screenshot({ path: `${OUT}/${label}.png`, fullPage: true });
     await jpeg(page, label);
@@ -89,20 +104,64 @@ async function audit(ctx, label, route, { wait = "networkidle", before, afterNav
 const pub = await mk();
 for (const r of ["/", "/login", "/register", "/forgot-password", "/reset-password", "/privacy", "/terms", "/refund", "/data-deletion"]) await audit(pub, `public_${r.replace(/\W+/g, "") || "root"}`, r);
 
-// 2) demo: a real navigation to /api/demo/start (needs DEMO_SESSION_SECRET in the runner's server env)
-const demo = await mk();
-// Diagnostics (no cookie values printed): what does the entry answer, and does a cookie come back?
-const r0 = await demo.request.get(BASE + "/api/demo/start", { maxRedirects: 0, headers: { "sec-fetch-mode": "navigate", "sec-fetch-dest": "document" } });
-const sc = r0.headers()["set-cookie"] ?? "";
-console.log(`DEMO start: status=${r0.status()} location=${r0.headers().location ?? "-"} setCookie=${sc ? sc.replace(/=[^;]*/, "=<redacted>") : "none"}`);
-if (sc) {
-  // The app marks the cookie Secure (correct on HTTPS). On plain http://localhost the harness stores it without that flag.
-  const [pair] = sc.split(";"); const i = pair.indexOf("=");
-  await demo.addCookies([{ name: pair.slice(0, i), value: pair.slice(i + 1), domain: "localhost", path: "/" }]);
-  const r1 = await demo.request.get(BASE + "/demo/dashboard", { maxRedirects: 0 });
-  console.log(`DEMO dashboard with cookie: status=${r1.status()} location=${r1.headers().location ?? "-"}`);
+// 2) demo: sesi demo bertanda tangan (cookie Secure+HttpOnly dari /api/demo/start; aplikasi TIDAK diubah/dilonggarkan).
+// Diagnostik aman: hanya boolean/status/path/panjang yang dicetak; nilai token, cookie, dan secret tidak pernah dicetak.
+const NAV = { "sec-fetch-mode": "navigate", "sec-fetch-dest": "document" };
+const RUNNER_SECRET = process.env.DEMO_SESSION_SECRET ?? "";
+const flagsOf = (sc) => ({ present: Boolean(sc), secure: /;\s*secure/i.test(sc), httpOnly: /;\s*httponly/i.test(sc), sameSite: (sc.match(/samesite=(\w+)/i)?.[1] ?? "none").toLowerCase() });
+function tokenInfo(token) {
+  const parts = token.split(".");
+  const info = { parts: parts.length, sigHexLen: (parts[3] ?? "").length, signedWithRunnerSecret: "unknown", expiredByRunnerClock: "unknown" };
+  if (parts.length === 4 && RUNNER_SECRET) {
+    info.signedWithRunnerSecret = createHmac("sha256", RUNNER_SECRET).update(parts.slice(0, 3).join(".")).digest("hex") === parts[3];
+    info.expiredByRunnerClock = Date.now() > Number(parts[2]);
+  }
+  return info;
+}
+const probeReq = async (rc, headers = {}) => { const r = await rc.get(BASE + "/demo/dashboard", { maxRedirects: 0, headers }); return { status: r.status(), location: pathOf(r.headers().location ?? "") }; };
+async function probeBrowser(ctx) {
+  const page = await ctx.newPage();
+  try { await page.goto(BASE + "/demo/dashboard", { waitUntil: "domcontentloaded", timeout: 20000 }); return { ok: pathOf(page.url()) === "/demo/dashboard", finalPath: pathOf(page.url()) }; }
+  catch (e) { return { ok: false, error: String(e).split("\n")[0].replace(/at http\S+/, "").trim() }; }
+  finally { await page.close(); }
+}
+const diag = { runnerSecretKnownToHarness: Boolean(RUNNER_SECRET) };
+let demo = null;
+{
+  const probeCtx = await mk();
+  const r0 = await probeCtx.request.get(BASE + "/api/demo/start", { maxRedirects: 0, headers: NAV });
+  const sc = r0.headers()["set-cookie"] ?? "";
+  diag.start = { status: r0.status(), location: pathOf(r0.headers().location ?? ""), cookie: flagsOf(sc) };
+  let name = null, token = null;
+  if (sc) { const [pair] = sc.split(";"); const i = pair.indexOf("="); name = pair.slice(0, i); token = pair.slice(i + 1); diag.token = tokenInfo(token); }
+  if (token) {
+    diag.jarAfterStart = (await probeCtx.cookies(BASE)).filter((c) => c.name === name).map((c) => ({ domain: c.domain, secure: c.secure, httpOnly: c.httpOnly, sameSite: c.sameSite, sameValueAsSetCookie: c.value === token }));
+    diag.probe_jarFromStart_request = await probeReq(probeCtx.request);
+    const iso = await pwRequest.newContext();
+    diag.probe_explicitCookieHeader_noJar = await probeReq(iso, { cookie: `${name}=${token}` });
+    await iso.dispose();
+    // Metode memasang cookie yang sama (nilai identik) ke jar browser; atribut aplikasi tidak diubah.
+    const methods = {
+      jarFromStart: async (c) => c,
+      addCookieByUrl: async (c) => { await c.addCookies([{ name, value: token, url: BASE }]); return c; },
+      addCookieByUrlSecure: async (c) => { await c.addCookies([{ name, value: token, url: BASE, secure: true }]); return c; },
+      addCookieDomainPath: async (c) => { await c.addCookies([{ name, value: token, domain: "localhost", path: "/" }]); return c; },
+    };
+    diag.browserProbe = {};
+    for (const [m, setup] of Object.entries(methods)) {
+      const c = m === "jarFromStart" ? probeCtx : await mk();
+      await setup(c);
+      const res = await probeBrowser(c);
+      diag.browserProbe[m] = res;
+      if (res.ok && !demo) demo = c;
+      if (c !== probeCtx && c !== demo) await c.close();
+    }
+  }
+  console.log("DEMO-DIAG " + JSON.stringify(diag));
+  if (!demo) demo = probeCtx; // tidak ada metode yang berhasil: halaman demo tetap diaudit dan GAGAL (load/redirect), tidak dilewati
 }
 for (const r of ["/demo/dashboard", "/demo/products", "/demo/campaign", "/demo/content", "/demo/analytics"]) await audit(demo, `demo_${r.split("/").pop()}`, r);
+
 
 // 3) login-gated screens (fixture session)
 const authed = await mk([sessionCookie(USERS.complete)]);
@@ -127,8 +186,7 @@ await audit(fresh, "onboarding", "/onboarding");
     await page.waitForSelector("[role=status][aria-busy=true]", { timeout: 12000 });
     entry.status = 200; entry.finalUrl = "(skeleton shown)";
     Object.assign(entry, await measure(page));
-    const axe = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze();
-    entry.axe = axe.violations.map((v) => ({ id: v.id, impact: v.impact, nodes: v.nodes.length, sample: v.nodes[0]?.target?.join(" ") }));
+    entry.axe = await axeOf(page);
     entry.consoleErrors = [];
     await page.screenshot({ path: `${OUT}/loading_state.png`, fullPage: true });
     await jpeg(page, "loading_state");
@@ -142,33 +200,22 @@ await browser.close();
 writeFileSync(`${OUT}/report.json`, JSON.stringify(report, null, 2));
 try { writeFileSync(`${OUT}/mock-log.json`, await (await fetch(`${MOCK}/__log`)).text()); } catch {}
 
-// Kunci temuan yang stabil, supaya baseline bisa dibandingkan antar-proses.
-function keysOf(r) {
-  if (r.error) return ["load"];
-  const k = [];
-  if (r.innerWidth !== 360) k.push("viewport");
-  if (r.overflowX > 0) k.push("overflowX");
-  for (const t of r.small) k.push(`target<44:${t.el}:${t.name}`);
-  if (r.unnamedButtons) k.push("unnamedButtons");
-  if (r.inputsNoLabel) k.push("inputsNoLabel");
-  for (const a of r.axe) if (a.impact === "serious" || a.impact === "critical") k.push(`axe:${a.id}`);
-  return [...new Set(k)];
-}
+// Penilaian: kunci temuan (scripts/qa/mobile-360-keys.mjs). Kunci fatal (load, status:*) tidak pernah bisa di-baseline.
 let fails = 0;
 for (const r of report) {
   const keys = keysOf(r);
-  const accepted = new Set((BASELINE[r.label] ?? []).map((e) => e.key));
-  const fresh = keys.filter((x) => !accepted.has(x));
-  const stale = [...accepted].filter((x) => !keys.includes(x));
+  const { fresh, stale } = classify(keys, BASELINE[r.label]);
   if (fresh.length) fails++;
-  console.log(`\n## ${r.label} ${r.route} -> ${r.finalUrl ?? "-"} [${r.status ?? "-"}] ${fresh.length ? "FAIL (baru): " + fresh.join("; ") : keys.length ? "PASS (hanya temuan baseline)" : "PASS"}`);
+  const verdict = fresh.length ? `FAIL (baru): ${fresh.slice(0, 6).join("; ")}${fresh.length > 6 ? ` (+${fresh.length - 6})` : ""}` : keys.length ? "PASS (hanya temuan baseline)" : "PASS";
+  console.log(`\n## ${r.label} ${r.route} -> ${r.finalUrl ?? "-"} [${r.status ?? "-"}] ${verdict}`);
+  // Satu baris mesin-terbaca per halaman (untuk membangun baseline dari lari CI nyata).
+  console.log(`KEYS ${r.label} ${JSON.stringify(keys)}`);
   if (r.error) { console.log(`   ${r.error}`); continue; }
   console.log(`   w=${r.innerWidth} targets=${r.targetCount} h1=${r.h1} title="${r.title}" consoleErrors=${JSON.stringify(r.consoleErrors)}`);
-  if (keys.length) console.log(`   semua temuan: ${JSON.stringify(keys)}`);
+  if (fresh.some(isFatalKey)) console.log(`   FATAL: halaman wajib tidak termuat dengan benar; tidak dapat diterima baseline.`);
   if (stale.length) console.log(`   baseline usang (sudah tidak muncul, hapus dari baseline): ${JSON.stringify(stale)}`);
   if (r.unlabeledInfo?.length) console.log(`   unlabeled: ${JSON.stringify(r.unlabeledInfo)}`);
   if (r.offenders.length) console.log(`   overflow candidates: ${JSON.stringify(r.offenders)}`);
-  for (const a of r.axe) console.log(`   axe ${a.impact} ${a.id} x${a.nodes} ${a.sample}`);
 }
 console.log(`\nSUMMARY pages=${report.length} failing_new=${fails}`);
 process.exit(fails ? 1 : 0);

@@ -39,11 +39,16 @@ jobs:
       # Versi dipin; --no-save agar package.json/package-lock.json aplikasi tidak berubah.
       - run: npm i --no-save playwright@1.49.1 @axe-core/playwright@4.10.1
       - run: npx playwright install --with-deps chromium
+      - name: Ephemeral demo secret (runner only)
+        run: |
+          # Nilai sementara yang dibuat di runner ini saja (bukan secret repo), dimask di log dan tidak disimpan.
+          # Dipakai server (menandatangani sesi demo) dan harness (hanya memeriksa tanda tangan sebagai boolean).
+          S="$(openssl rand -hex 32)"
+          echo "::add-mask::$S"
+          echo "DEMO_SESSION_SECRET=$S" >> "$GITHUB_ENV"
       - name: Start app
         run: |
           nohup node scripts/qa/mock-supabase.mjs > mock.log 2>&1 &
-          # Nilai sementara yang dibuat di runner ini saja, agar pintu masuk demo dapat diuji; tidak disimpan.
-          export DEMO_SESSION_SECRET="$(openssl rand -hex 32)"
           nohup npm run start > server.log 2>&1 &
           for i in $(seq 1 40); do curl -sf http://localhost:3000/login >/dev/null && break; sleep 2; done
       - name: QA 360px
