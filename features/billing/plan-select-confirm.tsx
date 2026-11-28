@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useRef, useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils/cn";
 import { useBackToClose } from "@/lib/hooks/use-back-to-close";
 import { formatCurrency } from "@/lib/utils/format";
@@ -66,7 +66,9 @@ export function PlanSelectConfirm({
     initialState,
   );
   const pendingRef = useRef(false);
-  pendingRef.current = pending;
+  useEffect(() => {
+    pendingRef.current = pending;
+  });
 
   // Back fisik Android menutup konfirmasi (bukan meninggalkan halaman). Selama aksi berjalan, Back tidak membatalkan tampilan.
   useBackToClose(confirming && !readOnly, () => {
