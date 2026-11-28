@@ -1130,7 +1130,7 @@ export default async function CampaignDetailPage({
                 </p>
               ) : null}
               <div className="flex flex-col divide-y divide-border rounded-[var(--radius-lg)] border border-border">
-                {proposal.budget_allocation.map((b) => {
+                {(Array.isArray(proposal.budget_allocation) ? proposal.budget_allocation : []).map((b) => {
                   const connectorPlatform = CHANNEL_TO_CONNECTOR[b.channel];
                   const isConnected = connectorPlatform ? connectedPlatforms.has(connectorPlatform) : null;
                   const basisAmount = campaign.daily_budget ?? campaign.total_budget;

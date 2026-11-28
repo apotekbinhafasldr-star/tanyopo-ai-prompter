@@ -35,7 +35,7 @@ describe("metaLaunchInputReasons (F-03/F-01: shown before approval, same resolve
     expect(reasons).toHaveLength(3);
     expect(reasons.join(" ")).toMatch(/Negara/);
     expect(reasons.join(" ")).toMatch(/2 sampai 365/);
-    expect(reasons.join(" ")).toMatch(/Alokasi budget channel belum konsisten/);
+    expect(reasons.join(" ")).toMatch(/Persentase alokasi budget channel belum konsisten/);
     expect(
       metaLaunchInputReasons({ targetCountry: "ID", durationDays: null, totalBudget: 500000, allocation: GOOD_ROWS }, NOW).join(" "),
     ).toMatch(/durasi campaign belum diisi/);
@@ -74,8 +74,8 @@ describe("buildCampaignReadiness with launchInputs", () => {
       launchInputs: { targetCountry: "ID", durationDays: 7, totalBudget: null, allocation: GOOD_ROWS },
     });
     // (The Meta media check is always UNKNOWN on the page, so "ready" is decided elsewhere; only the input reasons matter here.)
-    expect((good.launch?.reasons ?? []).join(" ")).not.toMatch(/Negara|2 sampai 365|Alokasi budget/);
-    expect((bad.launch?.reasons ?? []).join(" ")).toMatch(/Alokasi budget channel belum konsisten/);
+    expect((good.launch?.reasons ?? []).join(" ")).not.toMatch(/Negara|2 sampai 365|[Aa]lokasi budget/);
+    expect((bad.launch?.reasons ?? []).join(" ")).toMatch(/Persentase alokasi budget channel belum konsisten/);
   });
 
   it("a non-Meta campaign does not get Meta input reasons", () => {

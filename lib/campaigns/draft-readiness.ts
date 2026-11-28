@@ -277,9 +277,11 @@ export function metaLaunchInputReasons(inputs: LaunchInputsState | undefined, no
   if (inputs.allocation === "read_failed") {
     reasons.push("Alokasi budget channel gagal dibaca, jadi belum bisa dipastikan. Muat ulang halaman.");
   } else {
-    // Same rule set as the launch; a dummy daily budget large enough that only the percentage rules can fail.
+    // Same percentage rules as the launch (allocateDailyBudget), run with a DUMMY daily budget large enough that only the
+    // percentage rules can fail. So this checks "persentase alokasi konsisten" ONLY: it does NOT check the real daily
+    // budget (integer, per-channel minimum, currency), which the launch checks with the real budget.
     const allocation = allocateDailyBudget(1_000_000_000, [...inputs.allocation]);
-    if (!allocation.ok) reasons.push(`Alokasi budget channel belum konsisten: ${allocation.error}`);
+    if (!allocation.ok) reasons.push(`Persentase alokasi budget channel belum konsisten: ${allocation.error}`);
   }
   return reasons;
 }
