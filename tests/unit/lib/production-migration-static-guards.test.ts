@@ -318,6 +318,28 @@ describe("Pipeline v2 — public-log safety and file hygiene", () => {
     expect(read(MANIFEST)).toMatch(/"approved_privileged_role": false/);
   });
 
+  it("T1 function_body_pins: the advisory needle stays in FORBIDDEN, only the exact pinned form is lifted, pins live only in the p0-3 manifest entry", () => {
+    const src = read(RUNNER);
+    expect(src).toContain("pg_(try_)?advisory");
+    expect(src).toMatch(/PIN_PERMITS = \("advisory_xact_lock", "dml_cte"\)/);
+    expect(src).toMatch(/PIN_MAX = 4/);
+    expect(src).toMatch(/lo == "pg_try_advisory_xact_lock"/);
+    expect(src).not.toMatch(/"pg_advisory_lock"\s*:\s*True|PIN_PERMITS = \([^)]*(delete|execute|set_config|nextval)/);
+    // the tokenizer and the global ban lists carry no pin logic
+    const tok = src.slice(src.indexOf("def tokenize("), src.indexOf("def split_statements("));
+    expect(tok).not.toMatch(/pin/i);
+    const manifest = JSON.parse(read(MANIFEST)) as { packages: Record<string, Record<string, unknown>> };
+    for (const [name, pkg] of Object.entries(manifest.packages)) {
+      if ("function_body_pins" in pkg) expect(name, "function_body_pins only in the p0-3 entry").toBe("p0-3");
+    }
+    expect(manifest.packages["p0-2"]).not.toHaveProperty("function_body_pins");
+    const doc = read("docs/PRODUCTION_MIGRATION.md");
+    for (const needle of ["function_body_pins", "pengecualian pembekuan tokenizer", "APPROVE P03-D2-1-T1", "Batas jujur", "fn_sha256"]) {
+      expect(doc, needle).toContain(needle);
+    }
+    expect(read("supabase/prod-packages/tests/test_tools_v3.py")).toContain("test_body_and_pin_changed_together_passes_documented_limit");
+  });
+
   it("the runner never escalates: no CREATE/ALTER ROLE, no GRANT, no SET ROLE is executed by python code", () => {
     const src = read(RUNNER).split("\n").filter((l) => !/^\s*(#|\(r"|"""|FORBIDDEN)/.test(l)).join("\n");
     expect(src).not.toMatch(/f?"(create|alter)\s+role|f?"grant\s|"set\s+role/i);

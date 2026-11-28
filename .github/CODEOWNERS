@@ -8,3 +8,4 @@
 /.github/workflows/ci.yml @apotekbinhafasldr-star
 /.gitattributes @apotekbinhafasldr-star
 /docs/PRODUCTION_MIGRATION.md @apotekbinhafasldr-star
+/tests/unit/lib/production-migration-static-guards.test.ts @apotekbinhafasldr-star
