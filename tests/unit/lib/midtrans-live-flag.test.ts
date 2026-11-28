@@ -1,17 +1,21 @@
 // @vitest-environment node
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
-const { serverEnvMock } = vi.hoisted(() => ({
+const { serverEnvMock, publicEnvMock } = vi.hoisted(() => ({
   serverEnvMock: {
+    supabaseSecretKey: undefined as string | undefined,
     payment: {
       providerName: "midtrans" as string | undefined,
       apiKey: undefined as string | undefined,
       webhookSecret: undefined as string | undefined,
+      sandboxDbRefs: "abcdefghij0123456789" as string | undefined,
     },
   },
+  publicEnvMock: { supabaseUrl: "https://abcdefghij0123456789.supabase.co" },
 }));
-vi.mock("@/lib/env", () => ({ serverEnv: serverEnvMock }));
+vi.mock("@/lib/env", () => ({ serverEnv: serverEnvMock, publicEnv: publicEnvMock }));
 
+import { PRODUCTION_SUPABASE_REFS } from "@/lib/billing/providers/doku-sandbox-db-guard";
 import {
   MidtransPaymentProvider,
   computeMidtransSignature,
@@ -38,7 +42,13 @@ function jsonResponse(body: unknown, init: ResponseInit = { status: 200 }) {
 const fetchMock = vi.fn();
 let provider: MidtransPaymentProvider;
 
+/** D3: live mode only runs against a known production project, so live tests point the mock database at it. */
+const useProductionDb = () => {
+  publicEnvMock.supabaseUrl = `https://${PRODUCTION_SUPABASE_REFS[0]}.supabase.co`;
+};
+
 beforeEach(() => {
+  publicEnvMock.supabaseUrl = "https://abcdefghij0123456789.supabase.co";
   vi.unstubAllEnvs();
   vi.stubEnv("PAYMENT_LIVE_ENABLED", "");
   vi.stubEnv("PAYMENT_PROVIDER_ENV", "");
@@ -99,6 +109,7 @@ describe("MidtransPaymentProvider.isConfigured — C1 key prefix follows the mod
     expect(provider.isConfigured()).toBe(false);
   });
   it("live mode accepts a production key", () => {
+    useProductionDb();
     vi.stubEnv("PAYMENT_LIVE_ENABLED", "true");
     vi.stubEnv("PAYMENT_PROVIDER_ENV", "production");
     serverEnvMock.payment.apiKey = LIVE_KEY;
@@ -131,6 +142,7 @@ describe("MidtransPaymentProvider — C1 hosts, C4 expiry, unchanged signature",
   });
 
   it("live mode calls only the production hosts", async () => {
+    useProductionDb();
     vi.stubEnv("PAYMENT_LIVE_ENABLED", "true");
     vi.stubEnv("PAYMENT_PROVIDER_ENV", "production");
     serverEnvMock.payment.apiKey = LIVE_KEY;
@@ -180,6 +192,7 @@ describe("MidtransPaymentProvider — C1 hosts, C4 expiry, unchanged signature",
     expect(provider.verifyWebhookSignature(build(SANDBOX_KEY), null)).toBe(true);
     expect(provider.verifyWebhookSignature(build(LIVE_KEY), null)).toBe(false);
 
+    useProductionDb();
     vi.stubEnv("PAYMENT_LIVE_ENABLED", "true");
     vi.stubEnv("PAYMENT_PROVIDER_ENV", "production");
     serverEnvMock.payment.apiKey = LIVE_KEY;

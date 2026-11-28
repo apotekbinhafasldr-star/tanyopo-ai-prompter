@@ -53,6 +53,11 @@ B3 only **records** refund/chargeback/reversal evidence. **No operational alarm 
 - To confirm in the Midtrans sandbox before any go-live discussion: status codes per status, that Get Status returns `currency`, `callbacks.finish` behaviour, notification URL registration (`<domain>/api/webhooks/payment`).
 - Netlify Deploy Previews cannot receive third-party webhooks (login wall), so end-to-end sandbox payment tests need the production domain with a **sandbox** key — a separate Founder decision, not part of this PR.
 
+## D3 addendum (guard sandbox/live vs database)
+`isConfigured()` now also requires a database identity that matches the mode (see `lib/billing/providers/payment-env-guard.ts` and
+docs/GO_LIVE_PAYMENTS.md, section D3). Order, all fail-closed: switches, server-key prefix, database guard. Transactions carry
+`metadata.pg_env` / `metadata.pg_db_ref`, checked in `verifyAndSettle()` before the gateway is asked.
+
 ## Rollback
 Revert the PR and clear `PAYMENT_PROVIDER_NAME` → `NullPaymentProvider` (webhook 503, checkout refused). No database change to undo.
 

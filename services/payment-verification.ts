@@ -9,6 +9,7 @@ import {
   type VerifiedPayment,
   type VerifiedPaymentStatus,
 } from "@/lib/billing/payment-provider";
+import { checkStamp, readEnvStamp, type EnvMismatchReason } from "@/lib/billing/payment-env-stamp";
 import { recordPaymentAlarm } from "@/services/payment-alerts";
 import type { Database, Json } from "@/types/database";
 
@@ -33,12 +34,14 @@ export type SettleOutcome =
   | { kind: "ALARM"; alarm: PaymentAlarmKind; evidenceRef: string }
   | { kind: "NOT_FOUND" }
   | { kind: "WRONG_PROVIDER" }
+  /** D3: the transaction was created in another payment environment / database project than this server runs in. */
+  | { kind: "ENV_MISMATCH"; reason: EnvMismatchReason }
   | { kind: "UNVERIFIABLE"; message: string }
   | { kind: "RPC_ERROR"; message: string };
 
 type TxnRow = Pick<
   Database["public"]["Tables"]["prompter_payment_transactions"]["Row"],
-  "id" | "tenant_id" | "provider" | "status" | "amount" | "currency" | "plan"
+  "id" | "tenant_id" | "provider" | "status" | "amount" | "currency" | "plan" | "metadata"
 >;
 
 /**
@@ -69,12 +72,20 @@ export async function verifyAndSettle(
 
   const { data: txn } = await admin
     .from("prompter_payment_transactions")
-    .select("id, tenant_id, provider, status, amount, currency, plan")
+    .select("id, tenant_id, provider, status, amount, currency, plan, metadata")
     .eq("id", transactionId)
     .maybeSingle();
 
   if (!txn) return { kind: "NOT_FOUND" };
   if (txn.provider !== provider.name) return { kind: "WRONG_PROVIDER" };
+
+  // D3: environment stamp. A provider that reports its runtime environment may only settle transactions stamped for exactly
+  // that environment and database project. On a mismatch (or a missing stamp) nothing is asked of the gateway, nothing is
+  // activated and the transaction is left untouched.
+  if (provider.runtimeEnvironment) {
+    const stampCheck = checkStamp(readEnvStamp(txn.metadata), provider.runtimeEnvironment());
+    if (!stampCheck.ok) return { kind: "ENV_MISMATCH", reason: stampCheck.reason };
+  }
 
   let verified: VerifiedPayment;
   try {

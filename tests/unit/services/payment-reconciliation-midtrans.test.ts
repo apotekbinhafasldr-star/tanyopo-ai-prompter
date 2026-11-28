@@ -6,13 +6,14 @@ import type { Database } from "@/types/database";
 const { serverEnvMock, holder, rateBuckets } = vi.hoisted(() => ({
   rateBuckets: new Map<string, number>(),
   serverEnvMock: {
-    payment: { providerName: "midtrans" as string | undefined, apiKey: "SB-Mid-server-TESTKEY123" as string | undefined, webhookSecret: undefined as string | undefined },
+    supabaseSecretKey: undefined as string | undefined,
+    payment: { providerName: "midtrans" as string | undefined, apiKey: "SB-Mid-server-TESTKEY123" as string | undefined, webhookSecret: undefined as string | undefined, sandboxDbRefs: "abcdefghij0123456789" as string | undefined },
   },
   holder: { provider: null as unknown, admin: null as unknown },
 }));
 vi.mock("@/lib/env", () => ({
   serverEnv: serverEnvMock,
-  publicEnv: { supabaseUrl: "https://x.supabase.co", supabasePublishableKey: "k", appUrl: "http://localhost:3000" },
+  publicEnv: { supabaseUrl: "https://abcdefghij0123456789.supabase.co", supabasePublishableKey: "k", appUrl: "http://localhost:3000" },
 }));
 vi.mock("@/lib/billing/get-payment-provider", () => ({ getPaymentProvider: () => holder.provider }));
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => holder.admin }));

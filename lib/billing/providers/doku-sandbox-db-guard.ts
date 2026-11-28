@@ -46,7 +46,7 @@ export function projectRefFromSupabaseUrl(rawUrl: string | undefined): string | 
 }
 
 /** `ref` claim of a legacy JWT service key (payload only, signature is Supabase's to check). null if not a JWT / no claim. */
-function refClaimOfJwt(key: string | undefined): string | null | "NOT_JWT" {
+export function refClaimOfJwt(key: string | undefined): string | null | "NOT_JWT" {
   if (!key) return "NOT_JWT";
   const parts = key.split(".");
   if (parts.length !== 3) return "NOT_JWT";
