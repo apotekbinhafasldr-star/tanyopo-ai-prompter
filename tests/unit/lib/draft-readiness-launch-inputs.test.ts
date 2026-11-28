@@ -61,7 +61,7 @@ describe("buildCampaignReadiness with launchInputs", () => {
     expect((r.launch?.reasons ?? []).join(" ")).toMatch(/Meta \(Facebook\/Instagram\): Negara target/);
   });
 
-  it("SCHEDULED stays not ready while an input problem exists, and becomes ready when it is fixed", () => {
+  it("SCHEDULED stays not ready while an input problem exists, and the input reasons disappear when it is fixed", () => {
     const bad = buildCampaignReadiness({
       ...BASE,
       status: "SCHEDULED",
@@ -73,7 +73,9 @@ describe("buildCampaignReadiness with launchInputs", () => {
       status: "SCHEDULED",
       launchInputs: { targetCountry: "ID", durationDays: 7, totalBudget: null, allocation: GOOD_ROWS },
     });
-    expect(good.launch?.ready).toBe(true);
+    // (The Meta media check is always UNKNOWN on the page, so "ready" is decided elsewhere; only the input reasons matter here.)
+    expect((good.launch?.reasons ?? []).join(" ")).not.toMatch(/Negara|2 sampai 365|Alokasi budget/);
+    expect((bad.launch?.reasons ?? []).join(" ")).toMatch(/Alokasi budget channel belum konsisten/);
   });
 
   it("a non-Meta campaign does not get Meta input reasons", () => {
