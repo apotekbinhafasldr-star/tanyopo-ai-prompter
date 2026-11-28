@@ -1,5 +1,8 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import { readFileSync } from "node:fs";
 import { buildPurchaseDestination } from "@/lib/campaigns/purchase-destination";
+import { buildCopySnapshot, evaluateCopyGuard } from "@/lib/campaigns/copy-guard";
+import { LAUNCHABLE_PROPOSAL, LAUNCHABLE_COPY_SNAPSHOT } from "@/tests/unit/helpers/launchable-proposal";
 import {
   makeAdminStorage,
   makePreflightFixtures,
@@ -135,7 +138,7 @@ function buildHarness(
       currency: "IDR",
       daily_budget: 100000,
       total_budget: null,
-      ai_proposal: { headline: "Diskon Besar", primary_text: "Beli sekarang", cta: "Beli Sekarang" },
+      ai_proposal: LAUNCHABLE_PROPOSAL,
       ...options.master,
     },
     error: null,
@@ -770,12 +773,14 @@ describe("launchChannelCampaignAction — approval destination snapshot", () => 
   if (!builtWa.ok) throw new Error("fixture");
   const WA = builtWa.value as { version: number; type: string; value: string; link: string };
   const WEB = { version: 1, type: "WEBSITE", value: "https://tokosaya.com/produk", link: "https://tokosaya.com/produk" };
-  const proposal = (d: unknown) => ({ headline: "Diskon", primary_text: "Beli", cta: "Beli Sekarang", purchase_destination: d });
+  const proposal = (d: unknown) => ({ ...LAUNCHABLE_PROPOSAL, purchase_destination: d });
   const snapOf = (d: typeof WEB) => ({
     destination_snapshot: { version: 1, kind: "destination", type: d.type, value: d.value, link: d.link },
+    copy_snapshot: LAUNCHABLE_COPY_SNAPSHOT,
   });
   const legacySnap = (link: string | null) => ({
     destination_snapshot: link ? { version: 1, kind: "legacy_url", link } : { version: 1, kind: "legacy_unresolved" },
+    copy_snapshot: LAUNCHABLE_COPY_SNAPSHOT,
   });
   const approved = (context?: unknown, created_at = "2026-10-01T00:00:00Z") =>
     context === undefined ? { status: "APPROVED", created_at } : { status: "APPROVED", created_at, context };
@@ -909,7 +914,7 @@ describe("launchChannelCampaignAction — approval destination snapshot", () => 
 
     it("the old first-version { kind: 'legacy' } snapshot is not trusted", async () => {
       harness = buildHarness();
-      fx.approvals = [approved({ destination_snapshot: { version: 1, kind: "legacy" } })];
+      fx.approvals = [approved({ destination_snapshot: { version: 1, kind: "legacy" }, copy_snapshot: LAUNCHABLE_COPY_SNAPSHOT })];
       expectRefusedBeforeAnyCall(await launchChannelCampaignAction("cc1"), /berbeda dari yang disetujui/);
     });
   });
@@ -1093,5 +1098,123 @@ describe("launchChannelCampaignAction — Meta flight end_time (launch time + du
     const result = await launchChannelCampaignAction("cc1");
     expect(result.error).toBeNull();
     expect(adSetInput()).not.toHaveProperty("endTimeUnixSeconds");
+  });
+});
+
+describe("launchChannelCampaignAction — copy guard (FIX-195-LAUNCH-GUARD)", () => {
+  const snapshotOf = (p: unknown) => buildCopySnapshot(p) as NonNullable<ReturnType<typeof buildCopySnapshot>>;
+  const approvedWith = (context: unknown) => [{ status: "APPROVED", created_at: "2026-10-01T00:00:00Z", context }];
+  const LEGACY_COPY = { headline: "Kopi Robusta Aceh", primary_text: "Kopi sangrai medium 200 gram", cta: "Lihat" };
+
+  beforeEach(() => {
+    requireSessionContextMock.mockClear();
+    decryptTokenMock.mockClear();
+    for (const fn of Object.values(connectorMock)) fn.mockClear();
+  });
+
+  /** Refused before the connection reads, the token decryption, every provider call and the claim. */
+  function expectRefusedBeforeAnySideEffect(result: { error: string | null }, pattern: RegExp) {
+    expect(result.error).toMatch(pattern);
+    expect(harness.connectedAccountSelects).toEqual([]);
+    expect(harness.claimUpdate).not.toHaveBeenCalled();
+    expect(harness.auditInsert).not.toHaveBeenCalled();
+    expect(harness.adminFrom).not.toHaveBeenCalled();
+    expect(decryptTokenMock).not.toHaveBeenCalled();
+    for (const fn of Object.values(connectorMock)) expect(fn).not.toHaveBeenCalled();
+  }
+
+  it.each([
+    ["no stored proposal (null)", null],
+    ["empty object", {}],
+    ["a string", "Kopi Robusta"],
+    ["an array", [LEGACY_COPY]],
+    ["headline is a number", { ...LAUNCHABLE_PROPOSAL, headline: 5 }],
+    ["headline empty", { ...LAUNCHABLE_PROPOSAL, headline: "" }],
+    ["headline whitespace", { ...LAUNCHABLE_PROPOSAL, headline: "   " }],
+    ["primary_text missing", { ...LAUNCHABLE_PROPOSAL, primary_text: undefined }],
+    ["cta missing", { ...LAUNCHABLE_PROPOSAL, cta: undefined }],
+  ])("an approved campaign whose proposal is %s is refused with zero side effects", async (_name, aiProposal) => {
+    harness = buildHarness({ master: { ai_proposal: aiProposal } });
+    fx.approvals = approvedWith({ copy_snapshot: LAUNCHABLE_COPY_SNAPSHOT });
+    expectRefusedBeforeAnySideEffect(await launchChannelCampaignAction("cc1"), /Peluncuran dibatalkan.*teks iklan belum lengkap/);
+  });
+
+  it("copy over the length limit is refused (length message, not the block message)", async () => {
+    const tooLong = { ...LAUNCHABLE_PROPOSAL, primary_text: "a".repeat(601) };
+    harness = buildHarness({ master: { ai_proposal: tooLong } });
+    fx.approvals = approvedWith({ copy_snapshot: snapshotOf(tooLong) });
+    const result = await launchChannelCampaignAction("cc1");
+    expectRefusedBeforeAnySideEffect(result, /melebihi batas panjang/);
+    expect(result.error).not.toMatch(/diblokir/);
+  });
+
+  it("a blocking claim in the active copy is refused even when the approval fingerprint matches it", async () => {
+    const claim = { ...LAUNCHABLE_PROPOSAL, headline: "Passive income dari rumah" };
+    harness = buildHarness({ master: { ai_proposal: claim } });
+    fx.approvals = approvedWith({ copy_snapshot: snapshotOf(claim) });
+    const result = await launchChannelCampaignAction("cc1");
+    expectRefusedBeforeAnySideEffect(result, /memuat hal yang diblokir/);
+    expect(result.error).not.toMatch(/melebihi batas panjang|belum lengkap/);
+  });
+
+  it("a legacy proposal that only passes the REDUCED check is not launchable (the full gate never ran)", async () => {
+    harness = buildHarness({ master: { ai_proposal: LEGACY_COPY } });
+    fx.approvals = approvedWith({ copy_snapshot: snapshotOf(LEGACY_COPY) });
+    expectRefusedBeforeAnySideEffect(await launchChannelCampaignAction("cc1"), /berformat lama.*Quality Gate penuh/);
+  });
+
+  it("copy edited after the approval (fingerprint mismatch) is refused", async () => {
+    const edited = { ...LAUNCHABLE_PROPOSAL, headline: "Judul lain yang tidak disetujui Owner" };
+    harness = buildHarness({ master: { ai_proposal: edited } });
+    fx.approvals = approvedWith({ copy_snapshot: LAUNCHABLE_COPY_SNAPSHOT });
+    expectRefusedBeforeAnySideEffect(await launchChannelCampaignAction("cc1"), /copy iklan berbeda dari yang disetujui/);
+  });
+
+  it.each([
+    ["an old approval without any copy fingerprint", { destination_snapshot: { version: 1, kind: "legacy_unresolved" } }],
+    ["a malformed fingerprint", { copy_snapshot: { version: 1, algorithm: "sha256", hash: 42 } }],
+    ["a null context", null],
+  ])("%s is refused (fail closed, resubmit needed)", async (_name, context) => {
+    harness = buildHarness();
+    fx.approvals = approvedWith(context);
+    expectRefusedBeforeAnySideEffect(await launchChannelCampaignAction("cc1"), /persetujuan ini dibuat sebelum copy dicatat/);
+  });
+
+  it("valid copy whose fingerprint matches the approval still goes on to the creative, with exactly that copy", async () => {
+    harness = buildHarness();
+    const result = await launchChannelCampaignAction("cc1");
+    expect(result.error).toBeNull();
+    expect(connectorMock.createCreative).toHaveBeenCalledWith(
+      "access-token-abc",
+      "act_123",
+      expect.objectContaining({ headline: LAUNCHABLE_PROPOSAL.headline, primaryText: LAUNCHABLE_PROPOSAL.primary_text, cta: LAUNCHABLE_PROPOSAL.cta }),
+    );
+  });
+
+  it("submit and launch use the SAME validator and reach the same decision for the same proposal", async () => {
+    const proposals: unknown[] = [
+      null,
+      {},
+      LEGACY_COPY,
+      { ...LEGACY_COPY, headline: "" },
+      { ...LAUNCHABLE_PROPOSAL, primary_text: "a".repeat(601) },
+      { ...LAUNCHABLE_PROPOSAL, headline: "Passive income dari rumah" },
+      LAUNCHABLE_PROPOSAL,
+    ];
+    const ctx = async () => ({ productName: null, knownFacts: null });
+    for (const proposal of proposals) {
+      const submit = await evaluateCopyGuard(proposal, { action: "SUBMIT", loadContext: ctx });
+      const launch = await evaluateCopyGuard(proposal, { action: "LAUNCH", loadContext: ctx });
+      expect(launch.ok).toBe(submit.ok);
+      expect(launch.level).toBe(submit.level);
+      if (!submit.ok && !launch.ok) expect(launch.reason).toBe(submit.reason);
+    }
+    const root = process.cwd();
+    for (const file of ["features/campaigns/actions.ts", "features/campaigns/launch-actions.ts"]) {
+      const source = readFileSync(`${root}/${file}`, "utf8");
+      expect(source, file).toContain("evaluateCopyGuard(");
+      expect(source, file).not.toContain("evaluateCampaignQuality(");
+      expect(source, file).not.toContain("scanRawProposalCopy(");
+    }
   });
 });

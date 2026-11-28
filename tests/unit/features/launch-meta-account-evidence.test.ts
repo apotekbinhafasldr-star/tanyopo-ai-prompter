@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import { LAUNCHABLE_PROPOSAL, LAUNCHABLE_COPY_SNAPSHOT } from "@/tests/unit/helpers/launchable-proposal";
 import {
   makeAdminStorage,
   makePreflightFixtures,
@@ -150,7 +151,7 @@ const from = vi.fn((table: string) => {
                   currency: "IDR",
                   daily_budget: 100000,
                   total_budget: null,
-                  ai_proposal: { headline: "H", primary_text: "P", cta: "C" },
+                  ai_proposal: LAUNCHABLE_PROPOSAL,
                   ...masterOverrides,
                 },
                 error: null,
@@ -241,6 +242,7 @@ const APPROVAL_CONTEXT = {
   daily_budget: 100000,
   total_budget: null,
   destination_snapshot: { version: 1, kind: "legacy_url", link: "https://toko-saya.co.id/produk" },
+  copy_snapshot: LAUNCHABLE_COPY_SNAPSHOT,
 };
 
 beforeEach(() => {

@@ -5,19 +5,17 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { requireSessionContext } from "@/services/session";
 import {
-  CampaignProposalSchema,
   CampaignProposalGenerationSchema,
   normalizeProposalAdditions,
   findCopyLengthViolations,
-  findActiveCopyProblems,
   withPrimaryCandidate,
   withRecommendedChannels,
   selectCandidate,
   type CampaignProposal,
 } from "@/schemas/ai/campaign-proposal";
 import { buildSystemPreamble, buildCampaignProposalPrompt } from "@/lib/ai/prompts";
-import { evaluateCampaignQuality, formatBlockingIssuesMessage, scanRawProposalCopy } from "@/lib/ai/campaign-quality-gate";
-import { buildKnownFacts } from "@/lib/ai/known-facts";
+import { evaluateCopyGuard, buildCopySnapshot, COPY_SNAPSHOT_KEY } from "@/lib/campaigns/copy-guard";
+import { readCopyGuardContext } from "@/services/copy-guard-context";
 import { runAiJob } from "@/services/ai-jobs";
 import {
   syncChannelCampaigns,
@@ -544,62 +542,20 @@ export async function submitForApprovalAction(campaignId: string): Promise<Campa
     return { error: campaignLimit.message };
   }
 
-  // Quality Gate, enforced on the server (PR-5). The campaign page only DISPLAYS the gate; here the same
-  // evaluation (same parse, same product name, same product description as "known facts") decides whether an
-  // approval may be created at all. Nothing has been written yet, so a refusal leaves no approval row and no
-  // status change. Only the ACTIVE copy (the top-level hook/headline/cta/primary_text that the launch sends and
-  // that updateCampaignCopyAction edits) is enforced; the page still shows findings for every candidate as advice.
-  // A stored proposal that cannot be parsed (legacy) is "cannot be assessed" like on the page, except that its
-  // known active copy strings are still scanned for the two blocking rules (financial claim, special category).
-  // Required active copy first, for BOTH paths below (the schema accepts empty strings, and a null/{}/non-object
-  // proposal would otherwise be "cannot be assessed" and pass): the launch sends headline, primary_text and cta,
-  // so they must exist as non-blank text before an approval can be created. The message names the recovery paths.
-  const copyProblems = findActiveCopyProblems(campaign.ai_proposal);
-  if (copyProblems.length > 0) {
-    return {
-      error: `Campaign belum bisa diajukan: teks iklan belum lengkap (${copyProblems.join("; ")}). Lengkapi lewat editor di bagian Konten Iklan atau buat ulang strategi dengan tombol "Buat Ulang dengan AI", lalu ajukan lagi. Tidak ada pengajuan yang dibuat.`,
-    };
+  // Quality Gate, enforced on the server (PR-5) by the SAME validator the launch uses (lib/campaigns/copy-guard.ts):
+  // required active copy, length limits and the full Quality Gate (or, for a proposal the schema does not accept,
+  // the reduced check, which is NOT a gate pass). Nothing has been written yet, so a refusal leaves no approval
+  // row and no status change. Only the ACTIVE copy (headline, primary_text, cta, hook) is enforced; the page still
+  // shows findings for every candidate as advice.
+  const copyGuard = await evaluateCopyGuard(campaign.ai_proposal, {
+    action: "SUBMIT",
+    loadContext: () => readCopyGuardContext(supabase, session.tenantId, campaign.product_id),
+  });
+  if (!copyGuard.ok) {
+    return { error: copyGuard.message };
   }
-
-  const parsedProposal = CampaignProposalSchema.safeParse(campaign.ai_proposal);
-  if (parsedProposal.success) {
-    let productName: string | null = null;
-    let productFacts: string | null = null;
-    if (campaign.product_id) {
-      const { data: product, error: productError } = await supabase
-        .from("prompter_products")
-        .select("name, description, price, category, currency")
-        .eq("id", campaign.product_id)
-        .eq("tenant_id", session.tenantId)
-        .maybeSingle();
-      if (productError) {
-        return { error: "Gagal membaca data produk untuk pemeriksaan kualitas. Pengajuan tidak dibuat, coba lagi." };
-      }
-      productName = product?.name ?? null;
-      productFacts = buildKnownFacts(product);
-    }
-    const gateMessage = formatBlockingIssuesMessage(
-      evaluateCampaignQuality(parsedProposal.data, { productName, knownFacts: productFacts, copyScope: "active" }),
-    );
-    if (gateMessage) {
-      return { error: gateMessage };
-    }
-  } else {
-    // The schema does not accept this proposal (legacy shape, or copy over the length limit), so the FULL Quality
-    // Gate does NOT run: this branch is a reduced check, not a pass of the gate. It admits the proposal only when
-    // the required copy exists (above), no copy is over the length limit (the launch would send it as is) and no
-    // active copy string trips any blocking rule. Everything else the full gate assesses stays "cannot be assessed".
-    const lengthViolations = findCopyLengthViolations(campaign.ai_proposal);
-    if (lengthViolations.length > 0) {
-      return {
-        error: `Campaign belum bisa diajukan: teks iklan melebihi batas panjang (${lengthViolations.join(", ")}). Persingkat teks lewat editor di bagian Konten Iklan atau buat ulang strategi dengan "Buat Ulang dengan AI", lalu ajukan lagi.`,
-      };
-    }
-    const rawMessage = formatBlockingIssuesMessage({ issues: scanRawProposalCopy(campaign.ai_proposal) });
-    if (rawMessage) {
-      return { error: rawMessage };
-    }
-  }
+  // The copy the Owner is approving, recorded in the approval so the launch can refuse a different copy.
+  const copySnapshot = buildCopySnapshot(campaign.ai_proposal);
 
   const { error: approvalError } = await supabase.from("prompter_approvals").insert({
     tenant_id: session.tenantId,
@@ -621,6 +577,8 @@ export async function submitForApprovalAction(campaignId: string): Promise<Campa
         }).required,
       },
       destination_snapshot: destinationSnapshot,
+      // Fingerprint of the active copy being approved; the launch refuses a different copy (FIX-195-LAUNCH-GUARD).
+      [COPY_SNAPSHOT_KEY]: copySnapshot,
     } as unknown as Json,
   });
 

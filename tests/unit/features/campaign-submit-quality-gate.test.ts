@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { KOPI_ROBUSTA_IMPROVED, KOPI_ROBUSTA_SIMULASI } from "@/tests/fixtures/ai/kopi-robusta-aceh-simulasi";
+import { buildCopySnapshot } from "@/lib/campaigns/copy-guard";
 
 vi.mock("@/services/session", () => ({
   requireSessionContext: vi.fn(async () => ({ tenantId: "t1", userId: "u1", role: "owner" })),
@@ -454,5 +455,13 @@ describe("submitForApprovalAction — required active copy and the reduced check
       expect((await submitForApprovalAction("c1")).error).toBeNull();
       expect(currentSupabase.approvalInsert).toHaveBeenCalledTimes(1);
     }
+  });
+
+  it("the approval records a fingerprint of the active copy (headline, primary_text, cta) for the launch to compare", async () => {
+    currentSupabase = buildSupabase({ aiProposal: KOPI_ROBUSTA_IMPROVED, product: PRODUCT });
+    expect((await submitForApprovalAction("c1")).error).toBeNull();
+    const context = (currentSupabase.approvalInsert.mock.calls[0] as unknown as [{ context: Record<string, unknown> }])[0].context;
+    expect(context.copy_snapshot).toEqual(buildCopySnapshot(KOPI_ROBUSTA_IMPROVED));
+    expect(context.copy_snapshot).toMatchObject({ version: 1, algorithm: "sha256" });
   });
 });
