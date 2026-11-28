@@ -1,3 +1,5 @@
+import { LAUNCHABLE_PROPOSAL, LAUNCHABLE_COPY_SNAPSHOT } from "@/tests/unit/helpers/launchable-proposal";
+
 /**
  * Shared fixtures for tests that drive launchChannelCampaignAction through the
  * PR #36 Meta preflight. A tenant "t1" with product "p1" that is fully ready
@@ -61,7 +63,7 @@ function withDefaultSnapshots(fx: PreflightFixtures) {
     ? { version: 1, kind: "legacy_url", link }
     : { version: 1, kind: "legacy_unresolved" };
   return fx.approvals.map((row) =>
-    "context" in row ? row : { ...row, context: { destination_snapshot: snapshot } },
+    "context" in row ? row : { ...row, context: { destination_snapshot: snapshot, copy_snapshot: LAUNCHABLE_COPY_SNAPSHOT } },
   );
 }
 
