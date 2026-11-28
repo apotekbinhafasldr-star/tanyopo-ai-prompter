@@ -14,12 +14,14 @@ import {
   type CampaignProposal,
 } from "@/schemas/ai/campaign-proposal";
 import { buildSystemPreamble, buildCampaignProposalPrompt } from "@/lib/ai/prompts";
+import { checkChannelAllocation } from "@/lib/campaigns/channel-allocation";
 import { canEditCampaign, CAMPAIGN_EDIT_FORBIDDEN_MESSAGE } from "@/lib/campaigns/campaign-roles";
 import { evaluateCopyGuard, buildCopySnapshot, COPY_SNAPSHOT_KEY } from "@/lib/campaigns/copy-guard";
 import { readCopyGuardContext } from "@/services/copy-guard-context";
 import { runAiJob } from "@/services/ai-jobs";
 import {
   syncChannelCampaigns,
+  readChannelAllocationRows,
   isMirrorConfirmed,
   mirrorChannelCampaignStatus,
   transitionMasterCampaign,
@@ -569,6 +571,18 @@ export async function submitForApprovalAction(campaignId: string): Promise<Campa
   }
   // The copy the Owner is approving, recorded in the approval so the launch can refuse a different copy.
   const copySnapshot = buildCopySnapshot(campaign.ai_proposal);
+
+  // Budget allocation across channels, checked with the launch's own rules BEFORE an approval exists (F-01): a
+  // split that the launch would refuse (missing/invalid share, not adding up to 100%, paid channel at 0%) must not
+  // reach the Owner. A read failure refuses too (fail closed).
+  const allocationRows = await readChannelAllocationRows(supabase, session.tenantId, campaignId);
+  if (!allocationRows.ok) {
+    return { error: "Gagal membaca alokasi budget channel. Pengajuan tidak dibuat, coba lagi." };
+  }
+  const allocationCheck = checkChannelAllocation(allocationRows.rows);
+  if (!allocationCheck.ok) {
+    return { error: allocationCheck.error };
+  }
 
   const { error: approvalError } = await supabase.from("prompter_approvals").insert({
     tenant_id: session.tenantId,

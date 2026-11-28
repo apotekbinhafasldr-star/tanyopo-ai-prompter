@@ -75,8 +75,8 @@ const AI_DATA = { candidates: [CAND, CAND], budget_allocation: [], hook: "h", he
 
 function seed(over: { master?: Row; channels?: Row[]; approvals?: Row[]; extra?: Record<string, Row[]> } = {}) {
   const channels = over.channels ?? [
-    { id: "c1", tenant_id: "t1", master_campaign_id: M, channel: "FACEBOOK", status: "DRAFT", external_campaign_id: null },
-    { id: "c2", tenant_id: "t1", master_campaign_id: M, channel: "INSTAGRAM", status: "DRAFT", external_campaign_id: null },
+    { id: "c1", tenant_id: "t1", master_campaign_id: M, channel: "FACEBOOK", status: "DRAFT", external_campaign_id: null, budget_percentage: 50 },
+    { id: "c2", tenant_id: "t1", master_campaign_id: M, channel: "INSTAGRAM", status: "DRAFT", external_campaign_id: null, budget_percentage: 50 },
   ];
   return {
     prompter_master_campaigns: [
@@ -345,8 +345,8 @@ describe("P1-1 recovery of a blocked SCHEDULED campaign", () => {
     seed({
       master: { status: "SCHEDULED", ...over.master },
       channels: over.channels ?? [
-        { id: "c1", tenant_id: "t1", master_campaign_id: M, channel: "FACEBOOK", status: "SCHEDULED", external_campaign_id: null },
-        { id: "c2", tenant_id: "t1", master_campaign_id: M, channel: "INSTAGRAM", status: "SCHEDULED", external_campaign_id: null },
+        { id: "c1", tenant_id: "t1", master_campaign_id: M, channel: "FACEBOOK", status: "SCHEDULED", external_campaign_id: null, budget_percentage: 50 },
+        { id: "c2", tenant_id: "t1", master_campaign_id: M, channel: "INSTAGRAM", status: "SCHEDULED", external_campaign_id: null, budget_percentage: 50 },
       ],
       approvals: over.approvals ?? [oldApproval()],
       extra: over.extra,

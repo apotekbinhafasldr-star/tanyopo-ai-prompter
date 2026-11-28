@@ -12,11 +12,17 @@ vi.mock("@/services/budget-guard", () => ({
   checkBudgetGuard: vi.fn(() => ({ allowed: true, reason: null })),
 }));
 
-const { mirrorChannelCampaignStatusMock } = vi.hoisted(() => ({
+const { mirrorChannelCampaignStatusMock, readAllocationRowsMock } = vi.hoisted(() => ({
   mirrorChannelCampaignStatusMock: vi.fn(async () => ({ ok: true, updated: 1, consistent: true })),
+  readAllocationRowsMock: vi.fn(),
 }));
+const VALID_ALLOCATION_ROWS = [
+  { id: "cc1", channel: "FACEBOOK", budgetPercentage: 50 },
+  { id: "cc2", channel: "INSTAGRAM", budgetPercentage: 50 },
+];
 vi.mock("@/services/channel-campaigns", () => ({
   syncChannelCampaigns: vi.fn(async () => undefined),
+  readChannelAllocationRows: readAllocationRowsMock,
   mirrorChannelCampaignStatus: mirrorChannelCampaignStatusMock,
   transitionMasterCampaign: vi.fn(async () => "moved"),
   isMirrorConfirmed: (r: { ok: boolean; consistent: boolean }) => r.ok && r.consistent,
@@ -129,6 +135,26 @@ function expectNothingWritten() {
 describe("submitForApprovalAction — Quality Gate enforced on the server (PR-5)", () => {
   beforeEach(() => {
     mirrorChannelCampaignStatusMock.mockClear();
+    readAllocationRowsMock.mockReset();
+    readAllocationRowsMock.mockResolvedValue({ ok: true, rows: VALID_ALLOCATION_ROWS });
+  });
+
+  it("refuses to submit when the channel allocation is inconsistent (F-01), before any approval exists", async () => {
+    const bad: { ok: boolean; rows: { id: string; channel: string; budgetPercentage: number | null }[] }[] = [
+      { ok: true, rows: [{ id: "cc1", channel: "FACEBOOK", budgetPercentage: 33.3 }, { id: "cc2", channel: "INSTAGRAM", budgetPercentage: 33.3 }] },
+      { ok: true, rows: [{ id: "cc1", channel: "FACEBOOK", budgetPercentage: 100 }, { id: "cc2", channel: "INSTAGRAM", budgetPercentage: null }] },
+      { ok: true, rows: [{ id: "cc1", channel: "FACEBOOK", budgetPercentage: 100 }, { id: "cc2", channel: "INSTAGRAM", budgetPercentage: 0 }] },
+      { ok: true, rows: [] },
+      { ok: false, rows: [] },
+    ];
+    for (const read of bad) {
+      readAllocationRowsMock.mockResolvedValue(read);
+      currentSupabase = buildSupabase({ aiProposal: KOPI_ROBUSTA_IMPROVED, product: PRODUCT });
+      const result = await submitForApprovalAction("c1");
+      expect(result.error).toBeTruthy();
+      expect(result.error).toMatch(/alokasi budget/i);
+      expectNothingWritten();
+    }
   });
 
   it("the unmodified fixture proposal is accepted (baseline: the gate has no blocking issue)", async () => {
