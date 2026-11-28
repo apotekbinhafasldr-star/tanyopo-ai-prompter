@@ -1,0 +1,18 @@
+[
+ "bucket:fx-reserved-1",
+ "bucket:fx-reserved-2",
+ "comment:public.fx_audit_logs",
+ "function:public.fn_fx_block_audit_change()",
+ "function:public.fn_fx_evidence_purge(p_before timestamp with time zone)",
+ "function_acl:fn_fx_block_audit_change()",
+ "function_acl:fn_fx_evidence_purge(p_before timestamp with time zone)",
+ "policy:storage.objects.FX tenant all",
+ "policy:storage.objects.FX tenant delete",
+ "policy:storage.objects.FX tenant insert",
+ "policy:storage.objects.FX tenant select",
+ "policy:storage.objects.FX tenant update",
+ "table_acl:fx_audit_logs",
+ "table_acl:storage.objects",
+ "trigger:fx_audit_logs.trg_fx_audit_no_update",
+ "trigger_state:fx_audit_logs.trg_fx_audit_no_update"
+]

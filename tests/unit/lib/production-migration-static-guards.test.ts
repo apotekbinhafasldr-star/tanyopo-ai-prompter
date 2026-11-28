@@ -159,3 +159,269 @@ describe("Manifest, runner and docs", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------------------------------------------------
+// PR-1 (production pipeline v2). These tests only ADD constraints; none of the assertions above was loosened.
+// ---------------------------------------------------------------------------------------------------------------------
+describe("Pipeline v2 — workflow options follow the manifest, p0-2 entry stays pinned", () => {
+  const manifest = JSON.parse(read(MANIFEST)) as Manifest;
+  const body = noComments(read(WF));
+
+  it("the package choice in the workflow is DERIVED from the manifest keys (no package can be offered that is not pinned)", () => {
+    const m = body.match(/package:\n(?: {8}.*\n)*? {8}options:\n((?: {10}- .+\n)+)/);
+    expect(m).not.toBeNull();
+    const options = (m![1].match(/- (\S+)/g) ?? []).map((x) => x.slice(2));
+    expect(options).toEqual(Object.keys(manifest.packages));
+  });
+
+  it("PR-1 adds no package: the production manifest still has only p0-2 and no allow-list or shape on it", () => {
+    expect(Object.keys(manifest.packages)).toEqual(["p0-2"]);
+    const p = manifest.packages["p0-2"] as unknown as Record<string, unknown>;
+    for (const k of ["allow", "rollback_allow", "shape", "probes", "ledger_verify", "timeouts"]) expect(p[k], k).toBeUndefined();
+    const canon = JSON.stringify(sortKeys(p));
+    expect(createHash("sha256").update(canon).digest("hex")).toBe("dea14f3c671727745ac1240fdd0b5cf86c33bd00048c39fd0fb02a002d98753c");
+  });
+
+  it("the workflow does not mention the fixture, the probe or any new mode", () => {
+    expect(body).not.toMatch(/fx-n|fixtures|privilege_probe|ledger_verify/);
+    expect(body.match(/^ {10}- (owner-audit|verify-only|apply|record-ledger|rollback)$/gm)).toHaveLength(5);
+  });
+});
+
+function sortKeys(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(sortKeys);
+  if (v && typeof v === "object") return Object.fromEntries(Object.keys(v as object).sort().map((k) => [k, sortKeys((v as Record<string, unknown>)[k])]));
+  return v;
+}
+
+interface AllowEntry {
+  kind: string;
+  schema: string;
+  names?: string[];
+  columns?: string[];
+  objects?: string[];
+  roles?: string[];
+}
+interface FxPackage {
+  fixture: boolean;
+  shape: string;
+  migration: FileEntry;
+  rollback: FileEntry;
+  files: Record<string, FileEntry>;
+  allow: AllowEntry[];
+  rollback_allow: AllowEntry[];
+}
+
+describe("Pipeline v2 — synthetic fixture package (rehearsal only)", () => {
+  const FXM = "supabase/prod-packages/tests/fixtures/manifest.json";
+  const fx = JSON.parse(read(FXM)) as { packages: Record<string, FxPackage> };
+  const pkg = fx.packages["fx-n"];
+
+  it("every checksum of the fixture matches the bytes (run tests/fixtures/rehash.py after editing it)", () => {
+    for (const e of [pkg.migration, pkg.rollback, ...Object.values(pkg.files as Record<string, FileEntry>)]) {
+      expect(existsSync(path.join(root, e.path)), e.path).toBe(true);
+      expect(sha(e.path), e.path).toBe(e.sha256);
+    }
+  });
+
+  it("is shape N: B is the migration itself, E is the rollback itself, each with its own BEGIN/COMMIT", () => {
+    expect(pkg.shape).toBe("native-txn");
+    expect(pkg.files.B).toEqual(pkg.migration);
+    expect(pkg.files.E).toEqual(pkg.rollback);
+    for (const rel of [pkg.migration.path, pkg.rollback.path]) {
+      const sql = read(rel).replace(/--[^\n]*/g, "").trim();
+      expect(sql, rel).toMatch(/^begin;/i);
+      expect(sql, rel).toMatch(/commit;$/i);
+    }
+  });
+
+  it("the allow-lists are literal: schema public/storage only, no wildcard, no unused-looking entry kinds", () => {
+    for (const list of [pkg.allow, pkg.rollback_allow] as AllowEntry[][]) {
+      expect(list.length).toBeGreaterThan(0);
+      for (const e of list) {
+        expect(["public", "storage"], JSON.stringify(e)).toContain(e.schema);
+        for (const v of [...(e.names ?? []), ...(e.columns ?? []), ...(e.objects ?? []), ...(e.roles ?? [])]) expect(v, JSON.stringify(e)).not.toMatch(/[*%?\\]/);
+      }
+    }
+  });
+
+  it("is invisible to production: not in the manifest, not in the workflow, and has only synthetic names", () => {
+    expect(Object.keys((JSON.parse(read(MANIFEST)) as Manifest).packages)).not.toContain("fx-n");
+    expect(read(WF)).not.toMatch(/fx-n/);
+    expect(pkg.fixture).toBe(true);
+    expect(read(pkg.migration.path)).toMatch(/FIXTURE SINTETIS/);
+    expect(read(pkg.migration.path)).not.toMatch(/Tenant (baca|kelola|unggah)|product-media|prompter_/);
+  });
+});
+
+describe("Pipeline v2 — public-log safety and file hygiene", () => {
+  const manifest = JSON.parse(read(MANIFEST)) as Manifest;
+  const fx = JSON.parse(read("supabase/prod-packages/tests/fixtures/manifest.json")) as { packages: Record<string, PackageEntry> };
+  const readOnlyKeys = ["A", "C", "F", "S", "G"];
+  const readOnlyFiles = [...Object.values(manifest.packages), ...Object.values(fx.packages)].flatMap((p) =>
+    readOnlyKeys.filter((k) => p.files[k]).map((k) => p.files[k].path),
+  );
+
+  it("read-only package files never print names: every string_agg is hashed by md5, no policy/role/bucket name list", () => {
+    expect(readOnlyFiles.length).toBeGreaterThan(8);
+    for (const rel of readOnlyFiles) {
+      const sql = read(rel).replace(/--[^\n]*/g, "");
+      for (const m of sql.matchAll(/string_agg\(/g)) {
+        expect(sql.slice(Math.max(0, m.index! - 80), m.index!), `${rel}: string_agg must sit inside md5(...)`).toMatch(/md5\(/);
+      }
+      expect(sql, rel).not.toMatch(/array_agg\(\s*(\w+\.)?(policyname|rolname|name|id)\b/i);
+      expect(sql, rel).not.toMatch(/\bas\s+(nama|name|policyname|bucket)\b/i);
+      expect(sql, rel).not.toMatch(/raise\s+(notice|warning|info)/i);
+    }
+  });
+
+  it("the runner never reaches stderr/stdout except through the redacting helpers", () => {
+    const src = read(RUNNER);
+    expect(src).toMatch(/def safe_error\(/);
+    expect(src).toMatch(/def check_log_safe\(/);
+    expect(src).toMatch(/message text withheld: public log/);
+    for (const line of src.split("\n")) {
+      if (/\.stderr/.test(line)) expect(line, line).toMatch(/safe_error\(|returncode|capture_output/);
+      if (/Stop\(.*(\.stdout|\.stderr)/.test(line)) expect(line, line).toMatch(/safe_error\(/);
+    }
+    expect(src).not.toMatch(/Stop\(f?["'][^"']*\{(r|row|out|rows|h|hdr)\b/);
+  });
+
+  it("the python tests include the AST guard and the rehearsal greps the log for CANARY names, object names and passwords", () => {
+    expect(read("supabase/prod-packages/tests/test_tools_v2.py")).toMatch(/test_runner_source_never_prints_raw_results/);
+    const r = read("supabase/prod-packages/tests/rehearsal.sh");
+    expect(r).toMatch(/CANARY_OTHER_POLICY_zq81/);
+    expect(r).toMatch(/no policy\/bucket\/table\/function name of another party, no password/);
+    expect(r).toMatch(/SANDBOX/);
+  });
+
+  it("package files are LF only and .gitattributes pins LF for supabase/", () => {
+    expect(read(".gitattributes")).toMatch(/^supabase\/\*\* text eol=lf$/m);
+    const files = new Set<string>();
+    for (const p of [...Object.values(manifest.packages), ...Object.values(fx.packages)]) {
+      files.add(p.migration.path);
+      files.add(p.rollback.path);
+      for (const e of Object.values(p.files)) files.add(e.path);
+    }
+    for (const rel of [...files, "supabase/prod-packages/tools/privilege_probe_readonly.sql", "supabase/prod-packages/tools/ledger_verify_readonly.sql", "supabase/prod-packages/tools/ledger_precheck_readonly.sql", "supabase/prod-packages/tools/run_package.py"]) {
+      expect(readFileSync(path.join(root, rel), "utf8").includes("\r"), rel).toBe(false);
+    }
+  });
+
+  it("the runner forbids what the allow-list can never lift (ownership, role switch, advisory locks, dynamic EXECUTE, psql meta-commands)", () => {
+    const src = read(RUNNER);
+    for (const needle of ["owner\\s+to", "session_replication_role", "pg_(try_)?advisory", "dynamic EXECUTE", "role membership grant", "psql meta-command", "ALTER DEFAULT PRIVILEGES"]) {
+      expect(src, needle).toContain(needle);
+    }
+    expect(src).toMatch(/ALLOW_SCHEMAS = \("public", "storage"\)/);
+    expect(src).toMatch(/stale allow-list entry/);
+    expect(read(MANIFEST)).toMatch(/"approved_privileged_role": false/);
+  });
+
+  it("the runner never escalates: no CREATE/ALTER ROLE, no GRANT, no SET ROLE is executed by python code", () => {
+    const src = read(RUNNER).split("\n").filter((l) => !/^\s*(#|\(r"|"""|FORBIDDEN)/.test(l)).join("\n");
+    expect(src).not.toMatch(/f?"(create|alter)\s+role|f?"grant\s|"set\s+role/i);
+    expect(src).toMatch(/No privilege escalation is attempted/);
+  });
+
+  it("the operating guide documents the v2 model (R1/R2, allow-list, public-log rule, Android steps, evidence class)", () => {
+    const doc = read("docs/PRODUCTION_MIGRATION.md");
+    for (const needle of ["R1", "R2", "Allow-list", "SANDBOX", "UNKNOWN", "HP Android", "log publik", "Privilege probe", "ROLLED_BACK", "APPROVE"]) {
+      expect(doc, needle).toContain(needle);
+    }
+  });
+});
+
+describe("Pipeline v2.1 — QA #188 regressions (static guards on the runner, probe and tools)", () => {
+  const src = read(RUNNER);
+  const probe = read("supabase/prod-packages/tools/privilege_probe_readonly.sql").replace(/--[^\n]*/g, "");
+
+  it("function calls are default-deny, sequence functions are banned after normalising quotes, timeouts are bounded, no ACL fingerprints", () => {
+    expect(src).toMatch(/PURE_FUNCS = \{/);
+    expect(src).toMatch(/SQL_RESERVED = set\(/);
+    expect(src).not.toMatch(/KW_PAREN/);
+    expect(src).toMatch(/def check_calls\(ctx, s, qualified=True, ddl=False, plpgsql=False\)/);
+    expect(src).toMatch(/BAN_WORDS = \{[^}]*"nextval"[^}]*"currval"[^}]*"lastval"/);
+    expect(src).toMatch(/BAN_PREFIX_MORE = \(/);
+    expect(src).toMatch(/TIMEOUT_MAX_MS = \{"lock_timeout": 10000, "statement_timeout": 120000\}/);
+    expect(src).toMatch(/carriage return in SQL text/);
+    expect(probe).not.toMatch(/relacl|aclexplode|md5\(/);
+    const doc = read("docs/PRODUCTION_MIGRATION.md");
+    expect(doc).toContain("Keputusan Founder (P3-5");
+    expect(doc).not.toContain("gagal-tertutup");
+    expect(doc).toContain("Notasi atribut tanpa kurung");
+  });
+
+  it("PR-1 structural layer: session search_path, -c only, READ ONLY + snapshot, effects before COMMIT, tool/package separation", () => {
+    expect(src).toMatch(/SESSION_SQL = "set search_path = pg_catalog, pg_temp; set standard_conforming_strings = on"/);
+    expect(src).toMatch(/begin read only/);
+    expect(src).toMatch(/def effects_check_sql\(written, names, prefixes\)/);
+    expect(src).toMatch(/pg_stat_xact_all_tables/);
+    expect(src).toMatch(/EFEK DI LUAR DAFTAR/);
+    expect(src).toMatch(/def split_txn\(text\)/);
+    expect(src).toMatch(/def subst_pvars\(text, variables\)/);
+    // the runner never hands a file to psql with -f (psql would interpret meta-commands and :variables)
+    expect(src).not.toMatch(/"-f", path/);
+    const exec = src.slice(src.indexOf("def run_sql("), src.indexOf("def _read("));
+    expect(exec).not.toMatch(/"-f"/);
+    const sep = read("supabase/prod-packages/tools/check_separation.py");
+    expect(sep).toMatch(/supabase\/prod-packages\/tools\//);
+    expect(read(".github/CODEOWNERS")).toMatch(/\/supabase\/prod-packages\//);
+    expect(read(".github/workflows/ci.yml")).toMatch(/prod-pipeline-separation/);
+    const doc = read("docs/PRODUCTION_MIGRATION.md");
+    for (const needle of ["Model ancaman dan lapisan pengendali", "tripwire", "Ditunda ke PR-2", "Fuzz diferensial", "Apa yang dibuktikan dan tidak dibuktikan", "Evaluasi arsitektur alternatif"]) {
+      expect(doc).toContain(needle);
+    }
+    expect(doc).not.toMatch(/0 lolos-lint-dan-dieksekusi/);
+  });
+
+  it("the lint is a real tokenizer with default-deny statement classes, not a comment-stripping regex", () => {
+    expect(src).toMatch(/def tokenize\(sql\)/);
+    expect(src).toMatch(/class LintError/);
+    expect(src).toMatch(/def classify\(ctx, s, phase="top"\)/);
+    expect(src).toMatch(/default-deny/);
+    expect(src).not.toMatch(/def strip_sql\(/);
+    expect(src).not.toMatch(/re\.sub\(r"\/\\\*\.\*\?\\\*\/"/);
+    expect(src).toMatch(/only SELECT may follow the COMMIT/);
+    expect(src).toMatch(/nested/i);
+  });
+
+  it("set_config, advisory locks, dblink and friends are refused as WORDS (concatenation cannot hide them)", () => {
+    expect(src).toMatch(/BAN_WORDS = \{[^}]*"set_config"/);
+    expect(src).toMatch(/BAN_PREFIX = \("dblink", "pg_advisory", "pg_try_advisory"\)/);
+  });
+
+  it("the owner probe checks inherited rights (USAGE), never plain membership; A/C/F/S/G run in a read-only transaction", () => {
+    expect(probe).not.toMatch(/'MEMBER'\) then 'PASS'/);
+    expect(probe).toMatch(/'USAGE'\) then 'PASS'/);
+    expect(src).toMatch(/default_transaction_read_only=on/);
+    expect(src).toMatch(/require_harus/);
+    expect(src).toMatch(/STATE TIDAK PRE: periksa manual/);
+  });
+
+  it("the ledger name/version pre-check exists, is read-only and prints counts only", () => {
+    const sql = read("supabase/prod-packages/tools/ledger_precheck_readonly.sql").replace(/--[^\n]*/g, "");
+    expect(sql).toMatch(/^\s*select/i);
+    expect(sql).not.toMatch(/\b(insert|update|delete|drop|alter|create|grant|revoke)\b/i);
+    expect(sql).toMatch(/_harus_0/);
+    expect(src).toMatch(/def ledger_precheck\(\)/);
+  });
+
+  it("the python suites carry the QA regression class and the rehearsal drives the real tricks through the runner", () => {
+    expect(read("supabase/prod-packages/tests/test_tools_v2.py")).toMatch(/class QaRegressions/);
+    const r = read("supabase/prod-packages/tests/rehearsal.sh");
+    expect(r).toMatch(/psql menjalankan meta-perintah/);
+    expect(r).toMatch(/role NOINHERIT/);
+    expect(r).toMatch(/nama migrasi sudah ada di ledger/);
+  });
+
+  it("the guide states the p0-2 runner changes honestly and carries the recovery and log tables", () => {
+    const doc = read("docs/PRODUCTION_MIGRATION.md");
+    for (const needle of ["Perubahan perilaku runner untuk p0-2", "Setelah rollback: cara pulih", "Tabel baris log", "lock_timeout"]) {
+      expect(doc, needle).toContain(needle);
+    }
+    expect(doc).not.toMatch(/Lint global TETAP menolak/);
+    expect(doc).not.toMatch(/Tidak pernah bisa dilonggarkan oleh manifest/);
+    expect(doc).not.toMatch(/hasil CI PG17 untuk bagian 7 sampai job selesai/);
+  });
+});
