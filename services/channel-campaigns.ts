@@ -2,6 +2,8 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Channel, CampaignStatus, Database } from "@/types/database";
+import { normalizeChannelPercentages } from "@/lib/campaigns/channel-allocation";
+import type { AllocationRowInput } from "@/lib/campaigns/budget-allocation";
 
 interface BudgetAllocationEntry {
   channel: string;
@@ -21,7 +23,8 @@ export async function syncChannelCampaigns(
   channels: Channel[],
   budgetAllocation: BudgetAllocationEntry[],
 ): Promise<void> {
-  const percentageByChannel = new Map(budgetAllocation.map((b) => [b.channel, b.percentage]));
+  // Scaled to the SELECTED channels so the rows add up to exactly 100.00 (F-01); see lib/campaigns/channel-allocation.
+  const percentageByChannel = normalizeChannelPercentages(channels, budgetAllocation);
 
   const rows = channels.map((channel) => ({
     tenant_id: tenantId,
@@ -35,6 +38,35 @@ export async function syncChannelCampaigns(
   await supabase
     .from("prompter_channel_campaigns")
     .upsert(rows, { onConflict: "master_campaign_id,channel" });
+}
+
+/**
+ * The channel rows as the launch will read them (id, channel, percentage), for the submit-time allocation check.
+ * `ok: false` when the read fails: the caller must refuse (fail closed), never assume the rows are fine.
+ */
+export async function readChannelAllocationRows(
+  supabase: SupabaseClient<Database>,
+  tenantId: string,
+  masterCampaignId: string,
+): Promise<{ ok: boolean; rows: AllocationRowInput[] }> {
+  try {
+    const { data, error } = await supabase
+      .from("prompter_channel_campaigns")
+      .select("id, channel, budget_percentage")
+      .eq("master_campaign_id", masterCampaignId)
+      .eq("tenant_id", tenantId);
+    if (error || !Array.isArray(data)) return { ok: false, rows: [] };
+    return {
+      ok: true,
+      rows: data.map((r) => ({
+        id: r.id as string,
+        channel: r.channel as Channel,
+        budgetPercentage: r.budget_percentage == null ? null : Number(r.budget_percentage),
+      })),
+    };
+  } catch {
+    return { ok: false, rows: [] };
+  }
 }
 
 /**

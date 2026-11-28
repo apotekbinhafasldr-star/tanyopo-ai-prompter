@@ -1,4 +1,5 @@
 import { vi } from "vitest";
+import { LAUNCHABLE_PROPOSAL } from "@/tests/unit/helpers/launchable-proposal";
 import { createFakeDb, type FakeDb, type FakeDbOptions, type Row } from "./stateful-fake-db";
 import { makeAdminStorage, makePreflightFixtures } from "./meta-preflight-fixtures";
 
@@ -146,7 +147,7 @@ function tenantSeed(t: {
         target_country: "Indonesia",
         selected_media_id: null,
         channels: t.channels.map((c) => c.channel),
-        ai_proposal: { headline: "Diskon Besar", primary_text: "Beli sekarang", cta: "Beli Sekarang" },
+        ai_proposal: LAUNCHABLE_PROPOSAL,
       },
     ],
     prompter_channel_campaigns: t.channels.map((c) => ({
