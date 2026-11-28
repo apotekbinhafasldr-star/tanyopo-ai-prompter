@@ -87,6 +87,7 @@ describe("OnboardingWizard: tombol Back Android memundurkan satu langkah (UNIT/j
     expect(pickFirstOption()).toHaveAttribute("aria-pressed", "true");
 
     await back();
+    await waitFor(() => expect(heading(2)).toBeInTheDocument());
     await back();
     await waitFor(() => expect(heading(1)).toBeInTheDocument());
     expect(screen.getByLabelText("Nama bisnis")).toHaveValue("Kopi Nusantara");
@@ -94,6 +95,7 @@ describe("OnboardingWizard: tombol Back Android memundurkan satu langkah (UNIT/j
 
   it("Forward setelah Back memulihkan langkah dengan isian yang sama", async () => {
     await advanceTo(4);
+    fireEvent.change(document.querySelector("textarea")!, { target: { value: "Kopi kemasan siap seduh" } });
     await back();
     await waitFor(() => expect(heading(3)).toBeInTheDocument());
     await act(async () => {
