@@ -8,6 +8,7 @@ import {
   CampaignProposalSchema,
   CampaignProposalGenerationSchema,
   normalizeProposalAdditions,
+  findCopyLengthViolations,
   withPrimaryCandidate,
   withRecommendedChannels,
   selectCandidate,
@@ -314,6 +315,18 @@ export async function updateCampaignCopyAction(
 
   const currentProposal = (campaign.ai_proposal ?? {}) as Record<string, Json>;
 
+  // Server-side length guard. The editor's HTML maxLength is only a convenience: a crafted request could store
+  // copy the proposal schema rejects, which would make the submit gate fall back to a partial scan.
+  const lengthViolations = findCopyLengthViolations({
+    hook: typeof hook === "string" ? hook : undefined,
+    headline: typeof headline === "string" ? headline : undefined,
+    primary_text: typeof primaryText === "string" ? primaryText : undefined,
+    cta: typeof cta === "string" ? cta : undefined,
+  });
+  if (lengthViolations.length > 0) {
+    return { error: `Teks melebihi batas panjang (${lengthViolations.join(", ")}). Persingkat lalu simpan lagi.` };
+  }
+
   const updatedProposal: Record<string, Json> = {
     ...currentProposal,
     hook: typeof hook === "string" ? hook : currentProposal.hook,
@@ -555,6 +568,14 @@ export async function submitForApprovalAction(campaignId: string): Promise<Campa
       return { error: gateMessage };
     }
   } else {
+    // Cannot be parsed, so the full gate cannot run. Fail closed on copy longer than the schema allows (the
+    // launch would send it to the platform as is), then scan every blocking rule on the active copy strings.
+    const lengthViolations = findCopyLengthViolations(campaign.ai_proposal);
+    if (lengthViolations.length > 0) {
+      return {
+        error: `Campaign belum bisa diajukan: teks iklan melebihi batas panjang (${lengthViolations.join(", ")}). Persingkat teks di editor, lalu ajukan lagi.`,
+      };
+    }
     const rawMessage = formatBlockingIssuesMessage({ issues: scanRawProposalCopy(campaign.ai_proposal) });
     if (rawMessage) {
       return { error: rawMessage };

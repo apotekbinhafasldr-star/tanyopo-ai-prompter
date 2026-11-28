@@ -4,6 +4,36 @@ import { PROPOSAL_OBJECTIVE_VALUES } from "@/schemas/ai/proposal-objectives";
 const channelEnum = z.enum(["FACEBOOK", "INSTAGRAM", "TIKTOK", "X", "SEO"]);
 
 /**
+ * Length limits of the active ad copy. One source of truth for the schema below AND for the server-side check in
+ * updateCampaignCopyAction / the submit gate (the HTML maxLength on the editor is only a convenience, not a guard).
+ */
+export const COPY_LIMITS = { hook: 200, headline: 120, primary_text: 600, cta: 40 } as const;
+
+const COPY_LIMIT_LABELS: Record<keyof typeof COPY_LIMITS, string> = {
+  hook: "Hook",
+  headline: "Judul",
+  primary_text: "Teks utama",
+  cta: "CTA",
+};
+
+/**
+ * Names every active copy field whose string is longer than COPY_LIMITS. Works on an unparsed value, so it also
+ * covers a stored proposal that the schema rejected. Non-string fields are ignored here (the schema owns types).
+ */
+export function findCopyLengthViolations(raw: unknown): string[] {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return [];
+  const record = raw as Record<string, unknown>;
+  const violations: string[] = [];
+  for (const key of Object.keys(COPY_LIMITS) as (keyof typeof COPY_LIMITS)[]) {
+    const value = record[key];
+    if (typeof value === "string" && value.length > COPY_LIMITS[key]) {
+      violations.push(`${COPY_LIMIT_LABELS[key]} ${value.length}/${COPY_LIMITS[key]} karakter`);
+    }
+  }
+  return violations;
+}
+
+/**
  * One ranked hook/headline/CTA direction (Batch B1 — persuasive
  * intelligence). candidates[0] is always the recommended pick — enforced
  * deterministically in code via withPrimaryCandidate() below, never left
@@ -13,20 +43,20 @@ const channelEnum = z.enum(["FACEBOOK", "INSTAGRAM", "TIKTOK", "X", "SEO"]);
 export const CreativeCandidateSchema = z.object({
   hook: z
     .string()
-    .max(200)
+    .max(COPY_LIMITS.hook)
     .describe(
       "Attention-grabbing opening line addressing a specific customer pain or desired outcome for this exact product — never generic filler like 'solusi terbaik untuk bisnis Anda'",
     ),
-  headline: z.string().max(120),
+  headline: z.string().max(COPY_LIMITS.headline),
   cta: z
     .string()
-    .max(40)
+    .max(COPY_LIMITS.cta)
     .describe(
       "Action-oriented CTA matching the objective, funnel stage, and product type — not the same generic CTA for every product, and never implying a capability (e.g. a demo, a free trial) that wasn't stated as available",
     ),
   primary_text: z
     .string()
-    .max(600)
+    .max(COPY_LIMITS.primary_text)
     .describe(
       "Benefit-led body copy for THIS candidate's own angle specifically — problem, consequence, solution, key benefit, reason to act. Must stay consistent with this candidate's hook/headline, not a shared generic paragraph reused across all 3",
     ),
@@ -74,13 +104,13 @@ const campaignProposalBaseShape = {
     .describe(
       "Exactly 3 distinct hook/headline/CTA/primary_text directions for this campaign (different angles, not wording variants of the same angle), ordered strongest first. Rank by relevance to customer_pain, clarity, specificity, strength of benefit, fit with the objective/product type/funnel stage, natural language, CTA actionability, and truthfulness — never by which one simply sounds more aggressive or salesy",
     ),
-  hook: z.string().max(200).describe("Must equal candidates[0].hook"),
-  headline: z.string().max(120).describe("Must equal candidates[0].headline"),
+  hook: z.string().max(COPY_LIMITS.hook).describe("Must equal candidates[0].hook"),
+  headline: z.string().max(COPY_LIMITS.headline).describe("Must equal candidates[0].headline"),
   primary_text: z
     .string()
-    .max(600)
+    .max(COPY_LIMITS.primary_text)
     .describe("Benefit-led body copy expanding on the top-ranked candidate: problem, consequence, solution, key benefit, reason to act"),
-  cta: z.string().max(40).describe("Must equal candidates[0].cta"),
+  cta: z.string().max(COPY_LIMITS.cta).describe("Must equal candidates[0].cta"),
   creative_concept: z.string().describe("Brief description of the recommended visual/video concept"),
   budget_allocation: z
     .array(

@@ -279,6 +279,55 @@ describe("submitForApprovalAction — Quality Gate enforced on the server (PR-5)
     expectNothingWritten();
   });
 
+  it("copy longer than the schema allows cannot bypass the gate: a blocking rule other than the old two is still caught", async () => {
+    // Over-long primary_text makes the schema parse fail; the old fallback scanned only 2 rules and let this through.
+    const long = `Hasil dijamin 100% ${"kopi ".repeat(130)}`;
+    const p = JSON.parse(JSON.stringify(KOPI_ROBUSTA_IMPROVED));
+    p.primary_text = long;
+    currentSupabase = buildSupabase({ aiProposal: p, product: PRODUCT });
+    const result = await submitForApprovalAction("c1");
+    expect(result.error).toMatch(/belum bisa diajukan/i);
+    expectNothingWritten();
+  });
+
+  it("over-long but otherwise clean active copy is refused with a clear message (fail closed)", async () => {
+    for (const [field, size] of [["hook", 201], ["headline", 121], ["primary_text", 601], ["cta", 41]] as const) {
+      const p = JSON.parse(JSON.stringify(KOPI_ROBUSTA_IMPROVED));
+      p[field] = "a".repeat(size);
+      currentSupabase = buildSupabase({ aiProposal: p, product: PRODUCT });
+      const result = await submitForApprovalAction("c1");
+      expect(result.error).toMatch(/melebihi batas panjang/);
+      expect(result.error).toContain(`${size}/`);
+      expectNothingWritten();
+    }
+  });
+
+  it("updateCampaignCopyAction rejects over-long copy on the server and writes nothing", async () => {
+    currentSupabase = buildSupabase({ aiProposal: KOPI_ROBUSTA_IMPROVED, product: PRODUCT });
+    const limits = { hook: 200, headline: 120, primaryText: 600, cta: 40 };
+    for (const field of Object.keys(limits) as (keyof typeof limits)[]) {
+      const form = new FormData();
+      form.set("hook", "h");
+      form.set("headline", "j");
+      form.set("primaryText", "p");
+      form.set("cta", "c");
+      form.set(field, "a".repeat(limits[field] + 1));
+      const r = await updateCampaignCopyAction("c1", { error: null }, form);
+      expect(r.error).toMatch(/melebihi batas panjang/);
+    }
+    expect(currentSupabase.campaignUpdate).not.toHaveBeenCalled();
+  });
+
+  it("updateCampaignCopyAction accepts copy exactly at the limits", async () => {
+    currentSupabase = buildSupabase({ aiProposal: KOPI_ROBUSTA_IMPROVED, product: PRODUCT });
+    const form = new FormData();
+    form.set("hook", "a".repeat(200));
+    form.set("headline", "a".repeat(120));
+    form.set("primaryText", "a".repeat(600));
+    form.set("cta", "a".repeat(40));
+    expect((await updateCampaignCopyAction("c1", { error: null }, form)).error).toBeNull();
+  });
+
   it("no dead end: after updateCampaignCopyAction cleans the active copy, the same campaign can be submitted", async () => {
     const bad = JSON.parse(JSON.stringify(KOPI_ROBUSTA_IMPROVED));
     bad.hook = "Cepat kaya dengan kopi";
