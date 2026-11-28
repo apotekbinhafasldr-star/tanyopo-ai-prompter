@@ -20,6 +20,8 @@ import {
   goalLabel,
 } from "@/lib/utils/format";
 import { RegenerateProposalButton } from "@/features/campaigns/regenerate-button";
+import { ProposalRecoveryCard } from "@/features/campaigns/proposal-recovery-card";
+import { classifyStoredProposal } from "@/lib/campaigns/proposal-recovery";
 import { CampaignCopyEditor } from "@/features/campaigns/copy-editor";
 import { CampaignSubmitProvider, SubmitForApprovalButton } from "@/features/campaigns/submit-button";
 import { ApprovalDecideButtons } from "@/features/approvals/decide-buttons";
@@ -380,7 +382,10 @@ export default async function CampaignDetailPage({
     readinessPanel = <LaunchReadinessPanel readiness={readiness} preview={readinessPreview} />;
   }
 
-  const proposal = campaign.ai_proposal as CampaignProposal | null;
+  // A stored proposal that is not an object (string/array) is unusable: treat it like "no proposal" so the page shows
+  // the recovery card instead of reading fields from it. null/{}/incomplete are explained by the same card.
+  const storedShape = classifyStoredProposal(campaign.ai_proposal);
+  const proposal = storedShape === "MALFORMED" ? null : (campaign.ai_proposal as CampaignProposal | null);
 
   // Where the strategy came from (recorded job row, tenant-scoped by RLS and by
   // this filter) and what the rule-based quality gate says about it.
@@ -807,13 +812,17 @@ export default async function CampaignDetailPage({
       ) : null}
 
       {!proposal ? (
-        <Card>
-          <CardContent className="p-6 text-sm text-muted-foreground">
-            Belum ada proposal AI untuk campaign ini.
-          </CardContent>
-        </Card>
+        <ProposalRecoveryCard
+          campaignId={id}
+          shape={storedShape === "MALFORMED" ? "MALFORMED" : "MISSING"}
+          role={session.role}
+          status={campaign.status}
+        />
       ) : (
         <>
+          {storedShape === "INCOMPLETE" ? (
+            <ProposalRecoveryCard campaignId={id} shape="INCOMPLETE" role={session.role} status={campaign.status} />
+          ) : null}
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0">
               <div className="flex flex-wrap items-center gap-2">
