@@ -7,6 +7,8 @@ export const loginSchema = z.object({
 
 export type LoginInput = z.infer<typeof loginSchema>;
 
+export const ACCEPT_LEGAL_ERROR = "Anda harus menyetujui Syarat & Ketentuan untuk mendaftar.";
+
 export const registerSchema = z.object({
   nama: z.string().trim().min(2, "Nama minimal 2 karakter").max(120),
   namaUsaha: z.string().trim().min(2, "Nama bisnis minimal 2 karakter").max(120),
@@ -15,17 +17,15 @@ export const registerSchema = z.object({
     .string()
     .min(8, "Kata sandi minimal 8 karakter")
     .max(72, "Kata sandi maksimal 72 karakter"),
-  // Explicit acceptance at sign-up. Only the literal `true` passes: a missing,
-  // false or any other value is rejected. The browser sends "on" for a checked
-  // checkbox, which the action normalises to `true` before parsing. Enforced
-  // here (server side) so a direct invocation of registerAction cannot skip it.
-  // The message text is kept as-is for now (a locked test pins it). Persistence
-  // (Paket 3): after signUp the server records TERMS/ACCEPTED (version + server
-  // time) via lib/consent/signup-legal.ts, and records PRIVACY_NOTICE/DELIVERED
-  // only when the form actually showed the notice (privacyNoticeVersion field).
-  // Neither is a PDP consent. The value itself is never stored by this schema.
+  // Explicit acceptance of the Terms & Conditions ONLY. The Privacy Policy is a notice shown separately on the form;
+  // it is not accepted through this field. Only the literal `true` passes: a missing, false or any other value is
+  // rejected. The browser sends "on" for a checked checkbox, which the action normalises to `true` before parsing.
+  // Enforced here (server side) so a direct invocation of registerAction cannot skip it. The field name stays
+  // `acceptLegal` (e2e and server contract). Persistence (Paket 3): after signUp the server records TERMS/ACCEPTED
+  // (version + server time) via lib/consent/signup-legal.ts, and PRIVACY_NOTICE/DELIVERED only when the form posted
+  // the current privacyNoticeVersion. Neither is a PDP consent. The value itself is never stored by this schema.
   acceptLegal: z.literal(true, {
-    error: "Anda harus menyetujui Syarat & Ketentuan dan Kebijakan Privasi untuk mendaftar.",
+    error: ACCEPT_LEGAL_ERROR,
   }),
 });
 

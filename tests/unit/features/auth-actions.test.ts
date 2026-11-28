@@ -103,7 +103,8 @@ describe("registerAction — explicit Terms/Privacy acceptance (server-side)", (
   ])("rejects %s acceptance without reaching Supabase Auth", async (_label, value) => {
     const result = await registerAction({ error: null }, registerFormData({}, value));
 
-    expect(result.error).toMatch(/Syarat & Ketentuan dan Kebijakan Privasi/);
+    expect(result.error).toBe("Anda harus menyetujui Syarat & Ketentuan untuk mendaftar.");
+    expect(result.error).not.toMatch(/Privasi|Privacy|PDP/i);
     expect(result.info).toBeUndefined();
     expect(signUpMock).not.toHaveBeenCalled();
   });

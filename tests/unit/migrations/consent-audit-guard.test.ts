@@ -172,8 +172,10 @@ describe("Paket 3 migrasi: guard audit", () => {
 });
 
 describe("Paket 3: lingkup aplikasi", () => {
-  it("halaman legal publik, label checkbox, dan skema tidak diubah oleh Paket 3 (UI terkunci ditunda)", () => {
-    expect(read("schemas/auth.ts")).toMatch(/menyetujui Syarat & Ketentuan dan Kebijakan Privasi/);
+  it("skema pendaftaran hanya meminta penerimaan Syarat & Ketentuan (Privasi = pemberitahuan terpisah) dan form tidak memuat kata consent", () => {
+    const schema = read("schemas/auth.ts");
+    expect(schema).toMatch(/menyetujui Syarat & Ketentuan untuk mendaftar/);
+    expect(schema).not.toMatch(/menyetujui[^"]*(Kebijakan Privasi|Privacy)/);
     expect(read("features/auth/register-form.tsx")).not.toMatch(/consent|legalVersionShown/i);
   });
 
