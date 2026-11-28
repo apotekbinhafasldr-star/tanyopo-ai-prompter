@@ -1,17 +1,43 @@
 import "server-only";
 
-import { timingSafeEqual } from "node:crypto";
-import { serverEnv } from "@/lib/env";
+import { createHash, timingSafeEqual } from "node:crypto";
+import { publicEnv, serverEnv } from "@/lib/env";
+import { evaluatePaymentEnvironment } from "@/lib/billing/providers/payment-env-guard";
+import type { PaymentEnvStamp } from "@/lib/billing/payment-env-stamp";
 import {
   PaymentProviderConfigError,
   type CheckoutSessionInput,
   type CheckoutSessionResult,
   type ParsedWebhookEvent,
   type PaymentProvider,
+  type PaymentReasonCode,
   type RemotePaymentStatus,
+  type VerifiedPayment,
+  type VerifiedPaymentStatus,
 } from "@/lib/billing/payment-provider";
 
 const XENDIT_API_BASE = "https://api.xendit.co";
+
+/** Hard ceilings so a slow or hostile gateway answer can never hold a request open or exhaust memory. */
+const REQUEST_TIMEOUT_MS = 5_000;
+const MAX_RESPONSE_BYTES = 64 * 1024;
+const ORDER_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * D3 — sandbox key prefix + the two-way database guard (Xendit has no live mode in this codebase: a production key is
+ * refused). Returns the proven database project ref, or null when the adapter must stay OFF.
+ */
+function resolveXenditRuntimeRef(): string | null {
+  const { apiKey, webhookSecret } = serverEnv.payment;
+  if (!apiKey || !apiKey.startsWith("xnd_development_") || !webhookSecret) return null;
+  const guard = evaluatePaymentEnvironment({
+    mode: "sandbox",
+    supabaseUrl: publicEnv.supabaseUrl,
+    sandboxRefs: serverEnv.payment.sandboxDbRefs,
+    serviceKey: serverEnv.supabaseSecretKey,
+  });
+  return guard.ok ? guard.ref : null;
+}
 
 /**
  * Batch B11 — Xendit adapter, SANDBOX ONLY by explicit founder mandate
@@ -46,8 +72,12 @@ export class XenditPaymentProvider implements PaymentProvider {
   readonly name = "xendit";
 
   isConfigured(): boolean {
-    const { apiKey, webhookSecret } = serverEnv.payment;
-    return !!apiKey && apiKey.startsWith("xnd_development_") && !!webhookSecret;
+    return resolveXenditRuntimeRef() !== null;
+  }
+
+  runtimeEnvironment(): PaymentEnvStamp | null {
+    const dbRef = resolveXenditRuntimeRef();
+    return dbRef ? { env: "sandbox", dbRef } : null;
   }
 
   private requireConfig(): { apiKey: string } {
@@ -129,6 +159,85 @@ export class XenditPaymentProvider implements PaymentProvider {
     return mapXenditStatus(data.status);
   }
 
+  /**
+   * D3 phase C — asks Xendit server-to-server for the authoritative state of the invoice created for one of OUR
+   * transactions (found by external_id = our transaction id), so activation never depends on a webhook body. Fails closed:
+   * any timeout, non-2xx, oversized / non-JSON answer, zero or several matching invoices, or a PAID answer without the
+   * invoice id, a paid amount or IDR currency THROWS. Unrecognised statuses are UNKNOWN (never PAID, never used to close).
+   * Field names (`paid_amount`, `SETTLED`) are NOT yet proven against the Xendit sandbox (see docs).
+   */
+  async getVerifiedPayment(orderId: string): Promise<VerifiedPayment> {
+    const { apiKey } = this.requireConfig();
+    const fail = (message: string, code: PaymentReasonCode): never => {
+      throw new PaymentProviderConfigError(this.name, message, code);
+    };
+
+    // order_id ends up in a query string: only our own UUID shape is ever allowed there.
+    if (!ORDER_ID_PATTERN.test(orderId)) return fail("order_id tidak valid.", "ORDER_MISMATCH");
+
+    let response: Response;
+    try {
+      response = await fetch(`${XENDIT_API_BASE}/v2/invoices?external_id=${encodeURIComponent(orderId)}`, {
+        headers: { Authorization: this.authHeader(apiKey), Accept: "application/json" },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        cache: "no-store",
+      });
+    } catch (error) {
+      const timedOut = error instanceof DOMException && error.name === "TimeoutError";
+      return fail("Tidak dapat menghubungi Xendit.", timedOut ? "GATEWAY_TIMEOUT" : "GATEWAY_UNREACHABLE");
+    }
+    if (!response.ok) return fail(`Gagal mengambil status pembayaran dari Xendit (HTTP ${response.status}).`, "GATEWAY_REJECTED");
+
+    const text = await response.text();
+    if (text.length > MAX_RESPONSE_BYTES) return fail("Respons Xendit terlalu besar.", "RESPONSE_NOT_JSON");
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return fail("Respons Xendit bukan JSON yang valid.", "RESPONSE_NOT_JSON");
+    }
+
+    // The list endpoint answers an array. Exactly ONE invoice for this external_id is acceptable; zero or several is ambiguous.
+    const matching = (Array.isArray(parsed) ? parsed : [parsed]).filter(
+      (item): item is Record<string, unknown> =>
+        typeof item === "object" && item !== null && !Array.isArray(item) && (item as Record<string, unknown>).external_id === orderId,
+    );
+    if (matching.length !== 1) return fail("Invoice Xendit untuk order ini tidak ditemukan atau ganda.", "ORDER_MISMATCH");
+    const invoice = matching[0];
+
+    const invoiceId = typeof invoice.id === "string" && invoice.id.length > 0 ? invoice.id : null;
+    const rawStatus = typeof invoice.status === "string" && invoice.status.length > 0 ? invoice.status : null;
+    if (!invoiceId) return fail("Respons Xendit tanpa id invoice.", "REFERENCE_MISSING");
+    if (!rawStatus) return fail("Respons status Xendit tidak lengkap.", "STATUS_INCOMPLETE");
+
+    const status = mapXenditVerifiedStatus(rawStatus);
+    const currency = typeof invoice.currency === "string" && invoice.currency.length > 0 ? invoice.currency : null;
+    const paidAmount = invoice.paid_amount;
+    const invoiceAmount = invoice.amount;
+    let amount = 0;
+    if (status === "PAID") {
+      if (currency === null) return fail("Respons Xendit tanpa mata uang.", "CURRENCY_MISSING");
+      if (currency !== "IDR") return fail("Mata uang Xendit bukan IDR.", "CURRENCY_NOT_IDR");
+      if (typeof paidAmount !== "number" || !Number.isFinite(paidAmount) || paidAmount < 0) {
+        return fail("Respons Xendit tanpa nominal terbayar.", "AMOUNT_MISSING");
+      }
+      amount = paidAmount;
+    } else if (typeof invoiceAmount === "number" && Number.isFinite(invoiceAmount) && invoiceAmount >= 0) {
+      amount = invoiceAmount;
+    }
+
+    return {
+      orderId,
+      eventRef: `gw:${createHash("sha256").update(`${invoiceId}|${rawStatus}`).digest("hex").slice(0, 40)}`,
+      eventRefBasis: "status_only",
+      gatewayTransactionId: invoiceId,
+      status,
+      amount,
+      currency: currency ?? "IDR",
+      rawStatus,
+    };
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept named/typed so callers get real arity checking against the PaymentProvider interface, same convention as NullPaymentProvider.
   async cancelSubscription(externalSubscriptionId: string): Promise<void> {
     // Invoice-only mode (B11 sandbox scope): there is no persistent
@@ -197,6 +306,21 @@ interface XenditInvoiceCallbackPayload {
   amount?: number;
   paid_amount?: number;
   currency?: string;
+}
+
+/** D3: stricter mapping for the server-verified answer — anything not explicitly recognised is UNKNOWN, never FAILED or PAID. */
+function mapXenditVerifiedStatus(status: string): VerifiedPaymentStatus {
+  switch (status) {
+    case "PAID":
+    case "SETTLED":
+      return "PAID";
+    case "EXPIRED":
+      return "EXPIRED";
+    case "PENDING":
+      return "PENDING";
+    default:
+      return "UNKNOWN";
+  }
 }
 
 function mapXenditStatus(status: string | undefined): RemotePaymentStatus {

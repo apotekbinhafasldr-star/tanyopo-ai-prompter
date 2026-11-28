@@ -2,7 +2,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getPaymentProvider } from "@/lib/billing/get-payment-provider";
-import { unknownStatusMarker } from "@/lib/billing/webhook-markers";
+import { envMismatchMarker, unknownStatusMarker } from "@/lib/billing/webhook-markers";
 import type { WebhookRequestContext } from "@/lib/billing/payment-provider";
 import { canVerifyServerSide, verifyAndSettle } from "@/services/payment-verification";
 import type { Database, Json } from "@/types/database";
@@ -237,6 +237,12 @@ export async function processPaymentWebhook(
       case "WRONG_PROVIDER":
         await markVerifiedEvent("FAILED", "WRONG_PROVIDER");
         return { ok: false, status: 400, message: "Transaction was not created for this provider." };
+
+      case "ENV_MISMATCH":
+        // D3: created in another payment environment / database than this server. Retrying cannot fix it, so answer 200 (the
+        // gateway stops redelivering); the event row carries a queryable marker. Nothing was asked of the gateway or activated.
+        await markVerifiedEvent("FAILED", envMismatchMarker(outcome.reason));
+        return { ok: true, status: 200, message: "Environment mismatch; ignored." };
 
       case "UNVERIFIABLE":
         // Gateway timeout / error / inconsistent answer: fail closed and let the gateway retry.

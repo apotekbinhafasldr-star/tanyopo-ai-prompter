@@ -9,7 +9,14 @@ export const VERIFIED_STATUS_UNKNOWN = "VERIFIED_STATUS_UNKNOWN";
 export const VERIFIED_STATUS_NOT_PAID = "VERIFIED_STATUS_NOT_PAID";
 export const GATEWAY_VERIFICATION_FAILED_PREFIX = "GATEWAY_VERIFICATION_FAILED";
 
+/** D3: `ENV_MISMATCH:<reason>` — the transaction's environment stamp did not match this server (reason = closed set). */
+export const ENV_MISMATCH_PREFIX = "ENV_MISMATCH:";
+
 const MAX_CODE_LENGTH = 60;
+
+export function envMismatchMarker(reason: string): string {
+  return `${ENV_MISMATCH_PREFIX}${reason.replace(/[^A-Z_]/g, "").slice(0, MAX_CODE_LENGTH) || "?"}`;
+}
 
 /** `UNKNOWN_STATUS:<code>`: code = the gateway's status words, reduced to [A-Za-z0-9_/+.-] and cut to 60 chars. */
 export function unknownStatusMarker(rawStatus: string | null | undefined): string {
@@ -25,6 +32,7 @@ export function classifyWebhookError(error: unknown): WebhookHealthClass {
   if (typeof error !== "string") return null;
   if (error === VERIFIED_STATUS_UNKNOWN || error.startsWith(UNKNOWN_STATUS_PREFIX)) return "UNKNOWN";
   if (error === GATEWAY_VERIFICATION_FAILED_PREFIX || error.startsWith(`${GATEWAY_VERIFICATION_FAILED_PREFIX}:`)) return "VERIFICATION_FAILED";
+  if (error.startsWith(ENV_MISMATCH_PREFIX)) return "VERIFICATION_FAILED";
   if (error === VERIFIED_STATUS_NOT_PAID) return "NOT_PAID";
   return null;
 }
