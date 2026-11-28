@@ -251,6 +251,11 @@
       "file": "20261127110000_prompter_consent_owner_audit_redaction.sql",
       "group": "consent",
       "reason": "Revisi aditif Paket 3: persetujuan koneksi hanya Owner tenant dan jalur sempit operator untuk anonimisasi PII audit; belum diterapkan di mana pun; di luar alur QA-2 sampai disetujui Founder."
+    },
+    {
+      "file": "20261128090000_prompter_retention_vault.sql",
+      "group": "retensi",
+      "reason": "Brankas arsip minimal bukti billing (4r Opsi A): trigger BEFORE DELETE/TRUNCATE pada tiga tabel billing LINOE; belum diterapkan di mana pun; di luar alur QA-2 sampai disetujui Founder (QA reset akan menambah isi brankas QA)."
     }
   ],
   "forbidden": {

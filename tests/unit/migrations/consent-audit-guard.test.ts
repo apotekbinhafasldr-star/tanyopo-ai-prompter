@@ -21,9 +21,13 @@ describe("Paket 3 migrasi: lingkup", () => {
     expect(existsSync(path.join(root, DOWN))).toBe(true);
     const files = readdirSync(path.join(root, "supabase/migrations")).sort();
     expect(files.some((f) => f.endsWith(".down.sql"))).toBe(false);
-    expect(files[files.length - 1]).toBe("20261127110000_prompter_consent_owner_audit_redaction.sql");
-    expect(files[files.length - 2]).toBe("20261127100000_prompter_consent_audit_guard.sql");
-    expect(files[files.length - 3]).toBe("20261126100000_prompter_storage_bucket_l1.sql");
+    // 4r (20261128090000, retention vault) is the next migration after Paket 3; the Paket 3 files keep their relative order.
+    expect(files.slice(-4)).toEqual([
+      "20261126100000_prompter_storage_bucket_l1.sql",
+      "20261127100000_prompter_consent_audit_guard.sql",
+      "20261127110000_prompter_consent_owner_audit_redaction.sql",
+      "20261128090000_prompter_retention_vault.sql",
+    ]);
   });
 
   it("transaksi eksplisit dengan lock_timeout dan statement_timeout (up dan down)", () => {

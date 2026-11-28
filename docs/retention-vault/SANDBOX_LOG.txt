@@ -1,0 +1,190 @@
+# SANDBOX log 4r retention vault (PostgreSQL 16 lokal, data sintetis, skema Supabase = stub; bukan REAL). CI menjalankan PostgreSQL 16 dan 17.
+# 2026-11-27T17:34:18Z
+PostgreSQL major 16 confirmed (server_version_num=160015)
+SANDBOX: PostgreSQL server_version_num=160015, stub auth/tenants/role (bukan Supabase nyata); tabel billing dari migrasi asli repo
+PASS: T00 tabel transaksi, webhook, dan policy audit diekstrak dari migrasi asli repo
+PASS: T00 rantai asli (B10..P0-2) + pemilik non-superuser siap (template dengan dan tanpa P0-2)
+PASS: S1 keadaan awal: nol objek 4r
+PASS: S1 rantai membawa kolom transaction_id (P0-2) dan FK NO ACTION ke transaksi
+PASS: T22 apply pertama berhasil (sebagai pemilik non-superuser)
+PASS: T22 apply kedua idempoten (katalog sama)
+PASS: T22 apply ketiga idempoten
+PASS: T15 RLS dan policy tiga tabel billing identik sebelum/sesudah 4r
+PASS: T17 relforcerowsecurity tiga tabel billing tidak berubah (snapshot ikut RLSSNAP) dan tidak FORCE
+PASS: T18 relacl dan ACL kolom tiga tabel billing identik sebelum/sesudah 4r
+PASS: T26 badan fn_apply_verified_payment, fn_create_ai_job_if_entitled, fn_begin_checkout, fn_resolve_review_payment tidak berubah
+PASS: S1 baris tenants dan baris billing tidak berubah oleh migrasi
+PASS: T15 vault: RLS aktif dan nol policy
+PASS: S1 vault tanpa foreign key (keluar maupun masuk)
+PASS: S1 retain_until nullable tanpa default (tidak ada durasi retensi)
+PASS: S1 tidak ada fungsi purge/penghapus otomatis dan tidak ada pg_cron job baru
+PASS: T13 status(): ok, penyalin 3/3 always, penolak TRUNCATE 3/3 always, penjaga vault 2, vault kosong
+PASS: T19 vault, urutan identity, dan 4 fungsi: nol hak untuk public/anon/authenticated/service_role
+PASS: T19 ACL vault hanya pemilik
+PASS: T21 fn capture: SECURITY DEFINER, pemilik mig4r, search_path berakhir pg_temp
+PASS: T21 tiga fungsi lain SECURITY INVOKER dengan search_path berakhir pg_temp
+PASS: T21 tidak ada fungsi yang meng-UPDATE/DELETE vault
+PASS: T20 service_role tetap dapat DELETE tenants (kontrak produk lain tidak berubah)
+PASS: T1 hapus tenant A oleh service_role: vault = 1 langganan + 2 transaksi + 1 invoice, semua TENANT_CASCADE
+PASS: T1 deleted_by = service_role (session_user, tanpa PII)
+PASS: T1 baris billing tenant A hilang dari tabel sumber (perilaku cascade tetap)
+PASS: T12 tenant B utuh (1 langganan/1 invoice/1 transaksi) dan vault tidak memuat tenant_id B
+PASS: T3 invoice tertaut transaksi (FK NO ACTION): hapus tenant berhasil, transaction_id tersalin dan transaksinya juga tersalin
+PASS: T5 pk dan tenant_id kolom vault benar
+PASS: S2 capture_txid sama untuk satu pernyataan DELETE (satu transaksi), archived_at terisi, retain_until NULL, allowlist_ver 1
+PASS: T5 kunci row_data langganan = allowlist persis
+PASS: T5 kunci row_data invoice = allowlist persis
+PASS: T5 kunci row_data transaksi = allowlist persis
+PASS: T5 nol kanari (kolom bebas/rahasia) di seluruh vault
+PASS: T5 nilai penting tersalin utuh (nominal, pengenal penyedia, rencana)
+PASS: T5 hapus tenant B dengan kolom baru terpasang berhasil
+PASS: T5 kolom baru future_note tidak tersalin (allowlist, bukan denylist)
+PASS: T1 vault akhir: tenant A 4 baris + tenant B 4 baris (1 langganan, 1 invoice, 2 transaksi)
+PASS: T1 authenticated dengan hak hapus (policy uji) menghapus tenant B: berhasil
+PASS: T1 vault tenant B: 3 baris, deleted_by authenticated, TENANT_CASCADE
+PASS: T1 pemilik/superuser menghapus tenant A: vault 4 baris, deleted_by postgres
+PASS: T2 DELETE langsung per tabel: ROW_DELETE tersalin (invoice, transaksi, langganan)
+PASS: T2 source_pk langganan = tenant_id; transaksi = id
+PASS: T2 hapus massal 10.000 baris: vault +10.000 (595 ms)
+PASS: T2 hapus massal 10.000 baris selesai < 120 s (595 ms; satu INSERT per baris, volume produksi jauh lebih kecil)
+PASS: T6 tanpa kolom transaction_id: hapus tenant berhasil tanpa galat
+PASS: T6 row_data invoice tanpa transaction_id (kolom belum ada), vault 4 baris
+PASS: T4 vault di-rename: DELETE tenants ditolak (fail-closed)
+PASS: T4 vault di-rename: galat LR001
+PASS: T4 vault di-rename: pesan galat tanpa isi baris (nol kanari/nilai)
+PASS: T4 vault di-rename: tenant A tetap ada
+PASS: T4 vault di-rename: baris billing tenant A utuh (tidak ada anak hilang)
+PASS: T4 vault di-rename: vault tidak bertambah (atomik)
+PASS: T4 INSERT dicabut dari pemilik: DELETE tenants ditolak (fail-closed)
+PASS: T4 INSERT dicabut dari pemilik: galat LR001
+PASS: T4 INSERT dicabut dari pemilik: pesan galat tanpa isi baris (nol kanari/nilai)
+PASS: T4 INSERT dicabut dari pemilik: tenant A tetap ada
+PASS: T4 INSERT dicabut dari pemilik: baris billing tenant A utuh (tidak ada anak hilang)
+PASS: T4 INSERT dicabut dari pemilik: vault tidak bertambah (atomik)
+PASS: T4 CHECK gagal (penuh/menolak): DELETE tenants ditolak (fail-closed)
+PASS: T4 CHECK gagal (penuh/menolak): galat LR001
+PASS: T4 CHECK gagal (penuh/menolak): pesan galat tanpa isi baris (nol kanari/nilai)
+PASS: T4 CHECK gagal (penuh/menolak): tenant A tetap ada
+PASS: T4 CHECK gagal (penuh/menolak): baris billing tenant A utuh (tidak ada anak hilang)
+PASS: T4 CHECK gagal (penuh/menolak): vault tidak bertambah (atomik)
+PASS: T4 kolom NOT NULL tak terpenuhi: DELETE tenants ditolak (fail-closed)
+PASS: T4 kolom NOT NULL tak terpenuhi: galat LR001
+PASS: T4 kolom NOT NULL tak terpenuhi: pesan galat tanpa isi baris (nol kanari/nilai)
+PASS: T4 kolom NOT NULL tak terpenuhi: tenant A tetap ada
+PASS: T4 kolom NOT NULL tak terpenuhi: baris billing tenant A utuh (tidak ada anak hilang)
+PASS: T4 kolom NOT NULL tak terpenuhi: vault tidak bertambah (atomik)
+PASS: T4 statement_timeout tercapai saat INSERT: DELETE tenants ditolak (fail-closed)
+PASS: T4 statement_timeout tercapai saat INSERT: galat LR001
+PASS: T4 statement_timeout tercapai saat INSERT: pesan galat tanpa isi baris (nol kanari/nilai)
+PASS: T4 statement_timeout tercapai saat INSERT: tenant A tetap ada
+PASS: T4 statement_timeout tercapai saat INSERT: baris billing tenant A utuh (tidak ada anak hilang)
+PASS: T4 statement_timeout tercapai saat INSERT: vault tidak bertambah (atomik)
+PASS: T4 DELETE langsung pada tabel billing juga fail-closed (LR001)
+PASS: T4 invoice masih ada setelah DELETE langsung yang ditolak
+PASS: T7 trigger lain mengembalikan NULL: DELETE invoice 0 baris dan vault tidak bertambah
+PASS: T7 trg_zz_retention_capture adalah BEFORE DELETE row trigger TERAKHIR (urutan abjad) pada ketiga tabel
+PASS: T7 trigger lain yang melempar galat membatalkan DELETE tenants
+PASS: T7 vault tetap kosong setelah pembatalan oleh trigger lain (salinan ikut rollback)
+PASS: T8 truncate public.prompter_subscriptions ditolak LR003
+PASS: T8 truncate public.prompter_invoices ditolak LR003
+PASS: T8 truncate public.prompter_invoices, public.prompter_payment_transactions ditolak LR003
+PASS: T8 truncate public.prompter_payment_transactions restart identity cascade ditolak LR003
+PASS: T8 truncate public.tenants cascade ditolak LR003
+PASS: T8 service_role (hak TRUNCATE default Supabase) tetap ditolak LR003
+PASS: T8 TRUNCATE vault ditolak LR004
+PASS: T8 TRUNCATE tetap ditolak walau mode replica (ENABLE ALWAYS)
+PASS: T8 tidak ada baris yang hilang setelah semua percobaan TRUNCATE
+PASS: T8 update public.prompter_retention_vault set tenant_id=tenant_id ditolak LR004 (pemilik/superuser sekalipun)
+PASS: T8 delete from public.prompter_retention_vault ditolak LR004 (pemilik/superuser sekalipun)
+PASS: T9 replica: tenant B terhapus tetapi baris billing B TIDAK hilang (cascade FK tidak berjalan; yatim) dan vault tidak bertambah
+PASS: T9 replica: DELETE langsung tetap tersalin (trigger ENABLE ALWAYS); tenant sudah tak ada = TENANT_CASCADE
+PASS: T9 pemilik DAPAT menonaktifkan trigger (jujur: bukan immutable)
+PASS: T9 status().ok = false setelah trigger dinonaktifkan (terdeteksi)
+PASS: T9 DELETE saat trigger nonaktif TIDAK tersalin (jendela break-glass; diterima tertulis di docs)
+PASS: T9 ENABLE biasa (bukan ALWAYS): status().ok=false dan capture_triggers_always=2 (celah mode replica terdeteksi)
+PASS: T9 ENABLE ALWAYS dipulihkan: ok=true, always=3
+PASS: T9 status().ok=false bila trigger senama memanggil fungsi LAIN (walau ENABLE ALWAYS)
+PASS: T9 status().ok=false bila trigger penyalin bertipe salah (BEFORE INSERT, bukan DELETE)
+PASS: T9 status().ok=false bila penolak TRUNCATE tidak ENABLE ALWAYS
+PASS: T9 setelah dipulihkan: status().ok=true
+PASS: P2-1 PK langganan yang sama tersalin dua kali (ROW_DELETE lama + TENANT_CASCADE): hitungan mentah per (tenant,tabel) = 2 (bukan dasar rekonsiliasi)
+PASS: P2-1 rekonsiliasi benar: filter archived_at >= awal langkah hapus DAN TENANT_CASCADE = 1 baris, cocok dengan hitungan tabel sumber sebelum hapus (1)
+PASS: P2-1 rekonsiliasi invoice/transaksi dengan filter yang sama = 1 dan 2 (hitungan sumber)
+PASS: T10 hitungan seluruh tabel (tenants, profil, billing, produk lain, audit) sesudah hapus tenant A identik dengan dan tanpa 4r
+PASS: T10 tabel produk lain: baris tenant A ikut hilang seperti biasa, tenant B utuh
+PASS: S3 apply oleh pemilik tanpa BYPASSRLS (punya SELECT pada tenants) berhasil
+PASS: S3 pemilik penyalin tanpa BYPASSRLS + RLS tenants aktif: alasan = UNDETERMINED (bukan label palsu), penyalinan tetap berhasil
+PASS: T11/T13 authenticated (tenant A): nol akses ke vault dan keempat fungsi (SELECT/INSERT/UPDATE/DELETE/TRUNCATE/EXECUTE ditolak: permission denied)
+PASS: T11/T13 authenticated (tenant B): nol akses ke vault dan keempat fungsi (SELECT/INSERT/UPDATE/DELETE/TRUNCATE/EXECUTE ditolak: permission denied)
+PASS: T11/T13 anon: nol akses ke vault dan keempat fungsi (SELECT/INSERT/UPDATE/DELETE/TRUNCATE/EXECUTE ditolak: permission denied)
+PASS: T16 tenant A (authenticated) hanya melihat barisnya: langganan/invoice/transaksi = 1/1/2
+PASS: T16 tenant B hanya melihat barisnya = 1/1/1
+PASS: T16 hasil identik dengan keadaan tanpa 4r (A)
+PASS: T16 tenant A (authenticated) tidak dapat menulis langsung ke tiga tabel billing (hak/policy lama utuh)
+PASS: T11 setelah semua percobaan klien vault tetap kosong
+PASS: T12 setelah A dihapus, tenant B (authenticated) tetap membaca barisnya 1/1/1 dan vault tidak memuat tenant_id B
+PASS: T14 dua tenant dihapus berurutan: vault A=4, B=3, tidak ada tenant_id lain
+PASS: T14 dua tenant dihapus PARALEL: vault A=4, B=3, nol silang (tenant_id kolom = tenant_id di row_data)
+PASS: T22 down (vault kosong) berhasil
+PASS: T22 down kedua idempoten
+PASS: T22 katalog (fungsi/kelas/trigger) kembali persis ke keadaan awal sebelum 4r
+PASS: T22 down tidak mengubah ACL/RLS/fungsi billing dan baris
+PASS: T22 apply ulang setelah down berhasil
+PASS: T22 sesudah down lalu up lagi: DELETE tenants normal dan tersalin
+PASS: T23 down menolak saat vault berisi 4 baris (bukti tidak dibuang)
+PASS: T23 penolakan down tidak mengubah apa pun (vault 4, status ok)
+PASS: T23 down dengan nilai GUC yang salah ('YA') ditolak
+PASS: T23 jalur paksa lama (linoe.drop_retention_vault) sudah TIDAK ada: ditolak
+PASS: T23 setelah semua penolakan: trigger penyalin tetap terpasang (rollback transaksi utuh), vault 4 baris
+PASS: T23 down-soft berhasil
+PASS: T23 down-soft idempoten
+PASS: T23 down-soft: vault tetap berisi 4 baris, penjaga vault (2 trigger) dan fungsi status tetap ada
+PASS: T23 down-soft: trigger penyalin dan penolak TRUNCATE hilang dari tiga tabel billing; fungsi penyalin hilang
+PASS: T23 down-soft: status() masih dapat dipanggil dan ok=false (penyalinan tidak aktif; 4b-2 tak boleh jalan)
+PASS: T23 down-soft: hapus tenant B kembali seperti sebelum 4r (tanpa salinan baru; vault tetap 4)
+PASS: T23 apply ulang setelah down-soft: isi vault 4 baris dipertahankan, status ok=true
+PASS: T23 down biasa tetap menolak setelah down-soft selama vault berisi
+PASS: T23 down dengan GUC persis berhasil (tabel brankas di-RENAME)
+PASS: P1 tabel brankas asli tidak ada lagi; tepat satu tabel arsip hasil RENAME
+PASS: P1 riwayat TIDAK hilang: tabel arsip masih berisi 4 baris (isi sama)
+PASS: P1 penjaga hanya-tambah ikut terjaga pada tabel arsip (UPDATE/DELETE/TRUNCATE ditolak LR004)
+PASS: P1 trigger penyalin dan fungsi penyalin/status hilang; fungsi penjaga tetap ada selama tabel arsip ada
+PASS: T23 down kedua setelah RENAME idempoten (tabel arsip tidak disentuh)
+PASS: P1 arsip tetap 4 baris setelah down kedua
+PASS: P1 apply ulang setelah RENAME: vault baru kosong dan berfungsi, arsip utuh 4 baris, tidak ada tabrakan nama indeks/urutan
+PASS: T23 down pada vault kosong: katalog kembali ke keadaan awal (vault dan semua fungsi hilang)
+PASS: P2-2 down menunggu DELETE berjalan (trigger dilepas dulu), lalu melihat 1 baris dan MENOLAK (tanpa balapan hitung)
+PASS: P2-2 baris arsip dari transaksi yang berjalan tetap ada dan trigger tetap terpasang
+PASS: T24 tabel billing hilang: DIBATALKAN
+PASS: T24 apply yang dibatalkan tidak meninggalkan objek (vault/trigger/fungsi)
+PASS: T24 pemilik migrasi tanpa SELECT pada tenants: DIBATALKAN
+PASS: T24 tanpa SELECT: tidak ada objek tertinggal
+PASS: T24 lock_timeout tercapai saat tabel dikunci sesi lain: gagal bersih
+PASS: T24 gagal dalam 3041 ms (lock_timeout 3 s, tidak menggantung)
+PASS: T24 lock_timeout: tidak ada objek sebagian (vault/trigger/fungsi) setelah rollback
+PASS: T25 apply: tenants nol kunci selain AccessShare
+PASS: T25 apply pertama: tiga tabel billing hanya ShareRowExclusiveLock (baca tetap jalan; tulis tertahan sebentar)
+PASS: T25 SELECT pada tabel billing tidak tertahan selama apply berlangsung (24 ms)
+PASS: T25 INSERT transaksi paralel tertahan selama kunci apply (2364 ms) lalu lanjut berhasil
+PASS: T25 apply tanpa commit (dibatalkan) tidak meninggalkan objek 4r
+PASS: T27 40 sesi fn_apply_verified_payment (8 tenant x 5) + 4 DELETE tenants paralel: 8 applied + 32 ALREADY_PROCESSED, tanpa deadlock
+PASS: T27 tepat 1 invoice per transaksi terbayar (8) dan tenant yang dihapus paralel: vault +12 baris (4 x (1 langganan + 2 transaksi) = 12), nol anak yatim
+PASS: T27 dua DELETE tenants paralel pada tenant yang sama: satu menang (1+0), tanpa galat
+PASS: T27 vault tidak ganda: tepat 4 baris (1 langganan + 1 invoice + 2 transaksi), semua tenant A
+PASS: T28a DELETE tenant (tertahan) lalu INSERT checkout PENDING: INSERT gagal FK (hasil serial, tanpa baris yatim)
+PASS: T28a vault = baris yang benar-benar terhapus (1 langganan) dan tidak ada transaksi yatim
+PASS: T28b INSERT PENDING (tertahan) lalu DELETE tenant: DELETE menunggu (1440 ms) lalu berhasil
+PASS: T28b baris PENDING yang baru ikut ter-cascade dan tersalin (vault +2 = langganan + transaksi), nol anak yatim
+PASS: T29 skenario P0-2 (suite lama, tanpa diubah) lulus dengan 4r terpasang: 62 pemeriksaan
+PASS: T29 skenario B2 (suite lama, tanpa diubah) lulus dengan 4r terpasang: 60 pemeriksaan
+PASS: T29 setelah skenario P0-2: status().ok=true
+PASS: T29 setelah skenario B2 (ENABLE TRIGGER USER mereset ALWAYS): status().ok=false, capture_triggers_always=2 (terdeteksi, bukan lolos diam-diam)
+PASS: T29 setelah ENABLE ALWAYS dipulihkan: status().ok=true
+PASS: T30 SQL reset QA (dicetak skrip repo) berjalan dengan 4r terpasang
+PASS: T30 tenant QA terhapus dan vault QA bertambah (langganan + transaksi = 2) sesuai catatan: vault QA tumbuh
+PASS: T29b suite lama b1-checkout (tanpa diubah, 4r terpasang pada semua DB uji): 20 pemeriksaan lulus
+PASS: T29b suite lama plan-tampering (tanpa diubah, 4r terpasang pada semua DB uji): 14 pemeriksaan lulus
+PASS: T29b suite lama b2-double-payment (tanpa diubah, 4r terpasang pada semua DB uji): 18 pemeriksaan lulus
+PASS: T29b suite lama b4-payment-alerts (tanpa diubah, 4r terpasang pada semua DB uji): 37 pemeriksaan lulus
+PASS: T29b suite lama b4-2-notifications (tanpa diubah, 4r terpasang pada semua DB uji): 23 pemeriksaan lulus
+ALL PASSED (185 pemeriksaan)
