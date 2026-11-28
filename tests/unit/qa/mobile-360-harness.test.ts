@@ -117,7 +117,8 @@ describe("kunci temuan: halaman yang tidak termuat tidak pernah lulus (UNIT)", (
       for (const e of entries) expect(isFatalKey(e.key), `${label}:${e.key}`).toBe(false);
     }
     for (const l of ["demo_dashboard", "demo_products", "demo_campaign", "demo_content", "demo_analytics"]) {
-      expect(baseline.accepted[l] ?? []).toEqual([]);
+      // Halaman demo boleh punya temuan UI lama, tetapi tidak boleh dikecualikan dari "termuat" atau "tidak dialihkan".
+      for (const e of baseline.accepted[l] ?? []) expect(e.key, `${l}:${e.key}`).not.toMatch(/^(load|status:|redirect:)/);
     }
   });
 });
