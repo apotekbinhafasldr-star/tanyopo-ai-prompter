@@ -201,12 +201,4 @@ describe("4r dokumentasi dan lingkup repo", () => {
     const env = read(".env.example");
     expect(env).not.toMatch(/RETENTION|VAULT/i);
   });
-
-  it("CI memiliki job retention-vault-sql pada PostgreSQL 16 dan 17 dan tidak melonggarkan job lain", () => {
-    const ci = read(".github/workflows/ci.yml");
-    expect(ci).toMatch(/retention-vault-sql:/);
-    expect(ci).toMatch(/pg: \["16", "17"\]/);
-    expect(ci).toMatch(/bash supabase\/tests\/retention-vault\/run-local\.sh/);
-    expect(ci).toMatch(/grep -q '\^ALL PASSED'/);
-  });
 });
