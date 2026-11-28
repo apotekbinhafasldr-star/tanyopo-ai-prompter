@@ -25,6 +25,7 @@ import {
 } from "@/lib/campaigns/campaign-roles";
 import { evaluateCopyGuard, buildCopySnapshot, COPY_SNAPSHOT_KEY } from "@/lib/campaigns/copy-guard";
 import { readCopyGuardContext } from "@/services/copy-guard-context";
+import { campaignHasManualMetrics } from "@/features/campaigns/manual-metrics-actions";
 import { runAiJob } from "@/services/ai-jobs";
 import {
   syncChannelCampaigns,
@@ -498,17 +499,19 @@ export async function deleteCampaignAction(campaignId: string): Promise<Campaign
     return { error: "Hanya campaign berstatus Draft yang bisa dihapus. Batalkan pengajuan terlebih dahulu bila perlu." };
   }
 
-  for (const table of ["prompter_marketing_metrics", "prompter_manual_ad_metrics"] as const) {
-    const { data: rows, error } = await supabase
-      .from(table)
-      .select("id")
-      .eq("tenant_id", session.tenantId)
-      .eq("master_campaign_id", campaignId)
-      .limit(1);
-    if (error || !Array.isArray(rows)) return { error: "Data performa campaign tidak dapat diperiksa. Tidak ada yang dihapus, coba lagi." };
-    if (rows.length > 0) {
-      return { error: "Campaign ini memiliki data performa atau pengeluaran iklan, sehingga tidak bisa dihapus." };
-    }
+  const { data: metricRows, error: metricsError } = await supabase
+    .from("prompter_marketing_metrics")
+    .select("id")
+    .eq("tenant_id", session.tenantId)
+    .eq("master_campaign_id", campaignId)
+    .limit(1);
+  // Manual metrics live behind their own module (they are kept apart from this file on purpose).
+  const manual = await campaignHasManualMetrics(campaignId);
+  if (metricsError || !Array.isArray(metricRows) || manual === "unreadable") {
+    return { error: "Data performa campaign tidak dapat diperiksa. Tidak ada yang dihapus, coba lagi." };
+  }
+  if (metricRows.length > 0 || manual === "yes") {
+    return { error: "Campaign ini memiliki data performa atau pengeluaran iklan, sehingga tidak bisa dihapus." };
   }
 
   // Mark any PENDING approval of this campaign EXPIRED first (owner-only UPDATE under RLS): nothing is left

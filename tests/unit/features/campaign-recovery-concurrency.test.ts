@@ -890,7 +890,7 @@ describe("server-side role and lifecycle guard on submit, media, schedule and de
       },
     );
     const r = await scheduleChannelCampaignAction("c1", { error: null }, SCHED);
-    expect(r.error).toMatch(/baru berubah status/);
+    expect(r.error).toMatch(/baru saja berubah status/);
     expect(db.tables.prompter_channel_campaigns[0].scheduled_at).toBeUndefined();
   });
 

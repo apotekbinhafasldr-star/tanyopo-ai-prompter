@@ -64,6 +64,26 @@ function mapDbError(error: { code?: string | null; message?: string | null }): s
   }
 }
 
+/**
+ * READ-ONLY existence check used by deleteCampaignAction (a server-to-server call, no UI): deleting a campaign
+ * cascades to its manual metric rows, so a campaign that has any must not be deleted. Tenant-bound through the
+ * caller's own session. "unreadable" means the answer is unknown and the caller must refuse (fail closed).
+ * A database where the table does not exist yet has no such rows ("no").
+ */
+export async function campaignHasManualMetrics(campaignId: string): Promise<"yes" | "no" | "unreadable"> {
+  const session = await requireSessionContext();
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("prompter_manual_ad_metrics")
+    .select("id")
+    .eq("tenant_id", session.tenantId)
+    .eq("master_campaign_id", campaignId)
+    .limit(1);
+  if (error) return isManualMetricsTableMissing(error) ? "no" : "unreadable";
+  if (!Array.isArray(data)) return "unreadable";
+  return data.length > 0 ? "yes" : "no";
+}
+
 type Session = Awaited<ReturnType<typeof requireSessionContext>>;
 
 async function authorize(): Promise<{ session: Session } | { error: string }> {
