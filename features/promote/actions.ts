@@ -7,6 +7,7 @@ import { promoteWizardSchema, quickPromoteSchema, channelOptions } from "@/schem
 import { CampaignProposalGenerationSchema, normalizeProposalAdditions, withPrimaryCandidate, withRecommendedChannels } from "@/schemas/ai/campaign-proposal";
 import { buildSystemPreamble, buildCampaignProposalPrompt } from "@/lib/ai/prompts";
 import { runAiJob } from "@/services/ai-jobs";
+import { checkCampaignCountry, checkCampaignFlight } from "@/lib/campaigns/campaign-input-checks";
 import { syncChannelCampaigns } from "@/services/channel-campaigns";
 import { getTenantChannelPerformance } from "@/services/channel-performance";
 import type { Channel, Json, PrimaryGoal } from "@/types/database";
@@ -67,6 +68,11 @@ export async function generateCampaignDraftAction(
     ownHostsFromEnv(),
   );
   if (!destination.ok) return { error: destination.message };
+
+  // Country and run length are checked BEFORE the (paid) AI call: a launch that Meta would refuse must be visible
+  // now, not after the Owner approved (F-03). Same resolvers the launch uses.
+  const earlyCheck = checkEarlyLaunchInputs(parsed.data);
+  if (earlyCheck) return { error: earlyCheck };
 
   const session = await requireSessionContext();
   const supabase = await createClient();
@@ -216,6 +222,11 @@ export async function generateQuickCampaignDraftAction(
   );
   if (!destination.ok) return { error: destination.message };
 
+  // Country and run length are checked BEFORE the (paid) AI call: a launch that Meta would refuse must be visible
+  // now, not after the Owner approved (F-03). Same resolvers the launch uses.
+  const earlyCheck = checkEarlyLaunchInputs(parsed.data);
+  if (earlyCheck) return { error: earlyCheck };
+
   const session = await requireSessionContext();
   const supabase = await createClient();
 
@@ -324,4 +335,24 @@ export async function generateQuickCampaignDraftAction(
   await syncChannelCampaigns(supabase, session.tenantId, campaign.id, recommendedChannels, proposal.budget_allocation);
 
   redirect(`/campaigns/${campaign.id}?from=quick-promote`);
+}
+
+function checkEarlyLaunchInputs(data: {
+  targetCountry?: string;
+  dailyBudget?: number;
+  totalBudget?: number;
+  durationDays?: number;
+  channels?: string[];
+}): string | null {
+  const country = checkCampaignCountry({
+    country: data.targetCountry,
+    paidIntent: (data.dailyBudget ?? 0) > 0 || (data.totalBudget ?? 0) > 0,
+  });
+  if (!country.ok) return country.message;
+  const flight = checkCampaignFlight({
+    channels: data.channels,
+    durationDays: data.durationDays,
+    totalBudget: data.totalBudget,
+  });
+  return flight.ok ? null : flight.message;
 }
