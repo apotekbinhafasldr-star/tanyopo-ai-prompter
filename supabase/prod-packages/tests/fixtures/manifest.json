@@ -1,0 +1,236 @@
+{
+  "schema": 1,
+  "project_ref": "wjjyqovhmwenbcvbnkgx",
+  "migration_role": "linoe_migrator",
+  "approved_privileged_role": false,
+  "packages": {
+    "fx-n": {
+      "title": "FIXTURE sintetis fx-n (gladi bersih: pola L1 + Paket 3, bentuk N). BUKAN migrasi nyata.",
+      "fixture": true,
+      "shape": "native-txn",
+      "version": "20990101000000",
+      "name": "fixture_native_txn",
+      "ledger_verify": true,
+      "timeouts": {
+        "lock_ms": 3000,
+        "statement_ms": 30000
+      },
+      "guard_tags": [
+        "FX GUARD GAGAL",
+        "FX AUDIT TERKUNCI",
+        "DIBATALKAN"
+      ],
+      "probes": {
+        "schemas": [
+          "public"
+        ],
+        "ledger_insert": true
+      },
+      "migration": {
+        "path": "supabase/prod-packages/tests/fixtures/fx-n/migration/20990101000000_fixture_native_txn.sql",
+        "sha256": "c9b80b904fed46fe645dbab2d541e80c54b6dda50164393c0a14696abe972f45"
+      },
+      "rollback": {
+        "path": "supabase/prod-packages/tests/fixtures/fx-n/rollback/20990101000000_fixture_native_txn.down.sql",
+        "sha256": "d92d97d36af6bda19c1f263b8aa861749708374159722778258e18019beaabd7"
+      },
+      "files": {
+        "B": {
+          "path": "supabase/prod-packages/tests/fixtures/fx-n/migration/20990101000000_fixture_native_txn.sql",
+          "sha256": "c9b80b904fed46fe645dbab2d541e80c54b6dda50164393c0a14696abe972f45"
+        },
+        "E": {
+          "path": "supabase/prod-packages/tests/fixtures/fx-n/rollback/20990101000000_fixture_native_txn.down.sql",
+          "sha256": "d92d97d36af6bda19c1f263b8aa861749708374159722778258e18019beaabd7"
+        },
+        "A": {
+          "path": "supabase/prod-packages/tests/fixtures/fx-n/A_preflight_readonly.sql",
+          "sha256": "5a269bb9cf45fd2b264f80e4c53792eff9be237028b0db455da5bdfcfe0c6b79"
+        },
+        "C": {
+          "path": "supabase/prod-packages/tests/fixtures/fx-n/C_verify_readonly.sql",
+          "sha256": "4571065b17ea778824becf5fe5ed66809fb09a2cbc1599ac6df8a8405d3df5cd"
+        },
+        "D": {
+          "path": "supabase/prod-packages/tests/fixtures/fx-n/D_ledger_record.sql",
+          "sha256": "0bb560b07bd45429a4e5df29380b200a53962b667d914731ec18d237b9b43c3b"
+        },
+        "F": {
+          "path": "supabase/prod-packages/tests/fixtures/fx-n/F_final_verify.sql",
+          "sha256": "d44be0cf490fd2e0aaabbcd17f657b0607d3fcfeb2143ffc072b87f916e63bac"
+        },
+        "G": {
+          "path": "supabase/prod-packages/tests/fixtures/fx-n/G_after_rollback_readonly.sql",
+          "sha256": "eec99316708ae777b3a229401d4bc9f067f662b23d26502ad55914696e2ce35d"
+        },
+        "S": {
+          "path": "supabase/prod-packages/tests/fixtures/fx-n/S_state_readonly.sql",
+          "sha256": "6eb8fd431c91adc7f9c499a75d5c90c2a846fe8c0d324b7c4a6eefa061af4735"
+        }
+      },
+      "allow": [
+        {
+          "kind": "drop_policy",
+          "schema": "storage",
+          "table": "objects",
+          "names": [
+            "FX tenant all"
+          ]
+        },
+        {
+          "kind": "create_policy",
+          "schema": "storage",
+          "table": "objects",
+          "names": [
+            "FX tenant select",
+            "FX tenant insert",
+            "FX tenant update",
+            "FX tenant delete"
+          ]
+        },
+        {
+          "kind": "update_rows",
+          "schema": "storage",
+          "table": "buckets",
+          "columns": [
+            "public"
+          ]
+        },
+        {
+          "kind": "create_trigger",
+          "schema": "public",
+          "table": "fx_audit_logs",
+          "names": [
+            "trg_fx_audit_no_update"
+          ],
+          "functions": [
+            "fn_fx_block_audit_change"
+          ]
+        },
+        {
+          "kind": "revoke",
+          "schema": "storage",
+          "objects": [
+            "objects"
+          ],
+          "privileges": [
+            "truncate"
+          ],
+          "roles": [
+            "anon",
+            "authenticated"
+          ]
+        },
+        {
+          "kind": "delete_from",
+          "schema": "public",
+          "table": "fx_evidence",
+          "in_function": "fn_fx_evidence_purge"
+        }
+      ],
+      "rollback_allow": [
+        {
+          "kind": "drop_policy",
+          "schema": "storage",
+          "table": "objects",
+          "names": [
+            "FX tenant select",
+            "FX tenant insert",
+            "FX tenant update",
+            "FX tenant delete"
+          ]
+        },
+        {
+          "kind": "update_rows",
+          "schema": "storage",
+          "table": "buckets",
+          "columns": [
+            "public"
+          ]
+        },
+        {
+          "kind": "create_policy",
+          "schema": "storage",
+          "table": "objects",
+          "names": [
+            "FX tenant all"
+          ]
+        },
+        {
+          "kind": "drop_trigger",
+          "schema": "public",
+          "table": "fx_audit_logs",
+          "names": [
+            "trg_fx_audit_no_update"
+          ]
+        },
+        {
+          "kind": "drop_function",
+          "schema": "public",
+          "signatures": [
+            "fn_fx_block_audit_change()",
+            "fn_fx_evidence_purge(timestamptz)"
+          ]
+        },
+        {
+          "kind": "grant",
+          "schema": "storage",
+          "objects": [
+            "objects"
+          ],
+          "privileges": [
+            "truncate"
+          ],
+          "roles": [
+            "anon",
+            "authenticated"
+          ]
+        }
+      ],
+      "ddl_targets": [
+        "acl:storage.objects",
+        "function:fn_fx_block_audit_change",
+        "function:fn_fx_evidence_purge",
+        "policy:storage.objects:FX tenant all",
+        "policy:storage.objects:FX tenant delete",
+        "policy:storage.objects:FX tenant insert",
+        "policy:storage.objects:FX tenant select",
+        "policy:storage.objects:FX tenant update",
+        "rows:public.fx_evidence",
+        "rows:storage.buckets",
+        "table:fx_audit_logs",
+        "trigger:public.fx_audit_logs:trg_fx_audit_no_update"
+      ],
+      "allowed_public_refs": [
+        "fn_fx_block_audit_change",
+        "fn_fx_current_tenant",
+        "fn_fx_evidence_purge",
+        "fx_audit_logs",
+        "fx_evidence"
+      ],
+      "allowed_foreign_refs": [
+        "storage.buckets",
+        "storage.foldername",
+        "storage.objects"
+      ],
+      "expected_effects": [
+        "bucket:fx-reserved-1",
+        "bucket:fx-reserved-2",
+        "comment:public.fx_audit_logs",
+        "function:public.fn_fx_block_audit_change()",
+        "function:public.fn_fx_evidence_purge(p_before timestamp with time zone)",
+        "function_acl:fn_fx_block_audit_change()",
+        "function_acl:fn_fx_evidence_purge(p_before timestamp with time zone)",
+        "policy:storage.objects.FX tenant all",
+        "policy:storage.objects.FX tenant delete",
+        "policy:storage.objects.FX tenant insert",
+        "policy:storage.objects.FX tenant select",
+        "policy:storage.objects.FX tenant update",
+        "table_acl:fx_audit_logs",
+        "table_acl:storage.objects",
+        "trigger:fx_audit_logs.trg_fx_audit_no_update",
+        "trigger_state:fx_audit_logs.trg_fx_audit_no_update"
+      ]
+    }
+  }
+}
