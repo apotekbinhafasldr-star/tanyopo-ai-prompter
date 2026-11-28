@@ -691,8 +691,8 @@
     "reason": "Kontras teks di bawah 4,5:1 (audit A-6); elemen ini ada di main 4fef872, belum diperbaiki."
    },
    {
-    "key": "axe:color-contrast:.px-2",
-    "reason": "Kontras teks di bawah 4,5:1 (audit A-6); elemen ini ada di main 4fef872, belum diperbaiki."
+    "key": "axe:color-contrast:.min-w-11",
+    "reason": "Tombol \"Kembali\" konfirmasi paket (kontras teks redup di kartu berwarna); temuan yang sama dengan sebelumnya (.px-2), hanya selektornya berubah karena kelas min-w-11 pada PR ini. Ada di main, belum diperbaiki."
    },
    {
     "key": "axe:color-contrast:.bg-orange-600",
