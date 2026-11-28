@@ -14,6 +14,8 @@
   --muted-foreground: #71717a;
   --border: #e4e4e7;
   --border-strong: #d4d4d8;
+  /* Batas kontrol formulir (input, textarea, select, pilihan): >=3:1 terhadap --surface (WCAG 1.4.11). */
+  --border-input: #85858f;
 
   --brand: #4338ca;
   --brand-foreground: #ffffff;
@@ -60,6 +62,7 @@
   --color-muted-foreground: var(--muted-foreground);
   --color-border: var(--border);
   --color-border-strong: var(--border-strong);
+  --color-border-input: var(--border-input);
 
   --color-brand: var(--brand);
   --color-brand-foreground: var(--brand-foreground);
