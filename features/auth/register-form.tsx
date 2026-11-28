@@ -211,11 +211,17 @@ export function RegisterForm() {
             <div role="alert" className="flex flex-col gap-2 text-sm text-danger">
               <p>{otherError}</p>
               {state.uncertain ? (
-                <p className="flex gap-4 text-xs">
-                  <Link href="/login" className="font-medium text-brand hover:underline">
+                <p className="flex flex-wrap gap-x-2 text-sm">
+                  <Link
+                    href="/login"
+                    className="inline-flex min-h-11 min-w-11 items-center font-medium text-brand hover:underline"
+                  >
                     Masuk
                   </Link>
-                  <Link href="/forgot-password" className="font-medium text-brand hover:underline">
+                  <Link
+                    href="/forgot-password"
+                    className="inline-flex min-h-11 min-w-11 items-center font-medium text-brand hover:underline"
+                  >
                     Lupa kata sandi?
                   </Link>
                 </p>
