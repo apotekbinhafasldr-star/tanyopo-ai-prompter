@@ -1,15 +1,19 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-const { serverEnvMock } = vi.hoisted(() => ({
+const { serverEnvMock, publicEnvMock } = vi.hoisted(() => ({
   serverEnvMock: {
+    supabaseSecretKey: undefined as string | undefined,
     payment: {
       providerName: "xendit" as string | undefined,
       apiKey: "xnd_development_abc123" as string | undefined,
       webhookSecret: "sandbox-callback-token" as string | undefined,
+      // D3: the sandbox adapter only runs against an explicitly allow-listed (fictitious) non-production project.
+      sandboxDbRefs: "abcdefghij0123456789" as string | undefined,
     },
   },
+  publicEnvMock: { supabaseUrl: "https://abcdefghij0123456789.supabase.co" },
 }));
-vi.mock("@/lib/env", () => ({ serverEnv: serverEnvMock }));
+vi.mock("@/lib/env", () => ({ serverEnv: serverEnvMock, publicEnv: publicEnvMock }));
 
 import { XenditPaymentProvider } from "@/lib/billing/providers/xendit-payment-provider";
 import { PaymentProviderConfigError } from "@/lib/billing/payment-provider";

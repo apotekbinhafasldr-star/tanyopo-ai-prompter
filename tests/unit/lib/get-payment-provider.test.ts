@@ -1,11 +1,18 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-const { serverEnvMock } = vi.hoisted(() => ({
+const { serverEnvMock, publicEnvMock } = vi.hoisted(() => ({
   serverEnvMock: {
-    payment: { providerName: undefined as string | undefined, apiKey: undefined as string | undefined, webhookSecret: undefined },
+    supabaseSecretKey: undefined as string | undefined,
+    payment: {
+      providerName: undefined as string | undefined,
+      apiKey: undefined as string | undefined,
+      webhookSecret: undefined,
+      sandboxDbRefs: "abcdefghij0123456789" as string | undefined,
+    },
   },
+  publicEnvMock: { supabaseUrl: "https://abcdefghij0123456789.supabase.co" },
 }));
-vi.mock("@/lib/env", () => ({ serverEnv: serverEnvMock }));
+vi.mock("@/lib/env", () => ({ serverEnv: serverEnvMock, publicEnv: publicEnvMock }));
 
 import { getPaymentProvider } from "@/lib/billing/get-payment-provider";
 import { NullPaymentProvider } from "@/lib/billing/providers/null-payment-provider";
