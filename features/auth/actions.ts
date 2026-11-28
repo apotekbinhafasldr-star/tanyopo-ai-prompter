@@ -11,6 +11,8 @@ import { isUncertainSignupOutcome, mapSignupError, UNCERTAIN_SIGNUP_MESSAGE } fr
 import { safeNextPath } from "@/lib/auth/safe-next";
 import { isEmailOtpEnabled } from "@/lib/auth/email-otp";
 import { mapLoginError } from "@/lib/auth/login-error";
+import { recordSignupLegal } from "@/lib/consent/signup-legal";
+import { PRIVACY_NOTICE_VERSION } from "@/features/legal/legal-versions";
 import {
   RESEND_CONFIRMATION_COOLDOWN_SECONDS,
   RESEND_CONFIRMATION_HOURLY_LIMIT,
@@ -239,6 +241,19 @@ export async function registerAction(
 
   if (error) {
     return { error: mapSignupError(error), values };
+  }
+
+  // Paket 3: catat penerimaan Terms (versi + waktu server) dan penyampaian Privacy Notice sebagai dua catatan TERPISAH. Keduanya BUKAN
+  // persetujuan PDP. Hanya untuk akun BARU (jalur akun lama dan hasil tidak pasti sudah kembali di atas). Fail-open: kegagalan tidak
+  // pernah memblokir pendaftaran (hanya log tanpa data pribadi). Tidak menambah kunci ke options.data milik handle_new_user.
+  const newUserId = data?.user?.id;
+  if (typeof newUserId === "string" && newUserId.length > 0) {
+    try {
+      // DELIVERED hanya bila formulir mengirim versi Privacy Notice yang SAMA PERSIS dengan versi terbit (string "1"; bukan "01", " 1", "1.0").
+      await recordSignupLegal(newUserId, { privacyNoticeDelivered: formData.get("privacyNoticeVersion") === String(PRIVACY_NOTICE_VERSION) });
+    } catch {
+      // fail-open: pencatat tidak pernah boleh menggagalkan pendaftaran
+    }
   }
 
   // If the project requires email confirmation, signUp succeeds but no

@@ -19,6 +19,8 @@ import { DEFAULT_LOCALE } from "@/lib/i18n/config";
 import { getFeatureFlags } from "@/lib/feature-flags";
 import { listComplianceFlags } from "@/services/compliance";
 import { LEGAL } from "@/features/legal/legal-meta";
+import { isConsentUiEnabled } from "@/lib/consent/flags";
+import { ConsentSection } from "@/features/consent/consent-section";
 
 export const metadata: Metadata = { title: "Pengaturan — LINOE" };
 
@@ -283,6 +285,8 @@ export default async function SettingsPage() {
           </div>
         </div>
       </details>
+
+      {isConsentUiEnabled() ? <ConsentSection timeZone={brandProfile?.default_timezone ?? "Asia/Jakarta"} /> : null}
     </div>
   );
 }

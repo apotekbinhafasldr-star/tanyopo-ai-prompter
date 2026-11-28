@@ -39,6 +39,16 @@ describe("registerSchema", () => {
     expect(registerSchema.safeParse(without).success).toBe(false);
   });
 
+  it("rejection message names only the Terms & Conditions (Privacy is a notice, not an acceptance)", () => {
+    for (const bad of [false, "on", undefined]) {
+      const result = registerSchema.safeParse({ ...valid, acceptLegal: bad });
+      expect(result.success).toBe(false);
+      const messages = result.error!.issues.filter((i) => i.path[0] === "acceptLegal").map((i) => i.message);
+      expect(messages).toEqual(["Anda harus menyetujui Syarat & Ketentuan untuk mendaftar."]);
+      expect(messages.join(" ")).not.toMatch(/Privasi|Privacy|PDP/i);
+    }
+  });
+
   it("accepts valid registration data", () => {
     expect(registerSchema.safeParse(valid).success).toBe(true);
   });

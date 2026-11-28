@@ -1,0 +1,289 @@
+# SANDBOX log Paket 3 + revisi Jalur 1 + perbaikan QA (PostgreSQL 16 lokal, data sintetis, skema Supabase = stub; bukan REAL). CI menjalankan versi PG17.
+# 2026-11-27T08:44:42Z
+SANDBOX: PostgreSQL server_version_num=160015, stub auth/tenants (bukan Supabase nyata)
+PASS: blok prompter_audit_logs diekstrak dari migrasi foundation
+PASS: S1 up berhasil
+PASS: S1 katalog v1 berisi lima kode
+PASS: S1 hanya CONNECT_META dan CONNECT_TIKTOK aktif
+PASS: S1 text_sha256 = sha256 teks (dihitung ulang)
+PASS: S1 parameter retensi NULL (tidak ada angka)
+PASS: S1 auth.users/tenants/user_profiles tidak berubah
+PASS: S1 baris audit tidak berubah
+PASS: S1 up kedua = keadaan sama (idempoten)
+PASS: S1 up ketiga = keadaan sama
+PASS: S1 retain_until nullable tanpa default
+PASS: S2 anon tanpa hak UPDATE/DELETE/TRUNCATE pada prompter_audit_logs
+PASS: S2 authenticated tanpa hak UPDATE/DELETE/TRUNCATE pada prompter_audit_logs
+PASS: S2 service_role tanpa hak UPDATE/DELETE/TRUNCATE pada prompter_audit_logs
+PASS: S2 authenticated masih bisa INSERT audit (policy lama utuh)
+PASS: S2 service_role masih bisa INSERT audit
+PASS: S2 authenticated UPDATE audit ditolak (hak)
+PASS: S2 service_role DELETE audit ditolak (hak)
+PASS: S2 service_role TRUNCATE audit ditolak (hak)
+PASS: S2 trigger menolak UPDATE service_role walau hak dikembalikan
+PASS: S2 trigger menolak DELETE service_role walau hak dikembalikan
+PASS: S2 trigger menolak TRUNCATE service_role walau hak dikembalikan
+PASS: S2 pemilik/superuser UPDATE ditolak trigger
+PASS: S2 pemilik DELETE baris tenant yang masih ada ditolak
+PASS: S2 pemilik TRUNCATE ditolak
+PASS: S2 baris audit tidak berubah setelah semua percobaan (3 awal + 2 INSERT sah)
+PASS: S2 pemilik dapat menonaktifkan trigger lalu mengubah (jujur: bukan immutable)
+PASS: S2 cascade hapus tenant B berhasil
+PASS: S2 audit tenant B terhapus oleh cascade
+PASS: S2 audit tenant A utuh
+PASS: S3 pengguna A memberi CONNECT_META: changed
+PASS: S3 pemberian ulang tidak membuat baris baru
+PASS: S3 satu baris GRANTED tersimpan
+PASS: S3 pengguna B tidak melihat peristiwa A (RLS)
+PASS: S3 pengguna A melihat peristiwa miliknya
+PASS: S3 status A
+PASS: S3 status B: semua NOT_GIVEN
+PASS: S3 kode nonaktif ditolak untuk GRANTED
+PASS: S3 kode tidak dikenal ditolak
+PASS: S3 source REGISTER tidak dapat dipakai klien
+PASS: S3 tanpa sesi (auth.uid null) ditolak
+PASS: S3 anon tidak dapat memanggil consent_set
+PASS: S3 authenticated tidak dapat INSERT langsung
+PASS: S3 authenticated tidak dapat UPDATE langsung
+PASS: S3 authenticated tidak dapat DELETE langsung
+PASS: S3 authenticated tidak dapat TRUNCATE
+PASS: S3 authenticated tidak dapat membaca tabel settings
+PASS: S3 penarikan: changed
+PASS: S3 penarikan ulang tidak membuat baris
+PASS: S3 penarikan tanpa catatan: NO_RECORD
+PASS: S3 riwayat A = GRANTED lalu WITHDRAWN (append-only)
+PASS: S3 check: sudah ditarik
+PASS: S3 check: tanpa catatan (koneksi lama) = NO_RECORD
+PASS: S3 check: kode nonaktif
+PASS: S3 check: kode tidak dikenal
+PASS: S3 check: GRANTED
+PASS: S3 check: versi katalog naik -> VERSION_OUTDATED
+PASS: S3 versi lama tetap tersimpan
+PASS: S3 authenticated tidak dapat memanggil consent_check
+PASS: S3 katalog tidak dapat diubah (UPDATE)
+PASS: S3 katalog tidak dapat dihapus (DELETE)
+PASS: S4 service_role mencatat dua baris terpisah
+PASS: S4 TERMS/ACCEPTED dan PRIVACY_NOTICE/DELIVERED
+PASS: S4 pencatatan ulang idempoten
+PASS: S4 tetap dua baris
+PASS: S4 occurred_at waktu server
+PASS: S4 authenticated tidak dapat memanggil record_signup_legal
+PASS: S4 anon tidak dapat memanggil record_signup_legal
+PASS: S4 versi tidak valid ditolak
+PASS: S4 pengguna melihat catatan miliknya
+PASS: S4 pengguna B tidak melihat catatan A
+PASS: S4 catatan dokumen tidak dapat diubah service_role
+PASS: S4 catatan dokumen tidak dapat dihapus pemilik
+PASS: S4 TRUNCATE catatan dokumen ditolak pemilik
+PASS: S4 tidak ada kolom PII pada tabel bukti
+PASS: S5 service_role tidak dapat memanggil fn_prompter_consent_schedule_retention(true)
+PASS: S5 authenticated tidak dapat memanggil fn_prompter_consent_schedule_retention(true)
+PASS: S5 anon tidak dapat memanggil fn_prompter_consent_schedule_retention(true)
+PASS: S5 service_role tidak dapat memanggil fn_prompter_consent_evidence_purge(true,null,10)
+PASS: S5 authenticated tidak dapat memanggil fn_prompter_consent_evidence_purge(true,null,10)
+PASS: S5 anon tidak dapat memanggil fn_prompter_consent_evidence_purge(true,null,10)
+PASS: S5 purge dengan parameter NULL = NOT_APPROVED
+PASS: S5 NOT_APPROVED tercatat di purge_runs
+PASS: S5 schedule dengan parameter NULL = NOT_APPROVED
+PASS: S5 retain_until tetap NULL semua
+PASS: S5 schedule dry-run: kandidat 2 (subjek A ditarik), tidak mengubah
+PASS: S5 schedule nyata: hanya subjek yang ditarik
+PASS: S5 retain_until = peristiwa terakhir + 12 bulan
+PASS: S5 jalur retensi tidak mengubah kolom lain
+PASS: S5 UPDATE retain_until langsung ditolak
+PASS: S5 dry-run: status, kandidat, terhapus
+PASS: S5 keluaran dry-run tanpa user id/tenant id
+PASS: S5 dry-run tidak menghapus
+PASS: S5 purge nyata tanpa approval_ref = REFUSED
+PASS: S5 approval_ref berisi email ditolak
+PASS: S5 batch=2 menghapus paling banyak 2
+PASS: S5 sisa kandidat 1
+PASS: S5 purge nyata tanpa dry-run yang sama = REFUSED
+PASS: S5 purge selesai; legal_hold dan belum kedaluwarsa tidak terhapus
+PASS: S5 purge_runs mencatat eksekusi
+PASS: S5 setelah purge, DELETE langsung tetap ditolak
+PASS: S5 purge_runs tidak dapat diubah
+PASS: S5 bypass GUC oleh pemilik tidak menghapus baris hold/belum kedaluwarsa
+PASS: S5 bypass GUC oleh role klien tetap ditolak
+PASS: S6 down ditolak bila ada bukti (data aman)
+PASS: S6 tabel bukti masih utuh
+PASS: S6 guard audit masih terpasang
+PASS: S6 down dengan konfirmasi eksplisit berhasil
+PASS: S6 tabel Paket 3 hilang
+PASS: S6 fungsi Paket 3 hilang
+PASS: S6 trigger guard hilang
+PASS: S6 hak anon pada audit dipulihkan (UPDATE,DELETE,TRUNCATE)
+PASS: S6 hak authenticated pada audit dipulihkan (UPDATE,DELETE,TRUNCATE)
+PASS: S6 hak service_role pada audit dipulihkan (UPDATE,DELETE,TRUNCATE)
+PASS: S6 down kedua idempoten
+PASS: S6 auth.users/tenants/user_profiles tidak berubah oleh up+down
+PASS: S6 up lagi setelah down OK
+PASS: S6 down tanpa bukti berhasil tanpa konfirmasi
+PASS: S6 pemulihan hak persis keadaan awal (hanya service_role UPDATE)
+PASS: S7 fungsi yatim dibersihkan
+PASS: S7 fungsi yatim yang dipakai trigger TIDAK dibuang
+PASS: S7 kegagalan di tengah (psql biasa): semua dibatalkan
+PASS: S7 hak audit tidak berubah setelah kegagalan di tengah
+PASS: S7 trigger audit tidak terpasang setelah kegagalan
+PASS: S7 seluruh berkas sebagai SATU query berhasil
+PASS: S9 komentar tabel audit jujur (tanpa kata immutable)
+PASS: S9 occurred_at memakai clock_timestamp()
+PASS: S9 retensi 0 ditolak
+PASS: S9 retensi '012' ditolak
+PASS: S9 retensi '-5' ditolak
+PASS: S9 retensi '1' dan NULL diterima
+PASS: S9 consent_set argumen NULL (code) ditolak
+PASS: S9 consent_set argumen NULL (action) ditolak
+PASS: S9 consent_set argumen NULL (source) ditolak
+PASS: S9 kelas galat argumen NULL = 22023
+PASS: S9 signup_legal argumen NULL ditolak
+PASS: S9 purge dengan dry_run NULL ditolak
+PASS: S9 purge dengan batch 0 ditolak
+PASS: S9 schedule dengan dry_run NULL ditolak
+PASS: S9 v2 nonaktif: check tetap GRANTED terhadap v1 aktif
+PASS: S9 v2 nonaktif: my_status memakai v1
+PASS: S9 v2 nonaktif: consent_set GRANTED ulang tidak membuat baris
+PASS: S9 kode semua versi nonaktif: check = INACTIVE_CODE
+PASS: S9 setelah up: tidak ada ACL UPDATE/DELETE/TRUNCATE untuk PUBLIC atau role klien
+PASS: S9 up kedua tidak menimpa snapshot asli
+PASS: S9 down memulihkan ACL mentah (PUBLIC, grant option, role) persis
+PASS: S9 ACL asli memuat PUBLIC dan grant option pada role (bukan tautologi)
+PASS: S9 down memulihkan komentar lama
+PASS: S10 Owner A memberi CONNECT_META (tenant dari profil, bukan klien)
+PASS: S10 peristiwa Owner membawa tenant A dan text_sha256 katalog
+PASS: S10 non-Owner (marketing) tidak dapat memberi
+PASS: S10 non-Owner tidak dapat menarik
+PASS: S10 pengguna tanpa profil/tenant ditolak
+PASS: S10 anon ditolak
+PASS: S10 Owner tenant B tidak dapat bertindak atas tenant A (p_tenant_id)
+PASS: S10 Owner A dengan p_tenant_id tenant B ditolak
+PASS: S10 Owner A dengan p_tenant_id tenant sendiri diterima
+PASS: S10 ditolak tidak membuat baris (hanya 2 peristiwa Owner A)
+PASS: S10 check_tenant: Owner A di tenant A
+PASS: S10 check_tenant: anggota non-Owner memakai persetujuan Owner tenant
+PASS: S10 check_tenant: Owner B tidak anggota tenant A
+PASS: S10 check_tenant: Owner A pada tenant B
+PASS: S10 check_tenant: tenant B belum punya persetujuan (milik A tidak berlaku)
+PASS: S10 check_tenant: tanpa profil
+PASS: S10 check_tenant: kode non-CONNECT
+PASS: S10 check_tenant: tenant NULL tidak valid
+PASS: S10 authenticated tidak dapat memanggil check_tenant
+PASS: S10 status tenant: Owner kedua (UF) melihat persetujuan tenant
+PASS: S10 status tenant: non-Owner melihat status tenant
+PASS: S10 status tenant B tidak terpengaruh tenant A
+PASS: S10 anon tidak dapat memanggil my_status
+PASS: S10 pemberi persetujuan diturunkan dari Owner: persetujuan tidak berlaku
+PASS: S10 pemberi diturunkan: status koneksi tampil OUTDATED (bukan GRANTED menyesatkan)
+PASS: S10 pemberi diturunkan: Owner lain memberi ulang -> peristiwa BARU (changed true)
+PASS: S10 setelah pemberian ulang oleh Owner aktif: check_tenant GRANTED
+PASS: S10 setelah pemberian ulang: status GRANTED
+PASS: S10 pemberian ulang kedua oleh Owner aktif: idempoten (changed false)
+PASS: S10 indeks per tenant pada peristiwa persetujuan ada
+PASS: S10 Owner kedua (UF) menarik persetujuan tenant: changed
+PASS: S10 setelah penarikan: check_tenant WITHDRAWN
+PASS: S10 penarikan membawa text_sha256 versi yang ditarik
+PASS: S10 penarikan ulang oleh Owner A: tidak ada perubahan
+PASS: S10 consent_check lama (2 argumen) masih ada untuk kompatibilitas
+PASS: S10 fungsi consent_set 3 argumen lama sudah tidak ada (tanpa overload ambigu)
+PASS: S11 versi privacy NULL: hanya Terms ACCEPTED
+PASS: S11 baris: hanya TERMS
+PASS: S11 versi privacy dikirim: DELIVERED dicatat, Terms tidak dobel
+PASS: S11 baris: TERMS + PRIVACY DELIVERED
+PASS: S11 ulang idempoten
+PASS: S11 versi Terms NULL ditolak
+PASS: S11 versi privacy 0 ditolak
+PASS: S11 authenticated tidak dapat memanggil
+PASS: S12 anon tidak punya EXECUTE pada fungsi anonimisasi dan canary
+PASS: S12 authenticated tidak punya EXECUTE pada fungsi anonimisasi dan canary
+PASS: S12 service_role tidak punya EXECUTE pada fungsi anonimisasi dan canary
+PASS: S12 service_role tidak dapat memanggil
+PASS: S12 authenticated tidak dapat memanggil
+PASS: S12 eksekusi tanpa dry-run ditolak
+PASS: S12 request_ref bebas-teks (bukan pola REQ-nnnn) ditolak
+PASS: S12 request_ref terlalu pendek ditolak
+PASS: S12 tenant NULL ditolak
+PASS: S12 tenant tidak ada ditolak
+PASS: S12 batch 0 ditolak
+PASS: S12 dry_run NULL ditolak
+PASS: S12 canary sebelum: PII allowlist belum dianonimkan (3 baris x 2 kunci x 2 lokasi)
+PASS: S12 canary: kandidat di luar allowlist terlaporkan (tipe lain)
+PASS: S12 canary: nilai mirip email terlaporkan walau nama kunci netral
+PASS: S12 canary: nilai mirip telepon terlaporkan
+PASS: S12 canary: referensi actor_user_id dilaporkan (tidak dapat dianonimkan lewat jalur ini)
+PASS: S12 dry-run: cocok 3, nol diubah
+PASS: S12 dry-run tidak mengubah baris sumber
+PASS: S12 dry-run menulis SATU entri audit berisi hitungan saja
+PASS: S12 ref lain tanpa dry-run ditolak
+PASS: S12 eksekusi batch 2: 2 diubah, sisa 1
+PASS: S12 eksekusi lanjutan: sisa 0
+PASS: S12 eksekusi ulang idempoten (0 diubah)
+PASS: S12 PII diganti penanda; data non-PII (spend) tetap
+PASS: S12 id/tenant/aktor/action/tipe/waktu tidak berubah
+PASS: S12 baris tipe lain, tipe finansial (finance_ledger_entry), dan tenant lain tidak tersentuh
+PASS: S12 tabel finance_audit_logs dan budget_policies tidak berubah
+PASS: S12 auth.users/tenants/user_profiles tidak berubah
+PASS: S12 entri audit hanya berisi hitungan (kunci terbatas)
+PASS: S12 konteks entri audit tanpa PII
+PASS: S12 canary sesudah: tidak ada PII allowlist tersisa
+PASS: S12 nonce dibersihkan setelah eksekusi
+PASS: S12 tenant B tetap utuh (bukan target)
+PASS: S12 allowlist menolak INSERT tipe prompter_audit_logs (pemilik, tanpa GUC)
+PASS: S12 allowlist menolak tipe prompter_audit_logs walau GUC migrasi dinyalakan (CHECK daftar-tolak/positif)
+PASS: S12 allowlist menolak INSERT tipe prompter_approvals (pemilik, tanpa GUC)
+PASS: S12 allowlist menolak tipe prompter_approvals walau GUC migrasi dinyalakan (CHECK daftar-tolak/positif)
+PASS: S12 allowlist menolak INSERT tipe prompter_compliance_flags (pemilik, tanpa GUC)
+PASS: S12 allowlist menolak tipe prompter_compliance_flags walau GUC migrasi dinyalakan (CHECK daftar-tolak/positif)
+PASS: S12 allowlist menolak INSERT tipe prompter_subscriptions (pemilik, tanpa GUC)
+PASS: S12 allowlist menolak tipe prompter_subscriptions walau GUC migrasi dinyalakan (CHECK daftar-tolak/positif)
+PASS: S12 allowlist menolak INSERT tipe prompter_connected_accounts (pemilik, tanpa GUC)
+PASS: S12 allowlist menolak tipe prompter_connected_accounts walau GUC migrasi dinyalakan (CHECK daftar-tolak/positif)
+PASS: S12 allowlist menolak INSERT tipe prompter_autopilot_policies (pemilik, tanpa GUC)
+PASS: S12 allowlist menolak tipe prompter_autopilot_policies walau GUC migrasi dinyalakan (CHECK daftar-tolak/positif)
+PASS: S12 allowlist menolak INSERT tipe prompter_feature_flags (pemilik, tanpa GUC)
+PASS: S12 allowlist menolak tipe prompter_feature_flags walau GUC migrasi dinyalakan (CHECK daftar-tolak/positif)
+PASS: S12 allowlist menolak INSERT tipe prompter_other_thing (pemilik, tanpa GUC)
+PASS: S12 allowlist menolak tipe prompter_other_thing walau GUC migrasi dinyalakan (CHECK daftar-tolak/positif)
+PASS: S12 allowlist tetap 2 baris (seed) setelah semua percobaan
+PASS: S12 dry-run palsu (baris audit buatan pengguna tenant) tertulis
+PASS: S12 eksekusi dengan dry-run palsu ditolak (bukti dari tabel privat)
+PASS: S12 service_role UPDATE kolom data ditolak (hak dikembalikan, trigger menolak)
+PASS: S12 UPDATE action ditolak
+PASS: S12 bypass: set_config nonce tebakan dari klien lalu UPDATE ditolak
+PASS: S12 bypass: GUC retensi/purge lama tidak membuka audit
+PASS: S12 bypass: pemilik dengan nonce tebakan juga ditolak
+PASS: S12 bypass: klien tidak dapat menulis tabel nonce
+PASS: S12 klien tidak dapat membaca allowlist
+PASS: S12 klien tidak dapat mengubah allowlist
+PASS: S12 allowlist menolak tipe finansial (CHECK)
+PASS: S12 allowlist tidak dapat diubah lewat UPDATE (trigger), walau oleh pemilik
+PASS: S12 allowlist tidak dapat dihapus (trigger)
+PASS: S12 bypass: session_replication_role=replica oleh klien ditolak
+PASS: S12 TRUNCATE tetap ditolak trigger
+PASS: S12 semua fungsi DEFINER memakai search_path terpasang (bypass search_path)
+PASS: S12 baris sumber tidak berubah setelah percobaan klien
+PASS: S13 migrasi kedua berhasil
+PASS: S13 up kedua kali = keadaan sama (idempoten)
+PASS: S13 up ketiga kali = keadaan sama
+PASS: S13 migrasi kedua memang mengubah keadaan (bukan tautologi)
+PASS: S13 seed allowlist (2 kunci)
+PASS: S13 down kedua berhasil
+PASS: S13 down memulihkan keadaan persis seperti setelah migrasi pertama
+PASS: S13 down kedua kali idempoten
+PASS: S13 setelah down: consent_set 3 argumen kembali, 4 argumen hilang
+PASS: S13 setelah down: kolom text_sha256 hilang
+PASS: S13 setelah down: nonce tebakan tetap tidak membuka UPDATE audit
+PASS: S13 up kembali setelah down berhasil
+PASS: S13 up setelah down = keadaan sama dengan up pertama
+PASS: S13 down kedua ditolak bila ada bukti ber-hash
+PASS: S13 kegagalan di tengah migrasi kedua: seluruhnya dibatalkan
+PASS: S13 migrasi kedua sebagai SATU query berhasil
+PASS: S14 20261127110000_prompter_consent_owner_audit_redaction.sql tidak menyebut objek terlarang
+PASS: S14 20261127110000_prompter_consent_owner_audit_redaction.sql tidak mengubah tabel produk lain (user_profiles/tenants hanya dibaca)
+PASS: S14 20261127110000_prompter_consent_owner_audit_redaction.down.sql tidak menyebut objek terlarang
+PASS: S14 20261127110000_prompter_consent_owner_audit_redaction.down.sql tidak mengubah tabel produk lain (user_profiles/tenants hanya dibaca)
+PASS: S14 fungsi operator tanpa GRANT
+PASS: S14 trigger produk lain tidak diubah
+PASS: S8 20261127100000_prompter_consent_audit_guard.sql tidak menyebut objek terlarang
+PASS: S8 20261127100000_prompter_consent_audit_guard.down.sql tidak menyebut objek terlarang
+PASS: S8 migrasi tidak mengubah tenants (hanya membaca)
+ALL PASSED
