@@ -17,6 +17,13 @@ const { mirrorChannelCampaignStatusMock } = vi.hoisted(() => ({
 }));
 vi.mock("@/services/channel-campaigns", () => ({
   syncChannelCampaigns: vi.fn(async () => undefined),
+  readChannelAllocationRows: vi.fn(async () => ({
+    ok: true,
+    rows: [
+      { id: "cc1", channel: "FACEBOOK", budgetPercentage: 50 },
+      { id: "cc2", channel: "INSTAGRAM", budgetPercentage: 50 },
+    ],
+  })),
   mirrorChannelCampaignStatus: mirrorChannelCampaignStatusMock,
   transitionMasterCampaign: vi.fn(async () => "moved"),
   isMirrorConfirmed: (r: { ok: boolean; consistent: boolean }) => r.ok && r.consistent,

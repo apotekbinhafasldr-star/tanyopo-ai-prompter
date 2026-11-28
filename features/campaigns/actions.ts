@@ -16,9 +16,11 @@ import {
 import { buildSystemPreamble, buildCampaignProposalPrompt } from "@/lib/ai/prompts";
 import { evaluateCampaignQuality, formatBlockingIssuesMessage, scanRawProposalCopy } from "@/lib/ai/campaign-quality-gate";
 import { buildKnownFacts } from "@/lib/ai/known-facts";
+import { checkChannelAllocation } from "@/lib/campaigns/channel-allocation";
 import { runAiJob } from "@/services/ai-jobs";
 import {
   syncChannelCampaigns,
+  readChannelAllocationRows,
   isMirrorConfirmed,
   mirrorChannelCampaignStatus,
   transitionMasterCampaign,
@@ -559,6 +561,18 @@ export async function submitForApprovalAction(campaignId: string): Promise<Campa
     if (rawMessage) {
       return { error: rawMessage };
     }
+  }
+
+  // Budget allocation across channels, checked with the launch's own rules BEFORE an approval exists (F-01): a
+  // split that the launch would refuse (missing/invalid share, not adding up to 100%, paid channel at 0%) must not
+  // reach the Owner. A read failure refuses too (fail closed).
+  const allocationRows = await readChannelAllocationRows(supabase, session.tenantId, campaignId);
+  if (!allocationRows.ok) {
+    return { error: "Gagal membaca alokasi budget channel. Pengajuan tidak dibuat, coba lagi." };
+  }
+  const allocationCheck = checkChannelAllocation(allocationRows.rows);
+  if (!allocationCheck.ok) {
+    return { error: allocationCheck.error };
   }
 
   const { error: approvalError } = await supabase.from("prompter_approvals").insert({
