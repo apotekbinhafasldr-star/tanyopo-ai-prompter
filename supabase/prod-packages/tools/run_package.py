@@ -430,8 +430,10 @@ def norm_sig(text):
 
 
 class Ctx:
-    def __init__(self, name, allow, used, role, txn, literals, allow_pvar):
+    def __init__(self, name, allow, used, role, txn, literals, allow_pvar, pins=None, pin_hits=None):
         self.name, self.allow, self.used, self.role, self.txn = name, allow or [], used, role, txn
+        # T1: per-package function-body pins (already filtered to ONE scope by verify_package). pin = the pin matched by the function being linted.
+        self.pins, self.pin_hits, self.pin, self.last_pin = pins or [], pin_hits if pin_hits is not None else PinHits(), None, None
         self.literals, self.allow_pvar = literals, allow_pvar
         self.out, self.targets, self.fn_name = [], set(), None
         self.literal_hits = set()
@@ -821,6 +823,8 @@ def read_stmt(ctx, s, phase):
     for k, w in enumerate(words):
         if w is None:
             continue
+        if w in ("insert", "update") and phase == "fn" and _pin_cte_dml_ok(ctx, s, k):
+            continue  # T1: declared data-modifying CTE of a pinned function body
         if w in ("insert", "delete", "merge", "truncate", "copy", "call", "grant", "revoke", "alter", "drop", "create", "vacuum"):
             raise Deny(f"'{w}' inside a read statement (data-modifying CTE or similar)")
         if w == "update":
@@ -946,6 +950,145 @@ def p_comment(ctx, s):
 _TYPE_FIRST = {"double", "timestamp", "time", "character", "bit", "national", "interval", "varchar", "char", "with", "without"}
 
 
+# --------------------------------------------------------------------------------------------------------------------
+# T1: function-body pins. A pin lifts exactly two lint rules (advisory_xact_lock, dml_cte) for ONE function, in ONE package and scope,
+# when the schema-qualified signature AND the exact body bytes (sha256) match. Everything else in the lint still runs on the body.
+# --------------------------------------------------------------------------------------------------------------------
+PIN_PERMITS = ("advisory_xact_lock", "dml_cte")
+PIN_KEYS = {"scope", "signature", "fn_sha256", "body_md5_ws", "db_hash", "permit", "advisory_keys", "dml_targets", "why"}
+PIN_MAX = 4
+
+
+def fn_sha256(header, body):
+    """sha256 over the normalised CREATE FUNCTION header tokens (comments/whitespace dropped) + NUL + the EXACT body bytes."""
+    return hashlib.sha256((header + "\0" + body).encode("utf-8")).hexdigest()
+
+
+def pin_header(toks):
+    """CREATE FUNCTION tokens before AND after the body, exact (words lower-cased; string literals and quoted names kept verbatim): a changed default or clause unbinds the pin."""
+    return " ".join(t.text.lower() if t.kind == "word" else t.text for t in toks)
+
+
+def body_md5_ws(text):
+    return hashlib.md5(re.sub(r"\s+", "", text).encode("utf-8")).hexdigest()
+
+
+def validate_pins(pins, pkg):
+    """Structure of function_body_pins. Literal values only; every declared capability must be narrower than the package's own object lists."""
+    if not isinstance(pins, list) or len(pins) > PIN_MAX:
+        return [f"function_body_pins: a list of at most {PIN_MAX} entries"]
+    out, seen = [], set()
+    refs = {"public." + r for r in pkg.get("allowed_public_refs", [])}
+    fns = {t.split(":", 1)[1] for t in pkg.get("ddl_targets", []) if t.startswith("function:")}
+    for n, p in enumerate(pins):
+        w = f"function_body_pins[{n}]"
+        if not isinstance(p, dict) or set(p) != PIN_KEYS:
+            out.append(f"{w}: keys must be exactly {sorted(PIN_KEYS)}")
+            continue
+        if p["scope"] not in ("migration", "rollback"):
+            out.append(f"{w}.scope: migration|rollback")
+        m = re.fullmatch(r"public\.([a-z_][a-z0-9_]*)\([a-z0-9_ ,\[\]]*\)", p["signature"]) if isinstance(p["signature"], str) else None
+        if not m or m.group(1) not in fns:
+            out.append(f"{w}.signature: public.<function in ddl_targets>(types)")
+        if (p["scope"], p["signature"]) in seen:
+            out.append(f"{w}: duplicate (scope, signature)")
+        seen.add((p["scope"], p["signature"]))
+        for k, n_ in (("fn_sha256", 64), ("body_md5_ws", 32)):
+            if not (isinstance(p[k], str) and re.fullmatch(r"[0-9a-f]{%d}" % n_, p[k])):
+                out.append(f"{w}.{k}: lower-case hex, {n_} characters")
+        want_db = "post_fn_hash" if p["scope"] == "migration" else "pre_fn_hash"
+        if p["db_hash"] not in (None, want_db) or (p["db_hash"] and pkg.get(p["db_hash"]) != p["body_md5_ws"]):
+            out.append(f"{w}.db_hash: null or {want_db} equal to body_md5_ws (ties the lint pin to the database-side body check)")
+        pm = p["permit"]
+        if not (isinstance(pm, list) and pm and len(set(pm)) == len(pm) and set(pm) <= set(PIN_PERMITS)):
+            out.append(f"{w}.permit: a non-empty subset of {PIN_PERMITS}")
+            continue
+        keys, tg = p["advisory_keys"], p["dml_targets"]
+        if ("advisory_xact_lock" in pm) != bool(keys) or not (isinstance(keys, list) and all(isinstance(x, str) and re.fullmatch(r"[a-z_][a-z0-9_]{7,60}", x) for x in keys)):
+            out.append(f"{w}.advisory_keys: literal lock-key names, non-empty exactly when advisory_xact_lock is permitted")
+        if ("dml_cte" in pm) != bool(tg) or not (isinstance(tg, list) and tg == sorted(set(tg)) and set(tg) <= refs):
+            out.append(f"{w}.dml_targets: sorted unique public.<table> entries that are in allowed_public_refs, non-empty exactly when dml_cte is permitted")
+        if not (isinstance(p["why"], str) and 10 <= len(p["why"]) <= 200):
+            out.append(f"{w}.why: 10..200 characters")
+    return out
+
+
+class PinHits(collections.Counter):
+    """How often each (scope, signature) pin matched, plus the matched body text (for the reviewer-facing pin report)."""
+    def __init__(self):
+        super().__init__()
+        self.bodies, self.used = {}, set()
+
+
+PIN_REPORT = []
+
+
+def pin_report(pin_m, hits_m, hits_r):
+    """Lines for the public Summary: what each pin lets through, and how the pinned new body differs from the pinned old (= live) body."""
+    import difflib
+    out = []
+    for p in pin_m:
+        key = (p["scope"], p["signature"])
+        out.append(f"- PIN {p['signature']}: lifts {', '.join(p['permit'])}; lock keys {p['advisory_keys']}; CTE writes {p['dml_targets']}")
+        new, old = hits_m.bodies.get(key), hits_r.bodies.get(("rollback", p["signature"]))
+        if new is not None and old is not None:
+            d = [x for x in difflib.unified_diff(old.splitlines(), new.splitlines(), lineterm="", n=0) if x[:1] in "+-" and x[:3] not in ("+++", "---")]
+            out.append(f"- PIN diff migration body vs rollback (live) body: {len(d)} changed line(s)")
+            out += [f"    {x[:160]}" for x in d[:12]]
+    return out
+
+
+def find_pin(ctx, sig_s, header, body_text):
+    """The pin whose signature, header+exact-body sha256 AND whitespace-insensitive body md5 all match (else None: the default lint applies)."""
+    sha, md = fn_sha256(header, body_text), body_md5_ws(body_text)
+    for p in ctx.pins:
+        if p["signature"] == sig_s and p["fn_sha256"] == sha and p["body_md5_ws"] == md:
+            ctx.pin_hits[(p["scope"], p["signature"])] += 1
+            getattr(ctx.pin_hits, "bodies", {})[(p["scope"], p["signature"])] = body_text
+            return p
+    return None
+
+
+def _advisory_ok(ctx, sig, k, pin):
+    """sig[k] = pg_try_advisory_xact_lock: only `pg_try_advisory_xact_lock(hashtextextended('<declared key>', 0))`, unqualified or pg_catalog."""
+    if "advisory_xact_lock" not in pin["permit"]:
+        return False
+    if k and sig[k - 1].kind == "punct" and sig[k - 1].text == ".":
+        if not (k >= 2 and sig[k - 2].kind in ("word", "qid") and ident(sig[k - 2], False) == "pg_catalog") or (k >= 3 and sig[k - 3].text == "."):
+            return False
+    seq = sig[k + 1:k + 9]
+    ok = (len(seq) == 8 and seq[0].text == "(" and seq[1].kind == "word" and seq[1].text.lower() == "hashtextextended" and seq[2].text == "("
+            and seq[3].kind == "str" and seq[3].text[1:-1] in pin["advisory_keys"] and "'" not in seq[3].text[1:-1] and seq[4].text == ","
+            and seq[5].kind == "num" and seq[5].text == "0" and seq[6].text == ")" and seq[7].text == ")")
+    if ok:
+        getattr(ctx.pin_hits, "used", set()).add(("key", pin["scope"], seq[3].text[1:-1]))
+    return ok
+
+
+def _pin_cte_dml_ok(ctx, s, k):
+    """s[k] is insert|update inside a WITH of a pinned function: only `<cte> as ( insert into <t> ...` / `<cte> as ( update [only] <t> ...` with <t> declared."""
+    pin = ctx.pin
+    if not pin or "dml_cte" not in pin["permit"] or k < 3:
+        return False
+    if not (s[k - 1].kind == "punct" and s[k - 1].text == "(" and is_w(s[k - 2], "as") and s[k - 3].kind in ("word", "qid")):
+        return False
+    j = k + 1
+    if lw(s[k]) == "insert":
+        if not (j < len(s) and is_w(s[j], "into")):
+            return False
+        j += 1
+    elif j < len(s) and is_w(s[j], "only"):
+        j += 1
+    try:
+        parts, _ = qname(s, j)
+    except (Deny, IndexError):
+        return False
+    ok = len(parts) == 2 and ".".join(parts) in pin["dml_targets"]
+    if ok:
+        getattr(ctx.pin_hits, "used", set()).add(("dml", pin["scope"], ".".join(parts)))
+    return ok
+
+
 def arg_sig(name, toks):
     """name(type,type) of a CREATE FUNCTION argument list: argument names, modes (OUT is not part of the identity) and defaults dropped."""
     out = []
@@ -982,7 +1125,7 @@ def p_create_function(ctx, s, i):
     close = match_paren(s, i)
     if close < 0:
         raise Deny("argument list not closed")
-    body, lang, in_returns, depth = None, None, False, 0
+    body, body_k, lang, in_returns, depth = None, -1, None, False, 0
     for k in range(close + 1, len(s)):
         t = s[k]
         if t.kind == "punct" and t.text == "(":
@@ -994,7 +1137,7 @@ def p_create_function(ctx, s, i):
         elif t.kind == "dq":
             if body is not None:
                 raise Deny("two function bodies")
-            body = t
+            body, body_k = t, k
         elif t.kind == "str" and is_w(s[k - 1], "as"):
             raise Deny("function body must be dollar-quoted")
         elif t.kind == "word":
@@ -1014,14 +1157,16 @@ def p_create_function(ctx, s, i):
     if body is None or lang is None:
         raise Deny("function needs LANGUAGE plpgsql|sql and a dollar-quoted body")
     ctx.targets.add(f"function:{name}")
-    ctx.fn_created.add("public." + arg_sig(name, s[i + 1:close]))
+    sig_s = "public." + arg_sig(name, s[i + 1:close])
+    ctx.fn_created.add(sig_s)
     ctx.need_schema.add("public")
     old = ctx.fn_name
     ctx.fn_name = name
+    ctx.pin = ctx.last_pin = find_pin(ctx, sig_s, pin_header(s[:body_k]) + " $body " + pin_header(s[body_k + 1:]), dq_body(body)) if ctx.role == "write" else None
     try:
         lint_body(ctx, dq_body(body), "fn")
     finally:
-        ctx.fn_name = old
+        ctx.fn_name, ctx.pin = old, None
     return False
 
 
@@ -1161,7 +1306,7 @@ def lint_body(ctx, text, phase):
             ctx.bad(f"statement not accepted ({e if isinstance(e, Deny) else 'cannot be parsed'})")
             continue
         if not accepted:
-            _second_net(ctx, tail)
+            _second_net(ctx, tail, ctx.pin)
 
 
 def classify(ctx, s, phase="top"):
@@ -1263,7 +1408,9 @@ def check_tokens(ctx, sig, in_body=False):
             except Deny:
                 continue
             lo = v.lower() if t.kind == "qid" else v
-            if lo in BAN_WORDS or lo.startswith(BAN_PREFIX) or lo.startswith(BAN_PREFIX_MORE):
+            if lo == "pg_try_advisory_xact_lock" and t.kind == "word" and ctx.pin and in_body and _advisory_ok(ctx, sig, k, ctx.pin):
+                pass  # T1: the one declared advisory-lock call of a pinned function body
+            elif lo in BAN_WORDS or lo.startswith(BAN_PREFIX) or lo.startswith(BAN_PREFIX_MORE):
                 ctx.bad(f"forbidden SQL (function or setting '{lo}' is refused)")
             if OTHER_PRODUCT_RE.search(v):
                 ctx.bad("forbidden SQL (other product object)")
@@ -1283,19 +1430,22 @@ def check_tokens(ctx, sig, in_body=False):
             ctx.bad("forbidden SQL (other product object named in a literal)")
 
 
-def _second_net(ctx, s):
+def _second_net(ctx, s, pin=None):
     text = norm_text(s)
     for pat, why in FORBIDDEN:
         if re.search(pat, text, re.I | re.S):
+            if why == "advisory lock" and pin and "advisory_xact_lock" in pin["permit"] and \
+                    {m.group(0).lower() for m in re.finditer(pat, text, re.I | re.S)} == {"pg_try_advisory_xact_lock"}:
+                continue  # T1: only the exact name; pg_advisory_lock / pg_try_advisory_lock / session-level variants stay refused
             ctx.bad(f"forbidden SQL ({why})")
     if re.search(r"\bexecute\s+(?!on\b|function\b|procedure\b)", text):
         ctx.bad("forbidden SQL (dynamic EXECUTE)")
 
 
-def lint_sql(name, sql, role="write", allow=None, used=None, txn="none", literals=(), allow_pvar=False, targets=None, needs=None):
+def lint_sql(name, sql, role="write", allow=None, used=None, txn="none", literals=(), allow_pvar=False, targets=None, needs=None, pins=None, pin_hits=None):
     """The one entry point. role: write | readonly | ledger.  txn: none (no transaction control) | wrap (BEGIN first, one COMMIT, only
     SELECTs after it).  Returns [violation, ...]."""
-    ctx = Ctx(name, allow, used, role, txn, set(literals or ()), allow_pvar)
+    ctx = Ctx(name, allow, used, role, txn, set(literals or ()), allow_pvar, pins, pin_hits)
     try:
         sig = sig_tokens(tokenize(sql))
     except LintError as e:
@@ -1305,6 +1455,8 @@ def lint_sql(name, sql, role="write", allow=None, used=None, txn="none", literal
     lits = {x for lit in (literals or ()) for x in norm_literal(lit)}
     begins, commits, after_commit = 0, 0, False
     for idx, s in enumerate(stmts):
+        ctx.last_pin = None
+        ctx.last_pin = None
         key = " ".join(t.text.lower() if t.kind == "word" else t.text for t in s)
         if key in lits:
             continue
@@ -1333,8 +1485,9 @@ def lint_sql(name, sql, role="write", allow=None, used=None, txn="none", literal
         except (IndexError, KeyError):
             ctx.bad("statement not accepted (cannot be parsed)")
             continue
+        pin, ctx.last_pin = ctx.last_pin, None
         if not accepted and role != "readonly" and lw(s[0]) not in ("do",):
-            _second_net(ctx, s)
+            _second_net(ctx, s, pin)
     if txn == "wrap" and role != "readonly" and (begins != 1 or commits != 1 or (stmts and txn_kind(stmts[0]) != "begin")):
         ctx.bad("a file with its own transaction needs exactly one BEGIN (first) and one COMMIT")
     if targets is not None:
@@ -1616,9 +1769,9 @@ def derive_probe_spec(pkg, texts=None):
     return spec if (spec["tables"] or spec["functions"] or spec["replaces"] or spec["schemas"] or spec["ledger_insert"]) else None
 
 
-def lint_rollback(name, text, pkg, allow, used, txn="none"):
+def lint_rollback(name, text, pkg, allow, used, txn="none", pins=None, pin_hits=None):
     """The rollback may only drop what the migration added, listed LITERALLY (statement equality on tokens, not a text substitution)."""
-    return lint_sql(name, text, "write", allow, used, txn, pkg.get("rollback_allowed_statements", []))
+    return lint_sql(name, text, "write", allow, used, txn, pkg.get("rollback_allowed_statements", []), pins=pins, pin_hits=pin_hits)
 
 
 def verify_package(root, manifest, pkg_id):
@@ -1657,6 +1810,8 @@ def verify_package(root, manifest, pkg_id):
         return pkg, [f"unknown package shape '{shape}'"]
     allow, rallow = pkg.get("allow", []), pkg.get("rollback_allow", [])
     problems += validate_allow(allow, "allow") + validate_allow(rallow, "rollback_allow")
+    pins = pkg.get("function_body_pins", [])
+    problems += validate_pins(pins, pkg)
     if "probes" in pkg:
         problems += validate_probes(pkg["probes"])
     tm = pkg.get("timeouts")
@@ -1670,20 +1825,30 @@ def verify_package(root, manifest, pkg_id):
     if problems:  # a malformed allow-list is never used to lint
         return pkg, problems
     used_m, used_r = set(), set()
+    pin_m, pin_r = [p for p in pins if p["scope"] == "migration"], [p for p in pins if p["scope"] == "rollback"]
+    hits_m, hits_r = PinHits(), PinHits()
     native = shape == "native-txn"
     for k, text in texts.items():
         problems += lint_psql_meta(f"file {k}", text)
         if k == "E":
-            problems += lint_rollback("file E", text, pkg, rallow, None, txn="wrap")
+            problems += lint_rollback("file E", text, pkg, rallow, None, txn="wrap", pins=pin_r)
         elif k == "B":
-            problems += lint_sql("file B", text, "write", allow, None, "wrap")
+            problems += lint_sql("file B", text, "write", allow, None, "wrap", pins=pin_m)
         elif k == "D":
             problems += lint_sql("file D", text, "ledger", None, None, "wrap", allow_pvar=True)
         else:
             problems += lint_readonly(f"file {k}", text)
     problems += lint_psql_meta("migration", mig) + lint_psql_meta("rollback", rb)
-    problems += lint_sql("migration", mig, "write", allow, used_m, "wrap" if native else "none")
-    problems += lint_rollback("rollback", rb, pkg, rallow, used_r, txn="wrap" if native else "none")
+    problems += lint_sql("migration", mig, "write", allow, used_m, "wrap" if native else "none", pins=pin_m, pin_hits=hits_m)
+    problems += lint_rollback("rollback", rb, pkg, rallow, used_r, txn="wrap" if native else "none", pins=pin_r, pin_hits=hits_r)
+    problems += [f"function_body_pins: pin {p['scope']} {p['signature']} matched {h[(p['scope'], p['signature'])]} time(s) (must be exactly 1: stale or unused pin)"
+                 for p, h in [(p, hits_m) for p in pin_m] + [(p, hits_r) for p in pin_r] if h[(p["scope"], p["signature"])] != 1]
+    for p, h in [(p, hits_m) for p in pin_m] + [(p, hits_r) for p in pin_r]:
+        unused = [f"{k}:{x}" for k, x in [("key", x) for x in p["advisory_keys"]] + [("dml", x) for x in p["dml_targets"]] if (k, p["scope"], x) not in h.used]
+        if unused and h[(p["scope"], p["signature"])] == 1:
+            problems.append(f"function_body_pins: {p['scope']} {p['signature']} declares capabilities its body does not use: {unused}")
+    global PIN_REPORT
+    PIN_REPORT = pin_report(pin_m, hits_m, hits_r)
     problems += check_unused(allow, used_m, "allow") + check_unused(rallow, used_r, "rollback_allow")
     b = texts["B"]
     if shape == "wrapped":
@@ -2206,6 +2371,8 @@ def main(argv=None):
                 rep.add(f"- FAIL static: {p}")
             raise Stop("package verification failed")
         rep.add(f"- PASS static: package '{a.package}' files, checksums, lint and object allow-lists")
+        for line in PIN_REPORT:
+            rep.add(line)
         if a.mode == "check-only":
             rep.flush_summary()
             return 0
