@@ -12,6 +12,8 @@ interface AppShellProps {
   userRole: string;
   /** Show the "Admin Perusahaan" entry. Decided on the server; defaults to hidden. */
   showAdminLink?: boolean;
+  /** Show the "Privasi & Data Saya" link. Decided on the server (CONSENT_UI_ENABLED); defaults to hidden. */
+  showPrivacyLink?: boolean;
   /** Optional strip shown above the page content (e.g. trial status). Decided on the server. */
   banner?: ReactNode;
   children: ReactNode;
@@ -36,7 +38,7 @@ const getDesktopOnServer = () => true;
  * on small screens, opened from a slim top bar, and leaves the `lg:` docked
  * layout exactly as it was.
  */
-export function AppShell({ businessName, userName, userRole, showAdminLink = false, banner = null, children }: AppShellProps) {
+export function AppShell({ businessName, userName, userRole, showAdminLink = false, showPrivacyLink = false, banner = null, children }: AppShellProps) {
   const [open, setOpen] = useState(false);
   const desktop = useSyncExternalStore(subscribeDesktop, getDesktop, getDesktopOnServer);
 
@@ -87,6 +89,7 @@ export function AppShell({ businessName, userName, userRole, showAdminLink = fal
           userName={userName}
           userRole={userRole}
           showAdminLink={showAdminLink}
+          showPrivacyLink={showPrivacyLink}
           onNavigate={() => setOpen(false)}
         />
       </div>

@@ -14,7 +14,7 @@ const INTRO =
 
 const WITHDRAW_BODY: Record<ConsentItemView["kind"], string> = {
   CONNECTION:
-    "LINOE akan berhenti mengakses akun ini dan menghapus token akses dari sistem kami. Pencabutan akses di sisi platform (Meta/TikTok) kami upayakan sebaik mungkin, tetapi tidak dapat dijamin; Anda juga dapat mencabutnya langsung di pengaturan akun platform tersebut. Data kinerja yang sudah diimpor tidak otomatis terhapus; lihat Penghapusan Data. Penarikan tidak memengaruhi pemrosesan yang sudah berlangsung sebelumnya.",
+    "LINOE akan memutus koneksi ini dan berhenti mengakses akun tersebut. Data kinerja yang sudah diimpor tidak otomatis terhapus; lihat Penghapusan Data. Penarikan tidak memengaruhi pemrosesan yang sudah berlangsung sebelumnya.",
   OPTIONAL: "Anda tidak akan menerima komunikasi opsional ini lagi. Pesan layanan tetap dikirim. Penarikan tidak memengaruhi pemrosesan yang sudah berlangsung sebelumnya.",
 };
 
@@ -28,7 +28,7 @@ function badgeVariant(status: ConsentItemView["status"]): "success" | "neutral" 
  * Panel "Kelola persetujuan opsional" (Paket 3). Terpasang hanya bila CONSENT_UI_ENABLED === "true".
  * Status berubah HANYA setelah server mengonfirmasi (tanpa pembaruan optimistis); sesudahnya halaman dimuat ulang dari server.
  */
-export function ConsentPanel({ items, loadError }: { items: ConsentItemView[]; loadError?: boolean }) {
+export function ConsentPanel({ items, loadError, title = "Privasi & persetujuan", intro = INTRO }: { items: ConsentItemView[]; loadError?: boolean; title?: string; intro?: string }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [confirming, setConfirming] = useState<string | null>(null);
@@ -68,9 +68,9 @@ export function ConsentPanel({ items, loadError }: { items: ConsentItemView[]; l
     <section aria-labelledby="privasi-persetujuan-title" className="flex flex-col gap-3">
       <div>
         <h2 id="privasi-persetujuan-title" className="text-base font-semibold tracking-tight text-foreground">
-          Privasi &amp; persetujuan
+          {title}
         </h2>
-        <p className="mt-1 text-sm text-muted-foreground">{INTRO}</p>
+        <p className="mt-1 text-sm text-muted-foreground">{intro}</p>
       </div>
 
       {loadError ? (

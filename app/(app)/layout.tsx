@@ -1,3 +1,4 @@
+import { isConsentUiEnabled } from "@/lib/consent/flags";
 import type { Metadata } from "next";
 import { AppShell } from "@/components/layout/app-shell";
 import { TrialBanner } from "@/components/layout/trial-banner";
@@ -43,6 +44,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       userName={session.userName}
       userRole={session.role}
       showAdminLink={showAdminLink}
+      showPrivacyLink={isConsentUiEnabled()}
       banner={banner}
     >
       {children}
