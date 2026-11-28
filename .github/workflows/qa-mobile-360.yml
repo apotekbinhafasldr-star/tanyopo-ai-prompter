@@ -35,17 +35,19 @@ jobs:
           node-version: "22"
           cache: "npm"
       - run: npm ci
-      - run: npm run build
-      # Versi dipin; --no-save agar package.json/package-lock.json aplikasi tidak berubah.
-      - run: npm i --no-save playwright@1.49.1 @axe-core/playwright@4.10.1
-      - run: npx playwright install --with-deps chromium
       - name: Ephemeral demo secret (runner only)
         run: |
           # Nilai sementara yang dibuat di runner ini saja (bukan secret repo), dimask di log dan tidak disimpan.
+          # HARUS ada sebelum build: tanpa secret saat build, halaman /demo/* ter-prerender statis (tanda ○) menjadi
+          # redirect ke /demo dan menimbulkan loop. Di runner ini nilainya sama untuk build dan start.
           # Dipakai server (menandatangani sesi demo) dan harness (hanya memeriksa tanda tangan sebagai boolean).
           S="$(openssl rand -hex 32)"
           echo "::add-mask::$S"
           echo "DEMO_SESSION_SECRET=$S" >> "$GITHUB_ENV"
+      - run: npm run build
+      # Versi dipin; --no-save agar package.json/package-lock.json aplikasi tidak berubah.
+      - run: npm i --no-save playwright@1.49.1 @axe-core/playwright@4.10.1
+      - run: npx playwright install --with-deps chromium
       - name: Start app
         run: |
           nohup node scripts/qa/mock-supabase.mjs > mock.log 2>&1 &

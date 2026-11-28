@@ -157,6 +157,12 @@ describe("kunci axe sampai tingkat elemen (UNIT)", () => {
     }
   });
 
+  it("secret demo sementara dibuat SEBELUM build (tanpa itu /demo/* ter-prerender statis dan looping)", () => {
+    expect(workflow.indexOf("Ephemeral demo secret")).toBeGreaterThan(-1);
+    expect(workflow.indexOf("Ephemeral demo secret")).toBeLessThan(workflow.indexOf("npm run build"));
+    expect(workflow.indexOf("npm run build")).toBeLessThan(workflow.indexOf("name: Start app"));
+  });
+
   it("workflow memask secret sementara demo dan tidak memakai secret repo", () => {
     expect(workflow).toContain("::add-mask::");
     expect(workflow).toContain('DEMO_SESSION_SECRET=$S" >> "$GITHUB_ENV"');
