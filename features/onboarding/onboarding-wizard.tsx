@@ -24,7 +24,7 @@ const TOTAL_STEPS = 8;
 const initialState: OnboardingActionState = { error: null };
 
 const selectClass =
-  "h-11 rounded-[var(--radius-md)] border border-border-strong bg-surface px-3 sm:h-10 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40";
+  "h-11 rounded-[var(--radius-md)] border border-border-input bg-surface px-3 sm:h-10 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40";
 
 function OptionGrid({
   options,
@@ -52,7 +52,7 @@ function OptionGrid({
               "relative flex min-h-11 items-center justify-between gap-2 rounded-[var(--radius-md)] border-2 px-4 py-3 text-left text-sm font-medium transition-all",
               isSelected
                 ? "border-brand bg-brand-muted text-brand ring-2 ring-brand/30"
-                : "border-border-strong text-foreground hover:border-brand/40 hover:bg-surface-muted",
+                : "border-border-input text-foreground hover:border-brand/40 hover:bg-surface-muted",
             )}
           >
             <span>{opt.label}</span>
