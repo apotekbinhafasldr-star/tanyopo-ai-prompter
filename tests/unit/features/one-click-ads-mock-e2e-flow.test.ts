@@ -620,3 +620,59 @@ describe("MOCK E2E (in-memory, BUKAN bukti E2E nyata) — sync insight dan rekom
     expect(world.ads.countOf("updateBudget")).toBe(0);
   });
 });
+
+describe("MOCK E2E (in-memory, BUKAN bukti E2E nyata) — (8) sidik jari copy terikat ke campaign, tenant, approval, dan copy aktual", () => {
+  const approvalA = () => approvalFor(world, MASTER_A)!;
+
+  it("copy yang diluncurkan = copy yang disetujui (jalur sah)", async () => {
+    await approveCampaignA();
+    const approved = (approvalA().context as { copy_snapshot?: { hash?: string } }).copy_snapshot;
+    expect(approved?.hash).toMatch(/^[0-9a-f]{64}$/);
+
+    expect((await launch(CHANNEL_A1)).error).toBeNull();
+    const creative = world.ads.objects.find((o) => o.type === "creative")!.input;
+    const stored = rowOf(world, "prompter_master_campaigns", MASTER_A)!.ai_proposal as Record<string, unknown>;
+    expect(creative).toMatchObject({ headline: stored.headline, primaryText: stored.primary_text, cta: stored.cta });
+  });
+
+  it("copy diubah langsung di database setelah approval (penulis RLS): launch ditolak, tidak ada kontak platform dan tidak ada tulisan", async () => {
+    await approveCampaignA();
+    const stored = rowOf(world, "prompter_master_campaigns", MASTER_A)!.ai_proposal as Record<string, unknown>;
+    stored.headline = "Judul yang diganti setelah approval";
+
+    const mark = world.db.log.length;
+    expect((await launch(CHANNEL_A1)).error).toMatch(/copy iklan berbeda dari yang disetujui/);
+    expectNoPlatformContactAndNoWrites(mark);
+    expect(channelStatus(world, CHANNEL_A1)).toBe("SCHEDULED");
+  });
+
+  it.each([
+    ["approval milik campaign lain (resource_id)", { resource_id: MASTER_B }, /belum memiliki persetujuan/],
+    ["approval milik tenant lain (tenant_id)", { tenant_id: TENANT_B }, /belum memiliki persetujuan/],
+    ["approval bertipe lain", { approval_type: "AUTOPILOT_ACTION" }, /belum memiliki persetujuan/],
+    ["approval kedaluwarsa", { status: "EXPIRED" }, /belum memiliki persetujuan/],
+    ["approval ditolak", { status: "REJECTED" }, /belum memiliki persetujuan/],
+  ])("sidik jari yang sah tidak bisa dipinjam: %s", async (_name, patch, message) => {
+    await approveCampaignA();
+    Object.assign(approvalA(), patch);
+
+    const mark = world.db.log.length;
+    expect((await launch(CHANNEL_A1)).error).toMatch(message);
+    expectNoPlatformContactAndNoWrites(mark);
+  });
+
+  it("hanya approval TERBARU yang dibandingkan: approval lama yang cocok tidak menolong bila yang terbaru tidak mencatat copy", async () => {
+    await approveCampaignA();
+    const first = approvalA();
+    world.db.tables.prompter_approvals.push({
+      ...first,
+      id: "ap-newer",
+      created_at: "2099-01-01T00:00:00.000Z",
+      context: { ...(first.context as Record<string, unknown>), copy_snapshot: undefined },
+    });
+
+    const mark = world.db.log.length;
+    expect((await launch(CHANNEL_A1)).error).toMatch(/dibuat sebelum copy dicatat/);
+    expectNoPlatformContactAndNoWrites(mark);
+  });
+});

@@ -17,6 +17,13 @@ const { mirrorChannelCampaignStatusMock } = vi.hoisted(() => ({
 }));
 vi.mock("@/services/channel-campaigns", () => ({
   syncChannelCampaigns: vi.fn(async () => undefined),
+  readChannelAllocationRows: vi.fn(async () => ({
+    ok: true,
+    rows: [
+      { id: "cc1", channel: "FACEBOOK", budgetPercentage: 50 },
+      { id: "cc2", channel: "INSTAGRAM", budgetPercentage: 50 },
+    ],
+  })),
   mirrorChannelCampaignStatus: mirrorChannelCampaignStatusMock,
   transitionMasterCampaign: vi.fn(async () => "moved"),
   isMirrorConfirmed: (r: { ok: boolean; consistent: boolean }) => r.ok && r.consistent,
@@ -33,7 +40,11 @@ function buildSupabase(opts: {
   approvalInsertError?: { message: string } | null;
   rpcResult: { data: unknown; error: { message: string } | null };
 }) {
-  const campaignSingle = vi.fn(async () => ({ data: opts.campaign, error: null }));
+  // The campaign needs complete active copy to be submittable (submit refuses a missing/blank headline, primary_text or cta).
+  const campaignSingle = vi.fn(async () => ({
+    data: { ai_proposal: { headline: "Judul", primary_text: "Teks utama", cta: "Pelajari" }, ...opts.campaign },
+    error: null,
+  }));
   const campaignEq2 = vi.fn(() => ({ single: campaignSingle }));
   const campaignEq1 = vi.fn(() => ({ eq: campaignEq2 }));
   const campaignSelect = vi.fn(() => ({ eq: campaignEq1 }));
