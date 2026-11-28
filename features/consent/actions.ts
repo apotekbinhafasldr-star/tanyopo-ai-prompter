@@ -62,16 +62,41 @@ export async function grantOptionalConsentAction(code: string): Promise<ConsentA
 }
 
 /**
- * Memberi persetujuan koneksi platform (hanya Owner). Dipanggil dari alur koneksi SEBELUM OAuth dimulai (dialog menyusul di paket UI
- * berikutnya); tidak memutus atau mengubah koneksi apa pun.
+ * Membaca versi persetujuan AKTIF untuk satu kode dari database (fn_prompter_consent_my_status, lewat sesi pengguna).
+ * Mengembalikan null bila tidak terbaca (galat/baris tidak ada); pemanggil memperlakukannya sebagai gagal.
  */
-export async function grantConnectionConsentAction(platform: ConnectorPlatform): Promise<ConsentActionState> {
+async function readActiveVersion(code: ConsentCode): Promise<number | null> {
+  try {
+    const supabase = await createClient();
+    const { data, error } = await asConsentRpc(supabase).rpc("fn_prompter_consent_my_status");
+    if (error || !Array.isArray(data)) return null;
+    const row = (data as Array<{ code?: unknown; version?: unknown }>).find((r) => r?.code === code);
+    return typeof row?.version === "number" && Number.isInteger(row.version) ? row.version : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Memberi persetujuan koneksi platform (hanya Owner). Dipanggil dari dialog persetujuan di halaman Koneksi SEBELUM OAuth dimulai;
+ * tidak memutus atau mengubah koneksi apa pun.
+ *
+ * `shownVersion` (opsional, agar pemanggil lama tetap aman): versi teks yang BENAR-BENAR ditampilkan di dialog. Bila ada, versi aktif
+ * di database harus sama; bila berbeda atau tidak terbaca, tidak ada yang disimpan (persetujuan tidak boleh menunjuk teks yang tidak dilihat pengguna).
+ * Versi yang disimpan tetap ditentukan database, bukan klien.
+ */
+export async function grantConnectionConsentAction(platform: ConnectorPlatform, shownVersion?: number): Promise<ConsentActionState> {
   const session = await requireSessionContext();
   if (session.role !== "owner") return { error: CONSENT_MESSAGES.ownerOnly };
   const code = (Object.keys(PLATFORM_BY_CODE) as ConsentCode[]).find((c) => PLATFORM_BY_CODE[c] === platform);
   const entry = code ? getConsentEntry(code) : null;
   if (!entry || !entry.active) return { error: CONSENT_MESSAGES.saveFailed };
   if (!allowConsentRequest(session.userId)) return { error: CONSENT_MESSAGES.tooMany };
+  if (shownVersion !== undefined) {
+    const active = await readActiveVersion(entry.code);
+    if (active === null) return { error: CONSENT_MESSAGES.saveFailed };
+    if (active !== shownVersion || entry.version !== shownVersion) return { error: CONSENT_MESSAGES.staleText };
+  }
   const ok = await setConsent(entry.code, "GRANTED", "CONNECT_FLOW", session.tenantId);
   if (!ok) return { error: CONSENT_MESSAGES.saveFailed };
   revalidatePath("/connections");

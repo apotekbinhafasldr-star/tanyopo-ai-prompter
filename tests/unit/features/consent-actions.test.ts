@@ -40,6 +40,43 @@ describe("server actions persetujuan", () => {
     expect(rpcMock).toHaveBeenCalledWith("fn_prompter_consent_set", { p_code: "CONNECT_META", p_action: "GRANTED", p_source: "CONNECT_FLOW", p_tenant_id: "t1" });
   });
 
+  it("grantConnection dengan shownVersion basi: staleText, tanpa consent_set (bukti tidak menunjuk teks yang tidak dilihat)", async () => {
+    rpcMock.mockResolvedValue({ data: [{ code: "CONNECT_META", version: 2, status: "NOT_GIVEN" }], error: null });
+    expect(await grantConnectionConsentAction("META", 1)).toEqual({ error: CONSENT_MESSAGES.staleText });
+    expect(rpcMock).toHaveBeenCalledTimes(1);
+    expect(rpcMock).toHaveBeenCalledWith("fn_prompter_consent_my_status");
+    expect(rpcMock).not.toHaveBeenCalledWith("fn_prompter_consent_set", expect.anything());
+  });
+
+  it("grantConnection dengan shownVersion yang cocok: menyimpan (versi tetap ditentukan database, tidak dikirim klien)", async () => {
+    rpcMock.mockImplementation(async (fn: string) => (fn === "fn_prompter_consent_my_status" ? { data: [{ code: "CONNECT_META", version: 1, status: "NOT_GIVEN" }], error: null } : { data: {}, error: null }));
+    expect((await grantConnectionConsentAction("META", 1)).error).toBeNull();
+    expect(rpcMock).toHaveBeenCalledWith("fn_prompter_consent_set", { p_code: "CONNECT_META", p_action: "GRANTED", p_source: "CONNECT_FLOW", p_tenant_id: "t1" });
+  });
+
+  it("grantConnection dengan shownVersion: versi database tidak terbaca = gagal tersimpan, tanpa consent_set", async () => {
+    rpcMock.mockResolvedValue({ data: null, error: { message: "x" } });
+    expect(await grantConnectionConsentAction("META", 1)).toEqual({ error: CONSENT_MESSAGES.saveFailed });
+    rpcMock.mockReset();
+    rpcMock.mockResolvedValue({ data: [], error: null });
+    expect(await grantConnectionConsentAction("META", 1)).toEqual({ error: CONSENT_MESSAGES.saveFailed });
+    expect(rpcMock).not.toHaveBeenCalledWith("fn_prompter_consent_set", expect.anything());
+  });
+
+  it("grantConnection dengan shownVersion: bukan Owner tetap ditolak lebih dulu (tanpa membaca database)", async () => {
+    sessionMock.mockResolvedValue({ userId: "u1", tenantId: "t1", role: "marketing" });
+    expect(await grantConnectionConsentAction("META", 1)).toEqual({ error: CONSENT_MESSAGES.ownerOnly });
+    expect(rpcMock).not.toHaveBeenCalled();
+  });
+
+  it("grantConnection: rem laju (31 permintaan per menit per pengguna) menolak dengan tooMany sebelum membaca atau menulis", async () => {
+    sessionMock.mockResolvedValue({ userId: "u-rate", tenantId: "t1", role: "owner" });
+    let last: { error: string | null } = { error: null };
+    for (let i = 0; i < 31; i++) last = await grantConnectionConsentAction("META");
+    expect(last).toEqual({ error: CONSENT_MESSAGES.tooMany });
+    expect(rpcMock).toHaveBeenCalledTimes(30);
+  });
+
   it("grantConnection: platform X (nonaktif) ditolak", async () => {
     expect((await grantConnectionConsentAction("X")).error).toBe(CONSENT_MESSAGES.saveFailed);
     expect(rpcMock).not.toHaveBeenCalled();

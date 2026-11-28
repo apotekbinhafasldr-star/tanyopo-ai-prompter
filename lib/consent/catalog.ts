@@ -97,7 +97,15 @@ export function connectConsentCode(platform: string): ConsentCode | null {
 
 /** Pesan galat (spesifikasi C.4). Tidak memuat detail internal. */
 export const CONSENT_MESSAGES = {
-  required: "Fitur ini memerlukan persetujuan Anda. Buka Privasi & persetujuan untuk mengaturnya.",
+  /** G1: Owner ditolak (belum/ditarik/versi lama). */
+  required: "Fitur ini memerlukan persetujuan Anda. Buka Privasi & Data Saya di Pengaturan untuk mengaturnya.",
+  /** G1n: bukan Owner; persetujuan koneksi diberikan Owner. */
+  gateOwnerMissing: "Koneksi ini belum memiliki persetujuan Owner yang berlaku. Minta Owner meninjaunya di halaman Koneksi.",
+  /** G2: pemeriksaan gagal; tindakan ditahan. */
+  gateUnavailable: "Pemeriksaan persetujuan belum berhasil, jadi tindakan ini ditahan. Tidak ada yang dikirim ke platform. Coba lagi sebentar lagi; fitur lain tetap berjalan.",
+  /** Teks persetujuan berubah sejak dialog dibuka. */
+  staleText: "Teks persetujuan baru saja diperbarui. Muat ulang halaman, lalu coba lagi.",
+  networkError: "Permintaan belum berhasil. Periksa koneksi internet, lalu coba lagi.",
   saveFailed: "Persetujuan belum tersimpan. Periksa koneksi internet, lalu coba lagi.",
   withdrawFailed: "Penarikan belum berhasil. Status Anda belum berubah. Coba lagi.",
   ownerOnly: "Hanya Owner yang dapat mengatur koneksi ini.",

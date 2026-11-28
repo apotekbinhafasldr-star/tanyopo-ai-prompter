@@ -7,6 +7,8 @@ export interface ConsentItemView {
   title: string;
   text: string;
   kind: ConsentCatalogEntry["kind"];
+  /** Versi persetujuan aktif menurut baris database (fallback: versi katalog bila baris tidak memuatnya). */
+  version: number;
   status: ConsentStatus;
   /** Teks status (bukan warna saja), mis. "Aktif" atau "Ditarik pada 3 Desember 2026". */
   statusLabel: string;
@@ -44,6 +46,7 @@ export function statusLabel(status: ConsentStatus, occurredAt: string | null, ti
 
 interface StatusRow {
   code?: unknown;
+  version?: unknown;
   status?: unknown;
   occurred_at?: unknown;
 }
@@ -60,7 +63,8 @@ export function buildConsentItems(rows: unknown, timeZone: string): ConsentItemV
     if (!entry || !entry.active) continue;
     const status = raw.status as ConsentStatus;
     const occurredAt = typeof raw.occurred_at === "string" ? raw.occurred_at : null;
-    items.push({ code: entry.code, title: entry.title, text: entry.text, kind: entry.kind, status, statusLabel: statusLabel(status, occurredAt, timeZone) });
+    const version = typeof raw.version === "number" && Number.isInteger(raw.version) ? raw.version : entry.version;
+    items.push({ code: entry.code, title: entry.title, text: entry.text, kind: entry.kind, version, status, statusLabel: statusLabel(status, occurredAt, timeZone) });
   }
   return items;
 }

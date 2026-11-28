@@ -1,5 +1,6 @@
-import { CONSENT_MESSAGES, getConsentEntry, type ConsentCode } from "@/lib/consent/catalog";
+import { getConsentEntry, type ConsentCode } from "@/lib/consent/catalog";
 import { isConsentEnforcementEnabled } from "@/lib/consent/flags";
+import { gateMessage } from "@/lib/consent/gate-message";
 import type { ConsentRpcClient } from "@/lib/consent/rpc";
 
 export type ConsentDenyReason =
@@ -24,6 +25,8 @@ export interface RequireConsentDeps {
   /** Default: klien service_role (dimuat malas, hanya bila enforcement ON). null = tidak tersedia. */
   getClient?: () => Promise<ConsentRpcClient | null>;
   timeoutMs?: number;
+  /** Hanya untuk pemilihan teks pesan (G1 vs G1n). Default true. Bukan pemeriksaan hak akses. */
+  isOwner?: boolean;
 }
 
 const DEFAULT_TIMEOUT_MS = 3000;
@@ -93,5 +96,5 @@ export async function requireConsent(code: ConsentCode, userId: string, tenantId
 /** Pesan galat untuk pengguna bila ditolak; null bila boleh lanjut. Tanpa detail internal. */
 export async function consentGateMessage(code: ConsentCode, userId: string, tenantId: string | null, deps: RequireConsentDeps = {}): Promise<string | null> {
   const decision = await requireConsent(code, userId, tenantId, deps);
-  return decision.allowed ? null : CONSENT_MESSAGES.required;
+  return decision.allowed ? null : gateMessage(decision.reason, deps.isOwner ?? true);
 }

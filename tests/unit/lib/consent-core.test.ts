@@ -29,11 +29,13 @@ describe("flags: default OFF, aktif hanya bila persis \"true\"", () => {
     expect(isConsentEnforcementEnabled()).toBe(false);
     expect(isConsentUiEnabled()).toBe(false);
   });
-  it("hanya \"true\" mengaktifkan, dan masing-masing independen", () => {
+  it("UI hidup sendiri tidak mengaktifkan enforcement; enforcement efektif hanya bila UI juga \"true\" (K5-2)", () => {
+    vi.stubEnv("CONSENT_ENFORCEMENT_ENABLED", "");
+    vi.stubEnv("CONSENT_UI_ENABLED", "true");
+    expect(isConsentEnforcementEnabled()).toBe(false);
+    expect(isConsentUiEnabled()).toBe(true);
     vi.stubEnv("CONSENT_ENFORCEMENT_ENABLED", "true");
-    vi.stubEnv("CONSENT_UI_ENABLED", "");
     expect(isConsentEnforcementEnabled()).toBe(true);
-    expect(isConsentUiEnabled()).toBe(false);
   });
 });
 
@@ -94,6 +96,21 @@ describe("requireConsent", () => {
     const d = await requireConsent("CONNECT_META", "u1", "t1", { isEnabled: () => true, getClient: async () => ({ rpc: rpcOk({ consented: false, reason }) }) });
     expect(d).toEqual({ allowed: false, reason });
     expect(await consentGateMessage("CONNECT_META", "u1", "t1", { isEnabled: () => true, getClient: async () => ({ rpc: rpcOk({ consented: false, reason }) }) })).toBe(CONSENT_MESSAGES.required);
+  });
+
+  it.each(["NO_RECORD", "WITHDRAWN", "VERSION_OUTDATED", "NOT_IN_TENANT", "GRANTOR_NOT_OWNER"])("pesan gerbang %s: Owner = G1, bukan Owner = G1n", async (reason) => {
+    const deps = { isEnabled: () => true, getClient: async () => ({ rpc: rpcOk({ consented: false, reason }) }) };
+    expect(await consentGateMessage("CONNECT_META", "u1", "t1", { ...deps, isOwner: true })).toBe(CONSENT_MESSAGES.required);
+    expect(await consentGateMessage("CONNECT_META", "u1", "t1", { ...deps, isOwner: false })).toBe(CONSENT_MESSAGES.gateOwnerMissing);
+  });
+
+  it("pemeriksaan gagal (CHECK_FAILED, NO_CLIENT) = G2 untuk Owner maupun bukan Owner, tanpa menyuruh memberi persetujuan", async () => {
+    for (const isOwner of [true, false]) {
+      const noClient = await consentGateMessage("CONNECT_META", "u1", "t1", { isEnabled: () => true, getClient: async () => null, isOwner });
+      const failed = await consentGateMessage("CONNECT_META", "u1", "t1", { isEnabled: () => true, getClient: async () => ({ rpc: async () => ({ data: null, error: { message: "x" } }) }), isOwner });
+      expect(noClient).toBe(CONSENT_MESSAGES.gateUnavailable);
+      expect(failed).toBe(CONSENT_MESSAGES.gateUnavailable);
+    }
   });
 
   it("fail-closed: galat rpc, exception, tanpa klien, timeout, data aneh, user kosong, kode tidak aktif/tidak dikenal", async () => {
