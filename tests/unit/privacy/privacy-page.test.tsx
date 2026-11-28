@@ -181,7 +181,7 @@ describe("kartu masuk dan gerbang rute", () => {
   it("rute: 404 saat UI MATI, sesi dengan onboarding belum selesai diizinkan, tiga sumber dimuat terpisah dengan try/catch", () => {
     const src = read("app/(app)/settings/privasi/page.tsx");
     expect(src).toContain("if (!isConsentUiEnabled()) notFound();");
-    expect(src.indexOf("notFound()")).toBeLessThan(src.indexOf("requireSessionContext"));
+    expect(src.indexOf("notFound()")).toBeLessThan(src.indexOf("await requireSessionContext("));
     expect(src).toContain("allowIncompleteOnboarding: true");
     expect(src.match(/try \{/g)?.length).toBeGreaterThanOrEqual(2);
     expect(read("features/consent/consent-section.tsx")).toContain("catch");
