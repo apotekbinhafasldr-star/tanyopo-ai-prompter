@@ -565,12 +565,11 @@ function textRuleIssues(
   return issues;
 }
 
-const RAW_FALLBACK_CODES: readonly string[] = ["FINANCIAL_CLAIM", "SPECIAL_CATEGORY"];
-
 /**
- * Fallback for a stored proposal that does NOT parse against the schema (legacy shapes), so the full gate cannot
- * run. Scans only the known active copy strings (hook, headline, cta, primary_text) for the two blocking rules
- * FINANCIAL_CLAIM and SPECIAL_CATEGORY. Anything that is not an object, or has no such string, yields no issues:
+ * Fallback for a stored proposal that does NOT parse against the schema (legacy shapes, or copy longer than the
+ * schema allows), so the full gate cannot run. Scans the known active copy strings (hook, headline, cta,
+ * primary_text) for EVERY rule of severity "block" (not a hand-picked subset, so a new blocking rule is covered
+ * automatically); warnings are not part of the fallback. Anything that is not an object, or has no such string, yields no issues:
  * the proposal stays "cannot be assessed". Candidates are deliberately not scanned: the owner cannot edit them.
  */
 export function scanRawProposalCopy(raw: unknown): QualityIssue[] {
@@ -586,7 +585,7 @@ export function scanRawProposalCopy(raw: unknown): QualityIssue[] {
   return textRuleIssues(
     fields,
     "",
-    TEXT_RULES.filter((rule) => RAW_FALLBACK_CODES.includes(rule.code)),
+    TEXT_RULES.filter((rule) => rule.severity === "block"),
   );
 }
 

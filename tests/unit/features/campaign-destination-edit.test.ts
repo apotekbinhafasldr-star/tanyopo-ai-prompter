@@ -12,6 +12,13 @@ vi.mock("@/services/budget-guard", () => ({
 }));
 vi.mock("@/services/channel-campaigns", () => ({
   syncChannelCampaigns: vi.fn(async () => undefined),
+  readChannelAllocationRows: vi.fn(async () => ({
+    ok: true,
+    rows: [
+      { id: "cc1", channel: "FACEBOOK", budgetPercentage: 50 },
+      { id: "cc2", channel: "INSTAGRAM", budgetPercentage: 50 },
+    ],
+  })),
   mirrorChannelCampaignStatus: vi.fn(async () => ({ ok: true, updated: 1, consistent: true })),
   transitionMasterCampaign: vi.fn(async () => "moved"),
   isMirrorConfirmed: (r: { ok: boolean; consistent: boolean }) => r.ok && r.consistent,
@@ -198,7 +205,7 @@ describe("submitForApprovalAction — destination snapshot", () => {
   const base = { daily_budget: 100, total_budget: 1000, currency: "IDR", product_id: "p1" };
 
   it("stores the current destination in the approval context", async () => {
-    current = build({ campaign: { id: "c1", status: "DRAFT", ai_proposal: { purchase_destination: WEB }, ...base } });
+    current = build({ campaign: { id: "c1", status: "DRAFT", ai_proposal: { headline: "H", primary_text: "P", cta: "C", purchase_destination: WEB }, ...base } });
     const r = await submitForApprovalAction("c1");
     expect(r.error).toBeNull();
     const row = current.approvalInsert.mock.calls[0][0];
@@ -209,7 +216,7 @@ describe("submitForApprovalAction — destination snapshot", () => {
 
   it("legacy campaign records the ACTUAL product landing URL (not just 'legacy')", async () => {
     current = build({
-      campaign: { id: "c1", status: "DRAFT", ai_proposal: { headline: "H" }, ...base },
+      campaign: { id: "c1", status: "DRAFT", ai_proposal: { headline: "H", primary_text: "P", cta: "C" }, ...base },
       product: { id: "p1", website_url: "https://toko-saya.co.id/produk" },
     });
     await submitForApprovalAction("c1");
@@ -222,7 +229,7 @@ describe("submitForApprovalAction — destination snapshot", () => {
 
   it("legacy campaign falls back to the brand URL, validated on the server", async () => {
     current = build({
-      campaign: { id: "c1", status: "DRAFT", ai_proposal: { headline: "H" }, ...base },
+      campaign: { id: "c1", status: "DRAFT", ai_proposal: { headline: "H", primary_text: "P", cta: "C" }, ...base },
       product: { id: "p1", website_url: null },
       brand: { website_url: "https://brand-saya.id/" },
     });
@@ -235,7 +242,7 @@ describe("submitForApprovalAction — destination snapshot", () => {
 
   it("legacy campaign with an unsafe or missing URL records 'legacy_unresolved' (never the bad URL)", async () => {
     current = build({
-      campaign: { id: "c1", status: "DRAFT", ai_proposal: { headline: "H" }, ...base },
+      campaign: { id: "c1", status: "DRAFT", ai_proposal: { headline: "H", primary_text: "P", cta: "C" }, ...base },
       product: { id: "p1", website_url: "https://tanyopo-ai-prompter.netlify.app/x" },
     });
     await submitForApprovalAction("c1");

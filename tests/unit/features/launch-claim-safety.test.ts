@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import { LAUNCHABLE_PROPOSAL } from "@/tests/unit/helpers/launchable-proposal";
 import { ConnectorApiError } from "@/lib/connectors/types";
 import {
   makeAdminStorage,
@@ -161,7 +162,7 @@ const from = vi.fn((table: string) => {
                   currency: "IDR",
                   daily_budget: 100000,
                   total_budget: null,
-                  ai_proposal: { headline: "H", primary_text: "P", cta: "C" },
+                  ai_proposal: LAUNCHABLE_PROPOSAL,
                 },
                 error: null,
               }),

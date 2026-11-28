@@ -1,0 +1,65 @@
+name: QA mobile 360px
+
+# Harness UI Android 360px (Playwright + axe) untuk layar utama. Terpisah dari ci.yml.
+# Aman: tanpa secret, tanpa Supabase produksi, tanpa deploy. Aplikasi build produksi dijalankan di runner dan
+# berbicara ke backend palsu scripts/qa/mock-supabase.mjs (localhost:54321) dengan data sintetis.
+on:
+  pull_request:
+    paths:
+      - "app/**"
+      - "components/**"
+      - "features/**"
+      - "lib/hooks/**"
+      - "scripts/qa/mobile-360*"
+      - "scripts/qa/mock-supabase.mjs"
+      - ".github/workflows/qa-mobile-360.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mobile-360:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Hanya CI: mengarahkan aplikasi ke backend palsu runner-lokal. Bukan nilai produksi, tidak dipakai deploy.
+      NEXT_PUBLIC_SUPABASE_URL: http://localhost:54321
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_placeholder
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - name: Ephemeral demo secret (runner only)
+        run: |
+          # Nilai sementara yang dibuat di runner ini saja (bukan secret repo), dimask di log dan tidak disimpan.
+          # HARUS ada sebelum build: tanpa secret saat build, halaman /demo/* ter-prerender statis (tanda ○) menjadi
+          # redirect ke /demo dan menimbulkan loop. Di runner ini nilainya sama untuk build dan start.
+          # Dipakai server (menandatangani sesi demo) dan harness (hanya memeriksa tanda tangan sebagai boolean).
+          S="$(openssl rand -hex 32)"
+          echo "::add-mask::$S"
+          echo "DEMO_SESSION_SECRET=$S" >> "$GITHUB_ENV"
+      - run: npm run build
+      # Versi dipin; --no-save agar package.json/package-lock.json aplikasi tidak berubah.
+      - run: npm i --no-save playwright@1.49.1 @axe-core/playwright@4.10.1
+      - run: npx playwright install --with-deps chromium
+      - name: Start app
+        run: |
+          nohup node scripts/qa/mock-supabase.mjs > mock.log 2>&1 &
+          nohup npm run start > server.log 2>&1 &
+          for i in $(seq 1 40); do curl -sf http://localhost:3000/login >/dev/null && break; sleep 2; done
+      - name: QA 360px
+        run: node scripts/qa/mobile-360.mjs
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-mobile-360
+          path: |
+            qa-output
+            server.log
+            mock.log

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createFakeDb, type FakeDb, type Row } from "../helpers/stateful-fake-db";
 import { checkLaunchApproval } from "@/lib/campaigns/meta-launch-preflight";
+import { CAMPAIGN_EDIT_ROLES } from "@/lib/campaigns/campaign-roles";
 
 /**
  * BEHAVIOUR tests on a stateful in-memory database (every statement atomic, like one PostgREST request,
@@ -74,8 +75,8 @@ const AI_DATA = { candidates: [CAND, CAND], budget_allocation: [], hook: "h", he
 
 function seed(over: { master?: Row; channels?: Row[]; approvals?: Row[]; extra?: Record<string, Row[]> } = {}) {
   const channels = over.channels ?? [
-    { id: "c1", tenant_id: "t1", master_campaign_id: M, channel: "FACEBOOK", status: "DRAFT", external_campaign_id: null },
-    { id: "c2", tenant_id: "t1", master_campaign_id: M, channel: "INSTAGRAM", status: "DRAFT", external_campaign_id: null },
+    { id: "c1", tenant_id: "t1", master_campaign_id: M, channel: "FACEBOOK", status: "DRAFT", external_campaign_id: null, budget_percentage: 50 },
+    { id: "c2", tenant_id: "t1", master_campaign_id: M, channel: "INSTAGRAM", status: "DRAFT", external_campaign_id: null, budget_percentage: 50 },
   ];
   return {
     prompter_master_campaigns: [
@@ -89,7 +90,7 @@ function seed(over: { master?: Row; channels?: Row[]; approvals?: Row[]; extra?:
         daily_budget: 100000,
         total_budget: null,
         currency: "IDR",
-        ai_proposal: { headline: "Lama", hook: "x", candidates: [CAND, CAND] },
+        ai_proposal: { headline: "Lama", primary_text: "teks", cta: "Beli", hook: "x", candidates: [CAND, CAND] },
         updated_at: "ts-0",
         ...over.master,
       },
@@ -196,8 +197,8 @@ describe("P2-1 lost update on ai_proposal (compare-and-swap)", () => {
   });
 
   it("regenerate (seconds of AI) does not overwrite a destination edited while the AI was running", async () => {
-    make(seed({ master: { ai_proposal: { headline: "Lama", purchase_destination: WEB } } }));
-    ai.hook = () => bump({ ai_proposal: { headline: "Lama", purchase_destination: WA } });
+    make(seed({ master: { ai_proposal: { headline: "Lama", primary_text: "teks", cta: "Beli", purchase_destination: WEB } } }));
+    ai.hook = () => bump({ ai_proposal: { headline: "Lama", primary_text: "teks", cta: "Beli", purchase_destination: WA } });
     const r = await regenerateCampaignProposalAction(M);
     expect(r.error).toMatch(/baru saja diubah/);
     expect(proposal().purchase_destination).toEqual(WA);
@@ -205,7 +206,7 @@ describe("P2-1 lost update on ai_proposal (compare-and-swap)", () => {
   });
 
   it("regenerate writes nothing if the campaign was submitted while the AI was running", async () => {
-    make(seed({ master: { ai_proposal: { headline: "Lama", purchase_destination: WEB } } }));
+    make(seed({ master: { ai_proposal: { headline: "Lama", primary_text: "teks", cta: "Beli", purchase_destination: WEB } } }));
     ai.hook = () => bump({ status: "AWAITING_APPROVAL" });
     const r = await regenerateCampaignProposalAction(M);
     expect(r.error).toBeTruthy();
@@ -231,7 +232,7 @@ describe("P2-1 lost update on ai_proposal (compare-and-swap)", () => {
 
 describe("regenerate preserves the destination", () => {
   it("a stored destination survives regeneration and is passed to the AI (host only)", async () => {
-    make(seed({ master: { ai_proposal: { headline: "Lama", purchase_destination: WEB } } }));
+    make(seed({ master: { ai_proposal: { headline: "Lama", primary_text: "teks", cta: "Beli", purchase_destination: WEB } } }));
     const r = await regenerateCampaignProposalAction(M);
     expect(r.error).toBeNull();
     expect(proposal().purchase_destination).toEqual(WEB);
@@ -256,11 +257,11 @@ describe("regenerate preserves the destination", () => {
 
 describe("P2-2 race between submit, edit and approval", () => {
   it("a destination edit that slips in during submission can never be approved", async () => {
-    make(seed({ master: { ai_proposal: { headline: "Lama", purchase_destination: WEB } } }));
+    make(seed({ master: { ai_proposal: { headline: "Lama", primary_text: "teks", cta: "Beli", purchase_destination: WEB } } }));
     // Edit lands after submit has read the campaign (snapshot = WEB) but before the status flips.
     injectOnce(
       (c) => c.table === "prompter_approvals" && c.op === "insert",
-      () => bump({ ai_proposal: { headline: "Lama", purchase_destination: WA } }),
+      () => bump({ ai_proposal: { headline: "Lama", primary_text: "teks", cta: "Beli", purchase_destination: WA } }),
     );
     expect((await submitForApprovalAction(M)).error).toBeNull();
     expect(master().status).toBe("AWAITING_APPROVAL");
@@ -282,7 +283,7 @@ describe("P2-2 race between submit, edit and approval", () => {
   });
 
   it("while AWAITING_APPROVAL no action can change the destination", async () => {
-    make(seed({ master: { ai_proposal: { headline: "Lama", purchase_destination: WEB } } }));
+    make(seed({ master: { ai_proposal: { headline: "Lama", primary_text: "teks", cta: "Beli", purchase_destination: WEB } } }));
     await submitForApprovalAction(M);
     const r = await updateCampaignDestinationAction(M, DEST_INIT, dest("WHATSAPP", "081234567890"));
     expect(r.saved).toBe(false);
@@ -290,7 +291,7 @@ describe("P2-2 race between submit, edit and approval", () => {
   });
 
   it("an edit racing the submit's status flip loses (conditional on DRAFT)", async () => {
-    make(seed({ master: { ai_proposal: { headline: "Lama", purchase_destination: WEB } } }));
+    make(seed({ master: { ai_proposal: { headline: "Lama", primary_text: "teks", cta: "Beli", purchase_destination: WEB } } }));
     injectOnce(
       (c) => c.table === "prompter_master_campaigns" && c.op === "update",
       () => bump({ status: "AWAITING_APPROVAL" }),
@@ -322,7 +323,7 @@ describe("P2-2 race between submit, edit and approval", () => {
   });
 
   it("a campaign without a destination (NONE) can still be approved; launch refuses it on its own", async () => {
-    make(seed({ master: { ai_proposal: { headline: "Lama", purchase_destination: { version: 1, type: "NONE", value: null, link: null } } } }));
+    make(seed({ master: { ai_proposal: { headline: "Lama", primary_text: "teks", cta: "Beli", purchase_destination: { version: 1, type: "NONE", value: null, link: null } } } }));
     await submitForApprovalAction(M);
     expect((await decideApprovalAction("ap1", "APPROVED", null)).error).toBeNull();
   });
@@ -344,8 +345,8 @@ describe("P1-1 recovery of a blocked SCHEDULED campaign", () => {
     seed({
       master: { status: "SCHEDULED", ...over.master },
       channels: over.channels ?? [
-        { id: "c1", tenant_id: "t1", master_campaign_id: M, channel: "FACEBOOK", status: "SCHEDULED", external_campaign_id: null },
-        { id: "c2", tenant_id: "t1", master_campaign_id: M, channel: "INSTAGRAM", status: "SCHEDULED", external_campaign_id: null },
+        { id: "c1", tenant_id: "t1", master_campaign_id: M, channel: "FACEBOOK", status: "SCHEDULED", external_campaign_id: null, budget_percentage: 50 },
+        { id: "c2", tenant_id: "t1", master_campaign_id: M, channel: "INSTAGRAM", status: "SCHEDULED", external_campaign_id: null, budget_percentage: 50 },
       ],
       approvals: over.approvals ?? [oldApproval()],
       extra: over.extra,
@@ -688,5 +689,81 @@ describe("cancelSubmissionAction (Owner-only, fail-closed under production RLS)"
     await cancelSubmissionAction(form({ campaignId: M }));
     expect(master().status).toBe("SCHEDULED");
     expect(db.tables.prompter_approvals[0].status).toBe("APPROVED");
+  });
+});
+
+describe("server-side role guard on strategy and copy writers (FIX-195-SERVER-AUTHORIZATION)", () => {
+  const writes = () => db.log.filter((l) => l.op !== "select");
+  const FORM = () => form({ headline: "Judul", primaryText: "Teks", cta: "Beli", hook: "Hook" });
+  const calls: [string, () => Promise<{ error: string | null }>][] = [
+    ["regenerateCampaignProposalAction", () => regenerateCampaignProposalAction(M)],
+    ["updateCampaignCopyAction", () => updateCampaignCopyAction(M, CAMP_INIT, FORM())],
+    ["selectCampaignCandidateAction", () => selectCampaignCandidateAction(M, 1)],
+  ];
+
+  /** Nothing touched: no read, no AI call (no quota), no insert/update/delete, no audit, no mirror. */
+  function expectZeroSideEffects() {
+    expect(ai.run).not.toHaveBeenCalled();
+    expect(prompts.buildCampaignProposalPrompt).not.toHaveBeenCalled();
+    expect(writes()).toEqual([]);
+    expect(db.tables.prompter_audit_logs).toHaveLength(0);
+    expect(channelStatuses()).toEqual(["DRAFT", "DRAFT"]);
+  }
+
+  it.each(["apoteker", "kasir", "admin_gudang", "hr", "viewer", "finance", ""])(
+    "role %j is refused by every writer BEFORE any read, AI call or write",
+    async (role) => {
+      for (const [name, run] of calls) {
+        make(seed());
+        state.role = role;
+        const r = await run();
+        expect(r.error, name).toBe("Hanya Owner atau Marketing yang dapat mengubah strategi dan teks iklan campaign.");
+        expect(db.log, name).toEqual([]); // not even a read
+        expectZeroSideEffects();
+        expect(proposal().headline).toBe("Lama");
+        vi.clearAllMocks();
+      }
+    },
+  );
+
+  it("a campaign of ANOTHER tenant is not found: no AI call, no write", async () => {
+    for (const [name, run] of calls) {
+      make(seed());
+      state.tenantId = "t2";
+      const r = await run();
+      expect(r.error, name).toMatch(/tidak ditemukan|Belum ada kandidat/);
+      expectZeroSideEffects();
+      state.tenantId = "t1";
+      vi.clearAllMocks();
+    }
+  });
+
+  it.each(["AWAITING_APPROVAL", "SCHEDULED", "ACTIVE", "PAUSED", "COMPLETED", "FAILED"])(
+    "status %s is refused by every writer before the AI call or any write",
+    async (status) => {
+      for (const [name, run] of calls) {
+        make(seed({ master: { status } }));
+        const r = await run();
+        expect(r.error, name).toMatch(/sudah diajukan|tidak bisa/);
+        expect(ai.run, name).not.toHaveBeenCalled();
+        expect(writes(), name).toEqual([]);
+        expect(master().status).toBe(status);
+        vi.clearAllMocks();
+      }
+    },
+  );
+
+  it.each(["owner", "marketing"])("role %s still works: edit copy and regenerate", async (role) => {
+    make(seed());
+    state.role = role;
+    expect((await updateCampaignCopyAction(M, CAMP_INIT, FORM())).error).toBeNull();
+    expect(proposal().headline).toBe("Judul");
+    expect((await regenerateCampaignProposalAction(M)).error).toBeNull();
+    expect(ai.run).toHaveBeenCalledTimes(1);
+    expect(proposal().headline).toBe("Baru");
+  });
+
+  it("the allowed roles are exactly owner and marketing (the UI list in the recovery card must match)", () => {
+    expect([...CAMPAIGN_EDIT_ROLES]).toEqual(["owner", "marketing"]);
   });
 });

@@ -22,6 +22,8 @@ import {
 } from "@/lib/campaigns/external-budget-guard";
 import { readEmergencyStopStrict } from "@/services/automation-settings";
 import { decryptToken } from "@/lib/crypto/token-cipher";
+import { evaluateCopyGuard, REDUCED_LAUNCH_MESSAGE, checkApprovalCopySnapshot } from "@/lib/campaigns/copy-guard";
+import { readCopyGuardContext } from "@/services/copy-guard-context";
 import { connectConsentCode } from "@/lib/consent/catalog";
 import { consentGateMessage } from "@/lib/consent/require-consent";
 import {
@@ -616,6 +618,36 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
     metaFlightEnd = flight.endTime;
   }
 
+  // Copy guard (FIX-195-LAUNCH-GUARD), still read-only and BEFORE the connection/credential reads, the token
+  // decryption, every provider call and the claim: the copy that is launched must be copy that passes the SAME
+  // validator submit uses (lib/campaigns/copy-guard.ts), must be complete (the launch would otherwise substitute
+  // the campaign name / empty text / a default CTA), and must be the copy the Owner approved. An approval older
+  // than this check (no copy fingerprint) is refused: ask for a new submission. A proposal that only passes the
+  // REDUCED check (legacy shape, the full Quality Gate never ran) is refused too. A refusal writes nothing.
+  // META only, like the approval read it depends on: TikTok/X launches stay exactly as before (S1 keeps them locked).
+  // The copy that passed the guard AND matched the approval, captured ONCE as plain strings. The creative below is
+  // built from these values, not from a later read of the proposal object, so what is sent is exactly what was checked.
+  let guardedCopy: { headline: string; primaryText: string; cta: string } | null = null;
+  if (connectorPlatform === "META") {
+    const copyGuard = await evaluateCopyGuard(masterCampaign.ai_proposal, {
+      action: "LAUNCH",
+      loadContext: () => readCopyGuardContext(supabase, session.tenantId, masterCampaign.product_id),
+    });
+    if (!copyGuard.ok) {
+      return { error: copyGuard.message };
+    }
+    if (copyGuard.level !== "FULL") {
+      return { error: REDUCED_LAUNCH_MESSAGE };
+    }
+    // The approval is read only for META in this action (approvalContext stays null for the others).
+    const approvedCopy = checkApprovalCopySnapshot(approvalContext, masterCampaign.ai_proposal);
+    if (!approvedCopy.ok) {
+      return { error: approvedCopy.message };
+    }
+    const checked = masterCampaign.ai_proposal as { headline: string; primary_text: string; cta: string };
+    guardedCopy = { headline: checked.headline, primaryText: checked.primary_text, cta: checked.cta };
+  }
+
   // Connection reads, still BEFORE the atomic claim: a failed read writes
   // nothing and calls no platform API (fail closed).
   //
@@ -918,9 +950,9 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
     await beforeCreate("createCreative", "creative");
     const creative = await connector.createCreative(accessToken, adAccountId, {
       name: objectName("creative", "Creative"),
-      headline: proposal?.headline ?? masterCampaign.name,
-      primaryText: proposal?.primary_text ?? "",
-      cta: proposal?.cta ?? "Pelajari Lebih Lanjut",
+      headline: guardedCopy?.headline ?? proposal?.headline ?? masterCampaign.name,
+      primaryText: guardedCopy?.primaryText ?? proposal?.primary_text ?? "",
+      cta: guardedCopy?.cta ?? proposal?.cta ?? "Pelajari Lebih Lanjut",
       // Track B — Meta's own required Page selection, set by the Owner via
       // the Connections page (features/connections/meta-page-picker.tsx).
       // Undefined for TikTok/X (the field is Meta-specific) and for a Meta

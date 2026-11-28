@@ -339,6 +339,17 @@ describe("scanRawProposalCopy (fallback for a proposal that does not parse)", ()
     }
   });
 
+  it("scans every blocking rule, not a fixed subset (guaranteed result, url, phone, medical cure)", () => {
+    for (const raw of [
+      { headline: "Hasil dijamin 100%" },
+      { primary_text: "Kunjungi https://contoh.com sekarang" },
+      { hook: "Hubungi 081234567890" },
+      { primary_text: "Menyembuhkan diabetes" },
+    ]) {
+      expect(hasBlockingIssue({ issues: scanRawProposalCopy(raw) })).toBe(true);
+    }
+  });
+
   it("does not use the weaker hint rule", () => {
     expect(scanRawProposalCopy({ headline: "Pinjaman buku gratis" })).toEqual([]);
   });
