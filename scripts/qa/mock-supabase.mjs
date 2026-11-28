@@ -80,7 +80,7 @@ const handleRequest = (req, res) => {
     }
   });
 };
-// Hanya loopback (tidak pernah 0.0.0.0 / tanpa host). Aplikasi dan harness memakai "localhost", yang di runner dapat
+// Hanya loopback (tidak pernah semua antarmuka, tidak pernah tanpa host). Aplikasi dan harness memakai "localhost", yang di runner dapat
 // diselesaikan ke 127.0.0.1 atau ::1, jadi keduanya didengarkan; ::1 opsional bila runner tanpa IPv6.
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop())) {
   http.createServer(handleRequest).listen(54321, "127.0.0.1", () => console.log("mock supabase on 127.0.0.1:54321"));
