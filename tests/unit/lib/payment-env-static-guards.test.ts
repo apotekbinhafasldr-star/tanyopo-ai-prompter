@@ -41,7 +41,8 @@ describe("D3 — static guards", () => {
 
   it("G2: D3 phase A-C adds no database migration (the allow-list in the B3 static test is unchanged)", () => {
     const migrations = readdirSync(path.join(root, "supabase/migrations")).filter((m) => m.slice(0, 14) > "20261127110000");
-    expect(migrations).toEqual([]);
+    // 4r (retention vault) adalah satu-satunya migrasi sesudah batas ini; D3 sendiri tidak menambah migrasi.
+    expect(migrations).toEqual(["20261128090000_prompter_retention_vault.sql"]);
   });
 
   it("G3: no new public variable, no balance / wallet / ledger writer in the new files", () => {
