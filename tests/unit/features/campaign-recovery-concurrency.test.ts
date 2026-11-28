@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createFakeDb, type FakeDb, type Row } from "../helpers/stateful-fake-db";
 import { checkLaunchApproval } from "@/lib/campaigns/meta-launch-preflight";
-import { CAMPAIGN_EDIT_ROLES } from "@/lib/campaigns/campaign-roles";
+import { CAMPAIGN_DELETE_ROLES, CAMPAIGN_EDIT_ROLES, canDeleteCampaign, canEditCampaign } from "@/lib/campaigns/campaign-roles";
 
 /**
  * BEHAVIOUR tests on a stateful in-memory database (every statement atomic, like one PostgREST request,
@@ -57,9 +57,12 @@ vi.mock("@/lib/supabase/server", () => ({
 
 import {
   cancelSubmissionAction,
+  deleteCampaignAction,
   recoverBlockedScheduledCampaignAction,
   regenerateCampaignProposalAction,
+  scheduleChannelCampaignAction,
   selectCampaignCandidateAction,
+  selectCampaignMediaAction,
   submitForApprovalAction,
   updateCampaignCopyAction,
   updateCampaignDestinationAction,
@@ -765,5 +768,170 @@ describe("server-side role guard on strategy and copy writers (FIX-195-SERVER-AU
 
   it("the allowed roles are exactly owner and marketing (the UI list in the recovery card must match)", () => {
     expect([...CAMPAIGN_EDIT_ROLES]).toEqual(["owner", "marketing"]);
+  });
+});
+
+describe("server-side role and lifecycle guard on submit, media, schedule and delete (AUTHZ-REMAINING-4)", () => {
+  const MEDIA = { id: "media1", tenant_id: "t1", product_id: "p1", storage_path: "x" };
+  const SCHED = (() => {
+    const f = new FormData();
+    f.set("scheduledAt", "2026-12-25T10:00");
+    return f;
+  })();
+  const seedWith = (over: Parameters<typeof seed>[0] = {}) => {
+    const base = seed(over);
+    base.prompter_product_media = [MEDIA];
+    return base;
+  };
+  const writes = () => db.log.filter((l) => l.op !== "select");
+
+  const actions: [string, () => Promise<{ error: string | null }>, "edit" | "delete"][] = [
+    ["submitForApprovalAction", () => submitForApprovalAction(M), "edit"],
+    ["selectCampaignMediaAction", () => selectCampaignMediaAction(M, "media1"), "edit"],
+    ["scheduleChannelCampaignAction", () => scheduleChannelCampaignAction("c1", { error: null }, SCHED), "edit"],
+    ["deleteCampaignAction", () => deleteCampaignAction(M), "delete"],
+  ];
+
+  it.each(["apoteker", "kasir", "admin_gudang", "hr", "viewer", "finance", ""])(
+    "role %j is refused by all four BEFORE any read, write or AI call",
+    async (role) => {
+      for (const [name, run] of actions) {
+        make(seedWith());
+        state.role = role;
+        const r = await run();
+        expect(r.error, name).toMatch(/^Hanya Owner/);
+        expect(db.log, name).toEqual([]);
+        expect(ai.run, name).not.toHaveBeenCalled();
+        expect(master().status).toBe("DRAFT");
+        vi.clearAllMocks();
+      }
+    },
+  );
+
+  it("marketing may submit, pick media and schedule, but may NOT delete (owner only)", async () => {
+    make(seedWith());
+    state.role = "marketing";
+    expect((await selectCampaignMediaAction(M, "media1")).error).toBeNull();
+    expect(master().selected_media_id).toBe("media1");
+    expect((await scheduleChannelCampaignAction("c1", { error: null }, SCHED)).error).toBeNull();
+    expect(db.tables.prompter_channel_campaigns[0].scheduled_at).toBeTruthy();
+    expect((await submitForApprovalAction(M)).error).toBeNull();
+    expect(master().status).toBe("AWAITING_APPROVAL");
+
+    make(seedWith());
+    state.role = "marketing";
+    const r = await deleteCampaignAction(M);
+    expect(r.error).toBe("Hanya Owner yang dapat menghapus draft campaign.");
+    expect(db.log).toEqual([]);
+    expect(db.tables.prompter_master_campaigns).toHaveLength(1);
+  });
+
+  it("owner can do all four", async () => {
+    make(seedWith());
+    expect((await selectCampaignMediaAction(M, "media1")).error).toBeNull();
+    expect((await scheduleChannelCampaignAction("c1", { error: null }, SCHED)).error).toBeNull();
+    expect((await submitForApprovalAction(M)).error).toBeNull();
+    make(seedWith());
+    expect((await deleteCampaignAction(M)).error).toBeNull();
+    expect(db.tables.prompter_master_campaigns).toHaveLength(0);
+    expect(db.tables.prompter_audit_logs[0]).toMatchObject({ action: "campaign.deleted", resource_id: M, actor_user_id: "u1" });
+  });
+
+  it("another tenant's campaign is not found by any of the four, with no write", async () => {
+    for (const [name, run] of actions) {
+      make(seedWith());
+      state.tenantId = "t2";
+      const r = await run();
+      expect(r.error, name).toMatch(/tidak ditemukan/);
+      expect(writes(), name).toEqual([]);
+      expect(db.tables.prompter_master_campaigns).toHaveLength(1);
+      state.tenantId = "t1";
+      vi.clearAllMocks();
+    }
+  });
+
+  it.each(["AWAITING_APPROVAL", "SCHEDULED", "ACTIVE", "PAUSED", "COMPLETED", "FAILED"])(
+    "status %s: submit, media, schedule and delete are refused with no write",
+    async (status) => {
+      for (const [name, run] of actions) {
+        make(
+          seedWith({
+            master: { status },
+            channels: [{ id: "c1", tenant_id: "t1", master_campaign_id: M, channel: "FACEBOOK", status: "AWAITING_APPROVAL", external_campaign_id: null }],
+          }),
+        );
+        const r = await run();
+        expect(r.error, name).toBeTruthy();
+        expect(writes(), name).toEqual([]);
+        expect(db.tables.prompter_master_campaigns).toHaveLength(1);
+        expect(master().status).toBe(status);
+        vi.clearAllMocks();
+      }
+    },
+  );
+
+  it("media write is conditional: a submit that lands between the read and the write is reported, not overwritten", async () => {
+    make(seedWith());
+    injectOnce(
+      (c) => c.table === "prompter_master_campaigns" && c.op === "update",
+      () => bump({ status: "AWAITING_APPROVAL" }),
+    );
+    const r = await selectCampaignMediaAction(M, "media1");
+    expect(r.error).toMatch(/baru saja berubah status/);
+    expect(master().selected_media_id).toBeUndefined();
+  });
+
+  it("schedule write is conditional on the channel row still being DRAFT", async () => {
+    make(seedWith());
+    injectOnce(
+      (c) => c.table === "prompter_channel_campaigns" && c.op === "update",
+      () => {
+        db.tables.prompter_channel_campaigns[0].status = "AWAITING_APPROVAL";
+      },
+    );
+    const r = await scheduleChannelCampaignAction("c1", { error: null }, SCHED);
+    expect(r.error).toMatch(/baru berubah status/);
+    expect(db.tables.prompter_channel_campaigns[0].scheduled_at).toBeUndefined();
+  });
+
+  it("delete is refused (and nothing is removed) when the campaign has any metrics row or the check cannot be read", async () => {
+    for (const table of ["prompter_marketing_metrics", "prompter_manual_ad_metrics"]) {
+      make(seedWith({ extra: { [table]: [{ id: "m", tenant_id: "t1", master_campaign_id: M }] } }));
+      expect((await deleteCampaignAction(M)).error).toMatch(/data performa atau pengeluaran/);
+      expect(db.tables.prompter_master_campaigns).toHaveLength(1);
+      expect(writes()).toEqual([]);
+    }
+    make(seedWith());
+    db = createFakeDb(db.tables, { failWhen: (c) => (c.table === "prompter_manual_ad_metrics" ? "boom" : null) });
+    expect((await deleteCampaignAction(M)).error).toMatch(/tidak dapat diperiksa/);
+    expect(db.tables.prompter_master_campaigns).toHaveLength(1);
+  });
+
+  it("delete keeps approvals and audit rows: a PENDING one is marked EXPIRED, an APPROVED/REJECTED one is untouched", async () => {
+    const ap = (id: string, status: string) => ({ id, tenant_id: "t1", approval_type: "CAMPAIGN_LAUNCH", resource_type: "prompter_master_campaigns", resource_id: M, status, created_at: "2026-10-01T00:00:00Z", context: {} });
+    make(seedWith({ approvals: [ap("a1", "PENDING"), ap("a2", "REJECTED"), ap("a3", "EXPIRED")] }));
+    db.tables.prompter_audit_logs.push({ id: "old", tenant_id: "t1", action: "campaign.submitted_for_approval", resource_id: M });
+    expect((await deleteCampaignAction(M)).error).toBeNull();
+    expect(db.tables.prompter_approvals.map((a) => [a.id, a.status])).toEqual([["a1", "EXPIRED"], ["a2", "REJECTED"], ["a3", "EXPIRED"]]);
+    expect(db.tables.prompter_audit_logs.map((a) => a.action)).toEqual(["campaign.submitted_for_approval", "campaign.deleted"]);
+  });
+
+  it("delete does not remove a campaign when the pending approval cannot be closed (RLS 0 rows)", async () => {
+    const ap = { id: "a1", tenant_id: "t1", approval_type: "CAMPAIGN_LAUNCH", resource_type: "prompter_master_campaigns", resource_id: M, status: "PENDING", created_at: "2026-10-01T00:00:00Z", context: {} };
+    make(seedWith({ approvals: [ap] }));
+    state.role = "owner";
+    db = createFakeDb(db.tables, { denyWhen: (c) => c.table === "prompter_approvals" && c.op === "update" });
+    expect((await deleteCampaignAction(M)).error).toMatch(/tidak dapat ditutup/);
+    expect(db.tables.prompter_master_campaigns).toHaveLength(1);
+    expect(db.tables.prompter_approvals[0].status).toBe("PENDING");
+  });
+
+  it("role helpers: edit = owner and marketing, delete = owner only (literal lists, mirrored by the UI)", () => {
+    expect([...CAMPAIGN_EDIT_ROLES]).toEqual(["owner", "marketing"]);
+    expect([...CAMPAIGN_DELETE_ROLES]).toEqual(["owner"]);
+    expect(canEditCampaign("marketing")).toBe(true);
+    expect(canDeleteCampaign("marketing")).toBe(false);
+    expect(canDeleteCampaign("owner")).toBe(true);
+    expect(canDeleteCampaign(undefined)).toBe(false);
   });
 });

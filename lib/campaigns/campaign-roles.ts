@@ -11,3 +11,20 @@ export function canEditCampaign(role: string | null | undefined): boolean {
 }
 
 export const CAMPAIGN_EDIT_FORBIDDEN_MESSAGE = "Hanya Owner atau Marketing yang dapat mengubah strategi dan teks iklan campaign.";
+
+export const CAMPAIGN_SUBMIT_FORBIDDEN_MESSAGE = "Hanya Owner atau Marketing yang dapat mengajukan campaign untuk persetujuan.";
+export const CAMPAIGN_MEDIA_FORBIDDEN_MESSAGE = "Hanya Owner atau Marketing yang dapat memilih media campaign.";
+export const CAMPAIGN_SCHEDULE_FORBIDDEN_MESSAGE = "Hanya Owner atau Marketing yang dapat mengatur jadwal channel campaign.";
+
+/**
+ * Who may DELETE a draft campaign: the Owner only. Deleting is irreversible (it cascades to the channel rows and
+ * recommendations), so it is stricter than editing. RLS ("Owner/marketing kelola campaign") would also let
+ * marketing delete; the server action is the stricter fence and must not rely on RLS.
+ */
+export const CAMPAIGN_DELETE_ROLES = ["owner"] as const;
+
+export function canDeleteCampaign(role: string | null | undefined): boolean {
+  return typeof role === "string" && (CAMPAIGN_DELETE_ROLES as readonly string[]).includes(role);
+}
+
+export const CAMPAIGN_DELETE_FORBIDDEN_MESSAGE = "Hanya Owner yang dapat menghapus draft campaign.";

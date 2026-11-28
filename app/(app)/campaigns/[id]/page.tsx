@@ -6,7 +6,6 @@ import { Trash2, Lightbulb, ArrowLeft, Star, Check, ImagePlus, Sparkles } from "
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ConfirmForm } from "@/components/shared/confirm-form";
 import { requireSessionContext } from "@/services/session";
 import { createClient } from "@/lib/supabase/server";
 import { publicStorageUrl } from "@/lib/utils/storage-url";
@@ -27,9 +26,10 @@ import { CampaignSubmitProvider, SubmitForApprovalButton } from "@/features/camp
 import { ApprovalDecideButtons } from "@/features/approvals/decide-buttons";
 import { SelectCandidateButton } from "@/features/campaigns/select-candidate-button";
 import { SelectMediaButton } from "@/features/campaigns/select-media-button";
+import { DeleteCampaignButton } from "@/features/campaigns/delete-campaign-button";
+import { canDeleteCampaign, canEditCampaign, CAMPAIGN_SUBMIT_FORBIDDEN_MESSAGE } from "@/lib/campaigns/campaign-roles";
 import {
   updateCampaignCopyAction,
-  deleteCampaignAction,
   cancelSubmissionAction,
   scheduleChannelCampaignAction,
 } from "@/features/campaigns/actions";
@@ -396,6 +396,16 @@ export default async function CampaignDetailPage({
     : null;
   const boundCopyAction = updateCampaignCopyAction.bind(null, id);
   const isDraft = campaign.status === "DRAFT";
+  const canEditRole = canEditCampaign(session.role);
+  // The server enforces the same rule (submitForApprovalAction); this only avoids offering a button that would be refused.
+  const submitControl = (fullWidth: boolean) =>
+    canEditRole ? (
+      <SubmitForApprovalButton fullWidth={fullWidth} />
+    ) : (
+      <p className="text-sm text-muted-foreground" data-testid="submit-forbidden">
+        {CAMPAIGN_SUBMIT_FORBIDDEN_MESSAGE}
+      </p>
+    );
 
   // Honest readiness wording, from values already loaded above (no new query).
   // hasLaunchImage mirrors the Meta launch rule (pickLaunchMedia): the selected
@@ -478,7 +488,7 @@ export default async function CampaignDetailPage({
           ) : null}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {isDraft && !quickReview ? <SubmitForApprovalButton /> : null}
+          {isDraft && !quickReview ? submitControl(false) : null}
           {isAwaitingApproval && session.role === "owner" ? (
             <form action={cancelSubmissionAction}>
               <input type="hidden" name="campaignId" value={id} />
@@ -487,16 +497,7 @@ export default async function CampaignDetailPage({
               </Button>
             </form>
           ) : null}
-          <ConfirmForm
-            action={deleteCampaignAction}
-            message="Hapus draft campaign ini? Tindakan ini tidak dapat dibatalkan."
-          >
-            <input type="hidden" name="campaignId" value={id} />
-            <Button type="submit" variant="ghost" size="sm" disabled={!isDraft}>
-              <Trash2 />
-              Hapus Draft
-            </Button>
-          </ConfirmForm>
+          {canDeleteCampaign(session.role) ? <DeleteCampaignButton campaignId={id} disabled={!isDraft} /> : null}
         </div>
       </div>
 
@@ -569,7 +570,7 @@ export default async function CampaignDetailPage({
         <PurchaseDestinationCard
           aiProposal={campaign.ai_proposal}
           campaignId={id}
-          canEdit={isDraft && (session.role === "owner" || session.role === "marketing")}
+          canEdit={isDraft && canEditRole}
         />
       ) : null}
 
@@ -602,7 +603,7 @@ export default async function CampaignDetailPage({
             };
           })}
           changeBudgetHref={product ? `/promote?product=${product.id}` : "/promote"}
-          action={<SubmitForApprovalButton fullWidth />}
+          action={submitControl(true)}
         />
       ) : null}
 
@@ -1040,7 +1041,7 @@ export default async function CampaignDetailPage({
                                 />
                               )}
                             </div>
-                            <SelectMediaButton campaignId={id} mediaId={m.id} />
+                            {canEditRole ? <SelectMediaButton campaignId={id} mediaId={m.id} /> : null}
                           </div>
                         ))}
                     </div>
@@ -1220,12 +1221,19 @@ export default async function CampaignDetailPage({
                             kebutuhan Anda.
                           </p>
                         ) : null}
-                        <ScheduleForm
-                          action={scheduleChannelCampaignAction.bind(null, cc.id)}
-                          scheduledAt={cc.scheduled_at}
-                          scheduledLabel={cc.scheduled_at ? formatScheduleLabel(cc.scheduled_at, timeZone) : null}
-                          recommendation={recommendation}
-                        />
+                        {canEditRole ? (
+                          <ScheduleForm
+                            action={scheduleChannelCampaignAction.bind(null, cc.id)}
+                            scheduledAt={cc.scheduled_at}
+                            scheduledLabel={cc.scheduled_at ? formatScheduleLabel(cc.scheduled_at, timeZone) : null}
+                            recommendation={recommendation}
+                          />
+                        ) : (
+                          <p className="text-xs text-muted-foreground">
+                            {cc.scheduled_at ? `Terjadwal: ${formatScheduleLabel(cc.scheduled_at, timeZone)}` : "Jadwal belum diatur."}{" "}
+                            Hanya Owner atau Marketing yang dapat mengubah jadwal.
+                          </p>
+                        )}
                       </div>
                     );
                   })}
@@ -1278,7 +1286,7 @@ export default async function CampaignDetailPage({
                   Kembali ke Tujuan &amp; Budget
                 </Link>
               </Button>
-              <SubmitForApprovalButton fullWidth />
+              {submitControl(true)}
             </div>
           </CardContent>
         </Card>
