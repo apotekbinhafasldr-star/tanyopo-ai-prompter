@@ -437,6 +437,7 @@ describe("submitForApprovalAction — required active copy and the reduced check
 
   it("recovery: the copy editor repairs a null, empty or non-object proposal and the campaign can then be submitted", async () => {
     for (const aiProposal of [null, {}, "abc", [1, 2]]) {
+      mirrorChannelCampaignStatusMock.mockClear(); // a previous iteration ended in a successful submit
       currentSupabase = buildSupabase({ aiProposal, product: PRODUCT });
       expect((await submitForApprovalAction("c1")).error).toMatch(/belum lengkap/);
       expectNothingWritten();
