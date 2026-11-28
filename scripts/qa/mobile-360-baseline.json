@@ -1,0 +1,4 @@
+{
+  "_catatan": "Temuan yang sudah ada di main saat harness ini diperkenalkan. Format: {\"<label halaman>\": [{\"key\": \"<kunci>\", \"reason\": \"<alasan + PR perbaikan>\"}]}. Hanya temuan di luar daftar ini yang menggagalkan job. Hapus entri begitu perbaikannya merge.",
+  "accepted": {}
+}
