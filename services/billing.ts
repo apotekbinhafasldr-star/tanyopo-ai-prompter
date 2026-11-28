@@ -12,22 +12,16 @@ type Invoice = Database["public"]["Tables"]["prompter_invoices"]["Row"];
  * and never renewable by refreshing or clearing browser state. */
 export const TRIAL_DURATION_DAYS = 14;
 
-const DEFAULT_SUBSCRIPTION: Omit<Subscription, "tenant_id"> = {
-  plan: "FREE",
-  status: "ACTIVE",
-  billing_provider: null,
-  success_fee_rate_bps: null,
-  current_period_start: null,
-  current_period_end: null,
-  billing_country: null,
-  invoice_currency: null,
-  payment_provider_customer_reference: null,
-  tax_metadata: {},
-  cancel_at_period_end: false,
-  provider_subscription_id: null,
-  created_at: new Date(0).toISOString(),
-  updated_at: new Date(0).toISOString(),
-};
+const UNIQUE_VIOLATION = "23505";
+
+/** Thrown when the tenant's subscription row cannot be read or stored.
+ * Message is generic on purpose (no database details). */
+export class SubscriptionUnavailableError extends Error {
+  constructor() {
+    super("Subscription unavailable");
+    this.name = "SubscriptionUnavailableError";
+  }
+}
 
 /**
  * Loads the tenant's subscription, starting a real 14-day trial on first
@@ -44,11 +38,15 @@ export async function getOrCreateSubscription(
   supabase: SupabaseClient<Database>,
   tenantId: string,
 ): Promise<Subscription> {
-  const { data: existing } = await supabase
+  const { data: existing, error: selectError } = await supabase
     .from("prompter_subscriptions")
     .select("*")
     .eq("tenant_id", tenantId)
     .maybeSingle();
+
+  if (selectError) {
+    throw new SubscriptionUnavailableError();
+  }
 
   if (existing) {
     return existing;
@@ -57,7 +55,7 @@ export async function getOrCreateSubscription(
   const now = new Date();
   const trialEnd = new Date(now.getTime() + TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1000);
 
-  const { data: created } = await supabase
+  const { data: created, error: insertError } = await supabase
     .from("prompter_subscriptions")
     .insert({
       tenant_id: tenantId,
@@ -68,15 +66,28 @@ export async function getOrCreateSubscription(
     .select("*")
     .single();
 
-  return (
-    created ?? {
-      tenant_id: tenantId,
-      ...DEFAULT_SUBSCRIPTION,
-      status: "TRIALING",
-      current_period_start: now.toISOString(),
-      current_period_end: trialEnd.toISOString(),
+  if (!insertError && created) {
+    return created;
+  }
+
+  // Concurrent first access: another request inserted the row first
+  // (primary-key conflict on tenant_id). Return the stored winner row.
+  if (insertError?.code === UNIQUE_VIOLATION) {
+    const { data: winner, error: rereadError } = await supabase
+      .from("prompter_subscriptions")
+      .select("*")
+      .eq("tenant_id", tenantId)
+      .maybeSingle();
+
+    if (!rereadError && winner) {
+      return winner;
     }
-  );
+  }
+
+  // Never hand out a trial that was not stored: its period would come from
+  // the app clock and exist nowhere else. Fail closed; callers show a
+  // friendly error. Database details are deliberately not exposed.
+  throw new SubscriptionUnavailableError();
 }
 
 export interface TrialState {

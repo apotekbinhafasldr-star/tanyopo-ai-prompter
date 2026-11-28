@@ -3,13 +3,13 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
-import { getOrCreateSubscription, TRIAL_DURATION_DAYS } from "@/services/billing";
+import { getOrCreateSubscription, SubscriptionUnavailableError, TRIAL_DURATION_DAYS } from "@/services/billing";
 
 /**
  * Trial creation (getOrCreateSubscription) at CODE / UNIT level, with a fake query builder. Nothing here talks to a
  * database, so none of it proves what production does: that stays UNKNOWN until a dated read-only check
- * (see docs/S1_STATUS_EVIDENCE.md). Tests marked KNOWN GAP use `it.fails`: they state the behaviour we want, they pass
- * while the gap exists, and they turn red the day the gap is fixed so the marker is converted into a normal `it`.
+ * (see docs/S1_STATUS_EVIDENCE.md). Finding F1 (failed insert/select was ignored and a made-up trial returned) is
+ * fixed in this change; its former `it.fails` tests are now regular `it` tests.
  */
 
 type Subscription = Database["public"]["Tables"]["prompter_subscriptions"]["Row"];
@@ -43,13 +43,15 @@ function subscriptionRow(overrides: Partial<Subscription> = {}): Subscription {
 interface FakeOptions {
   /** What successive maybeSingle() reads return; the last entry repeats. */
   reads: Array<Subscription | null>;
+  /** Errors returned by successive maybeSingle() reads (same indexing as `reads`; missing = no error). */
+  readErrors?: Array<DbError | null>;
   /** What the insert(...).select().single() chain resolves to. */
   insert?: { data: Subscription | null; error: DbError | null };
 }
 
 interface ReadChain {
   eq: (column: string, value: unknown) => ReadChain;
-  maybeSingle: () => Promise<{ data: Subscription | null; error: null }>;
+  maybeSingle: () => Promise<{ data: Subscription | null; error: DbError | null }>;
 }
 
 function fakeClient(options: FakeOptions) {
@@ -66,8 +68,9 @@ function fakeClient(options: FakeOptions) {
     }),
     maybeSingle: vi.fn(async () => {
       const data = options.reads[Math.min(readIndex, options.reads.length - 1)];
+      const error = options.readErrors?.[readIndex] ?? null;
       readIndex += 1;
-      return { data, error: null };
+      return { data: error ? null : data, error };
     }),
   };
 
@@ -202,49 +205,79 @@ describe("getOrCreateSubscription: first access (CODE/UNIT)", () => {
 
     for (const options of paths) {
       const fake = fakeClient(options);
-      await getOrCreateSubscription(fake.client, TENANT);
+      await getOrCreateSubscription(fake.client, TENANT).catch(() => undefined);
       expect(fake.forbiddenWrites).toEqual({ update: 0, delete: 0, upsert: 0 });
     }
   });
 });
 
-describe("getOrCreateSubscription: insert did not succeed (KNOWN GAP, CODE)", () => {
-  // Today a failed insert is ignored and a trial row that was never stored is returned (period = application clock,
-  // 14 days from now). Two ways to hit it: a concurrent first access (the loser gets a primary-key conflict on
-  // tenant_id) and any other insert error (RLS, outage). The billing page then shows a trial that does not match the
-  // database, and a retry shows a fresh 14 days again. Fix needs services/billing.ts (forbidden for this task):
-  // see docs/S1_STATUS_EVIDENCE.md section "Rancangan perbaikan".
+describe("getOrCreateSubscription: insert/select did not succeed (F1 fixed, CODE/UNIT)", () => {
+  const CONFLICT = { code: "23505", message: "duplicate key value violates unique constraint" };
 
-  it.fails("KNOWN GAP: after a primary-key conflict (concurrent first access) it returns the row that won, not a made-up period", async () => {
+  it("after a primary-key conflict (concurrent first access) it returns the row that won, not a made-up period", async () => {
     const winner = subscriptionRow({
       current_period_start: "2026-11-11T09:59:59.000Z",
       current_period_end: "2026-11-25T09:59:59.000Z",
     });
-    const fake = fakeClient({
-      reads: [null, winner],
-      insert: { data: null, error: { code: "23505", message: "duplicate key value violates unique constraint" } },
-    });
+    const fake = fakeClient({ reads: [null, winner], insert: { data: null, error: CONFLICT } });
 
     const result = await getOrCreateSubscription(fake.client, TENANT);
 
-    expect(result.current_period_end).toBe(winner.current_period_end);
+    expect(result).toBe(winner);
+    expect(fake.inserts).toHaveLength(1);
+    expect(fake.filters.filter(([c, v]) => c === "tenant_id" && v === TENANT)).toHaveLength(2);
   });
 
-  it.fails("KNOWN GAP: when nothing could be stored it does not hand out a TRIALING row with a period that exists nowhere", async () => {
+  it("a conflict where the winner row still cannot be read fails closed (no made-up trial)", async () => {
+    const fake = fakeClient({ reads: [null, null], insert: { data: null, error: CONFLICT } });
+
+    await expect(getOrCreateSubscription(fake.client, TENANT)).rejects.toBeInstanceOf(SubscriptionUnavailableError);
+  });
+
+  it("a conflict whose re-read errors fails closed", async () => {
+    const fake = fakeClient({
+      reads: [null, null],
+      readErrors: [null, { code: "XX000", message: "boom" }],
+      insert: { data: null, error: CONFLICT },
+    });
+
+    await expect(getOrCreateSubscription(fake.client, TENANT)).rejects.toBeInstanceOf(SubscriptionUnavailableError);
+  });
+
+  it("any other insert error (RLS, outage) throws instead of handing out a TRIALING row that exists nowhere", async () => {
     const fake = fakeClient({
       reads: [null],
       insert: { data: null, error: { code: "42501", message: "new row violates row-level security policy" } },
     });
 
-    let fabricated = false;
-    try {
-      const result = await getOrCreateSubscription(fake.client, TENANT);
-      fabricated = result.status === "TRIALING" && result.current_period_end !== null;
-    } catch {
-      fabricated = false; // refusing loudly is an acceptable outcome
-    }
+    await expect(getOrCreateSubscription(fake.client, TENANT)).rejects.toBeInstanceOf(SubscriptionUnavailableError);
+    expect(fake.inserts).toHaveLength(1);
+  });
 
-    expect(fabricated).toBe(false);
+  it("an insert that returns neither row nor error fails closed", async () => {
+    const fake = fakeClient({ reads: [null], insert: { data: null, error: null } });
+
+    await expect(getOrCreateSubscription(fake.client, TENANT)).rejects.toBeInstanceOf(SubscriptionUnavailableError);
+  });
+
+  it("a failing first select throws and never attempts an insert", async () => {
+    const fake = fakeClient({ reads: [null], readErrors: [{ code: "57014", message: "statement timeout" }] });
+
+    await expect(getOrCreateSubscription(fake.client, TENANT)).rejects.toBeInstanceOf(SubscriptionUnavailableError);
+    expect(fake.inserts).toHaveLength(0);
+  });
+
+  it("the thrown error does not leak database details", async () => {
+    const fake = fakeClient({
+      reads: [null],
+      insert: { data: null, error: { code: "42501", message: "secret_table_detail policy xyz" } },
+    });
+
+    const error = await getOrCreateSubscription(fake.client, TENANT).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(SubscriptionUnavailableError);
+    const text = `${(error as Error).message} ${JSON.stringify(error)}`;
+    expect(text).not.toMatch(/secret_table_detail|42501|policy|prompter_subscriptions/);
   });
 });
 
