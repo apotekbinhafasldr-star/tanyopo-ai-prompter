@@ -1218,4 +1218,24 @@ describe("launchChannelCampaignAction — copy guard (FIX-195-LAUNCH-GUARD)", ()
       expect(source, file).not.toContain("scanRawProposalCopy(");
     }
   });
+
+  it("TOCTOU: copy changed in the proposal AFTER the guard (before the creative) is not what gets sent: the approved, checked copy is", async () => {
+    const live = JSON.parse(JSON.stringify(LAUNCHABLE_PROPOSAL)) as Record<string, unknown>;
+    harness = buildHarness({ master: { ai_proposal: live } });
+    // Simulates a direct writer: the stored proposal object changes while the launch is already running.
+    connectorMock.createAdSet.mockImplementationOnce(async () => {
+      live.headline = "Judul yang disuntikkan setelah guard";
+      live.primary_text = "Teks yang disuntikkan setelah guard";
+      live.cta = "Klik di sini";
+      return { id: "ext_adset_1" };
+    });
+    const result = await launchChannelCampaignAction("cc1");
+    expect(result.error).toBeNull();
+    const creative = (connectorMock.createCreative.mock.calls[0] as unknown[])[2] as Record<string, unknown>;
+    expect(creative).toMatchObject({
+      headline: LAUNCHABLE_PROPOSAL.headline,
+      primaryText: LAUNCHABLE_PROPOSAL.primary_text,
+      cta: LAUNCHABLE_PROPOSAL.cta,
+    });
+  });
 });

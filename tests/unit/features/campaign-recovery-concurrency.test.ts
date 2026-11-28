@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createFakeDb, type FakeDb, type Row } from "../helpers/stateful-fake-db";
 import { checkLaunchApproval } from "@/lib/campaigns/meta-launch-preflight";
+import { CAMPAIGN_EDIT_ROLES } from "@/lib/campaigns/campaign-roles";
 
 /**
  * BEHAVIOUR tests on a stateful in-memory database (every statement atomic, like one PostgREST request,
@@ -688,5 +689,81 @@ describe("cancelSubmissionAction (Owner-only, fail-closed under production RLS)"
     await cancelSubmissionAction(form({ campaignId: M }));
     expect(master().status).toBe("SCHEDULED");
     expect(db.tables.prompter_approvals[0].status).toBe("APPROVED");
+  });
+});
+
+describe("server-side role guard on strategy and copy writers (FIX-195-SERVER-AUTHORIZATION)", () => {
+  const writes = () => db.log.filter((l) => l.op !== "select");
+  const FORM = () => form({ headline: "Judul", primaryText: "Teks", cta: "Beli", hook: "Hook" });
+  const calls: [string, () => Promise<{ error: string | null }>][] = [
+    ["regenerateCampaignProposalAction", () => regenerateCampaignProposalAction(M)],
+    ["updateCampaignCopyAction", () => updateCampaignCopyAction(M, CAMP_INIT, FORM())],
+    ["selectCampaignCandidateAction", () => selectCampaignCandidateAction(M, 1)],
+  ];
+
+  /** Nothing touched: no read, no AI call (no quota), no insert/update/delete, no audit, no mirror. */
+  function expectZeroSideEffects() {
+    expect(ai.run).not.toHaveBeenCalled();
+    expect(prompts.buildCampaignProposalPrompt).not.toHaveBeenCalled();
+    expect(writes()).toEqual([]);
+    expect(db.tables.prompter_audit_logs).toHaveLength(0);
+    expect(channelStatuses()).toEqual(["DRAFT", "DRAFT"]);
+  }
+
+  it.each(["apoteker", "kasir", "admin_gudang", "hr", "viewer", "finance", ""])(
+    "role %j is refused by every writer BEFORE any read, AI call or write",
+    async (role) => {
+      for (const [name, run] of calls) {
+        make(seed());
+        state.role = role;
+        const r = await run();
+        expect(r.error, name).toBe("Hanya Owner atau Marketing yang dapat mengubah strategi dan teks iklan campaign.");
+        expect(db.log, name).toEqual([]); // not even a read
+        expectZeroSideEffects();
+        expect(proposal().headline).toBe("Lama");
+        vi.clearAllMocks();
+      }
+    },
+  );
+
+  it("a campaign of ANOTHER tenant is not found: no AI call, no write", async () => {
+    for (const [name, run] of calls) {
+      make(seed());
+      state.tenantId = "t2";
+      const r = await run();
+      expect(r.error, name).toMatch(/tidak ditemukan|Belum ada kandidat/);
+      expectZeroSideEffects();
+      state.tenantId = "t1";
+      vi.clearAllMocks();
+    }
+  });
+
+  it.each(["AWAITING_APPROVAL", "SCHEDULED", "ACTIVE", "PAUSED", "COMPLETED", "FAILED"])(
+    "status %s is refused by every writer before the AI call or any write",
+    async (status) => {
+      for (const [name, run] of calls) {
+        make(seed({ master: { status } }));
+        const r = await run();
+        expect(r.error, name).toMatch(/sudah diajukan|tidak bisa/);
+        expect(ai.run, name).not.toHaveBeenCalled();
+        expect(writes(), name).toEqual([]);
+        expect(master().status).toBe(status);
+        vi.clearAllMocks();
+      }
+    },
+  );
+
+  it.each(["owner", "marketing"])("role %s still works: edit copy and regenerate", async (role) => {
+    make(seed());
+    state.role = role;
+    expect((await updateCampaignCopyAction(M, CAMP_INIT, FORM())).error).toBeNull();
+    expect(proposal().headline).toBe("Judul");
+    expect((await regenerateCampaignProposalAction(M)).error).toBeNull();
+    expect(ai.run).toHaveBeenCalledTimes(1);
+    expect(proposal().headline).toBe("Baru");
+  });
+
+  it("the allowed roles are exactly owner and marketing (the UI list in the recovery card must match)", () => {
+    expect([...CAMPAIGN_EDIT_ROLES]).toEqual(["owner", "marketing"]);
   });
 });

@@ -14,6 +14,7 @@ import {
   type CampaignProposal,
 } from "@/schemas/ai/campaign-proposal";
 import { buildSystemPreamble, buildCampaignProposalPrompt } from "@/lib/ai/prompts";
+import { canEditCampaign, CAMPAIGN_EDIT_FORBIDDEN_MESSAGE } from "@/lib/campaigns/campaign-roles";
 import { evaluateCopyGuard, buildCopySnapshot, COPY_SNAPSHOT_KEY } from "@/lib/campaigns/copy-guard";
 import { readCopyGuardContext } from "@/services/copy-guard-context";
 import { runAiJob } from "@/services/ai-jobs";
@@ -54,6 +55,10 @@ export interface CampaignActionState {
 
 export async function regenerateCampaignProposalAction(campaignId: string): Promise<CampaignActionState> {
   const session = await requireSessionContext();
+  // Role first (server-side, FIX-195-SERVER-AUTHORIZATION): before any read, AI call, quota use or write.
+  if (!canEditCampaign(session.role)) {
+    return { error: CAMPAIGN_EDIT_FORBIDDEN_MESSAGE };
+  }
   const supabase = await createClient();
 
   const { data: campaign, error: campaignError } = await supabase
@@ -191,6 +196,10 @@ export async function selectCampaignCandidateAction(
   candidateIndex: number,
 ): Promise<CampaignActionState> {
   const session = await requireSessionContext();
+  // Role first (server-side, FIX-195-SERVER-AUTHORIZATION): before any read, AI call, quota use or write.
+  if (!canEditCampaign(session.role)) {
+    return { error: CAMPAIGN_EDIT_FORBIDDEN_MESSAGE };
+  }
   const supabase = await createClient();
 
   const { data: campaign, error: fetchError } = await supabase
@@ -290,6 +299,10 @@ export async function updateCampaignCopyAction(
   formData: FormData,
 ): Promise<CampaignActionState> {
   const session = await requireSessionContext();
+  // Role first (server-side, FIX-195-SERVER-AUTHORIZATION): before any read, AI call, quota use or write.
+  if (!canEditCampaign(session.role)) {
+    return { error: CAMPAIGN_EDIT_FORBIDDEN_MESSAGE };
+  }
   const supabase = await createClient();
 
   const headline = formData.get("headline");

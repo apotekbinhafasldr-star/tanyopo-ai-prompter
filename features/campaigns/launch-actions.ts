@@ -625,6 +625,9 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
   // than this check (no copy fingerprint) is refused: ask for a new submission. A proposal that only passes the
   // REDUCED check (legacy shape, the full Quality Gate never ran) is refused too. A refusal writes nothing.
   // META only, like the approval read it depends on: TikTok/X launches stay exactly as before (S1 keeps them locked).
+  // The copy that passed the guard AND matched the approval, captured ONCE as plain strings. The creative below is
+  // built from these values, not from a later read of the proposal object, so what is sent is exactly what was checked.
+  let guardedCopy: { headline: string; primaryText: string; cta: string } | null = null;
   if (connectorPlatform === "META") {
     const copyGuard = await evaluateCopyGuard(masterCampaign.ai_proposal, {
       action: "LAUNCH",
@@ -641,6 +644,8 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
     if (!approvedCopy.ok) {
       return { error: approvedCopy.message };
     }
+    const checked = masterCampaign.ai_proposal as { headline: string; primary_text: string; cta: string };
+    guardedCopy = { headline: checked.headline, primaryText: checked.primary_text, cta: checked.cta };
   }
 
   // Connection reads, still BEFORE the atomic claim: a failed read writes
@@ -945,9 +950,9 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
     await beforeCreate("createCreative", "creative");
     const creative = await connector.createCreative(accessToken, adAccountId, {
       name: objectName("creative", "Creative"),
-      headline: proposal?.headline ?? masterCampaign.name,
-      primaryText: proposal?.primary_text ?? "",
-      cta: proposal?.cta ?? "Pelajari Lebih Lanjut",
+      headline: guardedCopy?.headline ?? proposal?.headline ?? masterCampaign.name,
+      primaryText: guardedCopy?.primaryText ?? proposal?.primary_text ?? "",
+      cta: guardedCopy?.cta ?? proposal?.cta ?? "Pelajari Lebih Lanjut",
       // Track B — Meta's own required Page selection, set by the Owner via
       // the Connections page (features/connections/meta-page-picker.tsx).
       // Undefined for TikTok/X (the field is Meta-specific) and for a Meta
