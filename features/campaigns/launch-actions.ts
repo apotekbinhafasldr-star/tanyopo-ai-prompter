@@ -711,7 +711,7 @@ export async function launchChannelCampaignAction(channelCampaignId: string): Pr
   // Paket 3: gerbang persetujuan koneksi. Enforcement MATI (default) = no-op murni; HIDUP = fail-closed sebelum token dibuka.
   const consentCode = connectConsentCode(connectorPlatform);
   if (consentCode) {
-    const consentMessage = await consentGateMessage(consentCode, session.userId, session.tenantId);
+    const consentMessage = await consentGateMessage(consentCode, session.userId, session.tenantId, { isOwner: session.role === "owner" });
     if (consentMessage) return { error: consentMessage };
   }
 

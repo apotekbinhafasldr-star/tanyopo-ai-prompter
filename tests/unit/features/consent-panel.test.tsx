@@ -9,9 +9,9 @@ vi.mock("@/features/consent/actions", () => ({ withdrawConsentAction: withdrawMo
 import { ConsentPanel } from "@/features/consent/consent-panel";
 import type { ConsentItemView } from "@/lib/consent/view";
 
-const granted: ConsentItemView = { code: "CONNECT_META", title: "Koneksi akun Meta", text: "Teks persetujuan Meta.", kind: "CONNECTION", status: "GRANTED", statusLabel: "Aktif" };
-const notGiven: ConsentItemView = { code: "CONNECT_TIKTOK", title: "Koneksi akun TikTok", text: "Teks TikTok.", kind: "CONNECTION", status: "NOT_GIVEN", statusLabel: "Belum diberikan" };
-const optional: ConsentItemView = { code: "MARKETING_COMMS", title: "Email pembaruan", text: "Teks email.", kind: "OPTIONAL", status: "NOT_GIVEN", statusLabel: "Belum diberikan" };
+const granted: ConsentItemView = { code: "CONNECT_META", title: "Koneksi akun Meta", text: "Teks persetujuan Meta.", kind: "CONNECTION", version: 1, status: "GRANTED", statusLabel: "Aktif" };
+const notGiven: ConsentItemView = { code: "CONNECT_TIKTOK", title: "Koneksi akun TikTok", text: "Teks TikTok.", kind: "CONNECTION", version: 1, status: "NOT_GIVEN", statusLabel: "Belum diberikan" };
+const optional: ConsentItemView = { code: "MARKETING_COMMS", title: "Email pembaruan", text: "Teks email.", kind: "OPTIONAL", version: 1, status: "NOT_GIVEN", statusLabel: "Belum diberikan" };
 
 describe("ConsentPanel", () => {
   afterEach(() => cleanup());

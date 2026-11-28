@@ -9,7 +9,12 @@ import { getConnector } from "@/lib/connectors/get-connector";
 import { getCapabilities, type CapabilityRow } from "@/lib/connectors/capability-registry";
 import { PLATFORM_HELP, resolveConnectionView, type ConnectionView } from "@/lib/connectors/connection-readiness";
 import { formatDate } from "@/lib/utils/format";
+import Link from "next/link";
 import { DisconnectButton } from "@/features/connections/disconnect-button";
+import { ConnectButton, ReviewConsentButton } from "@/features/consent/connect-button";
+import { CONSENT_MESSAGES } from "@/lib/consent/catalog";
+import { isConsentUiEnabled } from "@/lib/consent/flags";
+import { loadConnectConsentStates, type ConnectConsentState } from "@/lib/consent/connect-status";
 import { MetaPagePicker } from "@/features/connections/meta-page-picker";
 import { MetaAdAccountSection } from "@/features/connections/meta-ad-account-section";
 import { isFeatureEnabled } from "@/lib/feature-flags";
@@ -28,7 +33,8 @@ const ERROR_LABEL: Record<string, string> = {
   encryption_not_configured: "Penyimpanan koneksi yang aman belum siap. Koneksi belum aktif; hubungi admin LINOE.",
   server_not_configured: "Layanan penyimpanan koneksi belum siap. Koneksi belum aktif; hubungi admin LINOE.",
   connect_failed: "Gagal menghubungkan akun. Silakan coba lagi.",
-  consent_required: "Fitur ini memerlukan persetujuan Anda. Buka Privasi & persetujuan untuk mengaturnya.",
+  consent_required: CONSENT_MESSAGES.required,
+  consent_check_failed: CONSENT_MESSAGES.gateUnavailable,
   provider_pending: "Koneksi ini belum dibuka: aplikasi LINOE masih menunggu persetujuan dari penyedia.",
 };
 
@@ -133,6 +139,10 @@ export default async function ConnectionsPage({
 
   const accountByPlatform = new Map((connectedAccounts ?? []).map((a) => [a.platform, a]));
 
+  // Paket 5a: dialog persetujuan hanya bila CONSENT_UI_ENABLED hidup DAN pengguna Owner. Saat MATI tidak ada pembacaan tambahan (RPC tidak dipanggil).
+  const consentUi = isConsentUiEnabled() && session.role === "owner";
+  const consentStates = consentUi ? await loadConnectConsentStates(supabase) : null;
+
   let metaPageSelection: MetaPageSelection = { readable: false };
   if (!accountsReadFailed && session.role === "owner" && accountByPlatform.has("META")) {
     const { data: pageRow, error: pageError } = await supabase
@@ -167,7 +177,17 @@ export default async function ConnectionsPage({
 
       {error ? (
         <div role="alert" className="rounded-[var(--radius-md)] bg-danger-muted p-4 text-sm text-danger">
-          {ERROR_LABEL[error] ?? "Terjadi kesalahan. Silakan coba lagi."}
+          {error === "consent_required" && isConsentUiEnabled() ? (
+            <>
+              Fitur ini memerlukan persetujuan Anda. Buka{" "}
+              <Link href="/settings" className="inline-flex min-h-11 items-center font-medium underline">
+                Privasi &amp; Data Saya
+              </Link>{" "}
+              di Pengaturan untuk mengaturnya.
+            </>
+          ) : (
+            (ERROR_LABEL[error] ?? "Terjadi kesalahan. Silakan coba lagi.")
+          )}
         </div>
       ) : null}
       {connected ? (
@@ -196,6 +216,7 @@ export default async function ConnectionsPage({
                 isOwner={session.role === "owner"}
                 capabilities={capabilitiesByPlatform.get(platform)}
                 metaPageSelection={metaPageSelection}
+                consentState={consentStates && platform !== "X" ? consentStates[platform] : undefined}
               />
             ))}
 
@@ -225,12 +246,15 @@ function ConnectorCard({
   isOwner,
   capabilities,
   metaPageSelection,
+  consentState,
 }: {
   platform: ConnectorPlatform;
   account: ConnectedAccountRow | undefined;
   isOwner: boolean;
   capabilities?: CapabilityRow[];
   metaPageSelection: MetaPageSelection;
+  /** Hanya terisi (Meta/TikTok) saat CONSENT_UI_ENABLED hidup dan pengguna Owner. undefined = tampilan lama persis. */
+  consentState?: ConnectConsentState;
 }) {
   const info = PLATFORM_INFO[platform];
   const Icon = info.icon;
@@ -247,7 +271,12 @@ function ConnectorCard({
               <Icon className="size-5 text-foreground" aria-hidden />
             </div>
             <div>
-              <p className="text-sm font-semibold text-foreground">{info.title}</p>
+              <p
+                className="text-sm font-semibold text-foreground"
+                {...(consentState ? { id: `connect-card-${platform}-title`, tabIndex: -1 } : {})}
+              >
+                {info.title}
+              </p>
               <p className="text-xs text-muted-foreground">{info.subtitle}</p>
             </div>
           </div>
@@ -282,9 +311,20 @@ function ConnectorCard({
           <div className="flex flex-col gap-2">
             <div className="flex flex-wrap gap-2">
               {canStartOauth ? (
-                <Button asChild size="sm" variant="secondary">
-                  <a href={info.authorizePath}>Sambungkan Ulang</a>
-                </Button>
+                consentState && (platform === "META" || platform === "TIKTOK") ? (
+                  <ConnectButton
+                    platform={platform}
+                    authorizePath={info.authorizePath}
+                    label="Sambungkan Ulang"
+                    variant="reconnect"
+                    consent={consentState}
+                    appearance="secondary"
+                  />
+                ) : (
+                  <Button asChild size="sm" variant="secondary">
+                    <a href={info.authorizePath}>Sambungkan Ulang</a>
+                  </Button>
+                )
               ) : (
                 <Button size="sm" variant="secondary" disabled aria-disabled="true">
                   Sambungkan Ulang
@@ -292,6 +332,9 @@ function ConnectorCard({
               )}
               <DisconnectButton platform={platform} />
             </div>
+            {consentState === "REQUIRED" && (platform === "META" || platform === "TIKTOK") ? (
+              <ReviewConsentButton platform={platform} titleId={`connect-card-${platform}-title`} />
+            ) : null}
             {!canStartOauth ? (
               <p className="text-xs text-muted-foreground">
                 Menyambungkan ulang belum tersedia untuk {info.title}. Anda tetap dapat memutuskan koneksi.
@@ -299,9 +342,13 @@ function ConnectorCard({
             ) : null}
           </div>
         ) : canStartOauth ? (
-          <Button asChild size="sm">
-            <a href={info.authorizePath}>Hubungkan</a>
-          </Button>
+          consentState && (platform === "META" || platform === "TIKTOK") ? (
+            <ConnectButton platform={platform} authorizePath={info.authorizePath} label="Hubungkan" variant="connect" consent={consentState} />
+          ) : (
+            <Button asChild size="sm">
+              <a href={info.authorizePath}>Hubungkan</a>
+            </Button>
+          )
         ) : (
           <div className="flex flex-col gap-2">
             <div>

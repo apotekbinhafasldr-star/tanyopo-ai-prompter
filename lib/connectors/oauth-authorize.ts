@@ -18,6 +18,7 @@ import { generatePkcePair, type XPkcePair } from "@/lib/connectors/x-pkce";
 import type { ConnectorPlatform } from "@/types/database";
 import { connectConsentCode } from "@/lib/consent/catalog";
 import { requireConsent } from "@/lib/consent/require-consent";
+import { authorizeErrorCode } from "@/lib/consent/gate-message";
 
 /**
  * Shared "start OAuth" handler for every ad-platform connector
@@ -45,12 +46,13 @@ export async function handleConnectorOauthAuthorize(
   }
 
   // Paket 3: gerbang persetujuan koneksi. Enforcement MATI (default) = no-op murni. HIDUP = fail-closed: tanpa persetujuan aktif OAuth
-  // tidak dimulai. (Dialog persetujuan pada halaman Koneksi menyusul di paket UI berikutnya; aktivasi enforcement menunggu itu.)
+  // tidak dimulai. Dialog persetujuan pada halaman Koneksi (Paket 5a) dibuka lebih dulu bila CONSENT_UI_ENABLED hidup.
+  // Alasan NO_RECORD/WITHDRAWN/VERSION_OUTDATED = consent_required; pemeriksaan gagal = consent_check_failed (tidak menyuruh memberi persetujuan).
   const consentCode = connectConsentCode(platform);
   if (consentCode) {
     const decision = await requireConsent(consentCode, session.userId, session.tenantId);
     if (!decision.allowed) {
-      return NextResponse.redirect(new URL("/connections?error=consent_required", request.url));
+      return NextResponse.redirect(new URL(`/connections?error=${authorizeErrorCode(decision.reason)}`, request.url));
     }
   }
 
