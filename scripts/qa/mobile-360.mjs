@@ -1,12 +1,12 @@
 // QA mobile 360px. Runs ONLY against a locally started production build on the CI runner.
 // Login-gated screens use scripts/qa/mock-supabase.mjs (a fake backend on the runner); the app has no test bypass.
-import { chromium, request as pwRequest } from "playwright";
+import { chromium } from "playwright";
 import { AxeBuilder } from "@axe-core/playwright";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { USERS, C1 } from "./mock-supabase.mjs";
 import { readFileSync } from "node:fs";
 import { createHmac } from "node:crypto";
-import { classify, isFatalKey, keysOf, validateBaseline } from "./mobile-360-keys.mjs";
+import { checkSessionCookieAttrs, classify, isFatalKey, keysOf, validateBaseline } from "./mobile-360-keys.mjs";
 
 const BASE = process.env.QA_BASE_URL ?? "http://localhost:3000";
 if (!/^http:\/\/localhost(:\d+)?$/.test(BASE)) throw new Error("QA runs against localhost only");
@@ -66,6 +66,11 @@ const BASELINE_FILE = JSON.parse(readFileSync(new URL("./mobile-360-baseline.jso
 const baselineErrors = validateBaseline(BASELINE_FILE);
 if (baselineErrors.length) throw new Error("Baseline tidak sah:\n" + baselineErrors.join("\n"));
 const BASELINE = BASELINE_FILE.accepted ?? {};
+// Pengalihan yang DIHARAPKAN, eksplisit per rute diminta -> tujuan akhir. Selain ini, pengalihan = FATAL (tidak bisa di-baseline).
+const EXPECTED_REDIRECTS = {
+  // Tanpa token pemulihan dan tanpa sesi, layar ganti kata sandi sengaja dialihkan ke login.
+  "/reset-password": "/login",
+};
 // Semua node pelanggaran serious/critical (bukan hanya yang pertama) agar pelanggaran baru dengan aturan sama terlihat.
 const axeOf = async (page) =>
   (await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze()).violations.map((v) => ({
@@ -104,62 +109,71 @@ async function audit(ctx, label, route, { wait = "networkidle", before, afterNav
 const pub = await mk();
 for (const r of ["/", "/login", "/register", "/forgot-password", "/reset-password", "/privacy", "/terms", "/refund", "/data-deletion"]) await audit(pub, `public_${r.replace(/\W+/g, "") || "root"}`, r);
 
-// 2) demo: sesi demo bertanda tangan (cookie Secure+HttpOnly dari /api/demo/start; aplikasi TIDAK diubah/dilonggarkan).
-// Diagnostik aman: hanya boolean/status/path/panjang yang dicetak; nilai token, cookie, dan secret tidak pernah dicetak.
-const NAV = { "sec-fetch-mode": "navigate", "sec-fetch-dest": "document" };
+// 2) demo: sesi demo bertanda tangan. Jalur kelulusan WAJIB = sesi ASLI: navigasi browser nyata ke /api/demo/start,
+// cookie dari Set-Cookie server dipakai context browser apa adanya (Secure+HttpOnly utuh; aplikasi tidak diubah/dilonggarkan).
+// Pemasangan cookie manual hanya diagnostik berlabel dan TIDAK PERNAH membuat job lulus. Hanya boolean/status/path dicetak;
+// nilai token, cookie, dan secret tidak pernah dicetak.
 const RUNNER_SECRET = process.env.DEMO_SESSION_SECRET ?? "";
-const flagsOf = (sc) => ({ present: Boolean(sc), secure: /;\s*secure/i.test(sc), httpOnly: /;\s*httponly/i.test(sc), sameSite: (sc.match(/samesite=(\w+)/i)?.[1] ?? "none").toLowerCase() });
+const NAV = { "sec-fetch-mode": "navigate", "sec-fetch-dest": "document" };
+const DEMO_COOKIE = "linoe_demo_session";
 function tokenInfo(token) {
   const parts = token.split(".");
-  const info = { parts: parts.length, sigHexLen: (parts[3] ?? "").length, signedWithRunnerSecret: "unknown", expiredByRunnerClock: "unknown" };
-  if (parts.length === 4 && RUNNER_SECRET) {
-    info.signedWithRunnerSecret = createHmac("sha256", RUNNER_SECRET).update(parts.slice(0, 3).join(".")).digest("hex") === parts[3];
-    info.expiredByRunnerClock = Date.now() > Number(parts[2]);
-  }
+  const info = { parts: parts.length, signedWithRunnerSecret: "unknown" };
+  if (parts.length === 4 && RUNNER_SECRET) info.signedWithRunnerSecret = createHmac("sha256", RUNNER_SECRET).update(parts.slice(0, 3).join(".")).digest("hex") === parts[3];
   return info;
 }
-const probeReq = async (rc, headers = {}) => { const r = await rc.get(BASE + "/demo/dashboard", { maxRedirects: 0, headers }); return { status: r.status(), location: r.headers().location ? pathOf(r.headers().location) : "-" }; };
-async function probeBrowser(ctx) {
-  const page = await ctx.newPage();
-  try { await page.goto(BASE + "/demo/dashboard", { waitUntil: "domcontentloaded", timeout: 20000 }); return { ok: pathOf(page.url()) === "/demo/dashboard", finalPath: pathOf(page.url()) }; }
-  catch (e) { return { ok: false, error: String(e).split("\n")[0].replace(/at http\S+/, "").trim() }; }
-  finally { await page.close(); }
-}
-const diag = { runnerSecretKnownToHarness: Boolean(RUNNER_SECRET) };
-let demo = null;
+const demo = await mk();
+const sessionProblems = [];
+const sessionDiag = {};
 {
-  const probeCtx = await mk();
-  const r0 = await probeCtx.request.get(BASE + "/api/demo/start", { maxRedirects: 0, headers: NAV });
-  const sc = r0.headers()["set-cookie"] ?? "";
-  diag.start = { status: r0.status(), location: r0.headers().location ? pathOf(r0.headers().location) : "-", cookie: flagsOf(sc) };
-  let name = null, token = null;
-  if (sc) { const [pair] = sc.split(";"); const i = pair.indexOf("="); name = pair.slice(0, i); token = pair.slice(i + 1); diag.token = tokenInfo(token); }
-  if (token) {
-    diag.jarAfterStart = (await probeCtx.cookies(BASE)).filter((c) => c.name === name).map((c) => ({ domain: c.domain, secure: c.secure, httpOnly: c.httpOnly, sameSite: c.sameSite, sameValueAsSetCookie: c.value === token }));
-    diag.probe_jarFromStart_request = await probeReq(probeCtx.request);
-    const iso = await pwRequest.newContext();
-    diag.probe_explicitCookieHeader_noJar = await probeReq(iso, { cookie: `${name}=${token}` });
-    await iso.dispose();
-    // Metode memasang cookie yang sama (nilai identik) ke jar browser; atribut aplikasi tidak diubah.
-    const methods = {
-      jarFromStart: async (c) => c,
-      addCookieByUrl: async (c) => { await c.addCookies([{ name, value: token, url: BASE }]); return c; },
-      addCookieByUrlSecure: async (c) => { await c.addCookies([{ name, value: token, url: BASE, secure: true }]); return c; },
-      addCookieDomainPath: async (c) => { await c.addCookies([{ name, value: token, domain: "localhost", path: "/" }]); return c; },
-    };
-    diag.browserProbe = {};
-    for (const [m, setup] of Object.entries(methods)) {
-      const c = m === "jarFromStart" ? probeCtx : await mk();
-      await setup(c);
-      const res = await probeBrowser(c);
-      diag.browserProbe[m] = res;
-      if (res.ok && !demo) demo = c;
-      if (c !== probeCtx && c !== demo) await c.close();
-    }
+  const page = await demo.newPage();
+  let setCookie = "";
+  page.on("response", async (res) => {
+    if (pathOf(res.url()) !== "/api/demo/start" || setCookie) return;
+    const h = (await res.headersArray()).filter((x) => x.name.toLowerCase() === "set-cookie" && x.value.startsWith(`${DEMO_COOKIE}=`));
+    if (h.length) setCookie = h[0].value;
+  });
+  try {
+    await page.goto(BASE + "/api/demo/start", { waitUntil: "domcontentloaded", timeout: 30000 });
+  } catch (e) {
+    sessionProblems.push("navigasi-gagal");
+    sessionDiag.navError = String(e).split("\n")[0].replace(/at http\S+/, "").trim();
   }
-  console.log("DEMO-DIAG " + JSON.stringify(diag));
-  if (!demo) demo = probeCtx; // tidak ada metode yang berhasil: halaman demo tetap diaudit dan GAGAL (load/redirect), tidak dilewati
+  sessionDiag.finalPath = pathOf(page.url());
+  if (sessionDiag.finalPath !== "/demo/dashboard") sessionProblems.push("tidak-masuk-dashboard");
+  sessionDiag.cookieMissingAttrs = checkSessionCookieAttrs(setCookie);
+  for (const m of sessionDiag.cookieMissingAttrs) sessionProblems.push(`cookie-atribut-hilang:${m}`);
+  const jar = (await demo.cookies(BASE)).filter((c) => c.name === DEMO_COOKIE);
+  sessionDiag.jar = jar.map((c) => ({ secure: c.secure, httpOnly: c.httpOnly, sameSite: c.sameSite, path: c.path, hasExpiry: c.expires > 0 }));
+  if (!jar.length) sessionProblems.push("cookie-tidak-tersimpan-di-browser");
+  if (setCookie) sessionDiag.token = tokenInfo(setCookie.split(";")[0].slice(DEMO_COOKIE.length + 1));
+  await page.close();
+  console.log("DEMO-SESSION-ASLI " + JSON.stringify({ ok: sessionProblems.length === 0, problems: sessionProblems, ...sessionDiag }));
+
+  if (sessionProblems.length) {
+    // DIAGNOSTIK MANUAL (tidak menentukan kelulusan, tidak dipakai untuk mengaudit halaman): menjelaskan mengapa sesi asli gagal.
+    const man = await mk();
+    const r0 = await man.request.get(BASE + "/api/demo/start", { maxRedirects: 0, headers: NAV });
+    const sc0 = r0.headers()["set-cookie"] ?? "";
+    const diag = { status: r0.status(), cookieMissingAttrs: checkSessionCookieAttrs(sc0) };
+    if (sc0) {
+      const tok = sc0.split(";")[0].slice(DEMO_COOKIE.length + 1);
+      diag.token = tokenInfo(tok);
+      const c2 = await mk();
+      await c2.addCookies([{ name: DEMO_COOKIE, value: tok, url: BASE }]);
+      const p2 = await c2.newPage();
+      try { await p2.goto(BASE + "/demo/dashboard", { waitUntil: "domcontentloaded", timeout: 20000 }); diag.manualBrowserFinalPath = pathOf(p2.url()); } catch (e) { diag.manualBrowserError = String(e).split("\n")[0].replace(/at http\S+/, "").trim(); }
+      await c2.close();
+    }
+    console.log("DEMO-DIAG-MANUAL (hanya diagnostik; TIDAK membuat job lulus) " + JSON.stringify(diag));
+    await man.close();
+  }
 }
+report.push({
+  label: "demo_session", route: "/api/demo/start (sesi asli)", status: 200, finalUrl: sessionDiag.finalPath ?? "-", sessionProblems,
+  error: sessionProblems.length ? `sesi demo asli gagal: ${sessionProblems.join(", ")}` : undefined,
+  innerWidth: 360, overflowX: 0, small: [], unnamedButtons: 0, inputsNoLabel: 0, axe: [], offenders: [], targetCount: 0, h1: 0, title: "demo_session", consoleErrors: [],
+});
 for (const r of ["/demo/dashboard", "/demo/products", "/demo/campaign", "/demo/content", "/demo/analytics"]) await audit(demo, `demo_${r.split("/").pop()}`, r);
 
 
@@ -203,7 +217,7 @@ try { writeFileSync(`${OUT}/mock-log.json`, await (await fetch(`${MOCK}/__log`))
 // Penilaian: kunci temuan (scripts/qa/mobile-360-keys.mjs). Kunci fatal (load, status:*) tidak pernah bisa di-baseline.
 let fails = 0;
 for (const r of report) {
-  const keys = keysOf(r);
+  const keys = keysOf(r, EXPECTED_REDIRECTS);
   const { fresh, stale } = classify(keys, BASELINE[r.label]);
   if (fresh.length) fails++;
   const verdict = fresh.length ? `FAIL (baru): ${fresh.slice(0, 6).join("; ")}${fresh.length > 6 ? ` (+${fresh.length - 6})` : ""}` : keys.length ? "PASS (hanya temuan baseline)" : "PASS";

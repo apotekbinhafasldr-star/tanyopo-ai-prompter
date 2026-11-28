@@ -1,5 +1,5 @@
 {
- "_catatan": "Temuan yang SUDAH ADA di main 4fef872 (lari CI nyata PR #203, yang hanya mengubah harness). Kunci axe berisi selector elemen. Kunci fatal (load, status:*) tidak pernah boleh masuk. Hapus entri begitu perbaikannya merge; harness melaporkan entri usang.",
+ "_catatan": "Temuan yang SUDAH ADA di main 4fef872 (lari CI nyata PR #203, yang hanya mengubah harness). Kunci axe berisi selector elemen. Kunci fatal (load, status:*, redirect:*, demo-session:*) tidak pernah boleh masuk. Hapus entri begitu perbaikannya merge; harness melaporkan entri usang.",
  "accepted": {
   "public_root": [
    {
@@ -75,12 +75,6 @@
    {
     "key": "target<44:a:Penghapusan Data",
     "reason": "Target ketuk di bawah 44px terukur di Chromium 360px; ada di main 4fef872, belum diperbaiki (tindak lanjut U4)."
-   }
-  ],
-  "public_resetpassword": [
-   {
-    "key": "redirect:/login",
-    "reason": "Tanpa token pemulihan, /reset-password dialihkan ke /login (perilaku sah); layar pemulihan itu sendiri belum teraudit oleh harness."
    }
   ],
   "public_privacy": [

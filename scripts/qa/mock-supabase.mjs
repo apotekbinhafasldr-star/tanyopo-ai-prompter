@@ -39,7 +39,7 @@ const jwtSub = (req) => {
 };
 const log = [];
 let delayMs = 0;
-const server = http.createServer((req, res) => {
+const handleRequest = (req, res) => {
   const url = new URL(req.url, "http://x");
   const send = (code, body, headers = {}) => { res.writeHead(code, { "content-type": "application/json", ...headers }); res.end(body === undefined ? "" : JSON.stringify(body)); };
   let raw = "";
@@ -79,5 +79,12 @@ const server = http.createServer((req, res) => {
     send(404, { error: "not found" });
     }
   });
-});
-if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop())) server.listen(54321, () => console.log("mock supabase on 54321"));
+};
+// Hanya loopback (tidak pernah 0.0.0.0 / tanpa host). Aplikasi dan harness memakai "localhost", yang di runner dapat
+// diselesaikan ke 127.0.0.1 atau ::1, jadi keduanya didengarkan; ::1 opsional bila runner tanpa IPv6.
+if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop())) {
+  http.createServer(handleRequest).listen(54321, "127.0.0.1", () => console.log("mock supabase on 127.0.0.1:54321"));
+  const v6 = http.createServer(handleRequest);
+  v6.on("error", (e) => console.log(`mock supabase ::1 tidak aktif (${e.code ?? "error"}); 127.0.0.1 tetap melayani`));
+  v6.listen(54321, "::1", () => console.log("mock supabase on [::1]:54321"));
+}

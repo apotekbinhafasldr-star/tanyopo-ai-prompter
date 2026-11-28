@@ -1,8 +1,8 @@
 // Logika kunci temuan dan baseline untuk harness 360px. Tanpa dependensi (hanya node:crypto) agar bisa diuji unit.
 import { createHash } from "node:crypto";
 
-/** Kunci yang TIDAK PERNAH boleh diterima baseline: halaman yang tidak termuat bukan "lulus". */
-export const isFatalKey = (key) => key === "load" || key.startsWith("status:");
+/** Kunci yang TIDAK PERNAH boleh diterima baseline: halaman tidak termuat, status bukan 2xx, pengalihan tak terduga, sesi demo asli gagal. */
+export const isFatalKey = (key) => key === "load" || key.startsWith("status:") || key.startsWith("redirect:") || key.startsWith("demo-session:");
 
 const MAX_SELECTOR = 140;
 
@@ -29,11 +29,15 @@ export function axeKeys(axeViolations) {
 }
 
 /** Kunci temuan satu halaman. `load`/`status:*` bersifat fatal (lihat isFatalKey). */
-export function keysOf(r) {
+export function keysOf(r, expectedRedirects = {}) {
+  if (r.sessionProblems?.length) return r.sessionProblems.map((p) => `demo-session:${p}`);
   if (r.error) return ["load"];
   const k = [];
   if (typeof r.status === "number" && (r.status < 200 || r.status >= 300)) k.push(`status:${r.status}`);
-  if (r.requestedPath && r.finalPath && r.requestedPath !== r.finalPath) k.push(`redirect:${r.finalPath}`);
+  // Pengalihan hanya sah bila terdaftar eksplisit di peta (rute diminta -> tujuan); selain itu FATAL.
+  if (r.requestedPath && r.finalPath && r.requestedPath !== r.finalPath && expectedRedirects[r.requestedPath] !== r.finalPath) {
+    k.push(`redirect:${r.finalPath}`);
+  }
   if (r.innerWidth !== 360) k.push("viewport");
   if (r.overflowX > 0) k.push("overflowX");
   for (const t of r.small ?? []) k.push(`target<44:${t.el}:${t.name}`);
@@ -62,4 +66,17 @@ export function classify(keys, acceptedEntries) {
     fresh: keys.filter((k) => isFatalKey(k) || !accepted.has(k)),
     stale: [...accepted].filter((k) => !keys.includes(k)),
   };
+}
+
+/** Atribut keamanan cookie sesi demo dari respons ASLI /api/demo/start. Mengembalikan daftar yang hilang (kosong = lengkap). */
+export function checkSessionCookieAttrs(setCookie) {
+  const sc = String(setCookie ?? "");
+  if (!sc) return ["cookie-tidak-ada"];
+  const missing = [];
+  if (!/;\s*secure\b/i.test(sc)) missing.push("Secure");
+  if (!/;\s*httponly\b/i.test(sc)) missing.push("HttpOnly");
+  if (!/;\s*samesite=lax\b/i.test(sc)) missing.push("SameSite=Lax");
+  if (!/;\s*path=\/(;|$)/i.test(sc)) missing.push("Path=/");
+  if (!/;\s*(max-age=\d+|expires=)/i.test(sc)) missing.push("Max-Age/Expires");
+  return missing;
 }
