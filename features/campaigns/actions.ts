@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { requireSessionContext } from "@/services/session";
 import {
@@ -15,9 +14,18 @@ import {
 } from "@/schemas/ai/campaign-proposal";
 import { buildSystemPreamble, buildCampaignProposalPrompt } from "@/lib/ai/prompts";
 import { checkChannelAllocation } from "@/lib/campaigns/channel-allocation";
-import { canEditCampaign, CAMPAIGN_EDIT_FORBIDDEN_MESSAGE } from "@/lib/campaigns/campaign-roles";
+import {
+  canDeleteCampaign,
+  canEditCampaign,
+  CAMPAIGN_DELETE_FORBIDDEN_MESSAGE,
+  CAMPAIGN_EDIT_FORBIDDEN_MESSAGE,
+  CAMPAIGN_MEDIA_FORBIDDEN_MESSAGE,
+  CAMPAIGN_SCHEDULE_FORBIDDEN_MESSAGE,
+  CAMPAIGN_SUBMIT_FORBIDDEN_MESSAGE,
+} from "@/lib/campaigns/campaign-roles";
 import { evaluateCopyGuard, buildCopySnapshot, COPY_SNAPSHOT_KEY } from "@/lib/campaigns/copy-guard";
 import { readCopyGuardContext } from "@/services/copy-guard-context";
+import { campaignHasManualMetrics } from "@/features/campaigns/manual-metrics-actions";
 import { runAiJob } from "@/services/ai-jobs";
 import {
   syncChannelCampaigns,
@@ -253,6 +261,7 @@ export async function selectCampaignMediaAction(
   mediaId: string,
 ): Promise<CampaignActionState> {
   const session = await requireSessionContext();
+  if (!canEditCampaign(session.role)) return { error: CAMPAIGN_MEDIA_FORBIDDEN_MESSAGE };
   const supabase = await createClient();
 
   const { data: campaign, error: fetchError } = await supabase
@@ -282,13 +291,21 @@ export async function selectCampaignMediaAction(
     return { error: "Media tidak ditemukan untuk produk ini." };
   }
 
-  const { error: updateError } = await supabase
+  // Conditional write: tenant-bound and only while still DRAFT. A campaign that was submitted between the read
+  // above and this write matches zero rows and is reported, never silently changed.
+  const { data: updatedRows, error: updateError } = await supabase
     .from("prompter_master_campaigns")
     .update({ selected_media_id: mediaId })
-    .eq("id", campaignId);
+    .eq("id", campaignId)
+    .eq("tenant_id", session.tenantId)
+    .eq("status", "DRAFT")
+    .select("id");
 
   if (updateError) {
     return { error: "Gagal menyimpan pilihan media." };
+  }
+  if (!Array.isArray(updatedRows) || updatedRows.length !== 1) {
+    return { error: "Campaign baru saja berubah status atau tidak ditemukan, pilihan media tidak disimpan. Muat ulang halaman." };
   }
 
   revalidatePath(`/campaigns/${campaignId}`);
@@ -390,6 +407,7 @@ export async function scheduleChannelCampaignAction(
   const localValue = typeof scheduledAtRaw === "string" ? scheduledAtRaw.trim() : "";
 
   const session = await requireSessionContext();
+  if (!canEditCampaign(session.role)) return { error: CAMPAIGN_SCHEDULE_FORBIDDEN_MESSAGE };
   const supabase = await createClient();
 
   const { data: channelCampaign, error: fetchError } = await supabase
@@ -430,35 +448,119 @@ export async function scheduleChannelCampaignAction(
     scheduledAt = parsed.toISOString();
   }
 
-  const { error: updateError } = await supabase
+  // Lifecycle guard on the write itself: tenant-bound and only while the channel row is still DRAFT (submit moves
+  // it to AWAITING_APPROVAL, launch claims it later). Zero matched rows is reported, not hidden.
+  const { data: scheduledRows, error: updateError } = await supabase
     .from("prompter_channel_campaigns")
     .update({ scheduled_at: scheduledAt })
-    .eq("id", channelCampaignId);
+    .eq("id", channelCampaignId)
+    .eq("tenant_id", session.tenantId)
+    .eq("status", "DRAFT")
+    .select("id");
 
   if (updateError) {
     return { error: "Gagal menyimpan jadwal channel." };
+  }
+  if (!Array.isArray(scheduledRows) || scheduledRows.length !== 1) {
+    return { error: "Channel campaign baru saja berubah status, jadwal tidak disimpan. Muat ulang halaman." };
   }
 
   revalidatePath(`/campaigns/${channelCampaign.master_campaign_id}`);
   return { error: null };
 }
 
-export async function deleteCampaignAction(formData: FormData): Promise<void> {
-  const campaignId = formData.get("campaignId");
-  if (typeof campaignId !== "string") return;
-
+/**
+ * Deletes a DRAFT campaign. OWNER ONLY, checked here before any read or write (RLS alone would also let marketing
+ * delete). Returns an honest result instead of redirecting silently: the client shows the error or navigates away.
+ *
+ * What is and is not removed (from the schema, see docs in the PR):
+ *  - removed by cascade: the campaign's channel rows and optimization recommendations; a DRAFT campaign has never
+ *    been launched, so it must have no performance or spend rows. If ANY marketing/manual metric row exists the
+ *    delete is REFUSED (those would cascade away), and so it is if that check cannot be read (fail closed).
+ *  - kept: audit logs (append-only, no FK), approval rows (no FK; PENDING ones are first marked EXPIRED so the
+ *    queue shows nothing orphaned), AI job rows (FK set null), content items (set null).
+ *  - a "campaign.deleted" audit row is written after a confirmed delete.
+ */
+export async function deleteCampaignAction(campaignId: string): Promise<CampaignActionState> {
   const session = await requireSessionContext();
+  if (!canDeleteCampaign(session.role)) return { error: CAMPAIGN_DELETE_FORBIDDEN_MESSAGE };
+  if (typeof campaignId !== "string" || campaignId.length === 0) return { error: "Campaign tidak ditemukan." };
   const supabase = await createClient();
 
-  await supabase
+  const { data: campaign, error: campaignError } = await supabase
+    .from("prompter_master_campaigns")
+    .select("id, status")
+    .eq("id", campaignId)
+    .eq("tenant_id", session.tenantId)
+    .maybeSingle();
+  if (campaignError) return { error: "Campaign tidak dapat diperiksa. Tidak ada yang dihapus, coba lagi." };
+  if (!campaign) return { error: "Campaign tidak ditemukan." };
+  if (campaign.status !== "DRAFT") {
+    return { error: "Hanya campaign berstatus Draft yang bisa dihapus. Batalkan pengajuan terlebih dahulu bila perlu." };
+  }
+
+  const { data: metricRows, error: metricsError } = await supabase
+    .from("prompter_marketing_metrics")
+    .select("id")
+    .eq("tenant_id", session.tenantId)
+    .eq("master_campaign_id", campaignId)
+    .limit(1);
+  // Manual metrics live behind their own module (they are kept apart from this file on purpose).
+  const manual = await campaignHasManualMetrics(campaignId);
+  if (metricsError || !Array.isArray(metricRows) || manual === "unreadable") {
+    return { error: "Data performa campaign tidak dapat diperiksa. Tidak ada yang dihapus, coba lagi." };
+  }
+  if (metricRows.length > 0 || manual === "yes") {
+    return { error: "Campaign ini memiliki data performa atau pengeluaran iklan, sehingga tidak bisa dihapus." };
+  }
+
+  // Mark any PENDING approval of this campaign EXPIRED first (owner-only UPDATE under RLS): nothing is left
+  // waiting for a decision on a campaign that no longer exists. Approval rows themselves are kept.
+  const { data: pending, error: pendingError } = await supabase
+    .from("prompter_approvals")
+    .select("id")
+    .eq("tenant_id", session.tenantId)
+    .eq("resource_type", "prompter_master_campaigns")
+    .eq("resource_id", campaignId)
+    .eq("status", "PENDING");
+  if (pendingError || !Array.isArray(pending)) return { error: "Persetujuan campaign tidak dapat diperiksa. Tidak ada yang dihapus, coba lagi." };
+  if (pending.length > 0) {
+    const { data: expired, error: expireError } = await supabase
+      .from("prompter_approvals")
+      .update({ status: "EXPIRED" })
+      .eq("tenant_id", session.tenantId)
+      .eq("resource_type", "prompter_master_campaigns")
+      .eq("resource_id", campaignId)
+      .eq("status", "PENDING")
+      .select("id");
+    if (expireError || !Array.isArray(expired) || expired.length !== pending.length) {
+      return { error: "Persetujuan yang menunggu tidak dapat ditutup. Tidak ada yang dihapus, coba lagi." };
+    }
+  }
+
+  const { data: deleted, error: deleteError } = await supabase
     .from("prompter_master_campaigns")
     .delete()
     .eq("id", campaignId)
     .eq("tenant_id", session.tenantId)
-    .eq("status", "DRAFT");
+    .eq("status", "DRAFT")
+    .select("id");
+  if (deleteError) return { error: "Gagal menghapus campaign. Muat ulang halaman dan periksa statusnya." };
+  if (!Array.isArray(deleted) || deleted.length !== 1) {
+    return { error: "Campaign baru saja berubah status atau sudah dihapus, tidak ada yang dihapus. Muat ulang halaman." };
+  }
+
+  await supabase.from("prompter_audit_logs").insert({
+    tenant_id: session.tenantId,
+    actor_user_id: session.userId,
+    action: "campaign.deleted",
+    resource_type: "prompter_master_campaigns",
+    resource_id: campaignId,
+    context: {},
+  });
 
   revalidatePath("/campaigns");
-  redirect("/campaigns");
+  return { error: null };
 }
 
 /** Reason codes fn_reserve_active_campaign_slot() (Batch B9) can return,
@@ -495,6 +597,7 @@ function describeCampaignReservationBlock(reason: string | null): string {
  */
 export async function submitForApprovalAction(campaignId: string): Promise<CampaignActionState> {
   const session = await requireSessionContext();
+  if (!canEditCampaign(session.role)) return { error: CAMPAIGN_SUBMIT_FORBIDDEN_MESSAGE };
   const supabase = await createClient();
 
   const { data: campaign, error: campaignError } = await supabase

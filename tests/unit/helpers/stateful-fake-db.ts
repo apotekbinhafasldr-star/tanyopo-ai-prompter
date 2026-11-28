@@ -102,7 +102,7 @@ export function createFakeDb(seed: Record<string, Row[]>, options: FakeDbOptions
       }
       if (op === "delete") {
         tables[table] = rows.filter((r) => !hit.includes(r));
-        return { data: null, error: null };
+        return { data: returning ? hit.map((r) => ({ id: r.id })) : null, error: null };
       }
       if (single) {
         if (hit.length === 1) return { data: { ...hit[0] }, error: null };
@@ -120,7 +120,7 @@ export function createFakeDb(seed: Record<string, Row[]>, options: FakeDbOptions
 
     const builder: Record<string, unknown> = {
       select: () => {
-        if (op === "update") returning = true;
+        if (op === "update" || op === "delete") returning = true;
         return builder;
       },
       update: (p: Row) => {
