@@ -1,0 +1,10 @@
+# Production-migration pipeline: every change to the tools, the workflow, the manifest, the packages and the runbook is reviewed by the repository owner.
+# (This file only requests the review. Whether it is REQUIRED is a repository setting that this change does not touch.)
+/supabase/prod-packages/ @apotekbinhafasldr-star
+/supabase/migrations/ @apotekbinhafasldr-star
+/supabase/rollback/ @apotekbinhafasldr-star
+/.github/workflows/production-migration.yml @apotekbinhafasldr-star
+/.github/CODEOWNERS @apotekbinhafasldr-star
+/.github/workflows/ci.yml @apotekbinhafasldr-star
+/.gitattributes @apotekbinhafasldr-star
+/docs/PRODUCTION_MIGRATION.md @apotekbinhafasldr-star
