@@ -14,17 +14,18 @@ const REQUIRED_COPY = ["headline", "primary_text", "cta"] as const;
 
 const isPlainObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const isAbsent = (v: unknown) => v === null || v === undefined;
-/** Fields the page prints as text: a present value that is not a string (object, array, number) would crash React. */
+/** Fields the page prints as text: a present value that is an object or array would crash React (a number or boolean only prints oddly, and copy of the wrong type is caught as INCOMPLETE below). */
 const TEXT_FIELDS = ["hook", "headline", "primary_text", "cta", "customer_pain", "desired_outcome", "value_proposition", "positioning", "audience_summary", "marketing_angle", "creative_concept"] as const;
+const isUnrenderable = (v: unknown) => typeof v === "object" && v !== null;
 const CANDIDATE_TEXT = ["hook", "headline", "cta", "primary_text", "rationale"] as const;
 
 /** True when a nested part of an otherwise-object proposal has a shape the page would crash on. */
 function hasMalformedNesting(record: Record<string, unknown>): boolean {
-  if (TEXT_FIELDS.some((k) => !isAbsent(record[k]) && typeof record[k] !== "string")) return true;
+  if (TEXT_FIELDS.some((k) => isUnrenderable(record[k]))) return true;
   const { candidates, budget_allocation: allocation, excluded_channels: excluded } = record;
   if (!isAbsent(candidates)) {
     if (!Array.isArray(candidates)) return true;
-    if (candidates.some((c) => !isPlainObject(c) || CANDIDATE_TEXT.some((k) => !isAbsent(c[k]) && typeof c[k] !== "string"))) return true;
+    if (candidates.some((c) => !isPlainObject(c) || CANDIDATE_TEXT.some((k) => isUnrenderable(c[k])))) return true;
   }
   if (!isAbsent(allocation)) {
     if (!Array.isArray(allocation)) return true;
