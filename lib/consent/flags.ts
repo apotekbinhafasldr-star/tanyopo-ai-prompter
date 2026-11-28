@@ -14,7 +14,8 @@ let warnedEnforcementWithoutUi = false;
  * agar Owner tidak terkunci tanpa jalur untuk memberi persetujuan, dan dicatat sekali per instance (tanpa data pribadi).
  */
 export function isConsentEnforcementEnabled(): boolean {
-  if (process.env.CONSENT_ENFORCEMENT_ENABLED !== "true") return false;
+  const enforcementFlag = process.env.CONSENT_ENFORCEMENT_ENABLED === "true";
+  if (!enforcementFlag) return false;
   if (!isConsentUiEnabled()) {
     if (!warnedEnforcementWithoutUi) {
       warnedEnforcementWithoutUi = true;

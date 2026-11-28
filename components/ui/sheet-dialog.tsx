@@ -49,6 +49,7 @@ export function SheetDialog({
     if (!open) return;
     const dialog = dialogRef.current;
     if (!dialog) return;
+    const returnTarget = returnFocusRef;
     const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -57,7 +58,8 @@ export function SheetDialog({
     return () => {
       document.body.style.overflow = previousOverflow;
       if (dialog.open) dialog.close();
-      const target = returnFocusRef?.current ?? previouslyFocused;
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- ref dibaca saat ditutup (menunjuk elemen pemicu yang tetap terpasang)
+      const target = returnTarget?.current ?? previouslyFocused;
       if (target && target.isConnected) target.focus();
     };
   }, [open, titleId, returnFocusRef]);
