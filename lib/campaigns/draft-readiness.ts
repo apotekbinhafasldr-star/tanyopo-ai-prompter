@@ -1,6 +1,8 @@
 import { CHANNEL_TO_CONNECTOR } from "@/lib/connectors/channel-map";
 import { isOwnProductMediaPath } from "@/lib/media/product-media-path";
-import { resolveLandingUrl } from "@/lib/campaigns/meta-launch-preflight";
+import { resolveLandingUrl, resolveTargetCountry } from "@/lib/campaigns/meta-launch-preflight";
+import { resolveMetaFlightEndTime } from "@/lib/campaigns/meta-flight";
+import { allocateDailyBudget, type AllocationRowInput } from "@/lib/campaigns/budget-allocation";
 import type { ConnectorPlatform } from "@/types/database";
 
 /**
@@ -104,7 +106,20 @@ export function assessLaunchMedia(
 
 export type AdPlatform = Extract<ConnectorPlatform, "META" | "TIKTOK" | "X">;
 
+/**
+ * Inputs the Meta launch refuses on AFTER the Owner approved (country, run length, channel budget split). Optional:
+ * a caller that does not pass it gets the previous behaviour. `allocation: "read_failed"` means the channel rows
+ * could not be read, which is shown as a problem and never as "fine".
+ */
+export interface LaunchInputsState {
+  targetCountry: string | null | undefined;
+  durationDays: number | null | undefined;
+  totalBudget: number | null | undefined;
+  allocation: readonly AllocationRowInput[] | "read_failed";
+}
+
 export interface ReadinessInput {
+  launchInputs?: LaunchInputsState;
   status: string;
   quality: ReadinessQuality;
   destination: DestinationState;
@@ -246,6 +261,31 @@ function destinationReason(destination: DestinationState): string | null {
   return null;
 }
 
+/**
+ * Reasons the Meta launch would refuse for reasons that have nothing to do with the connection: same pure resolvers
+ * as the launch (resolveTargetCountry, resolveMetaFlightEndTime, allocateDailyBudget percentages), so what the panel
+ * shows before approval is what the launch decides after it.
+ */
+export function metaLaunchInputReasons(inputs: LaunchInputsState | undefined, now: Date = new Date()): string[] {
+  if (!inputs) return [];
+  const reasons: string[] = [];
+  const country = resolveTargetCountry(inputs.targetCountry);
+  if (!country.ok) reasons.push(country.message);
+  const total = inputs.totalBudget && inputs.totalBudget > 0 ? inputs.totalBudget : null;
+  const flight = resolveMetaFlightEndTime({ durationDays: inputs.durationDays ?? null, totalBudget: total, now });
+  if (!flight.ok) reasons.push(flight.message);
+  if (inputs.allocation === "read_failed") {
+    reasons.push("Alokasi budget channel gagal dibaca, jadi belum bisa dipastikan. Muat ulang halaman.");
+  } else {
+    // Same percentage rules as the launch (allocateDailyBudget), run with a DUMMY daily budget large enough that only the
+    // percentage rules can fail. So this checks "persentase alokasi konsisten" ONLY: it does NOT check the real daily
+    // budget (integer, per-channel minimum, currency), which the launch checks with the real budget.
+    const allocation = allocateDailyBudget(1_000_000_000, [...inputs.allocation]);
+    if (!allocation.ok) reasons.push(`Persentase alokasi budget channel belum konsisten: ${allocation.error}`);
+  }
+  return reasons;
+}
+
 const LEGACY_NOTE = "Campaign lama: tujuan pembelian memakai URL produk atau brand.";
 const LEGACY_UNVERIFIED_NOTE =
   "Campaign lama: URL tujuan belum dapat dipastikan karena domain aplikasi belum dikonfigurasi di server.";
@@ -265,10 +305,13 @@ export function buildCampaignReadiness(input: ReadinessInput): CampaignReadiness
         : [];
   const hostBlocked = !input.hostsConfigured && platforms.some((p) => p.platform === "META");
   const destinationLaunchReason = destinationReason(input.destination);
+  const metaSelected = platforms.some((p) => p.platform === "META");
+  const metaInputReasons = metaSelected ? metaLaunchInputReasons(input.launchInputs).map((r) => `Meta (Facebook/Instagram): ${r}`) : [];
   const launchReasons = (extra: string[]): string[] => [
     ...extra,
     ...(destinationLaunchReason ? [destinationLaunchReason] : []),
     ...(hostBlocked ? [HOST_UNCONFIGURED_REASON] : []),
+    ...metaInputReasons,
     ...platforms.flatMap((p) => p.checks.filter((c) => c.status !== "PASS").map((c) => `${p.label}: ${c.detail}`)),
   ];
 
