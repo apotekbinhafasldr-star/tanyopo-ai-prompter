@@ -190,7 +190,7 @@ export default async function CampaignDetailPage({
 
   const [
     { data: product },
-    { data: channelCampaigns },
+    { data: channelCampaigns, error: channelCampaignsError },
     { data: capabilities },
     { data: connectedAccounts },
     { data: optimizationRecommendation },
@@ -423,6 +423,20 @@ export default async function CampaignDetailPage({
       X: isBudgetWritePlatformEnabled("X"),
     },
     canRegenerate: isDraft,
+    // What the Meta launch refuses on after approval (country, run length, channel split), shown now.
+    launchInputs: {
+      targetCountry: campaign.target_country,
+      durationDays: campaign.duration_days,
+      totalBudget: campaign.total_budget,
+      allocation:
+        channelCampaignsError || !Array.isArray(channelCampaigns)
+          ? "read_failed"
+          : channelCampaigns.map((cc) => ({
+              id: cc.id,
+              channel: cc.channel,
+              budgetPercentage: cc.budget_percentage == null ? null : Number(cc.budget_percentage),
+            })),
+    },
   });
   // PR-A phase-1 gate: simplified review ONLY for a DRAFT reached from Quick
   // Promote. Every other status/entry keeps the full page unchanged.
